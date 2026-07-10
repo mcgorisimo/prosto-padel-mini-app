@@ -46,33 +46,45 @@ const calcPerPlayer = (time, duration, courtType, dateISO) =>
   getPerPlayerPrice(time, duration, courtType, dateISO);
 
 const fmtPrice = fmtPriceLib;
+const fmtSetList = (sets) => (sets ?? [])
+  .filter(s => (s.t1 ?? 0) + (s.t2 ?? 0) > 0)
+  .map(s => `${s.t1}:${s.t2}`)
+  .join(', ');
 
 const canManageMatch = (user, match) =>
   user.id === (match.ownerId ?? match.owner_id) || user.role === 'admin';
 
 // ─── BottomSheet ──────────────────────────────────────────────────────────────
 
-function BottomSheet({ children, onClose }) {
+function BottomSheet({ children, onClose, variant = 'default' }) {
+  const isEdit = variant === 'edit';
+
   return (
     <div
+      className="app-modal-overlay"
       onClick={onClose}
       style={{
-        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.78)',
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.92)',
         display: 'flex', alignItems: 'flex-end', justifyContent: 'center', zIndex: 9999,
         touchAction: 'pan-y',
       }}
     >
       <div
+        className={isEdit ? 'app-modal-panel match-edit-sheet' : 'app-modal-panel'}
         onClick={e => e.stopPropagation()}
         style={{
-          background: C.card, borderRadius: '24px 24px 0 0',
+          background: '#07160F',
+          borderRadius: '24px 24px 0 0',
           width: '100%', maxWidth: '480px', padding: '0 20px calc(48px + env(safe-area-inset-bottom, 0px))',
-          border: `1px solid ${C.border}`,
+          border: '1px solid rgba(245,241,232,0.16)',
+          boxShadow: '0 -18px 60px rgba(0,0,0,0.68)',
           maxHeight: '92dvh',
           overflowY: 'auto',
           overflowX: 'hidden',
           WebkitOverflowScrolling: 'touch',
           touchAction: 'pan-y',
+          scrollbarWidth: 'none',
+          msOverflowStyle: 'none',
         }}
       >
         <div style={{ padding: '12px 0 20px', textAlign: 'center' }}>
@@ -340,17 +352,17 @@ function EditPanel({ initDate, initTime, initCourt, initDuration, initTitle, ini
   const validationTime = isToday ? now.getTime() + 15 * 60 * 1000 : 0;
 
   return (
-    <BottomSheet onClose={onClose}>
+    <BottomSheet onClose={onClose} variant="edit">
       <div style={{ color: C.text, fontSize: '20px', fontWeight: 850, marginBottom: '18px' }}>Редактировать матч</div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-        <div style={{ background: 'rgba(255,255,255,0.035)', border: `1px solid ${C.border}`, borderRadius: '20px', padding: '14px' }}>
+        <div style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(245,241,232,0.14)', borderRadius: '20px', padding: '14px' }}>
           <div style={{ fontSize: '10px', fontWeight: 800, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: '8px' }}>Название матча</div>
           <input
             value={editTitle}
             onChange={e => setEditTitle(e.target.value)}
             placeholder="Например: Турнир выходного дня"
-            style={{ width: '100%', padding: '13px 14px', borderRadius: '14px', background: 'rgba(255,255,255,0.045)', color: C.text, border: `1px solid ${C.border}`, fontSize: '15px', boxSizing: 'border-box', outline: 'none' }}
+            style={{ width: '100%', padding: '13px 14px', borderRadius: '14px', background: '#0B2117', color: C.text, border: '1px solid rgba(245,241,232,0.18)', fontSize: '15px', boxSizing: 'border-box', outline: 'none' }}
           />
           <div style={{ fontSize: '10px', fontWeight: 800, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.12em', margin: '14px 0 8px' }}>Комментарий</div>
           <textarea
@@ -358,14 +370,14 @@ function EditPanel({ initDate, initTime, initCourt, initDuration, initTitle, ini
             onChange={e => setEditDesc(e.target.value)}
             placeholder="Например: играем в спокойном темпе"
             rows={3}
-            style={{ width: '100%', padding: '13px 14px', borderRadius: '14px', background: 'rgba(255,255,255,0.045)', color: C.text, border: `1px solid ${C.border}`, fontSize: '15px', boxSizing: 'border-box', resize: 'vertical', minHeight: '92px', outline: 'none', lineHeight: 1.45 }}
+            style={{ width: '100%', padding: '13px 14px', borderRadius: '14px', background: '#0B2117', color: C.text, border: '1px solid rgba(245,241,232,0.18)', fontSize: '15px', boxSizing: 'border-box', resize: 'vertical', minHeight: '92px', outline: 'none', lineHeight: 1.45 }}
           />
         </div>
 
-        <div style={{ background: 'rgba(255,255,255,0.035)', border: `1px solid ${C.border}`, borderRadius: '20px', padding: '14px' }}>
+        <div style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(245,241,232,0.14)', borderRadius: '20px', padding: '14px' }}>
           <div style={{ fontSize: '10px', fontWeight: 800, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: '10px' }}>Дата и время</div>
           <input type="date" value={editDate} min={new Date().toISOString().slice(0, 10)} onChange={e => setEditDate(e.target.value)} style={{
-            width: '100%', padding: '13px 14px', borderRadius: '14px', background: 'rgba(255,255,255,0.045)', color: C.text, border: `1px solid ${C.border}`, fontSize: '15px', marginBottom: '12px', boxSizing: 'border-box', outline: 'none'
+            width: '100%', padding: '13px 14px', borderRadius: '14px', background: '#0B2117', color: C.text, border: '1px solid rgba(245,241,232,0.18)', fontSize: '15px', marginBottom: '12px', boxSizing: 'border-box', outline: 'none'
           }} />
           <div className="flex gap-[8px] overflow-x-auto pb-2 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]" style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-x' }}>
             {TIME_SLOTS.map(slot => {
@@ -387,7 +399,7 @@ function EditPanel({ initDate, initTime, initCourt, initDuration, initTitle, ini
           </div>
         </div>
 
-        <div style={{ background: 'rgba(255,255,255,0.035)', border: `1px solid ${C.border}`, borderRadius: '20px', padding: '14px' }}>
+        <div style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(245,241,232,0.14)', borderRadius: '20px', padding: '14px' }}>
           <div style={{ fontSize: '10px', fontWeight: 800, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: '10px' }}>Параметры корта</div>
           <div style={{ display: 'flex', gap: '8px', marginBottom: '12px', flexWrap: 'wrap' }}>
             {DURATION_OPTS.map(d => {
@@ -529,8 +541,8 @@ function InviteSheet({ matchId, onClose }) {
 
 function KickConfirm({ player, onConfirm, onCancel }) {
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.82)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '20px' }}>
-      <div style={{ background: C.card, borderRadius: '16px', padding: '24px', width: '100%', maxWidth: '320px', border: `1px solid ${C.border}`, textAlign: 'center' }}>
+    <div className="app-modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.92)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '20px' }}>
+      <div className="app-modal-panel" style={{ background: '#07160F', borderRadius: '16px', padding: '24px', width: '100%', maxWidth: '320px', border: '1px solid rgba(245,241,232,0.16)', textAlign: 'center' }}>
         <div style={{ color: C.gold, fontSize: '13px', fontWeight: 900, letterSpacing: '0.12em', marginBottom: '12px' }}>PLAYER</div>
         <div style={{ color: C.text, fontWeight: 700, fontSize: '16px', marginBottom: '8px' }}>Удалить игрока?</div>
         <div style={{ color: C.muted, fontSize: '13px', marginBottom: '24px', lineHeight: 1.5 }}>
@@ -841,11 +853,16 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
   const allFilled = baseSlots.slice(0, maxSlots);
   const slots     = [...allFilled, ...Array(Math.max(0, maxSlots - allFilled.length)).fill(null)];
   const isFull    = allFilled.length >= maxSlots;
+  const savedScore = match.finalScore ?? match.score;
+  const hasFinalScore = Array.isArray(savedScore) && savedScore.some(s => (s?.t1 ?? 0) + (s?.t2 ?? 0) > 0);
+  const isCompletedMatch = finished || status === 'completed' || status === 'finished' || hasFinalScore;
+  const canEditMatch = isOwner && !isCompletedMatch;
+  const completedScoreText = fmtSetList(savedScore);
 
   // Join guard
   const levelOk    = currentUser.ratingIdx >= ratingMin && currentUser.ratingIdx <= ratingMax;
   const verifiedOk = currentUser.isVerified === true;
-  const canJoin    = !isOwner && !isFull && levelOk && verifiedOk;
+  const canJoin    = !isCompletedMatch && !isOwner && !isFull && levelOk && verifiedOk;
   const isParticipant = (match.participants ?? []).includes(currentUser.id);
   const guardReason = !verifiedOk ? 'unverified' : !levelOk ? 'level' : null;
 
@@ -918,15 +935,20 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
   };
 
   const handleFinishMatch = () => {
-    if (!isFull || finished) return;
+    if (!isFull || isCompletedMatch) return;
     setFinishModal(true);
   };
 
-  const handleFinalize = ({ team1, team2, score, isTeam1Win }) => {
+  const handleFinalize = async ({ team1, team2, score, isTeam1Win }) => {
     const result = applyMatchOutcome(team1, team2, isTeam1Win, match.id);
-    setFinished(true);
-    setFinishModal(false);
-    onComplete?.(match.id, { score, isTeam1Win, team1, team2, ratingChanges: result.ratingChanges });
+    try {
+      await onComplete?.(match.id, { score, isTeam1Win, team1, team2, ratingChanges: result.ratingChanges });
+      setFinished(true);
+      setFinishModal(false);
+    } catch {
+      showToast?.('Р РµР·СѓР»СЊС‚Р°С‚ РЅРµ СЃРѕС…СЂР°РЅРёР»СЃСЏ. РџРѕРїСЂРѕР±СѓР№С‚Рµ РµС‰Рµ СЂР°Р·.', 'error');
+      return;
+    }
     const sign = result.userDelta >= 0 ? '+' : '';
     setFinishToast(`Рейтинг обновлён: ${sign}${result.userDelta.toFixed(3)}`);
     setTimeout(() => setFinishToast(null), 4000);
@@ -1018,7 +1040,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
       </div>
 
       {/* ── Owner action bar ───────────────────────────────────────────────── */}
-      {isOwner && (
+      {canEditMatch && (
         <div style={{ padding: '12px 16px', display: 'flex', gap: '8px', borderBottom: `1px solid ${C.border}`, background: 'rgba(216,243,74,0.04)' }}>
           {match.type === 'match' ? (
             <PadelButton variant="dark" size="md" onClick={() => setEditSheet(true)}>
@@ -1070,7 +1092,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
             <div style={{ fontSize: '10px', fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.12em' }}>
               Игроки {allFilled.length}/{maxSlots}
             </div>
-            {isOwner && (
+            {canEditMatch && (
               <button onClick={() => setInviteSheet(true)} style={{ padding: '5px 12px', background: 'rgba(216,243,74,0.10)', border: '1px solid rgba(216,243,74,0.24)', borderRadius: '8px', color: C.gold, fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}>
                 + Пригласить
               </button>
@@ -1090,9 +1112,9 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
                   player={enrichedPlayer}
                   slotIndex={i}
                   onTap={setViewPlayer}
-                  isOwner={isOwner}
+                  isOwner={canEditMatch}
                   onKick={p => setKickTarget(p)}
-                  onSlotClick={() => setTargetSlot(i)}
+                  onSlotClick={!isCompletedMatch ? () => setTargetSlot(i) : undefined}
                 />
               );
             })}
@@ -1121,26 +1143,35 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
         </div>
 
         {/* ── CTA / owner badge ─────────────────────────────────────────────── */}
-        {isOwner ? (
+        {isCompletedMatch ? (
+          <div style={{ textAlign: 'center', padding: '18px', background: 'rgba(34,197,94,0.08)', borderRadius: '14px', border: '1px solid rgba(34,197,94,0.25)' }}>
+            <div style={{ color: C.win, fontWeight: 800, fontSize: '17px' }}>✓ Матч завершён</div>
+            {completedScoreText && (
+              <div style={{ color: C.text, fontWeight: 800, fontSize: '18px', marginTop: '8px' }}>
+                {completedScoreText}
+              </div>
+            )}
+          </div>
+        ) : isOwner ? (
           <>
             <div style={{ background: 'rgba(212,175,55,0.06)', borderRadius: '14px', padding: '16px', border: '1px solid rgba(212,175,55,0.2)', textAlign: 'center', color: C.gold, fontSize: '13px', fontWeight: 600 }}>
               Вы управляете этой игрой
             </div>
             <PadelButton
-              variant={isFull && !finished ? 'success' : 'dark'}
+              variant={isFull && !isCompletedMatch ? 'success' : 'dark'}
               size="lg"
               fullWidth
-              disabled={!isFull || finished}
+              disabled={!isFull || isCompletedMatch}
               onClick={handleFinishMatch}
               className="mt-2.5"
             >
-              {finished
+              {isCompletedMatch
                 ? '✓ Матч завершён'
                 : isFull
                   ? '🏁 Завершить матч'
                   : `Заполните все слоты (${allFilled.length}/${maxSlots})`}
             </PadelButton>
-            {match.type === 'match' && (
+            {match.type === 'match' && !isCompletedMatch && (
               <PadelButton
                 variant="ghost"
                 size="md"
@@ -1176,10 +1207,10 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
 
       {/* ── Sheets / Dialogs ──────────────────────────────────────────────── */}
       {viewPlayer  && <PlayerMiniProfile player={viewPlayer} onClose={() => setViewPlayer(null)} />}
-      {editSheet   && <EditPanel initDate={dateISO} initTime={time} initCourt={courtType} initDuration={duration} initTitle={title} initDescription={description} onSave={handleEditSave} onClose={() => setEditSheet(false)} />}
-      {cancelSheet && <CancelSheet onConfirm={handleCancelConfirm} onClose={() => setCancelSheet(false)} />}
-      {inviteSheet && <InviteSheet matchId={match.id} onClose={() => setInviteSheet(false)} />}
-      {kickTarget  && <KickConfirm player={kickTarget} onConfirm={handleKickConfirm} onCancel={() => setKickTarget(null)} />}
+      {editSheet   && canEditMatch && <EditPanel initDate={dateISO} initTime={time} initCourt={courtType} initDuration={duration} initTitle={title} initDescription={description} onSave={handleEditSave} onClose={() => setEditSheet(false)} />}
+      {cancelSheet && canEditMatch && <CancelSheet onConfirm={handleCancelConfirm} onClose={() => setCancelSheet(false)} />}
+      {inviteSheet && canEditMatch && <InviteSheet matchId={match.id} onClose={() => setInviteSheet(false)} />}
+      {kickTarget  && canEditMatch && <KickConfirm player={kickTarget} onConfirm={handleKickConfirm} onCancel={() => setKickTarget(null)} />}
       {chatOpen && (
         <MatchChat
           match={match}
@@ -1189,7 +1220,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
           onClose={() => setChatOpen(false)}
         />
       )}
-      {targetSlot !== null && (
+      {targetSlot !== null && !isCompletedMatch && (
         <SlotActionSheet
           slotIndex={targetSlot}
           isOwner={isOwner}

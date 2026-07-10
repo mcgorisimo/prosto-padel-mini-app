@@ -175,20 +175,24 @@ export default function FinishMatchModal({ players, onSave, onClose }) {
 
   return (
     <div
+      className="app-modal-overlay"
       onClick={onClose}
       style={{
-        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.82)',
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.92)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         zIndex: 9999, padding: 12,
       }}
     >
       <div
+        className="app-modal-panel"
         onClick={e => e.stopPropagation()}
         style={{
-          background: C.bg, borderRadius: 18,
+          background: '#07160F', borderRadius: 18,
           width: '100%', maxWidth: 460, maxHeight: '92vh', overflowY: 'auto',
-          border: `1px solid ${C.border}`, padding: 20,
+          border: '1px solid rgba(245,241,232,0.16)', padding: 20,
           boxSizing: 'border-box',
+          scrollbarWidth: 'none',
+          msOverflowStyle: 'none',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>

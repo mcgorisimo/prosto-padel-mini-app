@@ -115,20 +115,22 @@ export default function MatchConfirmationModal({ time, duration, breakdown, tota
   };
 
   return (
-    <div style={{
+    <div className="app-modal-overlay" style={{
       position: 'fixed', inset: 0,
-      background: 'rgba(0,0,0,0.82)',
+      background: 'rgba(0,0,0,0.92)',
       display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
       zIndex: 9999,
     }}>
-      <div style={{
-        background: C.surface, borderRadius: '20px 20px 0 0',
+      <div className="app-modal-panel" style={{
+        background: '#07160F', borderRadius: '20px 20px 0 0',
         width: '100%', maxWidth: '480px',
-        border: `1px solid ${C.border}`,
+        border: '1px solid rgba(245,241,232,0.16)',
         maxHeight: '92vh', overflowY: 'auto',
+        scrollbarWidth: 'none',
+        msOverflowStyle: 'none',
       }}>
         {/* Sticky drag handle */}
-        <div style={{ padding: '12px 20px 0', position: 'sticky', top: 0, background: C.surface, zIndex: 1 }}>
+        <div style={{ padding: '12px 20px 0', position: 'sticky', top: 0, background: '#07160F', zIndex: 1 }}>
           <div style={{ width: '40px', height: '4px', background: C.border, borderRadius: '2px', margin: '0 auto 16px' }} />
         </div>
 

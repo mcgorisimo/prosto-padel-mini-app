@@ -788,3 +788,68 @@ textarea {
   min-height: 96px;
   resize: vertical;
 }
+
+.app-modal-overlay {
+  background: rgba(0, 0, 0, 0.92) !important;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+.app-modal-panel {
+  background: #07160f !important;
+  border-color: rgba(245, 241, 232, 0.16) !important;
+  box-shadow: 0 -18px 60px rgba(0, 0, 0, 0.68);
+}
+
+.app-modal-scroll,
+.app-modal-panel {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.app-modal-scroll::-webkit-scrollbar,
+.app-modal-panel::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+.app-modal-panel input,
+.app-modal-panel textarea,
+.app-modal-panel select {
+  background-color: #0b2117 !important;
+  color: #f5f1e8 !important;
+  border-color: rgba(245, 241, 232, 0.18) !important;
+}
+
+.app-modal-panel input:focus,
+.app-modal-panel textarea:focus,
+.app-modal-panel select:focus {
+  border-color: rgba(216, 243, 74, 0.46) !important;
+  box-shadow: 0 0 0 2px rgba(216, 243, 74, 0.08);
+}
+
+.match-edit-sheet {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.match-edit-sheet::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+.match-edit-sheet input,
+.match-edit-sheet textarea {
+  background-color: #0b2117 !important;
+  color: #f5f1e8 !important;
+  border-color: rgba(245, 241, 232, 0.18) !important;
+}
+
+.match-edit-sheet input:focus,
+.match-edit-sheet textarea:focus {
+  border-color: rgba(216, 243, 74, 0.46) !important;
+  box-shadow: 0 0 0 2px rgba(216, 243, 74, 0.08);
+}

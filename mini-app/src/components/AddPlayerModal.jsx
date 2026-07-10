@@ -14,18 +14,20 @@ const C = {
 function BottomSheet({ children, onClose }) {
   return (
     <div
+      className="app-modal-overlay"
       onClick={onClose}
       style={{
-        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.78)',
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.92)',
         display: 'flex', alignItems: 'flex-end', justifyContent: 'center', zIndex: 9999,
       }}
     >
       <div
+        className="app-modal-panel"
         onClick={e => e.stopPropagation()}
         style={{
-          background: C.card, borderRadius: '20px 20px 0 0',
+          background: '#07160F', borderRadius: '20px 20px 0 0',
           width: '100%', maxWidth: '480px', padding: '0 20px 48px',
-          border: `1px solid ${C.border}`,
+          border: '1px solid rgba(245,241,232,0.16)',
           maxHeight: '80vh',
           display: 'flex',
           flexDirection: 'column',
@@ -119,6 +121,8 @@ export default function AddPlayerModal({ onSelectPlayer, onClose }) {
         flex: 1,
         overflowY: 'auto',
         paddingRight: '8px',
+        scrollbarWidth: 'none',
+        msOverflowStyle: 'none',
       }}>
         {loading && (
           <div style={{ textAlign: 'center', color: C.muted, padding: '20px' }}>

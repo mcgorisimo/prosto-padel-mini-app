@@ -143,12 +143,12 @@ export default function BookingModal({ slot, allMatches = [], onClose, onConfirm
   return (
     <div
       onClick={onClose}
-      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-3"
+      className="app-modal-overlay fixed inset-0 z-[9999] flex items-center justify-center p-3"
     >
       <PadelCard
         onClick={(e) => e.stopPropagation()}
         padding="lg"
-        className="w-full max-w-md max-h-[92dvh] overflow-y-auto"
+        className="app-modal-panel w-full max-w-md max-h-[92dvh] overflow-y-auto"
         style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-y' }}
       >
         {/* Header */}
