@@ -403,7 +403,48 @@ const handleBookSlot = async (booking) => {
   // ── Slot changes: persist filledSlots, recompute participants + status ──
   const handleSlotsChange = async (matchId, newFilledSlots) => {
     const { participants, status } = deriveParticipantsAndStatus(newFilledSlots, allMatches.find(m => m.id === matchId)?.status);
-    await supabase.from('matches').update({ filledSlots: newFilledSlots, participants, status }).eq('id', matchId);
+    const { data, error } = await supabase
+      .from('matches')
+      .update({ filledSlots: newFilledSlots, participants, status })
+      .eq('id', matchId)
+      .select();
+
+    if (error) {
+      console.error(`Ошибка при сохранении слота: ${error.message}`);
+      showToast?.('Не удалось сохранить слот. Попробуйте еще раз.', 'error');
+      throw error;
+    }
+
+    const updatedRow = data?.[0];
+    if (!updatedRow) {
+      const emptyUpdateError = new Error('Match slot update returned no rows');
+      console.error(emptyUpdateError);
+      showToast?.('Не удалось сохранить слот. Проверьте права доступа к матчу.', 'error');
+      throw emptyUpdateError;
+    }
+
+    const updatedMatch = normalizeMatch(updatedRow);
+    const savedParticipants = updatedMatch.participants ?? [];
+    const savedSlots = updatedMatch.filledSlots ?? [];
+    const slotsSaved = newFilledSlots.every(slot => !slot?.id || savedSlots.some(savedSlot => savedSlot?.id === slot.id));
+    const participantsSaved = participants.every(id => savedParticipants.includes(id));
+
+    if (!slotsSaved || !participantsSaved) {
+      const persistError = new Error('Match slot update was not persisted');
+      console.error(persistError);
+      showToast?.('Слот не сохранился. Попробуйте еще раз.', 'error');
+      throw persistError;
+    }
+
+    setAllMatches(prev => {
+      const exists = prev.some(m => m.id === updatedMatch.id);
+      return exists
+        ? prev.map(m => m.id === updatedMatch.id ? updatedMatch : m)
+        : [updatedMatch, ...prev];
+    });
+    setSelected(prev => prev?.id === updatedMatch.id ? updatedMatch : prev);
+
+    return updatedMatch;
   };
 
   // ── Dev reset (clears localStorage and reloads) ──

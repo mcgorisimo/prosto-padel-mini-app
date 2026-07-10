@@ -769,6 +769,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
 
   const [viewPlayer,  setViewPlayer]  = useState(null);
   const [joined,      setJoined]      = useState(false);
+  const [joining,     setJoining]     = useState(false);
   const [cancelled,   setCancelled]   = useState(false);
   const [editSheet,   setEditSheet]   = useState(false);
   const [cancelSheet, setCancelSheet] = useState(false);
@@ -860,8 +861,8 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
   const isParticipant = (match.participants ?? []).includes(currentUser.id);
   const guardReason = !verifiedOk ? 'unverified' : !levelOk ? 'level' : null;
 
-  const handleJoin = () => {
-    if (!canJoin) return;
+  const handleJoin = async () => {
+    if (!canJoin || joining) return;
 
     const firstFreeSlotIndex = slots.findIndex(slot => !slot);
     if (firstFreeSlotIndex === -1) {
@@ -869,7 +870,12 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
       return;
     }
 
-    handleTakeSlot(firstFreeSlotIndex);
+    setJoining(true);
+    try {
+      await handleTakeSlot(firstFreeSlotIndex);
+    } finally {
+      setJoining(false);
+    }
   };
   
   const handleEditSave = ({ date: dt, time: t, courtType: ct, duration: d, title: newTitle, description: newDesc }) => {
@@ -883,9 +889,10 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
   };
 
   // Persist slot mutations both locally (instant UI) and up to allMatches (status/participants).
-  const commitSlots = (nextFilled) => {
-    setLocalSlots(nextFilled);
-    onSlotsChange?.(match.id, nextFilled);
+  const commitSlots = async (nextFilled) => {
+    const updatedMatch = await onSlotsChange?.(match.id, nextFilled);
+    setLocalSlots(updatedMatch?.filledSlots ?? nextFilled);
+    return updatedMatch;
   };
 
   const handleKickConfirm = () => {
@@ -938,7 +945,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
   };
 
   // Non-owner takes an empty slot with their own profile
-  const handleTakeSlot = (slotIndex) => {
+  const handleTakeSlot = async (slotIndex) => {
     if (!currentUser?.id) {
       showToast?.('Не удалось определить игрока. Попробуйте войти заново.', 'error');
       return;
@@ -954,7 +961,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
       isVerified:  currentUser.isVerified,
       isOrganizer: false,
     };
-    commitSlots(next.filter(Boolean));
+    await commitSlots(next.filter(Boolean));
     setTargetSlot(null);
     setJoined(true);
     setTimeout(() => onJoinSuccess?.(match), 1500);
@@ -1170,7 +1177,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
               variant={canJoin ? (isActuallyPrime ? 'yellow' : 'info') : 'dark'}
               size="lg"
               fullWidth
-              disabled={!canJoin}
+              disabled={!canJoin || joining}
               onClick={handleJoin}
             >
               {isFull ? 'Мест нет' : canJoin ? 'Присоединиться к игре' : 'Участие недоступно'}
