@@ -13,6 +13,7 @@ const C = {
 
 export default function MatchChat({ match, currentUser, messages = [], onSendMessage, onClose, showToast }) {
   const [text, setText] = useState('');
+  const [sending, setSending] = useState(false);
   const messagesEndRef = useRef(null);
 
   const scrollToBottom = () => {
@@ -24,10 +25,22 @@ export default function MatchChat({ match, currentUser, messages = [], onSendMes
     scrollToBottom();
   }, [messages]);
 
-  const handleSend = () => {
-    if (text.trim()) {
-      onSendMessage(text.trim());
+  const handleSend = async () => {
+    const messageText = text.trim();
+
+    if (sending || !messageText) {
+      return;
+    }
+
+    setSending(true);
+
+    try {
+      await onSendMessage(messageText);
       setText('');
+    } catch {
+      // Keep the draft so the player can retry after a failed request.
+    } finally {
+      setSending(false);
     }
   };
 
@@ -128,7 +141,7 @@ export default function MatchChat({ match, currentUser, messages = [], onSendMes
               variant="info"
               size="md"
               onClick={handleSend}
-              disabled={!text.trim()}
+              disabled={sending || !text.trim()}
               className="h-[46px]"
             >
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">

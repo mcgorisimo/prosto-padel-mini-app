@@ -344,7 +344,7 @@ const handleBookSlot = async (booking) => {
 
     if (!senderId) {
       showToast?.('Не удалось определить игрока. Попробуйте войти заново.', 'error');
-      return;
+      throw new Error('Cannot send message without sender id');
     }
 
     const newMessage = {
@@ -359,7 +359,7 @@ const handleBookSlot = async (booking) => {
     if (error) {
       console.error(`Ошибка при отправке сообщения: ${error.message}`);
       showToast?.('Не удалось отправить сообщение', 'error');
-      return;
+      throw error;
     }
 
     if (data?.length) {
