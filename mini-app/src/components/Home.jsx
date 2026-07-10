@@ -5,13 +5,6 @@ import PadelCard from './ui/PadelCard';
 import TrainingModal from './TrainingModal';
 import { CLUB } from '../lib/clubConfig';
 
-const ME_ID = 'me';
-
-const fmtSetList = (sets) => (sets ?? [])
-  .filter(s => (s.t1 ?? 0) + (s.t2 ?? 0) > 0)
-  .map(s => `${s.t1}:${s.t2}`)
-  .join(', ') || '—';
-
 const getDisplayDate = (dateISO) => {
   if (!dateISO || typeof dateISO !== 'string') return 'Дата не указана';
 
@@ -59,24 +52,15 @@ function CountdownBadge({ matchDateISO, matchTime }) {
   );
 }
 
-function PlayerAvatar({ player }) {
-  const initials = [player?.firstName?.[0], player?.lastName?.[0]].filter(Boolean).join('') || '?';
-  return (
-    <div className="relative flex h-8 w-8 items-center justify-center overflow-hidden rounded-full border border-warm-white/10 bg-accent-light/10 text-[10px] font-bold text-warm-white">
-      {player?.photo_url ? <img src={player.photo_url} className="h-full w-full object-cover" alt="" /> : initials}
-    </div>
-  );
-}
-
 function ActionModal({ match, onClose, onConvertToMatch, onSetupTraining }) {
   if (!match) return null;
 
   return (
     <div
       onClick={onClose}
-      className="fixed inset-0 z-[9998] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+      className="app-modal-overlay fixed inset-0 z-[9998] flex items-center justify-center p-4"
     >
-      <PadelCard onClick={(e) => e.stopPropagation()} padding="lg" className="w-full max-w-sm">
+      <PadelCard onClick={(e) => e.stopPropagation()} padding="lg" className="app-modal-panel w-full max-w-sm">
         <h3 className="mb-2 text-center text-lg font-bold text-warm-white">Действие с бронью</h3>
         <p className="mb-6 text-center text-sm text-warm-white/60">
           {getDisplayDate(match.dateISO)}, {match.time}
@@ -165,31 +149,6 @@ function UpcomingRow({ match, onClick }) {
   );
 }
 
-function CompletedRow({ match, onClick }) {
-  const inTeam1 = (match.team1 ?? []).some(p => p?.id === ME_ID);
-  const inTeam2 = (match.team2 ?? []).some(p => p?.id === ME_ID);
-  const win = inTeam1 ? !!match.isTeam1Win : inTeam2 ? !match.isTeam1Win : null;
-  const score = fmtSetList(match.finalScore);
-
-  return (
-    <PadelCard onClick={onClick} padding="sm" className="mb-2 cursor-pointer">
-      <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <div className="mb-2 text-xs font-medium text-warm-white/60">{match.date} · {score}</div>
-          <div className="flex items-center gap-1.5">
-            {(match.team1 || []).map(p => <PlayerAvatar key={p.id} player={p} />)}
-            <span className="mx-1 text-[10px] uppercase text-warm-white/36">vs</span>
-            {(match.team2 || []).map(p => <PlayerAvatar key={p.id} player={p} />)}
-          </div>
-        </div>
-        <div className={`text-xs font-bold ${win ? 'text-accent-light' : win === false ? 'text-coral' : 'text-warm-white/50'}`}>
-          {win ? 'Победа' : win === false ? 'Поражение' : 'Ничья'}
-        </div>
-      </div>
-    </PadelCard>
-  );
-}
-
 function QuickAction({ icon: Icon, label, hint, onClick }) {
   return (
     <button
@@ -208,7 +167,6 @@ function QuickAction({ icon: Icon, label, hint, onClick }) {
 
 export default function Home({
   upcomingMatches = [],
-  completedMatches = [],
   onBookCourt,
   onViewDetails,
   onConvertToPublic,
@@ -224,6 +182,8 @@ export default function Home({
   const gamesWithPartners = upcomingMatches.filter(m => m.type === 'match');
   const myTrainings = upcomingMatches.filter(m => m.type === 'private' && m.isTraining);
   const personalBookings = upcomingMatches.filter(m => m.type === 'private' && !m.isTraining);
+  const featuredEvent = [...gamesWithPartners, ...myTrainings, ...personalBookings]
+    .sort((a, b) => new Date(`${a.dateISO}T${a.time || '00:00'}:00`) - new Date(`${b.dateISO}T${b.time || '00:00'}:00`))[0];
   const rating = user?.numericRating || 3.0;
   const playerName = user?.firstName || 'Игрок';
 
@@ -281,14 +241,21 @@ export default function Home({
 
       <section className="space-y-4">
         <div className="text-[10px] font-extrabold uppercase tracking-[0.20em] text-warm-white/42">
-          Предстоящие
+          Ближайшее событие
         </div>
 
-        {upcomingMatches.length > 0 ? (
+        {featuredEvent ? (
           <>
-            {gamesWithPartners.map(m => <UpcomingRow key={m.id} match={m} onClick={() => handleUpcomingClick(m)} />)}
-            {myTrainings.map(m => <UpcomingRow key={m.id} match={m} onClick={() => handleUpcomingClick(m)} />)}
-            {personalBookings.map(m => <UpcomingRow key={m.id} match={m} onClick={() => handleUpcomingClick(m)} />)}
+            <UpcomingRow match={featuredEvent} onClick={() => handleUpcomingClick(featuredEvent)} />
+            {upcomingMatches.length > 1 && (
+              <button
+                type="button"
+                onClick={onOpenMatches}
+                className="w-full rounded-2xl border border-warm-white/10 px-4 py-3 text-sm font-bold text-warm-white/70"
+              >
+                Смотреть все матчи
+              </button>
+            )}
           </>
         ) : (
           <PadelCard className="border-dashed py-8 text-center">
@@ -297,19 +264,6 @@ export default function Home({
               Выбрать время
             </PadelButton>
           </PadelCard>
-        )}
-      </section>
-
-      <section className="mt-9">
-        <div className="mb-4 text-[10px] font-extrabold uppercase tracking-[0.20em] text-warm-white/42">
-          История игр
-        </div>
-        {completedMatches.length > 0 ? (
-          <div className="space-y-1">
-            {completedMatches.map(m => <CompletedRow key={m.id} match={m} onClick={() => onViewDetails(m)} />)}
-          </div>
-        ) : (
-          <p className="text-center text-xs text-warm-white/36">Здесь появится история ваших матчей</p>
         )}
       </section>
 
