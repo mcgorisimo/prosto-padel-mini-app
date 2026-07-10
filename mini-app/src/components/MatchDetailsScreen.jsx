@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { getAvailableBots, applyMatchOutcome, getTestBots } from '../lib/testSeed';
-import { getPerPlayerPrice, fmtPrice as fmtPriceLib, RATES } from '../lib/pricing';
+import { getCourtCapacity, getPerPlayerPrice, fmtPrice as fmtPriceLib, isPrimeTime } from '../lib/pricing';
+import { HOURS, WORKING_HOURS, BOOKING_DURATIONS } from '../lib/booking';
 import FinishMatchModal from './FinishMatchModal';
 import PadelCard from './ui/PadelCard';
 import MatchChat from './MatchChat';
@@ -25,36 +26,24 @@ const C = {
   loss:    '#FF6F61',
 };
 
-const TIME_SLOTS = (() => {
-  const slots = [];
-  for (let h = 7; h <= 24; h++) {
-    slots.push(`${String(h % 24).padStart(2, '0')}:00`);
-    if (h < 24) slots.push(`${String(h % 24).padStart(2, '0')}:30`);
-  }
-  return slots;
-})();
+const TIME_SLOTS = HOURS;
 
 const PLAYER_COLORS = ['#FFD700', '#4285F4', '#34A853', '#EA4335'];
-
-const PRIME_START_MIN = 17 * 60;
-const DAY_RATE    = RATES.DAY;
-const PRIME_RATE  = RATES.PRIME;
-const SINGLE_RATE = RATES.SINGLE;
 
 const toMin = (time) => {
   if (typeof time !== 'string' || !time.includes(':')) return 0;
   let [h, m] = time.split(':').map(Number);
-  if (h < 7) h += 24;
+  if (h < WORKING_HOURS.startHour) h += 24;
   return h * 60 + m;
 };
 
 const maxDur = (time) => {
-  const remaining = (24 * 60 - toMin(time)) / 60;
+  const remaining = (WORKING_HOURS.endHour * 60 - toMin(time)) / 60;
   return Math.max(0.5, Math.floor(remaining * 2) / 2);
 };
 
-const calcPerPlayer = (time, duration, courtType) =>
-  getPerPlayerPrice(time, duration, courtType);
+const calcPerPlayer = (time, duration, courtType, dateISO) =>
+  getPerPlayerPrice(time, duration, courtType, dateISO);
 
 const fmtPrice = fmtPriceLib;
 
@@ -341,10 +330,10 @@ function EditPanel({ initDate, initTime, initCourt, initDuration, initTitle, ini
 
   const maxD   = maxDur(editTime);
   const safeDur = Math.min(editDur, maxD);
-  const isP    = toMin(editTime) >= PRIME_START_MIN;
-  const newPPl = calcPerPlayer(editTime, safeDur, editCourt);
+  const isP    = isPrimeTime(editTime, editDate);
+  const newPPl = calcPerPlayer(editTime, safeDur, editCourt, editDate);
   // Минимальная аренда — 1 час
-  const DURATION_OPTS = [1, 1.5, 2].filter(d => d <= maxD);
+  const DURATION_OPTS = BOOKING_DURATIONS.filter(d => d <= maxD);
 
   const isToday = editDate === new Date().toISOString().slice(0, 10);
   const now = new Date();
@@ -381,7 +370,7 @@ function EditPanel({ initDate, initTime, initCourt, initDuration, initTitle, ini
           <div className="flex gap-[8px] overflow-x-auto pb-2 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]" style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-x' }}>
             {TIME_SLOTS.map(slot => {
               const active = slot === editTime;
-              const slotP  = toMin(slot) >= PRIME_START_MIN;
+              const slotP  = isPrimeTime(slot, editDate);
               const slotDateTime = new Date(`${editDate}T${slot}:00`);
               const isPast = isToday && slotDateTime.getTime() < validationTime;
               return (
@@ -415,7 +404,7 @@ function EditPanel({ initDate, initTime, initCourt, initDuration, initTitle, ini
             })}
           </div>
           <div style={{ display: 'flex', gap: '8px' }}>
-            {[['panoramic', 'Ультрапанорама'], ['single', 'Сингл']].map(([val, label]) => {
+            {[['panoramic', 'Ультрапанорама']].map(([val, label]) => {
               const active = editCourt === val;
               return (
                 <button key={val} onClick={() => setEditCourt(val)} style={{
@@ -440,7 +429,7 @@ function EditPanel({ initDate, initTime, initCourt, initDuration, initTitle, ini
             <div style={{ color: C.gold, fontSize: '22px', fontWeight: 850, lineHeight: 1 }}>{fmtPrice(newPPl)}</div>
             <div style={{ color: C.muted, fontSize: '11px', marginTop: '3px' }}>новая цена / участник</div>
           </div>
-          {isP && <div style={{ color: C.gold, fontSize: '12px', fontWeight: 700 }}>Prime Time</div>}
+          {isP && <div style={{ color: C.gold, fontSize: '12px', fontWeight: 700 }}>Тариф выше базового</div>}
         </div>
 
         {timeError && (
@@ -815,11 +804,10 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
   const title     = localTitle ?? origTitle;
   const description = localDesc ?? origDescription;
 
-  const isActuallyPrime = toMin(time) >= PRIME_START_MIN;
+  const isActuallyPrime = isPrimeTime(time, dateISO);
   const isPanoramic     = courtType === 'panoramic';
-  const maxSlots        = courtType === 'single' ? 2 : 4;
-  const hourlyRate      = courtType === 'single' ? SINGLE_RATE : (isActuallyPrime ? PRIME_RATE : DAY_RATE);
-  const pricePerPl      = calcPerPlayer(time, duration, courtType);
+  const maxSlots        = getCourtCapacity(courtType);
+  const pricePerPl      = calcPerPlayer(time, duration, courtType, dateISO);
 
   // Owner's real profile for the first slot
   const ownerSlot = {
@@ -1004,7 +992,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div>
               <div style={{ color: isActuallyPrime ? C.gold : C.text, fontWeight: 700, fontSize: '15px', marginBottom: '6px' }}>
-                {courtName || (isPanoramic ? 'Ультрапанорамный корт' : 'Сингл-корт')}
+                {courtName || (isPanoramic ? 'Ультрапанорамный корт' : 'Корт')}
               </div>
               <div style={{ display: 'flex', gap: '14px', flexWrap: 'wrap' }}>
                 {[['Дата', date], ['Время', time], ['Длительность', `${duration}ч`]].map(([icon, val]) => (
@@ -1127,7 +1115,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
         <div style={{ background: 'rgba(216,243,74,0.06)', borderRadius: '12px', padding: '12px 16px', marginBottom: '20px', border: '1px solid rgba(216,243,74,0.18)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             <div style={{ color: C.gold, fontSize: '22px', fontWeight: 800, lineHeight: 1 }}>{fmtPrice(pricePerPl)}</div>
-            <div style={{ color: C.muted, fontSize: '11px', marginTop: '3px' }}>с человека · {fmtPrice(hourlyRate)}/ч ÷ {maxSlots}</div>
+            <div style={{ color: C.muted, fontSize: '11px', marginTop: '3px' }}>с человека · тариф по времени ÷ {maxSlots}</div>
           </div>
           {isActuallyPrime && <div style={{ color: C.gold, fontSize: '12px', fontWeight: 600 }}>✦ Вечерний тариф</div>}
         </div>

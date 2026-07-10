@@ -3,6 +3,7 @@ import { Settings as SettingsIcon } from 'lucide-react';
 import RatingChart from './RatingChart';
 import PadelButton from './ui/PadelButton';
 import { RATING_CONFIG, getLevelForRating } from '../lib/ratingEngine';
+import { CLUB, PRICING } from '../lib/clubConfig';
 
 // ─── Count-up animation ──────────────────────────────────────────────────────
 // Eases from previous value to current target using requestAnimationFrame.
@@ -50,7 +51,7 @@ const fmtPrice = (n) => n.toLocaleString('ru-RU') + ' ₽';
 
 const getAttestationPrice = (timeSlot) => {
   const coach = 4000;
-  const court = timeSlot === 'night' ? 8000 : 5000;
+  const court = timeSlot === 'night' ? PRICING.weekday[1].rate : PRICING.weekday[0].rate;
   return { coach, court, total: coach + court };
 };
 
@@ -327,7 +328,7 @@ function TrainingBookingSheet({ ratingLabel, onClose, onBooked }) {
           </div>
           {[
             ['Работа тренера (1ч)', fmtPrice(coach), C.text],
-            ['Аренда корта' + (timeSlot === 'night' ? ' (Prime)' : ''), fmtPrice(court), timeSlot === 'night' ? C.gold : C.text],
+            ['Аренда корта' + (timeSlot === 'night' ? ' (вечерний тариф)' : ''), fmtPrice(court), timeSlot === 'night' ? C.gold : C.text],
           ].map(([label, val, color]) => (
             <div key={label} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
               <span style={{ color: C.muted, fontSize: '13px' }}>{label}</span>
@@ -465,7 +466,7 @@ export default function PlayerProfile({ user, stats, upcomingMatches = [], compl
               </span>
             </div>
             <div style={{ color: C.muted, fontSize: '12px' }}>
-              {user?.username ? `@${user.username} · ` : ''}ТРЦ «Отрада», Пятницкое ш., 1
+              {user?.username ? `@${user.username} · ` : ''}{CLUB.location}, {CLUB.address}
             </div>
           </div>
 

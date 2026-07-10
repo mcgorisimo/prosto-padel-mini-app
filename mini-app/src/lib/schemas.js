@@ -22,7 +22,6 @@ export const MATCH_STATUS = Object.freeze({
 
 export const COURT_TYPES = Object.freeze({
   PANORAMIC: 'panoramic',
-  SINGLE:    'single',
 });
 
 // ─── JSDoc typedefs ──────────────────────────────────────────────────────────
@@ -73,7 +72,7 @@ export const COURT_TYPES = Object.freeze({
  * @property {number}        duration            hours, e.g. 1.5
  * @property {string}        [courtId]           e.g. 'p3' / 's2'. Required for BookingCalendar visibility
  * @property {string}        [courtName]         display label, e.g. "Корт 3"
- * @property {('panoramic'|'single')} courtType
+ * @property {'panoramic'} courtType
  * @property {boolean}       isPrime
  * @property {number}        ratingMin           0..6
  * @property {number}        ratingMax           0..6

@@ -10,6 +10,7 @@ import BookingCalendar from './components/BookingCalendar';
 import { supabase } from './lib/supabaseClient';
 import { useTelegram } from './hooks/useTelegram';
 import { COURTS, checkAvailability } from './lib/booking';
+import { isPrimeTime } from './lib/pricing';
 import { getCurrentRating, getLevelForRating } from './lib/ratingEngine';
 
 // ─── Seed data (shown until user creates real matches) ────────────────────────
@@ -271,7 +272,7 @@ const handleBookSlot = async (booking) => {
       courtId:       booking.court?.id || '1',
       courtName:     booking.court?.name || 'Корт',
       courtType:     booking.court?.type || 'standard',
-      isPrime:       Number((booking?.time || '0:0').split(':')[0]) >= 17,
+      isPrime:       isPrimeTime(booking?.time || '00:00', booking.dateISO),
       type:          booking.type || 'match',
       ratingMin:     booking.ratingMin ?? 0,
       ratingMax:     booking.ratingMax ?? 6,
@@ -509,7 +510,7 @@ const handleBookSlot = async (booking) => {
       courtId:      data.courtId,   // May be assigned if synced
       courtName:    data.courtName, // May be assigned if synced
       courtType:    data.courtType ?? 'panoramic',
-      isPrime:      Number((data?.time || '0:0').split(':')[0]) >= 17,
+      isPrime:      isPrimeTime(data?.time || '00:00', data.dateISO),
       type:         'match', // Always a match when created from this screen
       ratingMin:    data.ratingMin ?? 0,
       ratingMax:    data.ratingMax ?? 6,

@@ -1,4 +1,5 @@
 import React from 'react';
+import { getCourtCapacity, getPerPlayerPrice, fmtPrice } from '../lib/pricing';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -17,8 +18,6 @@ const C = {
 const LUNDA_NUM_START = [1.0, 1.5, 2.5, 3.0, 3.5, 4.0, 4.5];
 const ratingFromIdx = (idx) =>
   (typeof idx === 'number' && idx >= 0 && idx < LUNDA_NUM_START.length) ? LUNDA_NUM_START[idx] : null;
-
-const fmtPrice = (n) => n.toLocaleString('ru-RU') + ' ₽';
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
@@ -151,9 +150,8 @@ export default function MatchCard({ match, playerRating, onJoin, onViewDetails }
   } = match;
 
   const isPanoramic    = courtType === 'panoramic';
-  const maxSlots       = courtType === 'single' ? 2 : 4;
-  const hourlyRate     = courtType === 'single' ? 3000 : (isPrime ? 8000 : 5000);
-  const pricePerPlayer = Math.round((hourlyRate * duration) / maxSlots);
+  const maxSlots       = getCourtCapacity(courtType);
+  const pricePerPlayer = getPerPlayerPrice(time, duration, courtType, match.dateISO);
 
   const isConfirmed = status === 'confirmed' || scenario === 'social';
   const isFull     = (filledSlots?.length ?? 0) >= maxSlots;
@@ -209,7 +207,7 @@ export default function MatchCard({ match, playerRating, onJoin, onViewDetails }
           </div>
         )}
         <div style={{ color: isPanoramic && isPrime ? C.gold : C.muted, fontSize: '12px', fontWeight: 500 }}>
-          {courtName ? `📍 ${courtName}` : (isPanoramic ? '✦ Ультрапанорама' : 'Сингл-корт')}
+          {courtName ? `📍 ${courtName}` : (isPanoramic ? '✦ Ультрапанорама' : 'Корт')}
         </div>
       </div>
 
@@ -252,7 +250,7 @@ export default function MatchCard({ match, playerRating, onJoin, onViewDetails }
             {fmtPrice(pricePerPlayer)}
           </div>
           <div style={{ color: C.muted, fontSize: '11px', marginTop: '3px' }}>
-            с человека · {fmtPrice(hourlyRate)}/ч ÷ {maxSlots}
+            с человека · тариф по времени ÷ {maxSlots}
           </div>
         </div>
 

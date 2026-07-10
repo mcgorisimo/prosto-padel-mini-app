@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import BookingModal from './BookingModal';
 import { COURTS, HOURS, toMin, fromMin, generateDates } from '../lib/booking';
+import { isPrimeTime } from '../lib/pricing';
 import { RATING_CONFIG } from '../lib/ratingEngine';
 
 // ─── Static configuration ────────────────────────────────────────────────────
@@ -205,8 +206,7 @@ export default function BookingCalendar({ allMatches = [], userId, userRating, o
 
           {/* Time Gutter Column */}
           {HOURS.map((hour, i) => {
-            const hourNum = parseInt(hour.split(':')[0], 10);
-            const isPrime = hourNum >= 17;
+            const isPrime = isPrimeTime(hour, dateISO);
             const isHalfHour = hour.endsWith(':30');
             return (
               <div key={hour} className={`w-16 shrink-0 sticky left-0 z-10 border-r border-b border-warm-white/10 flex flex-col items-center justify-center text-xs font-medium ${
@@ -224,7 +224,7 @@ export default function BookingCalendar({ allMatches = [], userId, userRating, o
               const slot = schedule[hour][court.id];
               if (slot.status !== 'available' && !slot.isStart) return null; // Render nothing if it's a covered slot
 
-              const isPrime = parseInt(hour.split(':')[0], 10) >= 17;
+              const isPrime = isPrimeTime(hour, dateISO);
               const style = slot.isStart ? { gridRow: `span ${slot.durationCells}`, zIndex: 10 } : {};
 
               return (

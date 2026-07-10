@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { PRICING } from '../lib/clubConfig';
 
 // ─── Tokens ───────────────────────────────────────────────────────────────────
 
@@ -53,12 +54,12 @@ function PriceReceipt({ breakdown, totalPrice }) {
       </div>
 
       {breakdown.map((line, i) => {
-        const isPrime = line.label === 'Prime Time';
+        const isPrime = line.rate > PRICING.weekday[0].rate;
         return (
           <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
             <div>
               <div style={{ color: isPrime ? C.gold : C.muted, fontSize: '13px', fontWeight: 600 }}>
-                {isPrime ? '✦ Prime Time' : '☀ Дневное время'}
+                {isPrime ? `✦ ${line.label}` : `☀ ${line.label}`}
               </div>
               <div style={{ color: '#475569', fontSize: '11px', marginTop: '2px' }}>
                 {fmtHours(line.hours)} × {line.rate.toLocaleString('ru-RU')} ₽/ч

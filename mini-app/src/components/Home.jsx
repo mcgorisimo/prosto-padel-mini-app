@@ -3,6 +3,7 @@ import { CalendarDays, ChartNoAxesCombined, Dumbbell, Trophy } from 'lucide-reac
 import PadelButton from './ui/PadelButton';
 import PadelCard from './ui/PadelCard';
 import TrainingModal from './TrainingModal';
+import { CLUB } from '../lib/clubConfig';
 
 const ME_ID = 'me';
 
@@ -117,7 +118,7 @@ function UpcomingRow({ match, onClick }) {
   const isTraining = match.isTraining;
   const isTrainingPending = isTraining && match.trainingStatus === 'pending_coach';
   const coachName = match.trainingDetails?.coachName;
-  const courtLabel = match.courtName || (match.courtType === 'panoramic' ? 'Ультрапанорама' : 'Сингл-корт');
+  const courtLabel = match.courtName || (match.courtType === 'panoramic' ? 'Ультрапанорама' : 'Корт');
   const label = isMatch ? 'Матч' : isTraining ? 'Тренировка' : 'Бронь';
 
   return (
@@ -242,13 +243,13 @@ export default function Home({
     <div className="min-h-screen bg-app-bg px-4 pb-24 pt-5">
       <header className="mb-5">
         <div className="mb-2 text-[11px] font-extrabold uppercase tracking-[0.18em] text-warm-white/48">
-          Просто Падел
+          {CLUB.name}
         </div>
         <h1 className="text-[32px] font-black leading-tight text-warm-white">
           Привет, {playerName}
         </h1>
         <p className="mt-2 text-sm leading-relaxed text-warm-white/58">
-          ТРЦ «Отрада», Пятницкое ш., 1
+          {CLUB.location}, {CLUB.address}
         </p>
       </header>
 

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { CLUB } from '../../lib/clubConfig';
 
 const tg = typeof window !== 'undefined' && window.Telegram?.WebApp
   ? window.Telegram.WebApp
@@ -123,11 +124,11 @@ export default function WelcomeScreen({ onSignUp, onLogin }) {
             </div>
 
             <h1 style={{ color: C.text, fontSize: '34px', fontWeight: 850, lineHeight: 1.04, margin: '0 0 14px' }}>
-              Просто Падел
+              {CLUB.name}
             </h1>
 
             <p style={{ color: C.muted, fontSize: '16px', lineHeight: 1.6, margin: 0 }}>
-              Профиль игрока, матчи, бронирования и события клуба в ТРЦ «Отрада».
+              Профиль игрока, матчи, бронирования и события клуба в {CLUB.location}.
             </p>
 
             <div style={{
@@ -178,7 +179,7 @@ export default function WelcomeScreen({ onSignUp, onLogin }) {
           </button>
 
           <div style={{ textAlign: 'center', marginTop: '22px', color: 'rgba(245,241,232,0.42)', fontSize: '11px', letterSpacing: '0.04em', lineHeight: 1.5 }}>
-            prostopdl.ru · ТРЦ «Отрада», Пятницкое ш., 1
+            {CLUB.website} · {CLUB.location}, {CLUB.address}
           </div>
         </div>
       </div>

@@ -1,28 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { COURTS, checkAvailability } from '../lib/booking';
+import { COURTS, HOURS, WORKING_HOURS, checkAvailability } from '../lib/booking';
+import { getTotalPrice, isPrimeTime, fmtPrice as fmtPriceLib } from '../lib/pricing';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const RATINGS = ['D', 'D+', 'C', 'C+', 'B', 'B+', 'A'];
 
-const START_HOUR = 7;
-const END_HOUR   = 24;
+const START_HOUR = WORKING_HOURS.startHour;
+const END_HOUR   = WORKING_HOURS.endHour;
 
-const TIME_SLOTS = (() => {
-  const slots = [];
-  for (let h = START_HOUR; h <= END_HOUR; h++) {
-    slots.push(`${String(h % 24).padStart(2, '0')}:00`);
-    if (h < END_HOUR) slots.push(`${String(h % 24).padStart(2, '0')}:30`);
-  }
-  return slots;
-})();
+const TIME_SLOTS = HOURS;
 
-const PRIME_START_MIN = 17 * 60;
-const DAY_RATE        = 5000;
-const PRIME_RATE      = 8000;
-const SINGLE_RATE     = 3000;
-
-const isPrime = (time) => Number((time || '0:0').split(':')[0]) >= 17;
+const isPrime = (time, dateISO) => isPrimeTime(time, dateISO);
 
 const toMin = (time) => {
   let [h, m] = (time || '0:0').split(':').map(Number);
@@ -30,27 +19,8 @@ const toMin = (time) => {
   return h * 60 + m;
 };
 
-const getPriceBreakdown = (time, hrs) => {
-  const s = toMin(time), e = s + hrs * 60;
-  if (e <= PRIME_START_MIN)
-    return [{ label: 'Дневное время', hours: hrs, rate: DAY_RATE, amount: hrs * DAY_RATE }];
-  if (s >= PRIME_START_MIN)
-    return [{ label: 'Prime Time', hours: hrs, rate: PRIME_RATE, amount: hrs * PRIME_RATE }];
-  const dm = PRIME_START_MIN - s, pm = e - PRIME_START_MIN;
-  return [
-    { label: 'Дневное время', hours: dm / 60, rate: DAY_RATE,   amount: (dm / 60) * DAY_RATE   },
-    { label: 'Prime Time',    hours: pm / 60, rate: PRIME_RATE, amount: (pm / 60) * PRIME_RATE },
-  ];
-};
-
-const calculateTotalPrice = (time, hrs) =>
-  getPriceBreakdown(time, hrs).reduce((s, l) => s + l.amount, 0);
-
-const courtTotal = (time, dur, ct) =>
-  ct === 'single' ? SINGLE_RATE * dur : calculateTotalPrice(time, dur);
-
-const courtSlots  = (ct) => ct === 'single' ? 2 : 4;
-const ownerShare  = (time, dur, ct) => Math.round(courtTotal(time, dur, ct) / courtSlots(ct));
+const courtTotal = (time, dur, ct, dateISO) =>
+  getTotalPrice(time, dur, ct, dateISO);
 
 const maxDuration = (time) => {
   let [h, m] = time.split(':').map(Number);
@@ -75,7 +45,7 @@ const generateDates = () => {
   return dates;
 };
 
-const fmtPrice = (n) => n.toLocaleString('ru-RU') + ' ₽';
+const fmtPrice = fmtPriceLib;
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 
@@ -222,7 +192,7 @@ function TimePicker({ time, onTime, duration, onDuration, maxDur, selectedDate }
       )}
       <div ref={scrollContainerRef} className="grid grid-cols-4 gap-2 max-h-60 overflow-y-auto pr-1 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]" style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-y' }}>
         {TIME_SLOTS.map((slot) => {
-          const prime  = isPrime(slot);
+          const prime  = isPrime(slot, selectedDate.dateISO);
           const active = time === slot;
           const slotDateTime = new Date(`${selectedDate.dateISO}T${slot}:00`);
           const isPast = isToday && slotDateTime.getTime() < validationTime;
@@ -264,8 +234,7 @@ function TimePicker({ time, onTime, duration, onDuration, maxDur, selectedDate }
 
 function CourtTypeToggle({ value, onChange }) {
   const opts = [
-    { val: 'panoramic', label: 'Ультрапанорама', note: '4 игрока · 5–8 тыс/ч' },
-    { val: 'single',    label: 'Сингл-корт',       note: '2 игрока · 3 тыс/ч'   },
+    { val: 'panoramic', label: 'Ультрапанорама', note: '4 игрока · тариф по дате и времени' },
   ];
   return (
     <Section title="Тип корта">
@@ -369,7 +338,7 @@ function CourtSelector({ courtType, selectedDate, time, duration, allMatches, se
                 opacity: isAvailable ? 1 : 0.8,
               }}
             >
-              {isAvailable ? court.name.replace('Корт ', '').replace('Сингл ', 'S') : 'Занят'}
+              {isAvailable ? court.name.replace('Корт ', '') : 'Занят'}
             </button>
           );
         })}
@@ -380,9 +349,9 @@ function CourtSelector({ courtType, selectedDate, time, duration, allMatches, se
 
 // ─── Social Payment Sheet ─────────────────────────────────────────────────────
 
-function SocialPaymentSheet({ time, duration, courtType, onConfirm, onClose }) {
-  const isP       = isPrime(time);
-  const total     = courtTotal(time, duration, courtType);
+function SocialPaymentSheet({ time, duration, courtType, dateISO, onConfirm, onClose }) {
+  const isP       = isPrime(time, dateISO);
+  const total     = courtTotal(time, duration, courtType, dateISO);
 
   return (
     <div
@@ -400,7 +369,7 @@ function SocialPaymentSheet({ time, duration, courtType, onConfirm, onClose }) {
         <div style={{ textAlign: 'center', marginBottom: '20px' }}>
           <div style={{ color: '#fff', fontSize: '18px', fontWeight: 700 }}>Подтверждение брони</div>
           <div style={{ color: T.muted, fontSize: '12px', marginTop: '4px' }}>
-            {courtType === 'panoramic' ? 'Ультрапанорамный корт' : 'Сингл-корт'} · {time} · {duration}ч
+            {courtType === 'panoramic' ? 'Ультрапанорамный корт' : 'Корт'} · {time} · {duration}ч
           </div>
         </div>
 
@@ -560,7 +529,7 @@ export default function MatchCreationScreen({ onBack, onSuccess, user, allMatche
       time, duration, courtType, ratingMin, ratingMax,
   scenario: 'social',
   status: 'confirmed',
-      ownerPaid: courtTotal(time, duration, courtType),
+      ownerPaid: courtTotal(time, duration, courtType, selectedDate.dateISO),
       holdAmount: 0,
       isPrivate: isPrivate,
       courtId: selectedCourt.id,
@@ -572,8 +541,8 @@ export default function MatchCreationScreen({ onBack, onSuccess, user, allMatche
     });
   };
 
-  const isP       = isPrime(time);
-  const total     = courtTotal(time, duration, courtType);
+  const isP       = isPrime(time, selectedDate.dateISO);
+  const total     = courtTotal(time, duration, courtType, selectedDate.dateISO);
   const scenarioDef = SCENARIO_DEFS.find(s => s.id === scenario);
   const canBook = (scenario === 'social' ? !!selectedCourtId : true) && !timeError;
 
@@ -750,6 +719,7 @@ export default function MatchCreationScreen({ onBack, onSuccess, user, allMatche
           time={time}
           duration={duration}
           courtType={courtType}
+          dateISO={selectedDate.dateISO}
           onConfirm={handleSocialConfirm}
           onClose={() => setShowSocial(false)}
         />

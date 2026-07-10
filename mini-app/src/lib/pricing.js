@@ -1,45 +1,75 @@
-// Court pricing — shared between MatchDetailsScreen and BookingModal.
-// Single source of truth for rates. Adjust here when the club changes prices.
+import { PRICING, WORKING_HOURS } from './clubConfig';
+import { toMin } from './booking';
+
+const WEEKDAY_DAY_RATE = PRICING.weekday[0].rate;
+const WEEKDAY_PEAK_RATE = PRICING.weekday[1].rate;
+const WEEKEND_PEAK_RATE = PRICING.weekend[1].rate;
 
 export const RATES = Object.freeze({
-  DAY:    5000,  // ₽/h, panoramic, before 17:00
-  PRIME:  8000,  // ₽/h, panoramic, 17:00+
-  SINGLE: 3000,  // ₽/h, single court, all day
+  DAY: WEEKDAY_DAY_RATE,
+  PRIME: WEEKDAY_PEAK_RATE,
+  WEEKEND: WEEKEND_PEAK_RATE,
 });
-
-const PRIME_START_MIN = 17 * 60;
 
 export const fmtPrice = (n) => `${Math.round(n).toLocaleString('ru-RU')} ₽`;
 
-export const toMin = (time) => {
-  const [h, m] = time.split(':').map(Number);
-  return (h < 7 ? h + 24 : h) * 60 + m;
+const isWeekend = (dateISO) => {
+  if (!dateISO) return false;
+  const day = new Date(`${dateISO}T12:00:00`).getDay();
+  return day === 0 || day === 6;
 };
 
-export const isPrimeTime = (time) => toMin(time) >= PRIME_START_MIN;
+const getSegmentsForDate = (dateISO) => (isWeekend(dateISO) ? PRICING.weekend : PRICING.weekday);
 
-// Returns segments of price breakdown, e.g. day portion + prime portion if it crosses 17:00.
-export function getPriceBreakdown(time, hours, courtType = 'panoramic') {
-  if (courtType === 'single') {
-    return [{ label: 'Сингл', rate: RATES.SINGLE, amount: RATES.SINGLE * hours }];
-  }
+const getSegmentBounds = (segment) => ({
+  start: toMin(segment.from),
+  end: segment.to === '00:00' ? WORKING_HOURS.endHour * 60 : toMin(segment.to),
+});
+
+export const getRateForTime = (time, dateISO) => {
+  const minute = toMin(time);
+  const segment = getSegmentsForDate(dateISO).find((item) => {
+    const { start, end } = getSegmentBounds(item);
+    return minute >= start && minute < end;
+  });
+
+  return segment ?? getSegmentsForDate(dateISO)[0];
+};
+
+export const isPrimeTime = (time, dateISO) => {
+  const segment = getRateForTime(time, dateISO);
+  return segment.rate > WEEKDAY_DAY_RATE;
+};
+
+export function getPriceBreakdown(time, hours, courtType = 'panoramic', dateISO) {
   const start = toMin(time);
-  const end   = start + hours * 60;
-  if (end <= PRIME_START_MIN) return [{ label: 'Дневное ☀', rate: RATES.DAY,   amount: hours * RATES.DAY   }];
-  if (start >= PRIME_START_MIN) return [{ label: 'Prime ✦',   rate: RATES.PRIME, amount: hours * RATES.PRIME }];
-  const dayMin   = PRIME_START_MIN - start;
-  const primeMin = end - PRIME_START_MIN;
-  return [
-    { label: 'Дневное ☀', rate: RATES.DAY,   amount: (dayMin / 60)   * RATES.DAY   },
-    { label: 'Prime ✦',   rate: RATES.PRIME, amount: (primeMin / 60) * RATES.PRIME },
-  ];
+  const end = start + hours * 60;
+
+  return getSegmentsForDate(dateISO)
+    .map((segment) => {
+      const bounds = getSegmentBounds(segment);
+      const overlapStart = Math.max(start, bounds.start);
+      const overlapEnd = Math.min(end, bounds.end);
+      const minutes = Math.max(0, overlapEnd - overlapStart);
+
+      if (!minutes) return null;
+
+      const segmentHours = minutes / 60;
+      return {
+        label: segment.label,
+        hours: segmentHours,
+        rate: segment.rate,
+        amount: segmentHours * segment.rate,
+      };
+    })
+    .filter(Boolean);
 }
 
-export const getTotalPrice = (time, hours, courtType = 'panoramic') =>
-  Math.round(getPriceBreakdown(time, hours, courtType).reduce((s, l) => s + l.amount, 0));
+export const getTotalPrice = (time, hours, courtType = 'panoramic', dateISO) =>
+  Math.round(getPriceBreakdown(time, hours, courtType, dateISO).reduce((sum, line) => sum + line.amount, 0));
 
-// Per-player share for doubles (4 slots) or singles (2 slots).
-export function getPerPlayerPrice(time, hours, courtType = 'panoramic') {
-  if (courtType === 'single') return Math.round((RATES.SINGLE * hours) / 2);
-  return Math.round(getTotalPrice(time, hours, courtType) / 4);
+export const getCourtCapacity = () => 4;
+
+export function getPerPlayerPrice(time, hours, courtType = 'panoramic', dateISO) {
+  return Math.round(getTotalPrice(time, hours, courtType, dateISO) / getCourtCapacity(courtType));
 }

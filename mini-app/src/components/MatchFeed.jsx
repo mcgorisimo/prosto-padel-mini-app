@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { MapPin, Plus, UsersRound } from 'lucide-react';
+import { getPerPlayerPrice } from '../lib/pricing';
 
 const C = {
   bg: '#050F0B',
@@ -179,7 +180,7 @@ function PlayerSlot({ player }) {
 function MatchCard({ match, onViewDetails }) {
   const filledSlots = Array.isArray(match.filledSlots) ? match.filledSlots.filter(Boolean) : [];
   const filledCount = filledSlots.length;
-  const pricePerPerson = match.pricePerPerson || 1875;
+  const pricePerPerson = match.pricePerPerson || getPerPlayerPrice(match.time, match.duration || 1.5, match.courtType, match.dateISO);
 
   let statusText = 'Не забронировано';
   let statusColor = C.muted;

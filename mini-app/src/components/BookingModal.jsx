@@ -2,6 +2,7 @@
 import PadelCard from './ui/PadelCard';
 import PadelButton from './ui/PadelButton';
 import { getTotalPrice, fmtPrice, isPrimeTime } from '../lib/pricing';
+import { BOOKING_DURATIONS, checkAvailability } from '../lib/booking';
 
 const RATINGS = ['D', 'D+', 'C', 'C+', 'B', 'B+', 'A'];
 const T = {
@@ -73,34 +74,7 @@ function RatingRangeSlider({ minIdx, maxIdx, onChange }) {
   );
 }
 
-const DURATION_OPTIONS = [
-  { value: 1.0, label: '1 ч'   },
-  { value: 1.5, label: '1.5 ч' },
-  { value: 2.0, label: '2 ч'   },
-  { value: 2.5, label: '2.5 ч' },
-];
-
-// ─── Collision check ─────────────────────────────────────────────────────────
-
-const toMin = (t) => { const [h, m] = (t || '0:0').split(':').map(Number); return h * 60 + m; };
-
-/**
- * Checks whether a (courtId × dateISO × startTime × duration) interval collides
- * with any existing non-completed match on that court/day.
- * Returns true if available, false if blocked.
- */
-export function checkAvailability(allMatches, courtId, dateISO, startTime, duration) {
-  const startMin = toMin(startTime);
-  const endMin   = startMin + duration * 60;
-  for (const m of allMatches ?? []) {
-    if (!m || m.status === 'completed') continue;
-    if (m.courtId !== courtId || m.dateISO !== dateISO) continue;
-    const mStart = toMin(m.time);
-    const mEnd   = mStart + (m.duration ?? 0) * 60;
-    if (startMin < mEnd && endMin > mStart) return false;
-  }
-  return true;
-}
+const DURATION_OPTIONS = BOOKING_DURATIONS.map((value) => ({ value, label: `${value} ч` }));
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
@@ -116,9 +90,9 @@ export default function BookingModal({ slot, allMatches = [], onClose, onConfirm
 
   if (!slot) return null;
 
-  const total      = getTotalPrice(slot.time, duration, slot.court.type);
+  const total      = getTotalPrice(slot.time, duration, slot.court.type, slot.dateISO);
   const prepay     = total; // Always 100% payment
-  const prime      = isPrimeTime(slot.time);
+  const prime      = isPrimeTime(slot.time, slot.dateISO);
 
   // Per-option availability — drives disabled state on duration buttons.
   const availability = DURATION_OPTIONS.reduce((acc, d) => {
@@ -198,7 +172,7 @@ export default function BookingModal({ slot, allMatches = [], onClose, onConfirm
         <div className="mb-4 rounded-2xl bg-white/[0.04] border border-warm-white/10 p-3">
           <div className="text-xs text-slate-400 mb-0.5">Тип корта</div>
           <div className="text-sm text-slate-100 font-medium">
-            {slot.court.type === 'panoramic' ? 'Ультрапанорамный корт' : 'Сингл-корт'}
+            {slot.court.type === 'panoramic' ? 'Ультрапанорамный корт' : 'Корт'}
           </div>
         </div>
 
