@@ -152,9 +152,13 @@ export default function BookingCalendar({ allMatches = [], userId, onOpenMatch, 
     showToast?.('Этот слот занят', 'info');
   };
 
-  const handleBookConfirm = (booking) => {
-    onBookSlot?.(booking);
-    setSelectedSlot(null);
+  const handleBookConfirm = async (booking) => {
+    try {
+      await onBookSlot?.(booking);
+      setSelectedSlot(null);
+    } catch {
+      showToast?.('Бронь не сохранена. Попробуйте еще раз.', 'error');
+    }
   };
 
   return (

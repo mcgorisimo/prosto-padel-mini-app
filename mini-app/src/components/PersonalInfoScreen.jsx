@@ -177,7 +177,7 @@ const [firstName, setFirstName] = useState(user?.firstName || '');
     try {
       // 1. Отправляем новые данные прямо в Supabase
       if (user?.id) {
-        const { error } = await supabase
+        const { data, error } = await supabase
           .from('profiles')
           .update({
             first_name: firstName,
@@ -187,9 +187,11 @@ const [firstName, setFirstName] = useState(user?.firstName || '');
             // Если в таблице есть поле email, раскомментируй строку ниже:
             // email: email 
           })
-          .eq('id', user.id);
+          .eq('id', user.id)
+          .select('id');
 
         if (error) throw error;
+        if (!data?.[0]) throw new Error('Profile update returned no rows');
       }
 
       // 2. Безопасный вызов уведомления (чтобы больше не было ошибки!)

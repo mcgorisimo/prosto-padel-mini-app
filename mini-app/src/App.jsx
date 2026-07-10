@@ -89,7 +89,9 @@ function deriveParticipantsAndStatus(filledSlots, prevStatus) {
     .filter(p => p?.id != null)
     .map(p => p.id);
   let status = prevStatus;
-  if (prevStatus !== 'completed' && prevStatus !== 'finished') {
+  if (prevStatus === 'searching' || prevStatus === 'confirmed') {
+    status = prevStatus;
+  } else if (prevStatus !== 'completed' && prevStatus !== 'finished' && prevStatus !== 'cancelled' && prevStatus !== 'canceled') {
     status = filled.length >= 4 ? 'upcoming' : 'open';
   }
   return { participants, status };
@@ -212,10 +214,25 @@ export default function App({ session, showToast }) { // Accept showToast as a p
 
   // ── Delete match: remove from allMatches (persisted via useLocalStorage) ──
   const handleDeleteMatch = async (matchId) => {
-    const { error } = await supabase.from('matches').delete().eq('id', matchId);
-    if (!error) {
-      setAllMatches(prev => prev.filter(m => m.id !== matchId));
+    const { data, error } = await supabase
+      .from('matches')
+      .delete()
+      .eq('id', matchId)
+      .select('id');
+
+    if (error) {
+      showToast?.('Не удалось отменить матч. Попробуйте еще раз.', 'error');
+      throw error;
     }
+
+    if (!data?.[0]) {
+      const emptyDeleteError = new Error('Match delete returned no rows');
+      showToast?.('Матч не отменен. Проверьте права доступа.', 'error');
+      throw emptyDeleteError;
+    }
+
+    setAllMatches(prev => prev.filter(m => m.id !== matchId));
+    if (selectedMatch?.id === matchId) setSelected(null);
   };
 
   // ── Complete match: mark status + persist final score, teams, ratingChanges ──
@@ -307,22 +324,27 @@ const handleBookSlot = async (booking) => {
     
     if (error) {
       console.error("КРИТИЧЕСКАЯ ОШИБКА БД:", error);
-      alert(`Ошибка сохранения: ${error.message}`);
-      return;
+      showToast?.('Не удалось сохранить бронь. Попробуйте еще раз.', 'error');
+      throw error;
     }
 
-    if (data && data[0]) {
-      setAllMatches(prev => [normalizeMatch(data[0]), ...prev]);
-      // Если это публичный матч — идем в ленту, если приват — остаемся в календаре
-      if (!booking.isPrivate) {
-        setActiveTab('matches');
-      }
+    const insertedRow = data?.[0];
+    if (!insertedRow) {
+      const emptyInsertError = new Error('Booking creation returned no rows');
+      showToast?.('Бронь не сохранена. Проверьте права доступа и попробуйте еще раз.', 'error');
+      throw emptyInsertError;
+    }
+
+    setAllMatches(prev => [normalizeMatch(insertedRow), ...prev]);
+    // Если это публичный матч — идем в ленту, если приват — остаемся в календаре
+    if (!booking.isPrivate) {
+      setActiveTab('matches');
     }
   };
 
   // ─── 2. Исправленный handleRevertToPrivate ───
   const handleRevertToPrivate = async (matchId) => {
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('matches')
       .update({
         type: 'private',
@@ -347,15 +369,70 @@ const handleBookSlot = async (booking) => {
         }],
         participants: [ME_ID],
       })
-      .eq('id', matchId);
+      .eq('id', matchId)
+      .select();
 
     if (error) {
       console.error("Ошибка при отмене матча:", error);
-      alert("Не удалось перевести матч в приватный режим");
-    } else {
-      showToast('Матч отменен, бронь переведена в личную тренировку', 'info');
-      setActiveTab('home'); 
+      showToast?.('Не удалось перевести матч в приватный режим', 'error');
+      throw error;
     }
+
+    const updatedRow = data?.[0];
+    if (!updatedRow) {
+      const emptyUpdateError = new Error('Revert to private returned no rows');
+      showToast?.('Бронь не обновлена. Проверьте права доступа.', 'error');
+      throw emptyUpdateError;
+    }
+
+    const updatedMatch = normalizeMatch(updatedRow);
+    setAllMatches(prev => prev.map(m => m.id === matchId ? updatedMatch : m));
+    setSelected(prev => prev?.id === matchId ? updatedMatch : prev);
+    showToast('Матч отменен, бронь переведена в личную тренировку', 'info');
+    setActiveTab('home'); 
+  };
+
+  const handleUpdateMatch = async (matchId, updates) => {
+    const dateISO = updates.dateISO ?? updates.date;
+    const dateLabel = dateISO
+      ? new Date(dateISO).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }).replace(' г.', '')
+      : undefined;
+
+    const payload = {
+      date: dateLabel,
+      dateISO,
+      time: updates.time,
+      duration: updates.duration,
+      courtType: updates.courtType,
+      title: updates.title,
+      description: updates.description,
+      isPrime: isPrimeTime(updates?.time || '00:00', dateISO),
+    };
+
+    const { data, error } = await supabase
+      .from('matches')
+      .update(payload)
+      .eq('id', matchId)
+      .not('status', 'in', '("completed","finished")')
+      .select();
+
+    if (error) {
+      showToast?.('Не удалось сохранить изменения матча. Попробуйте еще раз.', 'error');
+      throw error;
+    }
+
+    const updatedRow = data?.[0];
+    if (!updatedRow) {
+      const emptyUpdateError = new Error('Match edit returned no rows');
+      showToast?.('Изменения не сохранены. Проверьте права доступа или статус матча.', 'error');
+      throw emptyUpdateError;
+    }
+
+    const updatedMatch = normalizeMatch(updatedRow);
+    setAllMatches(prev => prev.map(m => m.id === updatedMatch.id ? updatedMatch : m));
+    setSelected(prev => prev?.id === updatedMatch.id ? updatedMatch : prev);
+    showToast?.('Матч обновлен', 'success');
+    return updatedMatch;
   };
 
   const handleSendMessage = async (matchId, sender, text) => {
@@ -387,7 +464,7 @@ const handleBookSlot = async (booking) => {
   };
 
   const handleSetupTraining = async (trainingData) => {
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('matches')
       .update({
         isTraining: true,
@@ -399,13 +476,29 @@ const handleBookSlot = async (booking) => {
         },
         trainingStatus: 'pending_coach',
       })
-      .eq('id', trainingData.matchId);
+      .eq('id', trainingData.matchId)
+      .select();
 
+    if (error) {
+      showToast?.('Не удалось отправить запрос на тренировку. Попробуйте еще раз.', 'error');
+      throw error;
+    }
+
+    const updatedRow = data?.[0];
+    if (!updatedRow) {
+      const emptyUpdateError = new Error('Training setup returned no rows');
+      showToast?.('Тренировка не сохранена. Проверьте права доступа.', 'error');
+      throw emptyUpdateError;
+    }
+
+    const updatedMatch = normalizeMatch(updatedRow);
+    setAllMatches(prev => prev.map(m => m.id === updatedMatch.id ? updatedMatch : m));
+    setSelected(prev => prev?.id === updatedMatch.id ? updatedMatch : prev);
     showToast('Запрос на тренировку отправлен администратору', 'success');
   };
 
   const handleConvertToPublic = async (matchId) => {
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('matches')
       .update({
         type: 'match',
@@ -413,10 +506,24 @@ const handleBookSlot = async (booking) => {
         scenario: 'social',
         status: 'open',
       })
-      .eq('id', matchId);
+      .eq('id', matchId)
+      .select();
 
-    // Открываем детали, чтобы пользователь мог отредактировать матч
-    openMatchById(matchId);
+    if (error) {
+      showToast?.('Не удалось открыть сбор игроков. Попробуйте еще раз.', 'error');
+      throw error;
+    }
+
+    const updatedRow = data?.[0];
+    if (!updatedRow) {
+      const emptyUpdateError = new Error('Convert to public returned no rows');
+      showToast?.('Матч не опубликован. Проверьте права доступа.', 'error');
+      throw emptyUpdateError;
+    }
+
+    const updatedMatch = normalizeMatch(updatedRow);
+    setAllMatches(prev => prev.map(m => m.id === updatedMatch.id ? updatedMatch : m));
+    openMatchDetails(updatedMatch);
   };
 
   // ── Slot changes: persist filledSlots, recompute participants + status ──
@@ -447,8 +554,9 @@ const handleBookSlot = async (booking) => {
     const savedSlots = updatedMatch.filledSlots ?? [];
     const slotsSaved = newFilledSlots.every(slot => !slot?.id || savedSlots.some(savedSlot => savedSlot?.id === slot.id));
     const participantsSaved = participants.every(id => savedParticipants.includes(id));
+    const statusSaved = updatedMatch.status === status;
 
-    if (!slotsSaved || !participantsSaved) {
+    if (!slotsSaved || !participantsSaved || !statusSaved) {
       const persistError = new Error('Match slot update was not persisted');
       console.error(persistError);
       showToast?.('Слот не сохранился. Попробуйте еще раз.', 'error');
@@ -547,10 +655,20 @@ const handleBookSlot = async (booking) => {
     };
 
     const { data: insertedData, error } = await supabase.from('matches').insert([newMatch]).select();
-    if (insertedData) {
-      setAllMatches(prev => [normalizeMatch(insertedData[0]), ...prev]);
+
+    if (error) {
+      showToast?.('Не удалось создать матч. Попробуйте еще раз.', 'error');
+      throw error;
     }
 
+    const insertedRow = insertedData?.[0];
+    if (!insertedRow) {
+      const emptyInsertError = new Error('Match creation returned no rows');
+      showToast?.('Матч не создан. Проверьте права доступа.', 'error');
+      throw emptyInsertError;
+    }
+
+    setAllMatches(prev => [normalizeMatch(insertedRow), ...prev]);
     setScreen(null);
     setActiveTab('matches');
   };
@@ -630,6 +748,7 @@ const handleBookSlot = async (booking) => {
         onJoinSuccess={() => { setScreen(null); setActiveTab('matches'); }}
         onDelete={handleDeleteMatch}
         onComplete={handleCompleteMatch}
+        onUpdate={handleUpdateMatch}
         onSlotsChange={handleSlotsChange}
         allMessages={allMessages}
         onSendMessage={handleSendMessage}

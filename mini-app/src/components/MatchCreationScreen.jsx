@@ -458,6 +458,7 @@ export default function MatchCreationScreen({ onBack, onSuccess, user, allMatche
   const [title,       setTitle]      = useState('');
   const [description, setDescription] = useState('');
   const [isPrivate, setIsPrivate] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     const isToday = selectedDate.dateISO === new Date().toISOString().slice(0, 10);
@@ -497,10 +498,13 @@ export default function MatchCreationScreen({ onBack, onSuccess, user, allMatche
     else onBack?.();
   };
 
-  const handleCTA = () => {
+  const handleCTA = async () => {
+    if (saving) return;
     const selectedCourt = COURTS.find(c => c.id === selectedCourtId);
   if (scenario === 'community') {
-    onSuccess?.({
+    setSaving(true);
+    try {
+      await onSuccess?.({
       time,
       duration, 
       courtType, 
@@ -515,7 +519,12 @@ export default function MatchCreationScreen({ onBack, onSuccess, user, allMatche
       date: selectedDate.dateObj.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }).replace(' г.', ''),
       title,
       description,
-    });
+      });
+    } catch {
+      showToast?.('Матч не создан. Попробуйте еще раз.', 'error');
+    } finally {
+      setSaving(false);
+    }
   } else {
     if (!selectedCourt) return;
     setShowSocial(true);
@@ -523,11 +532,13 @@ export default function MatchCreationScreen({ onBack, onSuccess, user, allMatche
   }
 };
 
-  const handleSocialConfirm = () => {
+  const handleSocialConfirm = async () => {
+    if (saving) return;
     const selectedCourt = COURTS.find(c => c.id === selectedCourtId);
     if (!selectedCourt) return;
-    setShowSocial(false);
-    onSuccess?.({
+    setSaving(true);
+    try {
+      await onSuccess?.({
       time, duration, courtType, ratingMin, ratingMax,
   scenario: 'social',
   status: 'confirmed',
@@ -540,7 +551,13 @@ export default function MatchCreationScreen({ onBack, onSuccess, user, allMatche
   date: selectedDate.dateObj.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }).replace(' г.', ''),
       title,
       description,
-    });
+      });
+      setShowSocial(false);
+    } catch {
+      showToast?.('Матч не создан. Попробуйте еще раз.', 'error');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const isP       = isPrime(time, selectedDate.dateISO);
@@ -695,17 +712,19 @@ export default function MatchCreationScreen({ onBack, onSuccess, user, allMatche
           <div style={{ padding: '0 16px' }}>
             <button
               onClick={handleCTA}
-              disabled={!canBook}
+              disabled={!canBook || saving}
               style={{
                 ...styles.ctaBtn,
                 background: 'rgba(216,243,74,0.12)',
                 color: T.accent,
                 border: '1px solid rgba(216,243,74,0.32)',
-                opacity: canBook ? 1 : 0.5,
-                cursor: canBook ? 'pointer' : 'not-allowed',
+                opacity: canBook && !saving ? 1 : 0.5,
+                cursor: canBook && !saving ? 'pointer' : 'not-allowed',
               }}
             >
-              {scenario === 'community'
+              {saving
+                ? 'Сохраняем...'
+                : scenario === 'community'
                 ? 'Создать матч'
                 : canBook
                   ? 'Создать матч'

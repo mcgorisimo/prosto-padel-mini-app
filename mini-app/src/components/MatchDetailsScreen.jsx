@@ -757,7 +757,7 @@ function ScenarioInfoBlock({ scenario, status, isOwner }) {
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
-export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinSuccess, onDelete, onComplete, onSlotsChange, allMessages, onSendMessage, onRevertToPrivate, showToast }) {
+export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinSuccess, onDelete, onComplete, onUpdate, onSlotsChange, allMessages, onSendMessage, onRevertToPrivate, showToast }) {
   const isOwner = canManageMatch(currentUser, match);
 
   const allBots = useMemo(() => getTestBots(), []);
@@ -883,14 +883,26 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
     }
   };
   
-  const handleEditSave = ({ date: dt, time: t, courtType: ct, duration: d, title: newTitle, description: newDesc }) => {
-    setLocalDate(dt);
-    setLocalTime(t);
-    setLocalCourt(ct);
-    setLocalDur(d);
-    setEditSheet(false);
-    setLocalTitle(newTitle);
-    setLocalDesc(newDesc);
+  const handleEditSave = async ({ date: dt, time: t, courtType: ct, duration: d, title: newTitle, description: newDesc }) => {
+    try {
+      const updatedMatch = await onUpdate?.(match.id, {
+        dateISO: dt,
+        time: t,
+        courtType: ct,
+        duration: d,
+        title: newTitle,
+        description: newDesc,
+      });
+      setLocalDate(updatedMatch?.dateISO ?? dt);
+      setLocalTime(updatedMatch?.time ?? t);
+      setLocalCourt(updatedMatch?.courtType ?? ct);
+      setLocalDur(updatedMatch?.duration ?? d);
+      setLocalTitle(updatedMatch?.title ?? newTitle);
+      setLocalDesc(updatedMatch?.description ?? newDesc);
+      setEditSheet(false);
+    } catch {
+      showToast?.('Изменения не сохранены. Попробуйте еще раз.', 'error');
+    }
   };
 
   // Persist slot mutations both locally (instant UI) and up to allMatches (status/participants).
@@ -900,13 +912,17 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
     return updatedMatch;
   };
 
-  const handleKickConfirm = () => {
-    commitSlots(allFilled.filter(p => p !== kickTarget));
-    setKickTarget(null);
+  const handleKickConfirm = async () => {
+    try {
+      await commitSlots(allFilled.filter(p => p !== kickTarget));
+      setKickTarget(null);
+    } catch {
+      showToast?.('Слот не обновлен. Попробуйте еще раз.', 'error');
+    }
   };
 
   // Owner adds a named guest into a specific empty slot
-  const handleAddGuest = (slotIndex, playerData) => {
+  const handleAddGuest = async (slotIndex, playerData) => {
     const next = [...slots];
     if (typeof playerData === 'string') {
       // Old behavior: just a name string
@@ -915,9 +931,13 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
       // New behavior: full player object from database
       next[slotIndex] = playerData;
     }
-    commitSlots(next.filter(Boolean));
-    setTargetSlot(null);
-    setAddPlayerModal(null);
+    try {
+      await commitSlots(next.filter(Boolean));
+      setTargetSlot(null);
+      setAddPlayerModal(null);
+    } catch {
+      showToast?.('Игрок не добавлен. Попробуйте еще раз.', 'error');
+    }
   };
 
   // Owner drops a random available test-bot into an empty slot
@@ -925,13 +945,17 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
   const availableBots = getAvailableBots(usedBotIds);
   const availableBotsCount = availableBots.length;
 
-  const handleAddBot = (slotIndex) => {
+  const handleAddBot = async (slotIndex) => {
     if (availableBots.length === 0) return;
     const bot  = availableBots[Math.floor(Math.random() * availableBots.length)];
     const next = [...slots];
     next[slotIndex] = bot;
-    commitSlots(next.filter(Boolean));
-    setTargetSlot(null);
+    try {
+      await commitSlots(next.filter(Boolean));
+      setTargetSlot(null);
+    } catch {
+      showToast?.('Слот не обновлен. Попробуйте еще раз.', 'error');
+    }
   };
 
   const handleFinishMatch = () => {
@@ -977,11 +1001,16 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
     setTimeout(() => onJoinSuccess?.(match), 1500);
   };
 
-  const handleCancelConfirm = () => {
-    setCancelSheet(false);
-    onDelete?.(match.id);   // remove from allMatches in parent
-    setCancelled(true);
-    setTimeout(() => onBack?.(), 1800);
+  const handleCancelConfirm = async () => {
+    try {
+      await onDelete?.(match.id);   // remove from allMatches in parent
+      setCancelSheet(false);
+      setCancelled(true);
+      setTimeout(() => onBack?.(), 1800);
+    } catch {
+      setCancelSheet(false);
+      showToast?.('Матч не отменен. Попробуйте еще раз.', 'error');
+    }
   };
 
   // ── Cancelled state ───────────────────────────────────────────────────────

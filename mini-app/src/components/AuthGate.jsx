@@ -52,7 +52,7 @@ const handleSignUp = async ({ email, password, options }) => {
 
     // 2. СРАЗУ создаем запись в таблице profiles, используя те же данные
     if (authData.user) {
-      const { error: profileError } = await supabase
+      const { data: profileData, error: profileError } = await supabase
         .from('profiles')
         .insert([
           { 
@@ -62,12 +62,16 @@ const handleSignUp = async ({ email, password, options }) => {
             role: 'user', 
             rating: options.data.rating || 3.0 
           }
-        ]);
+        ])
+        .select('id')
+        .single();
         
       if (profileError) {
-        console.error("Ошибка записи профиля:", profileError);
-      } else {
-        console.log("Профиль успешно создан для:", options.data.first_name);
+        throw profileError;
+      }
+
+      if (!profileData?.id) {
+        throw new Error('Profile creation returned no rows');
       }
     }
     
