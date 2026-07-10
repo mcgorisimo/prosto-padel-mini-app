@@ -94,7 +94,7 @@ function ConfirmedState() {
       <div style={{ color: C.green, fontWeight: 700, fontSize: '17px', marginBottom: '4px' }}>
         Бронирование подтверждено!
       </div>
-      <div style={{ color: C.muted, fontSize: '12px' }}>Детали отправлены в Telegram</div>
+      <div style={{ color: C.muted, fontSize: '12px' }}>Детали сохранены в приложении</div>
     </div>
   );
 }

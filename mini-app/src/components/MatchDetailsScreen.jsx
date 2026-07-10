@@ -135,7 +135,7 @@ function PlayerMiniProfile({ player, onClose }) {
             )}
             {player.isVerified && (
               <div style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', background: 'linear-gradient(135deg, #f59e0b, #ca8a04)', borderRadius: '5px', padding: '2px 6px' }}>
-                <span style={{ color: '#fff', fontSize: '10px', fontWeight: 800 }}>✓ Verified</span>
+                <span style={{ color: '#fff', fontSize: '10px', fontWeight: 800 }}>✓ Подтверждён</span>
               </div>
             )}
           </div>
@@ -979,7 +979,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
     return (
       <div style={{ background: C.bg, minHeight: '100dvh', overflowY: 'auto', WebkitOverflowScrolling: 'touch', touchAction: 'pan-y', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '40px 24px', textAlign: 'center' }}>
         <div style={{ color: C.text, fontWeight: 700, fontSize: '20px', marginBottom: '8px' }}>Игра отменена</div>
-        <div style={{ color: C.muted, fontSize: '14px' }}>Участники получат уведомление в Telegram</div>
+        <div style={{ color: C.muted, fontSize: '14px' }}>Матч больше не отображается в ваших активных играх</div>
       </div>
     );
   }
@@ -1070,9 +1070,9 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '8px', paddingLeft: '2px' }}>
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', background: 'linear-gradient(135deg, #f59e0b, #ca8a04)', borderRadius: '4px', padding: '2px 6px' }}>
-              <span style={{ color: '#fff', fontSize: '9px', fontWeight: 800 }}>✓ Verified</span>
+              <span style={{ color: '#fff', fontSize: '9px', fontWeight: 800 }}>✓ Подтверждён</span>
             </div>
-            <span style={{ color: C.muted, fontSize: '11px' }}>обязателен для участия</span>
+            <span style={{ color: C.muted, fontSize: '11px' }}>подтверждённый рейтинг обязателен для участия</span>
           </div>
         </div>
 
@@ -1166,7 +1166,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
         ) : joined ? (
           <div style={{ textAlign: 'center', padding: '20px', background: 'rgba(34,197,94,0.08)', borderRadius: '14px', border: '1px solid rgba(34,197,94,0.25)' }}>
             <div style={{ color: C.win, fontWeight: 700, fontSize: '17px' }}>Вы присоединились к матчу!</div>
-            <div style={{ color: C.muted, fontSize: '12px', marginTop: '4px' }}>Детали отправлены в Telegram</div>
+            <div style={{ color: C.muted, fontSize: '12px', marginTop: '4px' }}>Место сохранено в матче</div>
           </div>
         ) : (
           <>

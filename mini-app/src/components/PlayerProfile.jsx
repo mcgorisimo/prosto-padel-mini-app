@@ -254,7 +254,7 @@ function VerifiedBadge() {
     }}>
       <span style={{ fontSize: '11px', color: '#fff' }}>✓</span>
       <span style={{ color: '#fff', fontSize: '11px', fontWeight: 800, letterSpacing: '0.06em' }}>
-        Verified
+        Подтверждён
       </span>
     </div>
   );
