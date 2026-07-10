@@ -1,0 +1,1238 @@
+import React, { useState, useMemo, useEffect } from 'react';
+import { getAvailableBots, applyMatchOutcome, getTestBots } from '../lib/testSeed';
+import { getPerPlayerPrice, fmtPrice as fmtPriceLib, RATES } from '../lib/pricing';
+import FinishMatchModal from './FinishMatchModal';
+import PadelCard from './ui/PadelCard';
+import MatchChat from './MatchChat';
+import PadelButton from './ui/PadelButton';
+import { supabase } from '../lib/supabaseClient';
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const RATINGS   = ['D', 'D+', 'C', 'C+', 'B', 'B+', 'A'];
+const LUNDA_NUM = ['1.0–1.9', '1.5–2.4', '2.5–2.9', '3.0–3.4', '3.5–3.9', '4.0–4.4', '4.5+'];
+
+const C = {
+  bg:      '#050F0B',
+  card:    'rgba(255,255,255,0.045)',
+  surface: '#071F16',
+  border:  'rgba(245,241,232,0.10)',
+  accent:  '#D8F34A',
+  text:    '#F5F1E8',
+  muted:   'rgba(245,241,232,0.62)',
+  gold:    '#D8F34A',
+  win:     '#D8F34A',
+  loss:    '#FF6F61',
+};
+
+const TIME_SLOTS = (() => {
+  const slots = [];
+  for (let h = 7; h <= 24; h++) {
+    slots.push(`${String(h % 24).padStart(2, '0')}:00`);
+    if (h < 24) slots.push(`${String(h % 24).padStart(2, '0')}:30`);
+  }
+  return slots;
+})();
+
+const PLAYER_COLORS = ['#FFD700', '#4285F4', '#34A853', '#EA4335'];
+
+const PRIME_START_MIN = 17 * 60;
+const DAY_RATE    = RATES.DAY;
+const PRIME_RATE  = RATES.PRIME;
+const SINGLE_RATE = RATES.SINGLE;
+
+const toMin = (time) => {
+  if (typeof time !== 'string' || !time.includes(':')) return 0;
+  let [h, m] = time.split(':').map(Number);
+  if (h < 7) h += 24;
+  return h * 60 + m;
+};
+
+const maxDur = (time) => {
+  const remaining = (24 * 60 - toMin(time)) / 60;
+  return Math.max(0.5, Math.floor(remaining * 2) / 2);
+};
+
+const calcPerPlayer = (time, duration, courtType) =>
+  getPerPlayerPrice(time, duration, courtType);
+
+const fmtPrice = fmtPriceLib;
+
+const canManageMatch = (user, match) =>
+  user.id === (match.ownerId ?? match.owner_id) || user.role === 'admin';
+
+// ─── BottomSheet ──────────────────────────────────────────────────────────────
+
+function BottomSheet({ children, onClose }) {
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.78)',
+        display: 'flex', alignItems: 'flex-end', justifyContent: 'center', zIndex: 9999,
+        touchAction: 'pan-y',
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: C.card, borderRadius: '24px 24px 0 0',
+          width: '100%', maxWidth: '480px', padding: '0 20px calc(48px + env(safe-area-inset-bottom, 0px))',
+          border: `1px solid ${C.border}`,
+          maxHeight: '92dvh',
+          overflowY: 'auto',
+          overflowX: 'hidden',
+          WebkitOverflowScrolling: 'touch',
+          touchAction: 'pan-y',
+        }}
+      >
+        <div style={{ padding: '12px 0 20px', textAlign: 'center' }}>
+          <div style={{ width: '40px', height: '4px', background: C.border, borderRadius: '2px', display: 'inline-block' }} />
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// ─── Player Mini-Profile ──────────────────────────────────────────────────────
+
+function PlayerMiniProfile({ player, onClose }) {
+  const initials = [player.firstName?.[0], player.lastName?.[0]].filter(Boolean).join('') || '?';
+  const isGold   = (player.ratingIdx ?? 0) >= 2;
+
+  return (
+    <BottomSheet onClose={onClose}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '20px' }}>
+        <div style={{
+          width: '64px', height: '64px', borderRadius: '50%', flexShrink: 0,
+          background: `conic-gradient(from 0deg, ${isGold ? C.gold : C.accent}, rgba(255,255,255,0.08) 60%, ${isGold ? C.gold : C.accent})`,
+          padding: '2px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <div style={{
+            width: '100%', height: '100%', borderRadius: '50%', background: C.bg,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
+          }}>
+            {player.photo
+              ? <img src={player.photo} alt={player.firstName} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }} />
+              : <div style={{ width: '100%', height: '100%', borderRadius: '50%', background: 'linear-gradient(145deg, #12382A, #071F16)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px', fontWeight: 700, color: C.text }}>{initials}</div>
+            }
+          </div>
+        </div>
+
+        <div style={{ flex: 1 }}>
+          <div style={{ color: C.text, fontSize: '18px', fontWeight: 700, marginBottom: '4px' }}>
+            {player.firstName} {player.lastName}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+            {player.ratingIdx != null && (
+              <>
+                <div style={{ background: 'rgba(216,243,74,0.10)', borderRadius: '6px', padding: '2px 8px', border: '1px solid rgba(216,243,74,0.24)', color: C.gold, fontSize: '12px', fontWeight: 700 }}>
+                  {RATINGS[player.ratingIdx]}
+                </div>
+                <div style={{ color: C.muted, fontSize: '11px' }}>{LUNDA_NUM[player.ratingIdx]}</div>
+              </>
+            )}
+            {player.isVerified && (
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', background: 'linear-gradient(135deg, #f59e0b, #ca8a04)', borderRadius: '5px', padding: '2px 6px' }}>
+                <span style={{ color: '#fff', fontSize: '10px', fontWeight: 800 }}>✓ Verified</span>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {(player.matches != null || player.winRate != null) && (
+        <div style={{ display: 'flex', background: C.bg, borderRadius: '12px', padding: '14px', marginBottom: '20px', border: `1px solid ${C.border}` }}>
+          {[
+            { label: 'Матчей',  value: player.matches ?? '—',                        color: C.text    },
+            { label: 'Побед',   value: player.winRate != null ? `${player.winRate}%` : '—', color: C.win  },
+            { label: 'Сторона', value: player.side || 'Right',                       color: C.gold },
+          ].map(({ label, value, color }, i, arr) => (
+            <React.Fragment key={label}>
+              <div style={{ flex: 1, textAlign: 'center' }}>
+                <div style={{ color, fontSize: '18px', fontWeight: 800, lineHeight: 1 }}>{value}</div>
+                <div style={{ color: C.muted, fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.08em', marginTop: '4px' }}>{label}</div>
+              </div>
+              {i < arr.length - 1 && <div style={{ width: '1px', background: C.border, alignSelf: 'stretch' }} />}
+            </React.Fragment>
+          ))}
+        </div>
+      )}
+
+      <button onClick={onClose} style={{ width: '100%', padding: '14px', background: 'transparent', color: C.muted, border: `1px solid ${C.border}`, borderRadius: '12px', fontSize: '15px', cursor: 'pointer' }}>
+        Закрыть
+      </button>
+    </BottomSheet>
+  );
+}
+
+// ─── Rating Guard Banner ──────────────────────────────────────────────────────
+
+function RatingGuardBanner({ ratingMin, ratingMax, reason }) {
+  return (
+    <div style={{ background: 'rgba(239,68,68,0.07)', borderRadius: '12px', padding: '12px 14px', border: '1px solid rgba(239,68,68,0.25)', display: 'flex', gap: '10px', alignItems: 'flex-start', marginBottom: '16px' }}>
+      <span style={{ fontSize: '14px', fontWeight: 900, flexShrink: 0 }}>!</span>
+      <div style={{ color: '#fca5a5', fontSize: '12px', lineHeight: 1.5 }}>
+        {reason === 'unverified'          
+          ? <>Этот матч только для игроков с <strong style={{ color: '#fff' }}>верифицированным рейтингом {(LUNDA_NUM[ratingMin] || '').split('–')[0]}+</strong>. Подтвердите уровень в профиле.</>
+          : <>Ваш уровень не входит в диапазон <strong style={{ color: '#fff' }}>{RATINGS[ratingMin]}–{RATINGS[ratingMax]}</strong> этого матча.</>
+        }
+      </div>
+    </div>
+  );
+}
+
+// ─── Player Slot ──────────────────────────────────────────────────────────────
+
+function PlayerSlot({ player, onTap, isOwner, onKick, slotIndex = 0, onSlotClick }) {
+  const initials = player
+    ? [player.firstName?.[0], player.lastName?.[0]].filter(Boolean).join('') || (player.firstName?.[0] ?? '?')
+    : null;
+  const isPlaceholder = player?.firstName === '—';
+  const isOrganizer   = !!player?.isOrganizer;
+  const hasRealData   = player && !isPlaceholder;
+  const isEmpty       = !player; // truly empty — clickable
+
+  const ratingStr = typeof player?.numericRating === 'number' ? player.numericRating.toFixed(1) : null;
+  const slotColor   = PLAYER_COLORS[slotIndex % PLAYER_COLORS.length];
+  const borderColor = hasRealData ? slotColor : C.border;
+
+  const avatarBg = !hasRealData
+    ? C.surface
+    : isOrganizer
+      ? 'linear-gradient(145deg, #b7860a, #D4AF37)'
+      : `linear-gradient(145deg, ${slotColor}ee, ${slotColor}99)`;
+
+  let label;
+  if (isEmpty)            label = 'Свободно';
+  else if (isPlaceholder) label = 'Занято';
+  else                    label = player.firstName || 'Занято';
+
+  const handleClick = () => {
+    if (hasRealData) onTap(player);
+    else if (isEmpty) onSlotClick?.();
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', position: 'relative', flexShrink: 0, overflow: 'visible' }}>
+      {/* Внешний контейнер (Wrapper) для аватара и бейджей */}
+      <div
+        onClick={handleClick}
+        style={{
+          position: 'relative',
+          width: '58px',
+          height: '56px',
+          cursor: (hasRealData || isEmpty) ? 'pointer' : 'default',
+          overflow: 'visible',
+        }}
+      >
+        {/* Слой Аватара (Круг) */}
+        <div
+          style={{
+            width: '52px',
+            height: '52px',
+            borderRadius: '9999px',
+            overflow: 'hidden',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            border: player ? `2px solid ${borderColor}` : `2px dashed ${C.border}`,
+            background: player ? C.surface : 'transparent',
+            opacity: isEmpty ? 0.65 : 1,
+            transition: 'opacity 0.15s, transform 0.1s',
+            boxSizing: 'border-box',
+          }}
+        >
+          {player ? (
+            isPlaceholder
+              ? <span style={{ color: C.muted, fontSize: '18px' }}>+</span>
+              : player.photo
+                ? <img src={player.photo} alt={player.firstName} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                : <div style={{ width: '100%', height: '100%', background: avatarBg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '16px', fontWeight: 700, color: '#fff' }}>{initials}</div>
+          ) : (
+            <span style={{ color: C.border, fontSize: '20px' }}>+</span>
+          )}
+        </div>
+
+        {/* Rating Badge */}
+        {hasRealData && ratingStr && (
+          <div style={{
+            position: 'absolute', top: '-4px', right: '-2px', zIndex: 12,
+            minWidth: '28px', height: '18px', padding: '0 5px',
+            background: '#071F16',
+            borderRadius: '999px',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            border: '1px solid rgba(216,243,74,0.42)',
+            boxShadow: '0 6px 14px rgba(0,0,0,0.28)',
+          }}>
+            <span style={{ color: C.gold, fontSize: '8.5px', fontWeight: 'bold', lineHeight: 1 }}>
+              {ratingStr}
+            </span>
+          </div>
+        )}
+        {/* Badge: crown for organizer, checkmark for verified */}
+        {hasRealData && (isOrganizer || player.isVerified) && (
+          <div style={{
+            position: 'absolute', bottom: 0, right: 0, zIndex: 10,
+            width: '16px', height: '16px', borderRadius: '50%',
+            background: isOrganizer ? 'linear-gradient(135deg, #b7860a, #D4AF37)' : 'linear-gradient(135deg, #f59e0b, #ca8a04)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: '8px', color: '#fff', fontWeight: 800,
+            border: `1.5px solid ${C.bg}`,
+          }}>
+            {isOrganizer ? 'О' : '✓'}
+          </div>
+        )}
+      </div>
+
+      {/* Kick button — only match owner, only real non-organizer players */}
+      {isOwner && hasRealData && !isOrganizer && (
+        <button
+          onClick={() => onKick?.(player)}
+          style={{
+            position: 'absolute', top: '-4px', left: '-4px',
+            width: '18px', height: '18px', borderRadius: '50%',
+            background: '#EF4444', border: `2px solid ${C.bg}`,
+            color: '#fff', fontSize: '9px', fontWeight: 900,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            cursor: 'pointer', padding: 0, lineHeight: 1,
+          }}
+        >✕</button>
+      )}
+
+      <div style={{
+        color: hasRealData ? slotColor : C.muted,
+        fontSize: '11px', fontWeight: player ? 600 : 400,
+        textAlign: 'center', maxWidth: '56px', lineHeight: 1.2,
+      }}>
+        {label}
+      </div>
+    </div>
+  );
+}
+
+// ─── Edit Panel (bottom sheet) ────────────────────────────────────────────────
+
+function EditPanel({ initDate, initTime, initCourt, initDuration, initTitle, initDescription, onSave, onClose }) {
+  const [editDate,  setEditDate]  = useState(initDate);
+  const [editTime,  setEditTime]  = useState(initTime);
+  const [editCourt, setEditCourt] = useState(initCourt);
+  const [editDur,   setEditDur]   = useState(initDuration);
+  const [editTitle, setEditTitle] = useState(initTitle || '');
+  const [editDesc,  setEditDesc]  = useState(initDescription || '');
+  const [timeError, setTimeError] = useState('');
+
+  useEffect(() => {
+    const isToday = editDate === new Date().toISOString().slice(0, 10);
+    if (!isToday) {
+      setTimeError('');
+      return;
+    }
+    const now = new Date();
+    const validationTime = new Date(now.getTime() + 15 * 60 * 1000);
+    const selectedDateTime = new Date(`${editDate}T${editTime}:00`);
+    if (selectedDateTime < validationTime) {
+      setTimeError('Нельзя забронировать время в прошлом');
+    } else {
+      setTimeError('');
+    }
+  }, [editDate, editTime]);
+
+  const maxD   = maxDur(editTime);
+  const safeDur = Math.min(editDur, maxD);
+  const isP    = toMin(editTime) >= PRIME_START_MIN;
+  const newPPl = calcPerPlayer(editTime, safeDur, editCourt);
+  // Минимальная аренда — 1 час
+  const DURATION_OPTS = [1, 1.5, 2].filter(d => d <= maxD);
+
+  const isToday = editDate === new Date().toISOString().slice(0, 10);
+  const now = new Date();
+  const validationTime = isToday ? now.getTime() + 15 * 60 * 1000 : 0;
+
+  return (
+    <BottomSheet onClose={onClose}>
+      <div style={{ color: C.text, fontSize: '20px', fontWeight: 850, marginBottom: '18px' }}>Редактировать матч</div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+        <div style={{ background: 'rgba(255,255,255,0.035)', border: `1px solid ${C.border}`, borderRadius: '20px', padding: '14px' }}>
+          <div style={{ fontSize: '10px', fontWeight: 800, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: '8px' }}>Название матча</div>
+          <input
+            value={editTitle}
+            onChange={e => setEditTitle(e.target.value)}
+            placeholder="Например: Турнир выходного дня"
+            style={{ width: '100%', padding: '13px 14px', borderRadius: '14px', background: 'rgba(255,255,255,0.045)', color: C.text, border: `1px solid ${C.border}`, fontSize: '15px', boxSizing: 'border-box', outline: 'none' }}
+          />
+          <div style={{ fontSize: '10px', fontWeight: 800, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.12em', margin: '14px 0 8px' }}>Комментарий</div>
+          <textarea
+            value={editDesc}
+            onChange={e => setEditDesc(e.target.value)}
+            placeholder="Например: играем в спокойном темпе"
+            rows={3}
+            style={{ width: '100%', padding: '13px 14px', borderRadius: '14px', background: 'rgba(255,255,255,0.045)', color: C.text, border: `1px solid ${C.border}`, fontSize: '15px', boxSizing: 'border-box', resize: 'vertical', minHeight: '92px', outline: 'none', lineHeight: 1.45 }}
+          />
+        </div>
+
+        <div style={{ background: 'rgba(255,255,255,0.035)', border: `1px solid ${C.border}`, borderRadius: '20px', padding: '14px' }}>
+          <div style={{ fontSize: '10px', fontWeight: 800, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: '10px' }}>Дата и время</div>
+          <input type="date" value={editDate} min={new Date().toISOString().slice(0, 10)} onChange={e => setEditDate(e.target.value)} style={{
+            width: '100%', padding: '13px 14px', borderRadius: '14px', background: 'rgba(255,255,255,0.045)', color: C.text, border: `1px solid ${C.border}`, fontSize: '15px', marginBottom: '12px', boxSizing: 'border-box', outline: 'none'
+          }} />
+          <div className="flex gap-[8px] overflow-x-auto pb-2 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]" style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-x' }}>
+            {TIME_SLOTS.map(slot => {
+              const active = slot === editTime;
+              const slotP  = toMin(slot) >= PRIME_START_MIN;
+              const slotDateTime = new Date(`${editDate}T${slot}:00`);
+              const isPast = isToday && slotDateTime.getTime() < validationTime;
+              return (
+                <button key={slot} onClick={() => !isPast && setEditTime(slot)} disabled={isPast} style={{
+                  flexShrink: 0, padding: '9px 12px', borderRadius: '14px',
+                  background: active ? 'rgba(216,243,74,0.14)' : 'rgba(255,255,255,0.045)',
+                  color: active ? C.gold : (slotP ? C.gold : C.muted),
+                  border: active ? '1px solid rgba(216,243,74,0.34)' : `1px solid ${C.border}`,
+                  fontSize: '13px', fontWeight: active ? 800 : 600,
+                  ...(isPast ? { opacity: 0.25, cursor: 'not-allowed', pointerEvents: 'none', filter: 'grayscale(1)' } : { cursor: 'pointer' }),
+                }}>{slot}</button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div style={{ background: 'rgba(255,255,255,0.035)', border: `1px solid ${C.border}`, borderRadius: '20px', padding: '14px' }}>
+          <div style={{ fontSize: '10px', fontWeight: 800, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: '10px' }}>Параметры корта</div>
+          <div style={{ display: 'flex', gap: '8px', marginBottom: '12px', flexWrap: 'wrap' }}>
+            {DURATION_OPTS.map(d => {
+              const active = safeDur === d;
+              return (
+                <button key={d} onClick={() => setEditDur(d)} style={{
+                  flex: '1 1 84px', padding: '10px 12px', borderRadius: '14px',
+                  background: active ? 'rgba(216,243,74,0.14)' : 'rgba(255,255,255,0.045)',
+                  color: active ? C.gold : C.muted,
+                  border: active ? '1px solid rgba(216,243,74,0.34)' : `1px solid ${C.border}`,
+                  fontSize: '13px', fontWeight: active ? 800 : 600, cursor: 'pointer',
+                }}>{d === 0.5 ? '30 мин' : `${d} ч`}</button>
+              );
+            })}
+          </div>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            {[['panoramic', 'Ультрапанорама'], ['single', 'Сингл']].map(([val, label]) => {
+              const active = editCourt === val;
+              return (
+                <button key={val} onClick={() => setEditCourt(val)} style={{
+                  flex: 1, padding: '12px 10px', borderRadius: '14px',
+                  background: active ? 'rgba(216,243,74,0.12)' : 'rgba(255,255,255,0.045)',
+                  color: active ? C.gold : C.muted,
+                  border: active ? '1px solid rgba(216,243,74,0.32)' : `1px solid ${C.border}`,
+                  fontSize: '13px', fontWeight: active ? 800 : 600, cursor: 'pointer',
+                }}>{label}</button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div style={{
+          background: 'rgba(216,243,74,0.06)',
+          borderRadius: '18px', padding: '14px 16px',
+          border: '1px solid rgba(216,243,74,0.18)',
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px',
+        }}>
+          <div>
+            <div style={{ color: C.gold, fontSize: '22px', fontWeight: 850, lineHeight: 1 }}>{fmtPrice(newPPl)}</div>
+            <div style={{ color: C.muted, fontSize: '11px', marginTop: '3px' }}>новая цена / участник</div>
+          </div>
+          {isP && <div style={{ color: C.gold, fontSize: '12px', fontWeight: 700 }}>Prime Time</div>}
+        </div>
+
+        {timeError && (
+          <div style={{ color: C.loss, fontSize: '12px', textAlign: 'center' }}>
+            {timeError}
+          </div>
+        )}
+      </div>
+
+      <div style={{ display: 'flex', gap: '8px', marginTop: '18px' }}>
+        <button onClick={() => onSave({ date: editDate, time: editTime, courtType: editCourt, duration: safeDur, title: editTitle, description: editDesc })} disabled={!!timeError} style={{ flex: 1, padding: '15px', background: 'rgba(216,243,74,0.12)', color: C.gold, border: '1px solid rgba(216,243,74,0.32)', borderRadius: '16px', fontSize: '15px', fontWeight: 800, cursor: 'pointer', opacity: timeError ? 0.5 : 1 }}>
+          Сохранить
+        </button>
+        <button onClick={onClose} style={{ padding: '15px 20px', background: 'transparent', color: C.muted, border: `1px solid ${C.border}`, borderRadius: '16px', fontSize: '15px', cursor: 'pointer' }}>
+          Отмена
+        </button>
+      </div>
+    </BottomSheet>
+  );
+}
+
+// ─── Cancel Sheet ─────────────────────────────────────────────────────────────
+
+function CancelSheet({ onConfirm, onClose }) {
+  return (
+    <BottomSheet onClose={onClose}>
+      <div style={{ textAlign: 'center', marginBottom: '20px' }}>
+        <div style={{ color: C.text, fontSize: '18px', fontWeight: 700 }}>Отменить игру?</div>
+      </div>
+
+      <div style={{ background: 'rgba(212,175,55,0.06)', borderRadius: '12px', padding: '14px', border: '1px solid rgba(212,175,55,0.2)', marginBottom: '20px' }}>
+        <div style={{ color: C.gold, fontWeight: 700, fontSize: '13px', marginBottom: '6px' }}>Правила отмены</div>
+        <div style={{ color: C.muted, fontSize: '12px', lineHeight: 1.7 }}>
+          Бесплатная отмена за <strong style={{ color: '#fff' }}>24 часа</strong> до начала матча.<br />
+          При отмене менее чем за 24 часа — штраф <strong style={{ color: '#fff' }}>50% от стоимости корта</strong>.
+        </div>
+      </div>
+
+      <button onClick={onConfirm} style={{ width: '100%', padding: '14px', marginBottom: '10px', background: 'linear-gradient(135deg, #dc2626, #ef4444)', color: '#fff', border: 'none', borderRadius: '12px', fontSize: '15px', fontWeight: 700, cursor: 'pointer' }}>
+        Да, отменить игру
+      </button>
+      <button onClick={onClose} style={{ width: '100%', padding: '14px', background: 'transparent', color: C.muted, border: `1px solid ${C.border}`, borderRadius: '12px', fontSize: '15px', cursor: 'pointer' }}>
+        Оставить игру
+      </button>
+    </BottomSheet>
+  );
+}
+
+// ─── Invite Sheet ─────────────────────────────────────────────────────────────
+
+function InviteSheet({ matchId, onClose }) {
+  const link = 'https://t.me/+qTqqdOIDHOU1ZTcy';
+  const [copied,   setCopied]   = useState(false);
+  const [username, setUsername] = useState('');
+
+  const handleCopy = () => {
+    navigator.clipboard?.writeText(link).catch(() => {});
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <BottomSheet onClose={onClose}>
+      <div style={{ color: C.text, fontSize: '17px', fontWeight: 700, marginBottom: '20px' }}>+ Пригласить игрока</div>
+
+      <div style={{ fontSize: '11px', fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '8px' }}>Ссылка-приглашение</div>
+      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '20px' }}>
+        <div style={{ flex: 1, background: C.surface, borderRadius: '10px', padding: '10px 12px', color: C.muted, fontSize: '12px', border: `1px solid ${C.border}`, wordBreak: 'break-all', lineHeight: 1.5 }}>
+          {link}
+        </div>
+        <button onClick={handleCopy} style={{ width: '44px', height: '44px', flexShrink: 0, borderRadius: '10px', background: copied ? 'rgba(34,197,94,0.12)' : C.surface, border: `1px solid ${copied ? 'rgba(34,197,94,0.35)' : C.border}`, color: copied ? C.win : C.muted, fontSize: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+          {copied ? '✓' : 'Copy'}
+        </button>
+      </div>
+
+      <div style={{ fontSize: '11px', fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '8px' }}>Поиск по username</div>
+      <div style={{ display: 'flex', gap: '8px', marginBottom: '20px' }}>
+        <input
+          value={username}
+          onChange={e => setUsername(e.target.value)}
+          placeholder="@username"
+          style={{ flex: 1, background: C.surface, border: `1px solid ${C.border}`, borderRadius: '10px', padding: '11px 14px', color: C.text, fontSize: '14px', outline: 'none' }}
+        />
+        <button style={{ padding: '0 16px', background: C.accent, color: '#fff', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>
+          Найти
+        </button>
+      </div>
+
+      <button onClick={onClose} style={{ width: '100%', padding: '14px', background: 'transparent', color: C.muted, border: `1px solid ${C.border}`, borderRadius: '12px', fontSize: '15px', cursor: 'pointer' }}>
+        Закрыть
+      </button>
+    </BottomSheet>
+  );
+}
+
+// ─── Kick Confirm ─────────────────────────────────────────────────────────────
+
+function KickConfirm({ player, onConfirm, onCancel }) {
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.82)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '20px' }}>
+      <div style={{ background: C.card, borderRadius: '16px', padding: '24px', width: '100%', maxWidth: '320px', border: `1px solid ${C.border}`, textAlign: 'center' }}>
+        <div style={{ color: C.gold, fontSize: '13px', fontWeight: 900, letterSpacing: '0.12em', marginBottom: '12px' }}>PLAYER</div>
+        <div style={{ color: C.text, fontWeight: 700, fontSize: '16px', marginBottom: '8px' }}>Удалить игрока?</div>
+        <div style={{ color: C.muted, fontSize: '13px', marginBottom: '24px', lineHeight: 1.5 }}>
+          <strong style={{ color: '#fff' }}>{player.firstName}</strong> будет удалён из матча. Слот освободится для нового участника.
+        </div>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button onClick={onCancel} style={{ flex: 1, padding: '12px', background: 'transparent', color: C.muted, border: `1px solid ${C.border}`, borderRadius: '10px', fontSize: '14px', cursor: 'pointer' }}>Отмена</button>
+          <button onClick={onConfirm} style={{ flex: 1, padding: '12px', background: 'linear-gradient(135deg, #dc2626, #ef4444)', color: '#fff', border: 'none', borderRadius: '10px', fontSize: '14px', fontWeight: 700, cursor: 'pointer' }}>Удалить</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Slot Action Sheet ────────────────────────────────────────────────────────
+function SlotActionSheet({ slotIndex, isOwner, currentUser, matchId, onAddGuest, onAddBot, availableBotsCount = 0, onTakeSlot, onClose, showToast, slots }) {
+  const [copied, setCopied] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [isSearching, setIsSearching] = useState(false);
+
+  // Проверяем, играет ли уже юзер в матче
+  const isParticipant = slots?.some(player => player?.id === currentUser?.id);
+  const link = 'https://t.me/+qTqqdOIDHOU1ZTcy';
+
+  const handleCopy = () => {
+    navigator.clipboard?.writeText(link).catch(() => {});
+    setCopied(true);
+    showToast('Ссылка скопирована!', 'info');
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  useEffect(() => {
+    const canSearch = isOwner || isParticipant;
+    if (!canSearch || searchTerm.trim().length < 2) {
+      setSearchResults([]);
+      return;
+    }
+    setIsSearching(true);
+    const delayDebounceFn = setTimeout(async () => {
+      try {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('id, first_name, last_name, rating, is_verified, side_preference')
+          .or(`first_name.ilike.%${searchTerm}%,last_name.ilike.%${searchTerm}%`)
+          .neq('id', currentUser?.id)
+          .limit(5);
+        if (!error) setSearchResults(data || []);
+      } finally {
+        setIsSearching(false);
+      }
+    }, 300);
+    return () => clearTimeout(delayDebounceFn);
+  }, [searchTerm, isOwner, isParticipant, currentUser?.id]);
+
+  const handleSelectPlayer = (player) => {
+    onAddGuest(slotIndex, {
+      id: player.id,
+      firstName: player.first_name,
+      lastName: player.last_name,
+      numericRating: player.rating,
+      isVerified: player.is_verified,
+      sidePreference: player.side_preference || 'LR',
+      isOrganizer: false,
+    });
+    onClose();
+  };
+
+  // 1. ИНТЕРФЕЙС ОРГАНИЗАТОРА ИЛИ УЧАСТНИКА (Поиск)
+  if (isOwner || isParticipant) {
+    return (
+      <BottomSheet onClose={onClose}>
+        <div style={{ marginBottom: '16px' }}>
+          <div style={{ color: C.text, fontSize: '17px', fontWeight: 700 }}>Слот {slotIndex + 1} · Свободно</div>
+          <div style={{ color: C.muted, fontSize: '12px', marginTop: '3px' }}>Поиск игрока в базе</div>
+        </div>
+        <input
+          type="text"
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          placeholder="Введите имя..."
+          style={{ width: '100%', padding: '12px', borderRadius: '12px', background: C.surface, color: C.text, border: `1px solid ${C.border}`, boxSizing: 'border-box', marginBottom: '16px', outline: 'none' }}
+        />
+        {isSearching && <div style={{ color: C.gold, fontSize: '12px', textAlign: 'center', marginBottom: '16px' }}>Ищем...</div>}
+        {!isSearching && searchResults.length > 0 && (
+          <div style={{ background: C.surface, borderRadius: '12px', border: `1px solid ${C.border}`, maxHeight: '160px', overflowY: 'auto', marginBottom: '16px' }}>
+            {searchResults.map((player) => (
+              <button
+                key={player.id}
+                onClick={() => handleSelectPlayer(player)}
+                style={{ width: '100%', padding: '12px', background: 'transparent', border: 'none', borderBottom: `1px solid ${C.border}`, color: C.text, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+              >
+                <span>{player.first_name} {player.last_name}</span>
+                <span style={{ color: C.gold, fontSize: '11px', fontWeight: 700 }}>★ {player.rating?.toFixed(1) || '3.0'}</span>
+              </button>
+            ))}
+          </div>
+        )}
+        {availableBotsCount > 0 && (
+          <button onClick={() => { onAddBot?.(slotIndex); onClose(); }} style={{ width: '100%', padding: '14px', marginBottom: '10px', background: 'rgba(34,197,94,0.1)', color: '#4ade80', border: '1px solid rgba(34,197,94,0.28)', borderRadius: '12px', fontWeight: 700, cursor: 'pointer' }}>
+            🤖 Добавить бота ({availableBotsCount})
+          </button>
+        )}
+        <button onClick={handleCopy} style={{ width: '100%', padding: '14px', marginBottom: '12px', background: copied ? 'rgba(34,197,94,0.08)' : C.surface, color: copied ? C.win : C.text, border: `1px solid ${copied ? 'rgba(34,197,94,0.35)' : C.border}`, borderRadius: '12px', fontWeight: 700, cursor: 'pointer' }}>
+          {copied ? 'Ссылка скопирована' : 'Telegram-группа «Просто Падел»'}
+        </button>
+        <button onClick={onClose} style={{ width: '100%', padding: '14px', background: 'transparent', color: C.muted, border: `1px solid ${C.border}`, borderRadius: '12px', cursor: 'pointer' }}>Закрыть</button>
+      </BottomSheet>
+    );
+  }
+
+  // 2. ИНТЕРФЕЙС ДЛЯ СТОРОННЕГО ИГРОКА (Занять место)
+  const initials = [currentUser?.firstName?.[0], currentUser?.lastName?.[0]].filter(Boolean).join('') || '?';
+  
+  return (
+    <BottomSheet onClose={onClose}>
+      <div style={{ textAlign: 'center', marginBottom: '24px' }}>
+        <div style={{ width: '64px', height: '64px', borderRadius: '50%', background: 'linear-gradient(145deg, #12382A, #071F16)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '24px', fontWeight: 700, color: C.text, margin: '0 auto 12px' }}>
+          {initials}
+        </div>
+        <div style={{ color: C.text, fontSize: '18px', fontWeight: 700 }}>{currentUser?.firstName} {currentUser?.lastName}</div>
+      </div>
+      <button onClick={() => { onTakeSlot?.(slotIndex); onClose(); }} style={{ width: '100%', padding: '16px', background: 'rgba(216,243,74,0.12)', color: C.gold, border: '1px solid rgba(216,243,74,0.32)', borderRadius: '16px', fontSize: '16px', fontWeight: 800, marginBottom: '10px', cursor: 'pointer' }}>
+        Занять место
+      </button>
+      <button onClick={onClose} style={{ width: '100%', padding: '14px', background: 'transparent', color: C.muted, border: `1px solid ${C.border}`, borderRadius: '12px', cursor: 'pointer' }}>Отмена</button>
+    </BottomSheet>
+  );
+}
+
+
+// ─── Pinned Message Block ─────────────────────────────────────────────────────
+
+function PinnedBlock({ msg, isOwner, onSave }) {
+  const [editing, setEditing] = useState(false);
+  const [draft,   setDraft]   = useState(msg || '');
+
+  if (!isOwner && !msg) return null;
+
+  return (
+    <div style={{ marginBottom: '16px' }}>
+      <div style={{ fontSize: '10px', fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: '8px' }}>
+        Сообщение организатора
+      </div>
+      {editing ? (
+        <div>
+          <textarea
+            value={draft}
+            onChange={e => setDraft(e.target.value)}
+            placeholder="Например: Собираемся у 7-го корта, форма чёрная 🖤"
+            maxLength={200}
+            rows={3}
+            style={{ width: '100%', background: C.surface, border: `1px solid ${C.accent}`, borderRadius: '10px', padding: '10px 12px', color: C.text, fontSize: '13px', resize: 'none', boxSizing: 'border-box', outline: 'none', lineHeight: 1.5 }}
+          />
+          <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+            <button onClick={() => { onSave(draft); setEditing(false); }} style={{ flex: 1, padding: '10px', background: C.accent, color: '#fff', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>
+              Закрепить
+            </button>
+            <button onClick={() => { setDraft(msg || ''); setEditing(false); }} style={{ padding: '10px 14px', background: 'transparent', color: C.muted, border: `1px solid ${C.border}`, borderRadius: '10px', fontSize: '13px', cursor: 'pointer' }}>
+              Отмена
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div style={{ background: C.surface, borderRadius: '10px', padding: '12px 14px', border: `1px solid ${C.border}`, position: 'relative', minHeight: '44px', display: 'flex', alignItems: 'center' }}>
+          <div style={{ color: msg ? C.text : C.muted, fontSize: '13px', lineHeight: 1.5, flex: 1, fontStyle: msg ? 'normal' : 'italic', paddingRight: isOwner ? '28px' : 0 }}>
+            {msg || 'Нажмите кнопку редактирования, чтобы добавить сообщение для участников'}
+          </div>
+          {isOwner && (
+            <button onClick={() => setEditing(true)} style={{ position: 'absolute', top: '10px', right: '10px', background: 'none', border: 'none', color: C.muted, fontSize: '15px', cursor: 'pointer', padding: '2px' }}>
+              Edit
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Scenario Info Block ──────────────────────────────────────────────────────
+
+function ScenarioInfoBlock({ scenario, status, isOwner }) {
+  const isConfirmed = status === 'confirmed' || scenario === 'social';
+
+  if (isConfirmed) {
+    return (
+      <div style={{ background: 'rgba(34,197,94,0.06)', borderRadius: '12px', padding: '12px 14px', border: '1px solid rgba(34,197,94,0.25)', display: 'flex', gap: '10px', alignItems: 'flex-start', marginBottom: '16px' }}>
+        <span style={{ fontSize: '13px', fontWeight: 900, flexShrink: 0 }}>OK</span>
+        <div>
+          <div style={{ color: '#22C55E', fontWeight: 700, fontSize: '13px', marginBottom: '4px' }}>Корт забронирован</div>
+          <div style={{ color: C.muted, fontSize: '12px', lineHeight: 1.6 }}>
+            Место игры подтверждено организатором. Ваше место гарантировано.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Not confirmed
+  return (
+    <div style={{ background: 'rgba(212,175,55,0.06)', borderRadius: '12px', padding: '12px 14px', border: '1px solid rgba(212,175,55,0.25)', display: 'flex', gap: '10px', alignItems: 'flex-start', marginBottom: '16px' }}>
+      <span style={{ fontSize: '14px', fontWeight: 900, flexShrink: 0 }}>!</span>
+      <div>
+        <div style={{ color: '#D4AF37', fontWeight: 700, fontSize: '13px', marginBottom: '4px' }}>Корт НЕ забронирован</div>
+        <div style={{ color: C.muted, fontSize: '12px', lineHeight: 1.6 }}>
+          Организатор еще не забронировал корт. Договоритесь о месте и времени самостоятельно.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Main Screen ──────────────────────────────────────────────────────────────
+
+export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinSuccess, onDelete, onComplete, onSlotsChange, allMessages, onSendMessage, onRevertToPrivate, showToast }) {
+  const isOwner = canManageMatch(currentUser, match);
+
+  const allBots = useMemo(() => getTestBots(), []);
+  const botsById = useMemo(() => {
+    return allBots.reduce((acc, bot) => {
+      acc[bot.id] = bot;
+      return acc;
+    }, {});
+  }, [allBots]);
+
+  const [viewPlayer,  setViewPlayer]  = useState(null);
+  const [joined,      setJoined]      = useState(false);
+  const [cancelled,   setCancelled]   = useState(false);
+  const [editSheet,   setEditSheet]   = useState(false);
+  const [cancelSheet, setCancelSheet] = useState(false);
+  const [inviteSheet, setInviteSheet] = useState(false);
+  const [kickTarget,  setKickTarget]  = useState(null);
+  const [pinnedMsg,   setPinnedMsg]   = useState('');
+  const [targetSlot,  setTargetSlot]  = useState(null); // index of tapped empty slot
+  const [finished,    setFinished]    = useState(match.status === 'completed');
+  const [finishToast, setFinishToast] = useState(null);
+  const [finishModal, setFinishModal] = useState(false);
+  const [chatOpen,    setChatOpen]    = useState(false);
+
+  // Owner-editable fields (null = use original from match prop)
+  const [localDate, setLocalDate] = useState(null);
+  const [localTime,  setLocalTime]  = useState(null);
+  const [localCourt, setLocalCourt] = useState(null);
+  const [localDur,   setLocalDur]   = useState(null);
+  const [localSlots, setLocalSlots] = useState(null);
+  const [localTitle, setLocalTitle] = useState(null);
+  const [localDesc,  setLocalDesc]  = useState(null);
+
+  const {
+    host, date, ratingMin, ratingMax,
+    dateISO:     origDateISO,
+    filledSlots: origFilledSlots,
+    players      = 0,
+    title:       origTitle,
+    description: origDescription,
+    status,
+    scenario,
+    courtName:   origCourtName,
+    courtType:   origCourt    = 'panoramic',
+    time:        origTime,
+    duration:    origDuration,
+  } = match;
+
+  // Effective values — local overrides original when owner edits
+  const dateISO   = localDate  ?? origDateISO;
+  const time      = localTime  ?? origTime;
+  const courtType = localCourt ?? origCourt;
+  const courtName = origCourtName;
+  const duration  = localDur   ?? origDuration;
+  const title     = localTitle ?? origTitle;
+  const description = localDesc ?? origDescription;
+
+  const isActuallyPrime = toMin(time) >= PRIME_START_MIN;
+  const isPanoramic     = courtType === 'panoramic';
+  const maxSlots        = courtType === 'single' ? 2 : 4;
+  const hourlyRate      = courtType === 'single' ? SINGLE_RATE : (isActuallyPrime ? PRIME_RATE : DAY_RATE);
+  const pricePerPl      = calcPerPlayer(time, duration, courtType);
+
+  // Owner's real profile for the first slot
+  const ownerSlot = {
+    id:          currentUser.id,
+    firstName:   currentUser.firstName || (host?.name || '').split(' ')[0] || 'Вы',
+    lastName:    currentUser.lastName  || '',
+    ratingIdx:   currentUser.ratingIdx,
+    numericRating: currentUser.numericRating,
+    isVerified:  currentUser.isVerified,
+    isOrganizer: true,
+  };
+
+  // Slot resolution: prefer explicit filledSlots array, fall back to numeric count
+  const resolvedSlots = localSlots ?? (origFilledSlots ?? []);
+  let baseSlots;
+  if (resolvedSlots.length > 0) {
+    // Inject current user's numeric rating if they are in the slots
+    baseSlots = resolvedSlots.map(p => {
+      if (p?.id === 'me') {
+        return { ...p, numericRating: currentUser.numericRating };
+      }
+      return p;
+    });
+  } else if (players > 0) {
+    baseSlots = isOwner
+      ? [ownerSlot, ...Array(Math.max(0, players - 1)).fill({ firstName: '—', isVerified: false })]
+      : Array(players).fill({ firstName: '—', isVerified: false });
+  } else {
+    baseSlots = [];
+  }
+  const allFilled = baseSlots.slice(0, maxSlots);
+  const slots     = [...allFilled, ...Array(Math.max(0, maxSlots - allFilled.length)).fill(null)];
+  const isFull    = allFilled.length >= maxSlots;
+
+  // Join guard
+  const levelOk    = currentUser.ratingIdx >= ratingMin && currentUser.ratingIdx <= ratingMax;
+  const verifiedOk = currentUser.isVerified === true;
+  const canJoin    = !isOwner && !isFull && levelOk && verifiedOk;
+  const isParticipant = (match.participants ?? []).includes(currentUser.id);
+  const guardReason = !verifiedOk ? 'unverified' : !levelOk ? 'level' : null;
+
+  const handleJoin = () => {
+    if (!canJoin) return;
+
+    const firstFreeSlotIndex = slots.findIndex(slot => !slot);
+    if (firstFreeSlotIndex === -1) {
+      showToast?.('В матче больше нет свободных мест', 'info');
+      return;
+    }
+
+    handleTakeSlot(firstFreeSlotIndex);
+  };
+  
+  const handleEditSave = ({ date: dt, time: t, courtType: ct, duration: d, title: newTitle, description: newDesc }) => {
+    setLocalDate(dt);
+    setLocalTime(t);
+    setLocalCourt(ct);
+    setLocalDur(d);
+    setEditSheet(false);
+    setLocalTitle(newTitle);
+    setLocalDesc(newDesc);
+  };
+
+  // Persist slot mutations both locally (instant UI) and up to allMatches (status/participants).
+  const commitSlots = (nextFilled) => {
+    setLocalSlots(nextFilled);
+    onSlotsChange?.(match.id, nextFilled);
+  };
+
+  const handleKickConfirm = () => {
+    commitSlots(allFilled.filter(p => p !== kickTarget));
+    setKickTarget(null);
+  };
+
+  // Owner adds a named guest into a specific empty slot
+  const handleAddGuest = (slotIndex, playerData) => {
+    const next = [...slots];
+    if (typeof playerData === 'string') {
+      // Old behavior: just a name string
+      next[slotIndex] = { firstName: playerData, isOrganizer: false, isVerified: false };
+    } else {
+      // New behavior: full player object from database
+      next[slotIndex] = playerData;
+    }
+    commitSlots(next.filter(Boolean));
+    setTargetSlot(null);
+    setAddPlayerModal(null);
+  };
+
+  // Owner drops a random available test-bot into an empty slot
+  const usedBotIds = allFilled.filter(p => p?.isBot).map(p => p.id);
+  const availableBots = getAvailableBots(usedBotIds);
+  const availableBotsCount = availableBots.length;
+
+  const handleAddBot = (slotIndex) => {
+    if (availableBots.length === 0) return;
+    const bot  = availableBots[Math.floor(Math.random() * availableBots.length)];
+    const next = [...slots];
+    next[slotIndex] = bot;
+    commitSlots(next.filter(Boolean));
+    setTargetSlot(null);
+  };
+
+  const handleFinishMatch = () => {
+    if (!isFull || finished) return;
+    setFinishModal(true);
+  };
+
+  const handleFinalize = ({ team1, team2, score, isTeam1Win }) => {
+    const result = applyMatchOutcome(team1, team2, isTeam1Win, match.id);
+    setFinished(true);
+    setFinishModal(false);
+    onComplete?.(match.id, { score, isTeam1Win, team1, team2, ratingChanges: result.ratingChanges });
+    const sign = result.userDelta >= 0 ? '+' : '';
+    setFinishToast(`Рейтинг обновлён: ${sign}${result.userDelta.toFixed(3)}`);
+    setTimeout(() => setFinishToast(null), 4000);
+  };
+
+  // Non-owner takes an empty slot with their own profile
+  const handleTakeSlot = (slotIndex) => {
+    if (!currentUser?.id) {
+      showToast?.('Не удалось определить игрока. Попробуйте войти заново.', 'error');
+      return;
+    }
+
+    const next = [...slots];
+    next[slotIndex] = {
+      id:          currentUser.id,
+      firstName:   currentUser.firstName,
+      lastName:    currentUser.lastName,
+      ratingIdx:   currentUser.ratingIdx,
+      numericRating: currentUser.numericRating,
+      isVerified:  currentUser.isVerified,
+      isOrganizer: false,
+    };
+    commitSlots(next.filter(Boolean));
+    setTargetSlot(null);
+    setJoined(true);
+    setTimeout(() => onJoinSuccess?.(match), 1500);
+  };
+
+  const handleCancelConfirm = () => {
+    setCancelSheet(false);
+    onDelete?.(match.id);   // remove from allMatches in parent
+    setCancelled(true);
+    setTimeout(() => onBack?.(), 1800);
+  };
+
+  // ── Cancelled state ───────────────────────────────────────────────────────
+  if (cancelled) {
+    return (
+      <div style={{ background: C.bg, minHeight: '100dvh', overflowY: 'auto', WebkitOverflowScrolling: 'touch', touchAction: 'pan-y', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '40px 24px', textAlign: 'center' }}>
+        <div style={{ color: C.text, fontWeight: 700, fontSize: '20px', marginBottom: '8px' }}>Игра отменена</div>
+        <div style={{ color: C.muted, fontSize: '14px' }}>Участники получат уведомление в Telegram</div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ background: C.bg, minHeight: '100dvh', maxHeight: '100dvh', overflowY: 'auto', overflowX: 'hidden', WebkitOverflowScrolling: 'touch', touchAction: 'pan-y', paddingBottom: 'calc(132px + env(safe-area-inset-bottom, 0px))' }}>
+
+      {/* ── Header ─────────────────────────────────────────────────────────── */}
+      <div style={{ background: 'linear-gradient(180deg, #071F16 0%, #050F0B 100%)', padding: '20px 16px 0', borderBottom: `1px solid ${C.border}` }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
+          <button onClick={onBack} style={{ background: 'none', border: 'none', color: C.muted, fontSize: '22px', cursor: 'pointer', lineHeight: 1, padding: '4px' }}>←</button>
+          <h1 style={{ color: C.text, fontSize: '18px', fontWeight: 700, margin: 0, flex: 1 }}>Детали матча</h1>
+          {isActuallyPrime && (
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'rgba(212,175,55,0.15)', borderRadius: '8px', padding: '4px 8px', border: '1px solid rgba(212,175,55,0.35)' }}>
+              <span style={{ color: C.gold, fontSize: '10px', fontWeight: 700, letterSpacing: '0.1em' }}>PRIME</span>
+            </div>
+          )}
+        </div>
+
+        {/* Court info card */}
+        <div style={{ background: isActuallyPrime ? 'rgba(212,175,55,0.06)' : C.surface, borderRadius: '14px', padding: '14px 16px', marginBottom: '16px', border: isActuallyPrime ? '1px solid rgba(212,175,55,0.25)' : `1px solid ${C.border}` }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <div>
+              <div style={{ color: isActuallyPrime ? C.gold : C.text, fontWeight: 700, fontSize: '15px', marginBottom: '6px' }}>
+                {courtName || (isPanoramic ? 'Ультрапанорамный корт' : 'Сингл-корт')}
+              </div>
+              <div style={{ display: 'flex', gap: '14px', flexWrap: 'wrap' }}>
+                {[['Дата', date], ['Время', time], ['Длительность', `${duration}ч`]].map(([icon, val]) => (
+                  <span key={String(icon) + val} style={{ color: C.muted, fontSize: '13px' }}>{icon}: {val}</span>
+                ))}
+              </div>
+            </div>
+            {isOwner && (
+              <div style={{ background: 'rgba(212,175,55,0.12)', borderRadius: '8px', padding: '4px 8px', border: '1px solid rgba(212,175,55,0.25)', color: C.gold, fontSize: '10px', fontWeight: 700, flexShrink: 0, marginLeft: '8px' }}>
+                Организатор
+              </div>
+            )}
+          </div>
+          {description && <div style={{ color: C.muted, fontSize: '12px', marginTop: '8px', lineHeight: 1.5 }}>{description}</div>}
+          {title && (
+            <div style={{
+              marginTop: '12px', paddingTop: '12px', borderTop: `1px solid ${isActuallyPrime ? 'rgba(212,175,55,0.25)' : C.border}`
+            }}>
+              <div style={{ color: C.text, fontWeight: 700, fontSize: '18px' }}>{title}</div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Owner action bar ───────────────────────────────────────────────── */}
+      {isOwner && (
+        <div style={{ padding: '12px 16px', display: 'flex', gap: '8px', borderBottom: `1px solid ${C.border}`, background: 'rgba(216,243,74,0.04)' }}>
+          {match.type === 'match' ? (
+            <PadelButton variant="dark" size="md" onClick={() => setEditSheet(true)}>
+              Редактировать
+            </PadelButton>
+          ) : (
+            <PadelButton variant="dark" size="md" onClick={() => setEditSheet(true)} fullWidth>
+              Редактировать бронь
+            </PadelButton>
+          )}
+          <PadelButton variant="danger" size="md" fullWidth={match.type !== 'match'} onClick={() => setCancelSheet(true)}>
+            Отменить игру
+          </PadelButton>
+        </div>
+      )}
+
+      <div style={{ padding: '16px' }}>
+
+        {/* ── Scenario status block ─────────────────────────────────────── */}
+        <ScenarioInfoBlock scenario={scenario} status={status} isOwner={isOwner} />
+
+        {/* ── Rating requirement ─────────────────────────────────────────── */}
+        <div style={{ marginBottom: '16px' }}>
+          <div style={{ fontSize: '10px', fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: '10px' }}>Требования к уровню</div>
+          <div style={{ background: C.card, borderRadius: '12px', padding: '12px 14px', border: `1px solid ${C.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+              {RATINGS.slice(ratingMin, ratingMax + 1).map(r => (
+                <div key={r} style={{ padding: '5px 10px', borderRadius: '8px', background: 'rgba(216,243,74,0.10)', border: '1px solid rgba(216,243,74,0.24)', color: C.gold, fontSize: '13px', fontWeight: 700 }}>{r}</div>
+              ))}
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ color: C.text, fontWeight: 700, fontSize: '14px' }}>
+                {(LUNDA_NUM[ratingMin] || '0').split('–')[0]}–{(LUNDA_NUM[ratingMax] || '0').split('–').pop()}
+              </div>
+              <div style={{ color: C.muted, fontSize: '10px', marginTop: '2px' }}>Lunda Rating</div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '8px', paddingLeft: '2px' }}>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', background: 'linear-gradient(135deg, #f59e0b, #ca8a04)', borderRadius: '4px', padding: '2px 6px' }}>
+              <span style={{ color: '#fff', fontSize: '9px', fontWeight: 800 }}>✓ Verified</span>
+            </div>
+            <span style={{ color: C.muted, fontSize: '11px' }}>обязателен для участия</span>
+          </div>
+        </div>
+
+        {/* ── Players ──────────────────────────────────────────────────────── */}
+        <div style={{ marginBottom: '20px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+            <div style={{ fontSize: '10px', fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.12em' }}>
+              Игроки {allFilled.length}/{maxSlots}
+            </div>
+            {isOwner && (
+              <button onClick={() => setInviteSheet(true)} style={{ padding: '5px 12px', background: 'rgba(216,243,74,0.10)', border: '1px solid rgba(216,243,74,0.24)', borderRadius: '8px', color: C.gold, fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}>
+                + Пригласить
+              </button>
+            )}
+          </div>
+          <PadelCard padding="md" className="!rounded-2xl flex justify-around">
+            {slots.map((player, i) => {
+              let enrichedPlayer = player;
+              // If it's a bot and doesn't have numericRating, enrich it from the source of truth.
+              if (player?.isBot && player.numericRating == null) {
+                const botData = botsById[player.id];
+                if (botData) enrichedPlayer = { ...player, numericRating: botData.numericRating };
+              }
+              return (
+                <PlayerSlot
+                  key={i}
+                  player={enrichedPlayer}
+                  slotIndex={i}
+                  onTap={setViewPlayer}
+                  isOwner={isOwner}
+                  onKick={p => setKickTarget(p)}
+                  onSlotClick={() => setTargetSlot(i)}
+                />
+              );
+            })}
+          </PadelCard>
+        </div>
+        
+        {isParticipant && (
+          <div className="mb-4">
+            <PadelButton variant="info" fullWidth onClick={() => setChatOpen(true)}>
+              💬 Открыть чат игры
+            </PadelButton>
+          </div>
+        )}
+
+
+        {/* ── Pinned message ────────────────────────────────────────────────── */}
+        <PinnedBlock msg={pinnedMsg} isOwner={isOwner} onSave={setPinnedMsg} />
+
+        {/* ── Price ────────────────────────────────────────────────────────── */}
+        <div style={{ background: 'rgba(216,243,74,0.06)', borderRadius: '12px', padding: '12px 16px', marginBottom: '20px', border: '1px solid rgba(216,243,74,0.18)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <div style={{ color: C.gold, fontSize: '22px', fontWeight: 800, lineHeight: 1 }}>{fmtPrice(pricePerPl)}</div>
+            <div style={{ color: C.muted, fontSize: '11px', marginTop: '3px' }}>с человека · {fmtPrice(hourlyRate)}/ч ÷ {maxSlots}</div>
+          </div>
+          {isActuallyPrime && <div style={{ color: C.gold, fontSize: '12px', fontWeight: 600 }}>✦ Вечерний тариф</div>}
+        </div>
+
+        {/* ── CTA / owner badge ─────────────────────────────────────────────── */}
+        {isOwner ? (
+          <>
+            <div style={{ background: 'rgba(212,175,55,0.06)', borderRadius: '14px', padding: '16px', border: '1px solid rgba(212,175,55,0.2)', textAlign: 'center', color: C.gold, fontSize: '13px', fontWeight: 600 }}>
+              Вы управляете этой игрой
+            </div>
+            <PadelButton
+              variant={isFull && !finished ? 'success' : 'dark'}
+              size="lg"
+              fullWidth
+              disabled={!isFull || finished}
+              onClick={handleFinishMatch}
+              className="mt-2.5"
+            >
+              {finished
+                ? '✓ Матч завершён'
+                : isFull
+                  ? '🏁 Завершить матч'
+                  : `Заполните все слоты (${allFilled.length}/${maxSlots})`}
+            </PadelButton>
+            {match.type === 'match' && (
+              <PadelButton
+                variant="ghost"
+                size="md"
+                fullWidth
+                onClick={() => onRevertToPrivate?.(match.id)}
+              >
+                Отменить матч и вернуть в личные
+              </PadelButton>
+            )}
+          </>
+        ) : joined ? (
+          <div style={{ textAlign: 'center', padding: '20px', background: 'rgba(34,197,94,0.08)', borderRadius: '14px', border: '1px solid rgba(34,197,94,0.25)' }}>
+            <div style={{ color: C.win, fontWeight: 700, fontSize: '17px' }}>Вы присоединились к матчу!</div>
+            <div style={{ color: C.muted, fontSize: '12px', marginTop: '4px' }}>Детали отправлены в Telegram</div>
+          </div>
+        ) : (
+          <>
+            {!canJoin && !isFull && guardReason && (
+              <RatingGuardBanner ratingMin={ratingMin} ratingMax={ratingMax} reason={guardReason} />
+            )}
+            <PadelButton
+              variant={canJoin ? (isActuallyPrime ? 'yellow' : 'info') : 'dark'}
+              size="lg"
+              fullWidth
+              disabled={!canJoin}
+              onClick={handleJoin}
+            >
+              {isFull ? 'Мест нет' : canJoin ? 'Присоединиться к игре' : 'Участие недоступно'}
+            </PadelButton>
+          </>
+        )}
+      </div>
+
+      {/* ── Sheets / Dialogs ──────────────────────────────────────────────── */}
+      {viewPlayer  && <PlayerMiniProfile player={viewPlayer} onClose={() => setViewPlayer(null)} />}
+      {editSheet   && <EditPanel initDate={dateISO} initTime={time} initCourt={courtType} initDuration={duration} initTitle={title} initDescription={description} onSave={handleEditSave} onClose={() => setEditSheet(false)} />}
+      {cancelSheet && <CancelSheet onConfirm={handleCancelConfirm} onClose={() => setCancelSheet(false)} />}
+      {inviteSheet && <InviteSheet matchId={match.id} onClose={() => setInviteSheet(false)} />}
+      {kickTarget  && <KickConfirm player={kickTarget} onConfirm={handleKickConfirm} onCancel={() => setKickTarget(null)} />}
+      {chatOpen && (
+        <MatchChat
+          match={match}
+          currentUser={currentUser}
+          messages={allMessages.filter(m => (m.matchId ?? m.match_id) === match.id)}
+          onSendMessage={(text) => onSendMessage(match.id, currentUser, text)}
+          onClose={() => setChatOpen(false)}
+        />
+      )}
+      {targetSlot !== null && (
+        <SlotActionSheet
+          slotIndex={targetSlot}
+          isOwner={isOwner}
+          currentUser={currentUser}
+          matchId={match.id}
+          slots={slots} // <-- ВОТ ОНА, САМАЯ ГЛАВНАЯ СТРОКА! Передаем массив слотов родителя
+          onAddGuest={handleAddGuest}
+          onAddBot={handleAddBot}
+          availableBotsCount={availableBotsCount}
+          onTakeSlot={handleTakeSlot}
+          showToast={showToast}
+          onClose={() => setTargetSlot(null)}
+        />
+      )}
+
+      {finishModal && (
+        <FinishMatchModal
+          players={allFilled}
+          onSave={handleFinalize}
+          onClose={() => setFinishModal(false)}
+        />
+      )}
+
+      {finishToast && (
+        <div style={{
+          position: 'fixed', top: '16px', left: '50%', transform: 'translateX(-50%)',
+          zIndex: 9000, maxWidth: '340px', width: 'calc(100% - 32px)',
+          background: '#1e293b', borderRadius: '12px',
+          padding: '12px 16px', border: '1px solid rgba(34,197,94,0.4)',
+          boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+          display: 'flex', gap: '10px', alignItems: 'center',
+        }}>
+          <span style={{ color: C.win, fontSize: '13px', fontWeight: 900 }}>UP</span>
+          <div style={{ color: C.win, fontWeight: 700, fontSize: '13px' }}>
+            {finishToast}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
