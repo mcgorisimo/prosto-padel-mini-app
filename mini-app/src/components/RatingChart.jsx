@@ -99,7 +99,10 @@ export default function RatingChart() {
             letterSpacing:   '0.1em',
             marginBottom:    '4px',
           }}>
-            Рейтинг
+            Динамика по матчам
+          </div>
+          <div style={{ color: C.muted, fontSize: '11px', lineHeight: 1.45, marginBottom: '4px' }}>
+            Статистика меняется после игр, но не влияет на подтверждённый рейтинг до проверки клуба.
           </div>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', flexWrap: 'wrap' }}>
             <span style={{
@@ -232,7 +235,7 @@ export default function RatingChart() {
       }}>
         {next ? (
           <>
-            До уровня <span style={{ color: next.nextColor, fontWeight: 700 }}>{next.nextLabel}</span>
+            По динамике до уровня <span style={{ color: next.nextColor, fontWeight: 700 }}>{next.nextLabel}</span>
             {' '}осталось <span style={{ color: C.text, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{fmt3(next.pointsToGo)}</span>
           </>
         ) : (

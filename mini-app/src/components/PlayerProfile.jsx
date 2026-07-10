@@ -210,11 +210,11 @@ function ProfileMatchSection({ title, emptyText, matches, type, onViewDetails, u
   );
 }
 
-function Avatar({ user, level, rating }) {
+function Avatar({ user, level, rating, isVerified }) {
   const fullName  = [user?.firstName, user?.lastName].filter(Boolean).join(' ');
   const initials  = [user?.firstName?.[0], user?.lastName?.[0]].filter(Boolean).join('') || '?';
   const ringColor = level?.color || C.accent;
-  const ratingStr = typeof rating === 'number' ? rating.toFixed(1) : '—';
+  const ratingStr = isVerified && typeof rating === 'number' ? rating.toFixed(1) : '—';
 
   return (
     <div style={{ position: 'relative', flexShrink: 0 }}>
@@ -528,7 +528,7 @@ export default function PlayerProfile({ user, stats, upcomingMatches = [], compl
       }}>
         {/* Avatar row */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '20px' }}>
-          <Avatar user={user} level={currentLevel} rating={animRating} />
+          <Avatar user={user} level={currentLevel} rating={animRating} isVerified={isVerified} />
 
           <div style={{ flex: 1, minWidth: 0 }}>
             <h1 style={{ color: C.text, fontSize: '20px', fontWeight: 700, margin: '0 0 6px', lineHeight: 1.2 }}>
@@ -540,7 +540,9 @@ export default function PlayerProfile({ user, stats, upcomingMatches = [], compl
               padding: '3px 8px', marginBottom: '6px',
             }}>
               <span style={{ color: currentLevel.color, fontSize: '11px', fontWeight: 700, letterSpacing: '0.06em', fontVariantNumeric: 'tabular-nums' }}>
-                {currentLevel.label} · {animRating.toFixed(2)}
+                {isVerified
+                  ? `Подтверждённый рейтинг · ${currentLevel.label} · ${animRating.toFixed(2)}`
+                  : `Рейтинг пока не подтверждён · ${currentLevel.label}`}
               </span>
             </div>
             <div style={{ color: C.muted, fontSize: '12px' }}>
@@ -583,7 +585,7 @@ export default function PlayerProfile({ user, stats, upcomingMatches = [], compl
                 <span style={{ color: C.win, fontSize: '13px', fontWeight: 900 }}>✓</span>
                 <div>
                   <div style={{ color: C.win, fontSize: '12px', fontWeight: 700 }}>Рейтинг подтверждён</div>
-                  <div style={{ color: C.muted, fontSize: '11px' }}>Можно участвовать в матчах с ограничением по уровню</div>
+                  <div style={{ color: C.muted, fontSize: '11px' }}>Это официальный клубный рейтинг для матчей с ограничением по уровню</div>
                 </div>
               </div>
             )
@@ -619,7 +621,7 @@ export default function PlayerProfile({ user, stats, upcomingMatches = [], compl
                 </div>
                 <div style={{ color: C.muted, fontSize: '11px', lineHeight: 1.5 }}>
                   Для участия в матчах с ограничением по уровню нужен подтверждённый рейтинг.
-                  Обратитесь к администратору клуба, чтобы подтвердить текущий уровень.
+                  Клуб подтвердит уровень после первых игр или тренировки.
                 </div>
               </div>
             )}
