@@ -174,8 +174,8 @@ function RatingGuardBanner({ ratingMin, ratingMax, reason }) {
     <div style={{ background: 'rgba(239,68,68,0.07)', borderRadius: '12px', padding: '12px 14px', border: '1px solid rgba(239,68,68,0.25)', display: 'flex', gap: '10px', alignItems: 'flex-start', marginBottom: '16px' }}>
       <span style={{ fontSize: '14px', fontWeight: 900, flexShrink: 0 }}>!</span>
       <div style={{ color: '#fca5a5', fontSize: '12px', lineHeight: 1.5 }}>
-        {reason === 'unverified'          
-          ? <>Этот матч только для игроков с <strong style={{ color: '#fff' }}>верифицированным рейтингом {(LUNDA_NUM[ratingMin] || '').split('–')[0]}+</strong>. Подтвердите уровень в профиле.</>
+        {reason === 'unverified'
+          ? <>Для участия в матчах с ограничением по уровню нужен <strong style={{ color: '#fff' }}>подтверждённый рейтинг</strong>. Подтвердите уровень у администратора клуба.</>
           : <>Ваш уровень не входит в диапазон <strong style={{ color: '#fff' }}>{RATINGS[ratingMin]}–{RATINGS[ratingMax]}</strong> этого матча.</>
         }
       </div>

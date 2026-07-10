@@ -678,7 +678,10 @@ const handleBookSlot = async (booking) => {
         {activeTab === 'leaderboard' && (
           <div className="tab-placeholder" style={{ padding: '40px 16px', color: 'rgba(245,241,232,0.62)', textAlign: 'center' }}>
             <h2 style={{ color: '#F5F1E8', marginBottom: '8px' }}>Рейтинг клуба</h2>
-            <p>Здесь будет список топ-игроков «Просто Падел»</p>
+            <p style={{ marginBottom: '8px' }}>Рейтинг клуба появится после первых игр.</p>
+            <p style={{ fontSize: '13px', lineHeight: 1.5 }}>
+              Сейчас в MVP показываем личный уровень и историю матчей в профиле.
+            </p>
           </div>
         )}
 

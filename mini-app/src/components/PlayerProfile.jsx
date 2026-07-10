@@ -494,12 +494,20 @@ export default function PlayerProfile({ user, stats, upcomingMatches = [], compl
 
           {/* Helper text — always visible */}
           <div style={{ color: '#334155', fontSize: '11px', textAlign: 'center', marginTop: '8px', lineHeight: 1.5 }}>
-            Для подтверждения рейтинга загрузите скриншот из Lunda или запишитесь на аттестацию
+            Уровень можно подтвердить у администратора клуба.
           </div>
 
           {/* Verification status block */}
           <div style={{ marginTop: '10px' }}>
-            {isVerified ? null
+            {isVerified ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(34,197,94,0.07)', borderRadius: '10px', padding: '10px 12px', border: '1px solid rgba(34,197,94,0.20)' }}>
+                <span style={{ color: C.win, fontSize: '13px', fontWeight: 900 }}>✓</span>
+                <div>
+                  <div style={{ color: C.win, fontSize: '12px', fontWeight: 700 }}>Рейтинг подтверждён</div>
+                  <div style={{ color: C.muted, fontSize: '11px' }}>Можно участвовать в матчах с ограничением по уровню</div>
+                </div>
+              </div>
+            )
 
             : verifPath === 'training' ? (
               /* ── Ожидает тренера ── */
@@ -524,29 +532,15 @@ export default function PlayerProfile({ user, stats, upcomingMatches = [], compl
               </div>
 
             ) : (
-              /* ── Не подтверждён — два пути ── */
+              /* ── Не подтверждён — честное MVP-состояние ── */
               <div style={{ background: 'rgba(100,116,139,0.06)', borderRadius: '10px', padding: '12px', border: `1px solid ${C.border}` }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '10px' }}>
                   <span style={{ color: C.muted, fontSize: '13px', fontWeight: 900 }}>i</span>
-                  <span style={{ color: C.muted, fontSize: '12px' }}>Уровень не подтверждён</span>
+                  <span style={{ color: C.muted, fontSize: '12px' }}>Рейтинг пока не подтверждён</span>
                 </div>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <button onClick={() => setShowTraining(true)} style={{
-                    flex: 1, padding: '8px 6px',
-                    background: C.accent, color: '#fff',
-                    border: 'none', borderRadius: '8px',
-                    fontSize: '11px', fontWeight: 700, cursor: 'pointer', lineHeight: 1.3,
-                  }}>
-                    Записаться на аттестацию
-                  </button>
-                  <button onClick={() => fileInputRef.current?.click()} style={{
-                    flex: 1, padding: '8px 6px',
-                    background: 'rgba(212,175,55,0.12)', color: C.gold,
-                    border: '1px solid rgba(212,175,55,0.3)', borderRadius: '8px',
-                    fontSize: '11px', fontWeight: 700, cursor: 'pointer', lineHeight: 1.3,
-                  }}>
-                    Перенести рейтинг из Lunda
-                  </button>
+                <div style={{ color: C.muted, fontSize: '11px', lineHeight: 1.5 }}>
+                  Для участия в матчах с ограничением по уровню нужен подтверждённый рейтинг.
+                  Обратитесь к администратору клуба, чтобы подтвердить текущий уровень.
                 </div>
               </div>
             )}
