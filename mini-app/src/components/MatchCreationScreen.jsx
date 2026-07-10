@@ -356,11 +356,13 @@ function SocialPaymentSheet({ time, duration, courtType, dateISO, onConfirm, onC
   return (
     <div
       onClick={onClose}
-      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.78)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', zIndex: 9999, touchAction: 'pan-y' }}
+      className="app-modal-overlay"
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.92)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', zIndex: 9999, touchAction: 'pan-y' }}
     >
       <div
         onClick={e => e.stopPropagation()}
-        style={{ background: T.bg, borderRadius: '24px 24px 0 0', width: '100%', maxWidth: '480px', padding: '0 20px calc(48px + env(safe-area-inset-bottom, 0px))', border: `1px solid ${T.border}`, maxHeight: '92dvh', overflowY: 'auto', WebkitOverflowScrolling: 'touch', touchAction: 'pan-y' }}
+        className="app-modal-panel"
+        style={{ background: '#07160F', borderRadius: '24px 24px 0 0', width: '100%', maxWidth: '480px', padding: '0 20px calc(48px + env(safe-area-inset-bottom, 0px))', border: '1px solid rgba(245,241,232,0.16)', maxHeight: '92dvh', overflowY: 'auto', WebkitOverflowScrolling: 'touch', touchAction: 'pan-y', scrollbarWidth: 'none', msOverflowStyle: 'none' }}
       >
         <div style={{ padding: '12px 0 20px', textAlign: 'center' }}>
           <div style={{ width: '40px', height: '4px', background: T.border, borderRadius: '2px', display: 'inline-block' }} />

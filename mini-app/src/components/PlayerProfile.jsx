@@ -75,6 +75,16 @@ const fmtCompletedDate = (ts) => {
     return new Date(ts).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }).replace(' г.', '');
   } catch { return ''; }
 };
+const getCompletedResultLabel = (match, userId) => {
+  if (typeof match?.isTeam1Win !== 'boolean' || !userId) return 'Завершён';
+
+  const inTeam1 = (match.team1 ?? []).some(p => p?.id === userId);
+  const inTeam2 = (match.team2 ?? []).some(p => p?.id === userId);
+  if (!inTeam1 && !inTeam2) return 'Завершён';
+
+  const isWin = inTeam1 ? match.isTeam1Win : !match.isTeam1Win;
+  return isWin ? 'Победа' : 'Поражение';
+};
 
 // ─── Player Avatar with Rating Badge ──────────────────────────────────────────
 
@@ -131,6 +141,74 @@ function TeamAvatars({ team, ratingChanges }) {
 }
 
 // ─── Avatar ───────────────────────────────────────────────────────────────────
+
+function ProfileMatchCard({ match, type = 'upcoming', onClick, userId }) {
+  const isCompleted = type === 'completed';
+  const score = fmtSetList(match.finalScore ?? match.score);
+  const completedDate = fmtCompletedDate(match.completedAt ?? match.completed_at);
+  const title = match.title || (match.type === 'match' ? 'Матч' : 'Бронь');
+  const meta = [match.date, match.time, match.courtName || 'Корт'].filter(Boolean).join(' · ');
+  const resultLabel = getCompletedResultLabel(match, userId);
+
+  return (
+    <button
+      type="button"
+      onClick={() => onClick?.(match)}
+      style={{
+        width: '100%',
+        textAlign: 'left',
+        background: C.card,
+        border: `1px solid ${C.border}`,
+        borderRadius: '14px',
+        padding: '12px',
+        color: C.text,
+        cursor: 'pointer',
+      }}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', alignItems: 'flex-start' }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: '14px', fontWeight: 800, marginBottom: '4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {title}
+          </div>
+          <div style={{ color: C.muted, fontSize: '12px', lineHeight: 1.4 }}>
+            {isCompleted ? (completedDate || meta) : meta}
+          </div>
+        </div>
+        <div style={{ color: isCompleted ? C.win : C.gold, fontSize: '12px', fontWeight: 800, flexShrink: 0 }}>
+          {isCompleted ? resultLabel : 'Открыть'}
+        </div>
+      </div>
+      {isCompleted && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', marginTop: '10px', color: C.muted, fontSize: '11px' }}>
+          <span>{fmtPair(match.team1)}</span>
+          <span style={{ color: C.text, fontWeight: 700 }}>{score}</span>
+          <span>{fmtPair(match.team2)}</span>
+        </div>
+      )}
+    </button>
+  );
+}
+
+function ProfileMatchSection({ title, emptyText, matches, type, onViewDetails, userId }) {
+  return (
+    <section style={{ marginBottom: '16px' }}>
+      <div style={{ color: C.muted, fontSize: '10px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: '10px' }}>
+        {title}
+      </div>
+      {matches.length > 0 ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {matches.map(match => (
+            <ProfileMatchCard key={match.id} match={match} type={type} onClick={onViewDetails} userId={userId} />
+          ))}
+        </div>
+      ) : (
+        <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: '14px', padding: '12px', color: C.muted, fontSize: '12px' }}>
+          {emptyText}
+        </div>
+      )}
+    </section>
+  );
+}
 
 function Avatar({ user, level, rating }) {
   const fullName  = [user?.firstName, user?.lastName].filter(Boolean).join(' ');
@@ -275,14 +353,14 @@ function TrainingBookingSheet({ ratingLabel, onClose, onBooked }) {
   };
 
   return (
-    <div style={{
+    <div className="app-modal-overlay" style={{
       position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)',
       display: 'flex', alignItems: 'flex-end', justifyContent: 'center', zIndex: 9999,
     }}>
-      <div style={{
-        background: C.bg, borderRadius: '24px 24px 0 0',
+      <div className="app-modal-panel" style={{
+        background: '#07160F', borderRadius: '24px 24px 0 0',
         width: '100%', maxWidth: '480px', padding: '0 20px 44px',
-        border: `1px solid ${C.border}`,
+        border: '1px solid rgba(245,241,232,0.16)',
       }}>
         {/* Handle */}
         <div style={{ padding: '12px 0 16px', textAlign: 'center' }}>
@@ -593,6 +671,24 @@ export default function PlayerProfile({ user, stats, upcomingMatches = [], compl
         </div>
 
         {/* ── Rating history chart ── */}
+        <ProfileMatchSection
+          title="Предстоящие матчи"
+          emptyText="Пока нет предстоящих матчей"
+          matches={upcomingMatches}
+          type="upcoming"
+          onViewDetails={onViewDetails}
+          userId={user?.id}
+        />
+
+        <ProfileMatchSection
+          title="История матчей"
+          emptyText="История появится после завершения первого матча"
+          matches={completedMatches}
+          type="completed"
+          onViewDetails={onViewDetails}
+          userId={user?.id}
+        />
+
         <RatingChart />
 
         {/* ── Family bonus ── */}

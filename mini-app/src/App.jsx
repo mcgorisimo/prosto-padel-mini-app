@@ -72,10 +72,13 @@ function appendUniqueMessage(messages, row) {
   return [...messages, message];
 }
 
+const isMatchCompleted = (match) =>
+  match?.status === 'completed' || match?.status === 'finished';
+
 // Pure derivation: completed matches the given user participated in.
 function getUserMatchHistory(allMatches, userId) {
   return (allMatches ?? []).filter(m =>
-    m.status === 'completed' && Array.isArray(m.participants) && m.participants.includes(userId)
+    isMatchCompleted(m) && Array.isArray(m.participants) && m.participants.includes(userId)
   );
 }
 
@@ -86,7 +89,7 @@ function deriveParticipantsAndStatus(filledSlots, prevStatus) {
     .filter(p => p?.id != null)
     .map(p => p.id);
   let status = prevStatus;
-  if (prevStatus !== 'completed') {
+  if (prevStatus !== 'completed' && prevStatus !== 'finished') {
     status = filled.length >= 4 ? 'upcoming' : 'open';
   }
   return { participants, status };
@@ -235,7 +238,22 @@ export default function App({ session, showToast }) { // Accept showToast as a p
       .eq('id', matchId)
       .select();
     
-    // UI will update via realtime subscription
+    if (error) {
+      showToast?.('Не удалось сохранить результат матча. Попробуйте еще раз.', 'error');
+      throw error;
+    }
+
+    const updatedRow = data?.[0];
+    if (!updatedRow) {
+      const emptyUpdateError = new Error('Match completion update returned no rows');
+      showToast?.('Не удалось завершить матч. Проверьте права доступа.', 'error');
+      throw emptyUpdateError;
+    }
+
+    const updatedMatch = normalizeMatch(updatedRow);
+    setAllMatches(prev => prev.map(match => match.id === matchId ? updatedMatch : match));
+    showToast?.('Матч завершен и добавлен в историю', 'success');
+    return updatedMatch;
   };
 
   // ── Booking from BookingCalendar ──
@@ -698,7 +716,7 @@ const handleBookSlot = async (booking) => {
         )}
 
         {activeTab === 'booking' && (
-  <div style={{ height: 'calc(100dvh - 78px - env(safe-area-inset-bottom, 0px))', display: 'flex', flexDirection: 'column', overflow: 'visible', touchAction: 'pan-y' }}>
+  <div style={{ height: 'calc(100dvh - 78px - env(safe-area-inset-bottom, 0px))', display: 'flex', flexDirection: 'column', overflow: 'visible', touchAction: 'pan-x pan-y' }}>
     <BookingCalendar
       allMatches={allMatches}
       userId={ME_ID} // Передаем твой ID

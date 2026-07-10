@@ -96,11 +96,11 @@ export default function TrainingModal({ match, onClose, onConfirm, showToast }) 
   }, [match.duration]);
 
   return (
-    <div onClick={onClose} className="fixed inset-0 z-[9999] flex items-end justify-center bg-black/80 p-3 backdrop-blur-sm">
+    <div onClick={onClose} className="app-modal-overlay fixed inset-0 z-[9999] flex items-end justify-center p-3">
       <PadelCard
         onClick={(e) => e.stopPropagation()}
         padding="lg"
-        className="w-full max-w-md max-h-[92vh] overflow-y-auto !bg-slate-900 border border-slate-800 rounded-t-3xl"
+        className="app-modal-panel w-full max-w-md max-h-[92vh] overflow-y-auto rounded-t-3xl"
       >
         <div className="flex justify-between items-start mb-5">
           <div>
