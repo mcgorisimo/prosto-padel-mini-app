@@ -49,14 +49,14 @@ function PrimeBadge() {
   );
 }
 
-function SingleBadge() {
+function CourtBadge() {
   return (
     <div style={{
       display: 'inline-flex',
       background: 'rgba(100,116,139,0.15)', borderRadius: '8px',
       padding: '4px 8px', border: '1px solid rgba(100,116,139,0.2)',
     }}>
-      <span style={{ color: '#64748b', fontSize: '10px', fontWeight: 600, letterSpacing: '0.06em' }}>Single</span>
+      <span style={{ color: '#94a3b8', fontSize: '10px', fontWeight: 600, letterSpacing: '0.06em' }}>Корт</span>
     </div>
   );
 }
