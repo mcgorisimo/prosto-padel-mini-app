@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import PlayerProfile from './components/PlayerProfile';
 import BottomNav from './components/BottomNav';
 import MatchCreationScreen from './components/MatchCreationScreen';
@@ -12,7 +12,8 @@ import { supabase } from './lib/supabaseClient';
 import { useTelegram } from './hooks/useTelegram';
 import { COURTS, checkAvailability } from './lib/booking';
 import { isPrimeTime } from './lib/pricing';
-import { getCurrentRating, getLevelForRating } from './lib/ratingEngine';
+import { calculateRatingChange, getLevelForRating, MIN_RATING, MAX_RATING } from './lib/ratingEngine';
+import { isRatingMatch } from './lib/matchRating';
 
 // ─── Seed data (shown until user creates real matches) ────────────────────────
 
@@ -36,6 +37,14 @@ function normalizeMatch(row) {
     paymentStatus: row.paymentStatus ?? row.payment_status,
     ownerPaid: row.ownerPaid ?? row.owner_paid,
     holdAmount: row.holdAmount ?? row.hold_amount,
+    completedAt: row.completedAt ?? row.completed_at,
+    ratingChanges: row.ratingChanges ?? row.rating_changes,
+    isRatingMatch: row.isRatingMatch ?? row.is_rating_match ?? false,
+    requiresVerifiedRating: row.requiresVerifiedRating ?? row.requires_verified_rating,
+    scoreStatus: row.scoreStatus ?? row.score_status ?? 'none',
+    scoreSubmittedBy: row.scoreSubmittedBy ?? row.score_submitted_by,
+    scoreConfirmedBy: row.scoreConfirmedBy ?? row.score_confirmed_by,
+    scoreDisputedBy: row.scoreDisputedBy ?? row.score_disputed_by,
   };
 }
 
@@ -76,6 +85,9 @@ function appendUniqueMessage(messages, row) {
 const isMatchCompleted = (match) =>
   match?.status === 'completed' || match?.status === 'finished';
 
+const round3 = (n) => Math.round(n * 1000) / 1000;
+const clampRating = (n) => Math.max(MIN_RATING, Math.min(MAX_RATING, n));
+
 // Pure derivation: completed matches the given user participated in.
 function getUserMatchHistory(allMatches, userId) {
   return (allMatches ?? []).filter(m =>
@@ -98,6 +110,14 @@ function deriveParticipantsAndStatus(filledSlots, prevStatus) {
   return { participants, status };
 }
 
+function getHumanPlayerIds(players) {
+  return [...new Set(
+    (players ?? [])
+      .filter(player => player?.id && player.id !== 'me' && !player.isBot)
+      .map(player => player.id)
+  )];
+}
+
 // ─── App ──────────────────────────────────────────────────────────────────────
 
 export default function App({ session, showToast }) { // Accept showToast as a prop
@@ -113,21 +133,31 @@ export default function App({ session, showToast }) { // Accept showToast as a p
   const [toast, setToast]            = useState(null);
   const [selectedMatch, setSelected] = useState(null);
 
+  const fetchProfile = useCallback(async () => {
+    if (!ME_ID) return null;
+
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', ME_ID)
+      .single();
+
+    if (error && error.code !== 'PGRST116') {
+      console.error(`Ошибка при получении профиля из Supabase: ${error.message}`);
+      return null;
+    }
+
+    if (data) setProfile(data);
+    return data ?? null;
+  }, [ME_ID]);
+
   // --- 2. ЗАГРУЗКА ДАННЫХ ---
   useEffect(() => {
     const fetchData = async () => {
       if (!ME_ID) return;
 
       // Fetch profile
-      const { data: profileData, error: profileError } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', ME_ID) // Строгий фильтр по ID текущего пользователя
-        .single();
-      if (profileError && profileError.code !== 'PGRST116') { // PGRST116 = no rows found, which is ok
-          console.error(`Ошибка при получении профиля из Supabase: ${profileError.message}`);
-      }
-      if (profileData) setProfile(profileData);
+      await fetchProfile();
 
       // Fetch matches
       const { data: matchesData, error: matchesError } = await supabase.from('matches').select('*').order('created_at', { ascending: false });
@@ -182,7 +212,29 @@ export default function App({ session, showToast }) { // Accept showToast as a p
       supabase.removeChannel(matchesSubscription);
       supabase.removeChannel(messagesSubscription);
     };
-  }, [ME_ID]);
+  }, [ME_ID, fetchProfile]);
+
+  useEffect(() => {
+    if (activeTab === 'profile') {
+      fetchProfile();
+    }
+  }, [activeTab, fetchProfile]);
+
+  useEffect(() => {
+    const refreshVisibleProfile = () => {
+      if (document.visibilityState === 'visible') {
+        fetchProfile();
+      }
+    };
+
+    window.addEventListener('focus', fetchProfile);
+    document.addEventListener('visibilitychange', refreshVisibleProfile);
+
+    return () => {
+      window.removeEventListener('focus', fetchProfile);
+      document.removeEventListener('visibilitychange', refreshVisibleProfile);
+    };
+  }, [fetchProfile]);
 
   // --- 3. ПОЛЬЗОВАТЕЛЬ ---
   const currentUser = useMemo(() => {
@@ -207,6 +259,7 @@ export default function App({ session, showToast }) { // Accept showToast as a p
       rating: numericRating,
       numericRating,
       ratingIdx: ratingIdxFor(numericRating),
+      level: levelLabel,
       isVerified: p.is_verified === true,
       is_verified: p.is_verified === true,
       firstName: p.first_name,
@@ -217,6 +270,14 @@ export default function App({ session, showToast }) { // Accept showToast as a p
       role: p.role,
     };
   }, [profile, session, user?.username]); // <-- добавили session в зависимости
+
+  const canOpenBookingCalendar = currentUser?.role === 'admin';
+
+  useEffect(() => {
+    if (activeTab === 'booking' && !canOpenBookingCalendar) {
+      setActiveTab('home');
+    }
+  }, [activeTab, canOpenBookingCalendar]);
 
   // ── Delete match: remove from allMatches (persisted via useLocalStorage) ──
   const handleDeleteMatch = async (matchId) => {
@@ -241,23 +302,101 @@ export default function App({ session, showToast }) { // Accept showToast as a p
     if (selectedMatch?.id === matchId) setSelected(null);
   };
 
-  // ── Complete match: mark status + persist final score, teams, ratingChanges ──
-  const handleCompleteMatch = async (matchId, result) => {
-    const teamsFlat = [...(result.team1 ?? []), ...(result.team2 ?? [])];
-    const teamParticipants = teamsFlat.filter(p => p?.id != null).map(p => p.id);
-    
+  const buildRatingChanges = async (match, result) => {
+    if (!Array.isArray(result.team1) || result.team1.length !== 2 || !Array.isArray(result.team2) || result.team2.length !== 2) {
+      return {};
+    }
+
+    const allPlayers = [...result.team1, ...result.team2];
+    const humanIds = getHumanPlayerIds(allPlayers);
+    const profileRatings = {};
+
+    if (humanIds.length > 0) {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id, rating')
+        .in('id', humanIds);
+
+      if (error) {
+        showToast?.('Не удалось загрузить рейтинги игроков. Результат не сохранён.', 'error');
+        throw error;
+      }
+
+      (data ?? []).forEach(profileRow => {
+        profileRatings[profileRow.id] = Number(profileRow.rating) || 3.0;
+      });
+    }
+
+    const ratingFor = (player) => {
+      if (player?.isBot) return Number(player.numericRating) || 3.0;
+      if (player?.id && profileRatings[player.id] != null) return profileRatings[player.id];
+      if (player?.id === currentUser?.id) return Number(currentUser.rating) || 3.0;
+      return Number(player?.numericRating) || 3.0;
+    };
+
+    const matchCountFor = (playerId) => allMatches.filter(existingMatch =>
+      existingMatch.id !== match.id &&
+      isMatchCompleted(existingMatch) &&
+      isRatingMatch(existingMatch) &&
+      (existingMatch.ratingChanges?.[playerId] ?? existingMatch.rating_changes?.[playerId])
+    ).length;
+
+    const team1Ratings = result.team1.map(ratingFor);
+    const team2Ratings = result.team2.map(ratingFor);
+    const ratingChanges = {};
+
+    const buildChange = (player, team) => {
+      const before = ratingFor(player);
+      const playerMatchCount = player?.id && !player.isBot ? matchCountFor(player.id) : (player?.matchCount ?? 0);
+      const delta = calculateRatingChange(team1Ratings, team2Ratings, result.isTeam1Win, playerMatchCount)[team === 1 ? 'team1Delta' : 'team2Delta'];
+      const after = round3(clampRating(before + delta));
+      return { before: round3(before), after, delta: round3(delta) };
+    };
+
+    result.team1.forEach(player => {
+      if (player?.id) ratingChanges[player.id] = buildChange(player, 1);
+    });
+    result.team2.forEach(player => {
+      if (player?.id) ratingChanges[player.id] = buildChange(player, 2);
+    });
+
+    return ratingChanges;
+  };
+
+  const fetchMatchById = async (matchId) => {
     const { data, error } = await supabase
       .from('matches')
-      .update({
-        status:        'completed',
-        completedAt:   new Date().toISOString(),
-        finalScore:    result.score,
-        isTeam1Win:    result.isTeam1Win,
-        team1:         result.team1,
-        team2:         result.team2,
-        ratingChanges: result.ratingChanges,
-        participants: teamParticipants.length > 0 ? teamParticipants : undefined,
-      })
+      .select('*')
+      .eq('id', matchId)
+      .single();
+
+    if (error) throw error;
+    return normalizeMatch(data);
+  };
+
+  // ── Complete match: regular matches finish immediately; rated matches wait for score confirmation ──
+  const handleCompleteMatch = async (matchId, result) => {
+    const match = allMatches.find(m => m.id === matchId) ?? selectedMatch;
+    const teamsFlat = [...(result.team1 ?? []), ...(result.team2 ?? [])];
+    const teamParticipants = teamsFlat.filter(p => p?.id != null).map(p => p.id);
+    const isRated = isRatingMatch(match);
+    const updatePayload = {
+      status:        isRated ? 'pending_confirmation' : 'completed',
+      completedAt:   isRated ? null : new Date().toISOString(),
+      finalScore:    result.score,
+      isTeam1Win:    result.isTeam1Win,
+      team1:         result.team1,
+      team2:         result.team2,
+      participants: teamParticipants.length > 0 ? teamParticipants : undefined,
+      score_status: isRated ? 'pending_confirmation' : 'confirmed',
+      score_submitted_by: currentUser.id,
+      score_confirmed_by: isRated ? null : currentUser.id,
+      score_disputed_by: null,
+    };
+
+    const { data, error } = await supabase
+      .from('matches')
+      .update(updatePayload)
       .eq('id', matchId)
       .select();
     
@@ -275,7 +414,73 @@ export default function App({ session, showToast }) { // Accept showToast as a p
 
     const updatedMatch = normalizeMatch(updatedRow);
     setAllMatches(prev => prev.map(match => match.id === matchId ? updatedMatch : match));
-    showToast?.('Матч завершен и добавлен в историю', 'success');
+    showToast?.(
+      isRated ? 'Счёт отправлен на подтверждение' : 'Матч завершен и добавлен в историю',
+      'success'
+    );
+    return updatedMatch;
+  };
+
+  const handleConfirmScore = async (matchId) => {
+    const match = allMatches.find(m => m.id === matchId) ?? selectedMatch;
+    const result = {
+      score: match.finalScore ?? match.score,
+      isTeam1Win: match.isTeam1Win,
+      team1: match.team1,
+      team2: match.team2,
+    };
+    const ratingChanges = await buildRatingChanges(match, result);
+
+    const { error } = await supabase.rpc('confirm_rating_match_score', {
+      p_match_id: matchId,
+      p_confirmed_by: currentUser.id,
+      p_rating_changes: ratingChanges,
+    });
+
+    if (error) {
+      showToast?.('Счёт не подтверждён: требуется серверное применение рейтинга.', 'error');
+      throw error;
+    }
+
+    const updatedMatch = await fetchMatchById(matchId);
+    setAllMatches(prev => prev.map(match => match.id === matchId ? updatedMatch : match));
+    setSelected(prev => prev?.id === matchId ? updatedMatch : prev);
+
+    if (currentUser?.id && ratingChanges[currentUser.id]) {
+      setProfile(prev => ({ ...(prev || {}), rating: ratingChanges[currentUser.id].after }));
+    }
+
+    showToast?.('Счёт подтверждён. Рейтинг обновлён.', 'success');
+    return updatedMatch;
+  };
+
+  const handleDisputeScore = async (matchId) => {
+    const { data, error } = await supabase
+      .from('matches')
+      .update({
+        status: 'disputed',
+        score_status: 'disputed',
+        score_disputed_by: currentUser.id,
+      })
+      .eq('id', matchId)
+      .select();
+
+    if (error) {
+      showToast?.('Не удалось оспорить счёт. Попробуйте ещё раз.', 'error');
+      throw error;
+    }
+
+    const updatedRow = data?.[0];
+    if (!updatedRow) {
+      const emptyUpdateError = new Error('Score dispute update returned no rows');
+      showToast?.('Счёт не оспорен. Проверьте права доступа.', 'error');
+      throw emptyUpdateError;
+    }
+
+    const updatedMatch = normalizeMatch(updatedRow);
+    setAllMatches(prev => prev.map(match => match.id === matchId ? updatedMatch : match));
+    setSelected(prev => prev?.id === matchId ? updatedMatch : prev);
+    showToast?.('Счёт оспорен. Обратитесь к администратору клуба.', 'info');
     return updatedMatch;
   };
 
@@ -627,6 +832,8 @@ const handleBookSlot = async (booking) => {
 
   // ── Match creation: build object and persist ──
   const handleMatchSuccess = async (data) => {
+    const isRated = data.isRatingMatch === true || data.is_rating_match === true;
+
     const ownerSlot = {
       id:          ME_ID,
       firstName:   currentUser.firstName,
@@ -660,6 +867,7 @@ const handleBookSlot = async (booking) => {
       filledSlots:  [ownerSlot],
       participants: [ME_ID],
       isPrivate:    !!data.isPrivate,
+      is_rating_match: isRated,
       syncToCalendar: !!data.syncToCalendar,
       ownerPaid:    data.ownerPaid,
       holdAmount:   data.holdAmount,
@@ -746,6 +954,7 @@ const handleBookSlot = async (booking) => {
         onBack={() => setScreen(null)}
         onSuccess={handleMatchSuccess}
         user={currentUser}
+        showToast={showToast}
       />
     );
   }
@@ -759,6 +968,8 @@ const handleBookSlot = async (booking) => {
         onJoinSuccess={() => { setScreen(null); setActiveTab('matches'); }}
         onDelete={handleDeleteMatch}
         onComplete={handleCompleteMatch}
+        onConfirmScore={handleConfirmScore}
+        onDisputeScore={handleDisputeScore}
         onUpdate={handleUpdateMatch}
         onSlotsChange={handleSlotsChange}
         allMessages={allMessages}
@@ -810,7 +1021,7 @@ const handleBookSlot = async (booking) => {
             upcomingMatches={upcomingMatches}
             completedMatches={completedMatches}
             onViewDetails={openMatchDetails}
-            onBookCourt={() => setActiveTab('booking')}
+            onBookCourt={canOpenBookingCalendar ? () => setActiveTab('booking') : null}
             onSetupTraining={handleSetupTraining}
             onConvertToPublic={handleConvertToPublic} // This needs showToast
             user={currentUser}
@@ -828,7 +1039,7 @@ const handleBookSlot = async (booking) => {
             completedMatches={completedMatches}
             onViewDetails={openMatchDetails}
             onCreateMatch={openCreateMatch}
-            onBookCourt={() => setActiveTab('booking')}
+            onBookCourt={canOpenBookingCalendar ? () => setActiveTab('booking') : null}
             onLogout={handleLogout}
             onOpenSettings={() => setScreen('edit-profile')} // This needs showToast
             onOpenAdmin={() => {
@@ -861,7 +1072,7 @@ const handleBookSlot = async (booking) => {
           />
         )}
 
-        {activeTab === 'booking' && (
+        {activeTab === 'booking' && canOpenBookingCalendar && (
   <div style={{ height: 'calc(100dvh - 78px - env(safe-area-inset-bottom, 0px))', display: 'flex', flexDirection: 'column', overflow: 'visible', touchAction: 'pan-x pan-y' }}>
     <BookingCalendar
       allMatches={allMatches}
@@ -875,7 +1086,7 @@ const handleBookSlot = async (booking) => {
 )}
       </main>
 
-      <BottomNav active={activeTab} setActive={setActiveTab} />
+      <BottomNav active={activeTab} setActive={setActiveTab} isAdmin={canOpenBookingCalendar} />
     </div>
   );
 }
