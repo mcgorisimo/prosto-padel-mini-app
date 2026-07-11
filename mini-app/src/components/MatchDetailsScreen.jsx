@@ -7,6 +7,7 @@ import PadelCard from './ui/PadelCard';
 import MatchChat from './MatchChat';
 import PadelButton from './ui/PadelButton';
 import { supabase } from '../lib/supabaseClient';
+import { getMatchLevelBadges, getMatchLevelRequirement } from '../lib/matchLevelRequirement';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -170,14 +171,16 @@ function PlayerMiniProfile({ player, onClose }) {
 
 // ─── Rating Guard Banner ──────────────────────────────────────────────────────
 
-function RatingGuardBanner({ ratingMin, ratingMax, reason }) {
+function RatingGuardBanner({ match, reason }) {
+  const { summaryLabel } = getMatchLevelRequirement(match);
+
   return (
     <div style={{ background: 'rgba(239,68,68,0.07)', borderRadius: '12px', padding: '12px 14px', border: '1px solid rgba(239,68,68,0.25)', display: 'flex', gap: '10px', alignItems: 'flex-start', marginBottom: '16px' }}>
       <span style={{ fontSize: '14px', fontWeight: 900, flexShrink: 0 }}>!</span>
       <div style={{ color: '#fca5a5', fontSize: '12px', lineHeight: 1.5 }}>
         {reason === 'unverified'
           ? <>Для участия в матчах с ограничением по уровню нужен <strong style={{ color: '#fff' }}>подтверждённый рейтинг</strong>. Подтвердите уровень у администратора клуба.</>
-          : <>Ваш уровень не входит в диапазон <strong style={{ color: '#fff' }}>{RATINGS[ratingMin]}–{RATINGS[ratingMax]}</strong> этого матча.</>
+          : <>Ваш уровень не входит в диапазон <strong style={{ color: '#fff' }}>{summaryLabel}</strong> этого матча.</>
         }
       </div>
     </div>
@@ -576,7 +579,7 @@ function SlotActionSheet({ slotIndex, isOwner, currentUser, matchId, onAddGuest,
   };
 
   useEffect(() => {
-    const canSearch = isOwner || isParticipant;
+    const canSearch = isOwner;
     if (!canSearch || searchTerm.trim().length < 2) {
       setSearchResults([]);
       return;
@@ -596,7 +599,7 @@ function SlotActionSheet({ slotIndex, isOwner, currentUser, matchId, onAddGuest,
       }
     }, 300);
     return () => clearTimeout(delayDebounceFn);
-  }, [searchTerm, isOwner, isParticipant, currentUser?.id]);
+  }, [searchTerm, isOwner, currentUser?.id]);
 
   const handleSelectPlayer = (player) => {
     onAddGuest(slotIndex, {
@@ -612,7 +615,7 @@ function SlotActionSheet({ slotIndex, isOwner, currentUser, matchId, onAddGuest,
   };
 
   // 1. ИНТЕРФЕЙС ОРГАНИЗАТОРА ИЛИ УЧАСТНИКА (Поиск)
-  if (isOwner || isParticipant) {
+  if (isOwner) {
     return (
       <BottomSheet onClose={onClose}>
         <div style={{ marginBottom: '16px' }}>
@@ -665,7 +668,7 @@ function SlotActionSheet({ slotIndex, isOwner, currentUser, matchId, onAddGuest,
         </div>
         <div style={{ color: C.text, fontSize: '18px', fontWeight: 700 }}>{currentUser?.firstName} {currentUser?.lastName}</div>
       </div>
-      <button onClick={() => { onTakeSlot?.(slotIndex); onClose(); }} style={{ width: '100%', padding: '16px', background: 'rgba(216,243,74,0.12)', color: C.gold, border: '1px solid rgba(216,243,74,0.32)', borderRadius: '16px', fontSize: '16px', fontWeight: 800, marginBottom: '10px', cursor: 'pointer' }}>
+      <button onClick={async () => { const didTake = await onTakeSlot?.(slotIndex); if (didTake !== false) onClose(); }} style={{ width: '100%', padding: '16px', background: 'rgba(216,243,74,0.12)', color: C.gold, border: '1px solid rgba(216,243,74,0.32)', borderRadius: '16px', fontSize: '16px', fontWeight: 800, marginBottom: '10px', cursor: 'pointer' }}>
         Занять место
       </button>
       <button onClick={onClose} style={{ width: '100%', padding: '14px', background: 'transparent', color: C.muted, border: `1px solid ${C.border}`, borderRadius: '12px', cursor: 'pointer' }}>Отмена</button>
@@ -807,6 +810,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
     duration:    origDuration,
   } = match;
   const requiresVerifiedRating = match.requiresVerifiedRating === true || match.requires_verified_rating === true;
+  const levelRequirement = getMatchLevelRequirement(match);
 
   // Effective values — local overrides original when owner edits
   const dateISO   = localDate  ?? origDateISO;
@@ -837,10 +841,18 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
   const resolvedSlots = localSlots ?? (origFilledSlots ?? []);
   let baseSlots;
   if (resolvedSlots.length > 0) {
-    // Inject current user's numeric rating if they are in the slots
+    // Keep legacy "me" slots and current user's slot aligned with the loaded profile.
     baseSlots = resolvedSlots.map(p => {
-      if (p?.id === 'me') {
-        return { ...p, numericRating: currentUser.numericRating };
+      if (p?.id === 'me' || p?.id === currentUser.id) {
+        return {
+          ...p,
+          id: currentUser.id,
+          firstName: currentUser.firstName || p.firstName,
+          lastName: currentUser.lastName || p.lastName,
+          ratingIdx: currentUser.ratingIdx,
+          numericRating: currentUser.numericRating,
+          isVerified: currentUser.isVerified,
+        };
       }
       return p;
     });
@@ -861,14 +873,38 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
   const completedScoreText = fmtSetList(savedScore);
 
   // Join guard
+  const isParticipant = (match.participants ?? []).includes(currentUser.id)
+    || allFilled.some(player => player?.id === currentUser.id);
   const levelOk    = currentUser.ratingIdx >= ratingMin && currentUser.ratingIdx <= ratingMax;
   const verifiedOk = !requiresVerifiedRating || currentUser.isVerified === true;
-  const canJoin    = !isCompletedMatch && !isOwner && !isFull && levelOk && verifiedOk;
-  const isParticipant = (match.participants ?? []).includes(currentUser.id);
-  const guardReason = !verifiedOk ? 'unverified' : !levelOk ? 'level' : null;
+  const getJoinBlockReason = () => {
+    if (isCompletedMatch) return 'completed';
+    if (isOwner) return 'owner';
+    if (isParticipant) return 'participant';
+    if (isFull) return 'full';
+    if (!verifiedOk) return 'unverified';
+    if (!levelOk) return 'level';
+    return null;
+  };
+  const joinBlockReason = getJoinBlockReason();
+  const canJoin = joinBlockReason === null;
+  const guardReason = joinBlockReason === 'unverified' || joinBlockReason === 'level' ? joinBlockReason : null;
+  const showRatingGuard = !isOwner && !isParticipant && !isFull && guardReason;
+  const getJoinBlockedText = (reason = joinBlockReason) => {
+    if (reason === 'completed') return 'Матч уже завершён.';
+    if (reason === 'participant') return 'Вы уже участвуете в этом матче.';
+    if (reason === 'full') return 'В матче больше нет свободных мест.';
+    if (reason === 'unverified') return 'Для участия нужен подтверждённый рейтинг. Обратитесь к администратору клуба.';
+    if (reason === 'level') return `Ваш уровень не входит в диапазон ${levelRequirement.summaryLabel} этого матча.`;
+    return 'Участие в матче сейчас недоступно.';
+  };
 
   const handleJoin = async () => {
-    if (!canJoin || joining) return;
+    if (joining) return;
+    if (!canJoin) {
+      showToast?.(getJoinBlockedText(), guardReason ? 'error' : 'info');
+      return;
+    }
 
     const firstFreeSlotIndex = slots.findIndex(slot => !slot);
     if (firstFreeSlotIndex === -1) {
@@ -924,6 +960,11 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
 
   // Owner adds a named guest into a specific empty slot
   const handleAddGuest = async (slotIndex, playerData) => {
+    if (slots[slotIndex]) {
+      showToast?.('Этот слот уже занят.', 'info');
+      return false;
+    }
+
     const next = [...slots];
     if (typeof playerData === 'string') {
       // Old behavior: just a name string
@@ -983,7 +1024,17 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
   const handleTakeSlot = async (slotIndex) => {
     if (!currentUser?.id) {
       showToast?.('Не удалось определить игрока. Попробуйте войти заново.', 'error');
-      return;
+      return false;
+    }
+
+    if (!canJoin) {
+      showToast?.(getJoinBlockedText(), guardReason ? 'error' : 'info');
+      return false;
+    }
+
+    if (slots[slotIndex]) {
+      showToast?.('Этот слот уже занят.', 'info');
+      return false;
     }
 
     const next = [...slots];
@@ -996,10 +1047,29 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
       isVerified:  currentUser.isVerified,
       isOrganizer: false,
     };
-    await commitSlots(next.filter(Boolean));
-    setTargetSlot(null);
-    setJoined(true);
-    setTimeout(() => onJoinSuccess?.(match), 1500);
+    try {
+      await commitSlots(next.filter(Boolean));
+      setTargetSlot(null);
+      setJoined(true);
+      setTimeout(() => onJoinSuccess?.(match), 1500);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const handleEmptySlotClick = (slotIndex) => {
+    if (isOwner) {
+      setTargetSlot(slotIndex);
+      return;
+    }
+
+    if (!canJoin) {
+      showToast?.(getJoinBlockedText(), guardReason ? 'error' : 'info');
+      return;
+    }
+
+    handleTakeSlot(slotIndex);
   };
 
   const handleCancelConfirm = async () => {
@@ -1097,27 +1167,26 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
           <div style={{ fontSize: '10px', fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: '10px' }}>Требования к уровню</div>
           <div style={{ background: C.card, borderRadius: '12px', padding: '12px 14px', border: `1px solid ${C.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-              {RATINGS.slice(ratingMin, ratingMax + 1).map(r => (
+              {getMatchLevelBadges(match).map(r => (
                 <div key={r} style={{ padding: '5px 10px', borderRadius: '8px', background: 'rgba(216,243,74,0.10)', border: '1px solid rgba(216,243,74,0.24)', color: C.gold, fontSize: '13px', fontWeight: 700 }}>{r}</div>
               ))}
             </div>
             <div style={{ textAlign: 'right' }}>
               <div style={{ color: C.text, fontWeight: 700, fontSize: '14px' }}>
-                {(LUNDA_NUM[ratingMin] || '0').split('–')[0]}–{(LUNDA_NUM[ratingMax] || '0').split('–').pop()}
+                {levelRequirement.numericRangeLabel}
               </div>
               <div style={{ color: C.muted, fontSize: '10px', marginTop: '2px' }}>Lunda Rating</div>
             </div>
           </div>
-          {requiresVerifiedRating ? (
+          <div style={{ color: C.muted, fontSize: '11px', lineHeight: 1.45, marginTop: '8px', paddingLeft: '2px' }}>
+            Диапазон уровня применяется к игрокам, которые присоединяются. Организатор может быть вне выбранного диапазона.
+          </div>
+          {requiresVerifiedRating && (
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '8px', paddingLeft: '2px' }}>
               <div style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', background: 'linear-gradient(135deg, #f59e0b, #ca8a04)', borderRadius: '4px', padding: '2px 6px' }}>
                 <span style={{ color: '#fff', fontSize: '9px', fontWeight: 800 }}>✓ Подтверждён</span>
               </div>
               <span style={{ color: C.muted, fontSize: '11px' }}>подтверждённый рейтинг обязателен для участия</span>
-            </div>
-          ) : (
-            <div style={{ color: C.muted, fontSize: '11px', lineHeight: 1.45, marginTop: '8px', paddingLeft: '2px' }}>
-              Уровень указан ориентировочно. Клуб может подтвердить рейтинг после первых игр.
             </div>
           )}
         </div>
@@ -1150,7 +1219,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
                   onTap={setViewPlayer}
                   isOwner={canEditMatch}
                   onKick={p => setKickTarget(p)}
-                  onSlotClick={!isCompletedMatch ? () => setTargetSlot(i) : undefined}
+                  onSlotClick={!isCompletedMatch ? () => handleEmptySlotClick(i) : undefined}
                 />
               );
             })}
@@ -1225,8 +1294,8 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
           </div>
         ) : (
           <>
-            {!canJoin && !isFull && guardReason && (
-              <RatingGuardBanner ratingMin={ratingMin} ratingMax={ratingMax} reason={guardReason} />
+            {!canJoin && showRatingGuard && (
+              <RatingGuardBanner match={match} reason={guardReason} />
             )}
             <PadelButton
               variant={canJoin ? (isActuallyPrime ? 'yellow' : 'info') : 'dark'}
