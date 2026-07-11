@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { MapPin, Plus, UsersRound } from 'lucide-react';
-import { getPerPlayerPrice } from '../lib/pricing';
+import { getCourtCapacity, getPerPlayerPrice } from '../lib/pricing';
 import { getMatchLevelRequirement } from '../lib/matchLevelRequirement';
 import { getMatchBookingStatus } from '../lib/matchBookingStatus';
 
@@ -30,6 +30,65 @@ const calculateEndTime = (startTime, duration = 1.5) => {
   const endMins = Math.round(totalMinutes % 60);
   const f = (n) => String(n).padStart(2, '0');
   return `${f(endHours)}:${f(endMins)}`;
+};
+
+const FILTERS = [
+  { id: 'all', label: 'Все', empty: 'Пока нет открытых матчей' },
+  { id: 'fit', label: 'Подходят мне', empty: 'Нет матчей, подходящих вашему рейтингу' },
+  { id: 'booked', label: 'С бронью', empty: 'Нет матчей с бронью' },
+  { id: 'unbooked', label: 'Без брони', empty: 'Нет матчей без брони' },
+  { id: 'mine', label: 'Мои', empty: 'У вас пока нет активных матчей' },
+];
+
+const inactiveStatuses = new Set(['completed', 'finished', 'cancelled', 'canceled']);
+
+const getMatchStartMs = (match) => {
+  const date = match?.dateISO ?? match?.date_iso;
+  const time = match?.time || '00:00';
+  const timestamp = new Date(`${date}T${time}:00`).getTime();
+  return Number.isFinite(timestamp) ? timestamp : Number.MAX_SAFE_INTEGER;
+};
+
+const isFutureActiveMatch = (match) => {
+  if (!match || inactiveStatuses.has(String(match.status || '').toLowerCase())) return false;
+
+  const startMs = getMatchStartMs(match);
+  if (startMs === Number.MAX_SAFE_INTEGER) return true;
+
+  const durationMs = (match.duration || 1.5) * 60 * 60 * 1000;
+  return startMs + durationMs > Date.now();
+};
+
+const isUserInMatch = (match, userId) => {
+  if (!userId) return false;
+
+  const participants = Array.isArray(match?.participants) ? match.participants : [];
+  const filledSlots = Array.isArray(match?.filledSlots) ? match.filledSlots.filter(Boolean) : [];
+
+  return (
+    match?.ownerId === userId ||
+    match?.owner_id === userId ||
+    participants.includes(userId) ||
+    filledSlots.some(player => player?.id === userId)
+  );
+};
+
+const canCurrentUserJoin = (match, currentUser) => {
+  if (!currentUser || !isFutureActiveMatch(match)) return false;
+  if (isUserInMatch(match, currentUser.id)) return false;
+
+  const filledSlots = Array.isArray(match?.filledSlots) ? match.filledSlots.filter(Boolean) : [];
+  const maxSlots = getCourtCapacity(match?.courtType || match?.court_type || 'standard');
+  if (filledSlots.length >= maxSlots) return false;
+
+  const ratingMin = match?.ratingMin ?? match?.rating_min ?? 0;
+  const ratingMax = match?.ratingMax ?? match?.rating_max ?? 6;
+  const ratingIdx = currentUser.ratingIdx ?? 0;
+  const levelOk = ratingIdx >= ratingMin && ratingIdx <= ratingMax;
+  const requiresVerifiedRating = match?.requiresVerifiedRating === true || match?.requires_verified_rating === true;
+  const verifiedOk = !requiresVerifiedRating || currentUser.isVerified === true;
+
+  return levelOk && verifiedOk;
 };
 
 function JoinButton({ onClick }) {
@@ -265,7 +324,36 @@ function MatchCard({ match, onViewDetails }) {
   );
 }
 
-export default function MatchFeed({ matches, onViewDetails, onCreateMatch }) {
+export default function MatchFeed({ matches = [], currentUser, onViewDetails, onCreateMatch }) {
+  const [activeFilter, setActiveFilter] = useState('all');
+  const activeFilterDef = FILTERS.find(filter => filter.id === activeFilter) ?? FILTERS[0];
+
+  const activeSortedMatches = useMemo(() => {
+    return [...matches]
+      .filter(isFutureActiveMatch)
+      .sort((a, b) => getMatchStartMs(a) - getMatchStartMs(b));
+  }, [matches]);
+
+  const visibleMatches = useMemo(() => {
+    if (activeFilter === 'fit') {
+      return activeSortedMatches.filter(match => canCurrentUserJoin(match, currentUser));
+    }
+
+    if (activeFilter === 'booked') {
+      return activeSortedMatches.filter(match => getMatchBookingStatus(match).isBooked);
+    }
+
+    if (activeFilter === 'unbooked') {
+      return activeSortedMatches.filter(match => !getMatchBookingStatus(match).isBooked);
+    }
+
+    if (activeFilter === 'mine') {
+      return activeSortedMatches.filter(match => isUserInMatch(match, currentUser?.id));
+    }
+
+    return activeSortedMatches;
+  }, [activeFilter, activeSortedMatches, currentUser]);
+
   return (
     <div style={{
       padding: '20px 16px 104px',
@@ -302,11 +390,49 @@ export default function MatchFeed({ matches, onViewDetails, onCreateMatch }) {
           <Plus size={21} strokeWidth={2.4} />
         </button>
       </div>
-      {matches.length > 0 ? (
-        matches.map(m => <MatchCard key={m.id} match={m} onViewDetails={onViewDetails} />)
+      <div
+        style={{
+          display: 'flex',
+          gap: '8px',
+          overflowX: 'auto',
+          paddingBottom: '12px',
+          marginBottom: '8px',
+          scrollbarWidth: 'none',
+          msOverflowStyle: 'none',
+        }}
+      >
+        {FILTERS.map(filter => {
+          const isActive = activeFilter === filter.id;
+          return (
+            <button
+              key={filter.id}
+              type="button"
+              onClick={() => setActiveFilter(filter.id)}
+              style={{
+                flex: '0 0 auto',
+                padding: '9px 13px',
+                borderRadius: '999px',
+                border: isActive ? '1px solid rgba(216,243,74,0.62)' : `1px solid ${C.border}`,
+                background: isActive ? 'rgba(216,243,74,0.14)' : 'rgba(255,255,255,0.035)',
+                color: isActive ? C.lime : C.muted,
+                fontSize: '12px',
+                fontWeight: 850,
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+                boxShadow: isActive ? '0 10px 26px rgba(216,243,74,0.12)' : 'none',
+              }}
+            >
+              {filter.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {visibleMatches.length > 0 ? (
+        visibleMatches.map(m => <MatchCard key={m.id} match={m} onViewDetails={onViewDetails} />)
       ) : (
         <div style={{ textAlign: 'center', color: 'rgba(245,241,232,0.45)', marginTop: '64px', fontSize: '14px' }}>
-          Пока нет открытых матчей
+          {activeFilterDef.empty}
         </div>
       )}
     </div>

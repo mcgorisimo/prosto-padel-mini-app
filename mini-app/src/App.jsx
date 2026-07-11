@@ -852,6 +852,7 @@ const handleBookSlot = async (booking) => {
         {activeTab === 'matches' && (
           <MatchFeed
             matches={openMatches}
+            currentUser={currentUser}
             playerRating={currentUser.ratingIdx}
             onJoin={(match) => console.log('join', match.id)}
             onViewDetails={openMatchDetails} // This needs showToast
