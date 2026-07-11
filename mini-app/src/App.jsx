@@ -7,6 +7,7 @@ import MatchFeed from './components/MatchFeed';
 import Home from './components/Home';
 import EditProfileScreen from './components/EditProfileScreen';
 import BookingCalendar from './components/BookingCalendar';
+import AdminScreen from './components/AdminScreen';
 import { supabase } from './lib/supabaseClient';
 import { useTelegram } from './hooks/useTelegram';
 import { COURTS, checkAvailability } from './lib/booking';
@@ -208,9 +209,12 @@ export default function App({ session, showToast }) { // Accept showToast as a p
       isVerified: p.is_verified || false,
       firstName: p.first_name,
       lastName: p.last_name,
+      phone: p.phone || '',
+      side_preference: p.side_preference || 'Both',
+      username: user?.username || meta.username || '',
       role: p.role,
     };
-  }, [profile, session]); // <-- добавили session в зависимости
+  }, [profile, session, user?.username]); // <-- добавили session в зависимости
 
   // ── Delete match: remove from allMatches (persisted via useLocalStorage) ──
   const handleDeleteMatch = async (matchId) => {
@@ -582,12 +586,17 @@ const handleBookSlot = async (booking) => {
 
   // ── Logout ──
   const handleLogout = async () => {
-    // 1. Очищаем весь кэш браузера
-    localStorage.clear(); 
-    // 2. Выходим из базы данных
-    await supabase.auth.signOut();
-    // 3. ПРИНУДИТЕЛЬНО перезагружаем страницу (стирает всю оперативную память React)
-    window.location.reload(); 
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      showToast?.('Не удалось выйти из аккаунта. Попробуйте еще раз.', 'error');
+      throw error;
+    }
+    localStorage.clear();
+    window.location.reload();
+  };
+
+  const handleProfileSaved = (updatedProfile) => {
+    setProfile(prev => ({ ...(prev || {}), ...updatedProfile }));
   };
 
   // --- 4. TOAST (now handled by AuthGate, but keeping this for other app-specific toasts) ---
@@ -759,7 +768,19 @@ const handleBookSlot = async (booking) => {
   }
 
   if (screen === 'edit-profile') {
-    return <EditProfileScreen user={currentUser} onBack={() => setScreen(null)} showToast={showToast} />;
+    return (
+      <EditProfileScreen
+        user={currentUser}
+        onBack={() => setScreen(null)}
+        showToast={showToast}
+        onProfileSaved={handleProfileSaved}
+        onLogout={handleLogout}
+      />
+    );
+  }
+
+  if (screen === 'admin') {
+    return <AdminScreen user={currentUser} onBack={() => setScreen(null)} />;
   }
     
   
@@ -808,6 +829,9 @@ const handleBookSlot = async (booking) => {
             onBookCourt={() => setActiveTab('booking')}
             onLogout={handleLogout}
             onOpenSettings={() => setScreen('edit-profile')} // This needs showToast
+            onOpenAdmin={() => {
+              if (currentUser.role === 'admin') setScreen('admin');
+            }}
             // showToast is already passed to App, no need to pass it here again
             showToast={showToast}
           />

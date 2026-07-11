@@ -479,7 +479,7 @@ function FamilyBonusBlock() {
 
 // ─── Main screen ──────────────────────────────────────────────────────────────
 
-export default function PlayerProfile({ user, stats, upcomingMatches = [], completedMatches = [], onViewDetails, onCreateMatch, onBookCourt, onOpenSettings, showToast, onLogout, isVerified: initVerified = false, hasFamilyMembership = false }) {
+export default function PlayerProfile({ user, stats, upcomingMatches = [], completedMatches = [], onViewDetails, onCreateMatch, onBookCourt, onOpenSettings, onOpenAdmin, showToast, onLogout, isVerified: initVerified = false, hasFamilyMembership = false }) {
   // Numbers come from the App-level computed stats (single source of truth: allMatches + dp_rating_history).
   const currentRating = stats?.numericRating ?? 0;
   const matchesCount  = stats?.matchesCount  ?? 0;
@@ -709,6 +709,18 @@ export default function PlayerProfile({ user, stats, upcomingMatches = [], compl
         >
           Забронировать / Создать матч
         </PadelButton>
+
+        {user?.role === 'admin' && (
+          <PadelButton
+            variant="info"
+            size="md"
+            fullWidth
+            onClick={onOpenAdmin}
+            className="mb-3"
+          >
+            Админ-панель
+          </PadelButton>
+        )}
 
         {/* Logout Button */}
         <PadelButton
