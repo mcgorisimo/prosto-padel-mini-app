@@ -357,7 +357,7 @@ export default function BookingScreen({ allMatches = [], onBookSlot, showToast }
             onClick={(event) => event.stopPropagation()}
           >
             <div className="booking-sheet-grabber" aria-hidden="true" />
-            <div className="mb-4 flex items-start justify-between gap-3">
+            <div className="booking-sheet-header flex items-start justify-between gap-3">
               <div>
                 <div className="mb-1 text-[10px] font-extrabold uppercase tracking-[0.18em] text-warm-white/42">
                   Подтверждение
@@ -380,96 +380,100 @@ export default function BookingScreen({ allMatches = [], onBookSlot, showToast }
               </button>
             </div>
 
-            <div className="mb-4 grid grid-cols-2 gap-2">
-              <div className="booking-price-tile p-3">
-                <div className="text-xs text-warm-white/46">Цена за корт</div>
-                <div className="mt-1 text-lg font-black">{fmtPrice(totalPrice)}</div>
+            <div className="booking-sheet-body">
+              <div className="mb-4 grid grid-cols-2 gap-2">
+                <div className="booking-price-tile p-3">
+                  <div className="text-xs text-warm-white/46">Цена за корт</div>
+                  <div className="mt-1 text-lg font-black">{fmtPrice(totalPrice)}</div>
+                </div>
+                <div className="booking-price-tile p-3">
+                  <div className="text-xs text-warm-white/46">На игрока при 4</div>
+                  <div className="mt-1 text-lg font-black">{fmtPrice(perPlayerPrice)}</div>
+                </div>
               </div>
-              <div className="booking-price-tile p-3">
-                <div className="text-xs text-warm-white/46">На игрока при 4</div>
-                <div className="mt-1 text-lg font-black">{fmtPrice(perPlayerPrice)}</div>
-              </div>
-            </div>
 
-            <div className="mb-4 grid gap-2">
-              {BOOKING_FORMATS.map((format) => {
-                const active = bookingFormat === format.id;
-                const Icon = format.Icon;
-                return (
-                  <button
-                    key={format.id}
-                    type="button"
-                    onClick={() => {
-                      setBookingFormat(format.id);
-                      if (format.id === 'private') setMatchType('casual');
-                    }}
-                    className={[
-                      'booking-format-option flex items-start gap-3 p-3 text-left',
-                      active
-                        ? 'is-active'
-                        : '',
-                    ].join(' ')}
-                  >
-                    <span className={[
-                      'mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl',
-                      active ? 'bg-accent-light text-app-bg' : 'bg-white/[0.06] text-warm-white/60',
-                    ].join(' ')}>
-                      <Icon size={18} />
-                    </span>
-                    <span>
-                      <span className="block text-sm font-black">{format.title}</span>
-                      <span className="mt-1 block text-xs leading-relaxed text-warm-white/52">
-                        {format.description}
+              <div className="mb-4 grid gap-2">
+                {BOOKING_FORMATS.map((format) => {
+                  const active = bookingFormat === format.id;
+                  const Icon = format.Icon;
+                  return (
+                    <button
+                      key={format.id}
+                      type="button"
+                      onClick={() => {
+                        setBookingFormat(format.id);
+                        if (format.id === 'private') setMatchType('casual');
+                      }}
+                      className={[
+                        'booking-format-option flex items-start gap-3 p-3 text-left',
+                        active
+                          ? 'is-active'
+                          : '',
+                      ].join(' ')}
+                    >
+                      <span className={[
+                        'mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl',
+                        active ? 'bg-accent-light text-app-bg' : 'bg-white/[0.06] text-warm-white/60',
+                      ].join(' ')}>
+                        <Icon size={18} />
                       </span>
-                    </span>
-                  </button>
-                );
-              })}
+                      <span>
+                        <span className="block text-sm font-black">{format.title}</span>
+                        <span className="mt-1 block text-xs leading-relaxed text-warm-white/52">
+                          {format.description}
+                        </span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {isPublicFormat && (
+                <div className="booking-match-type mb-4">
+                  <div className="mb-2 text-[10px] font-extrabold uppercase tracking-[0.16em] text-warm-white/42">
+                    Тип матча
+                  </div>
+                  <div className="booking-match-type-control">
+                    {MATCH_TYPE_OPTIONS.map((option) => {
+                      const active = matchType === option.id;
+                      return (
+                        <button
+                          key={option.id}
+                          type="button"
+                          onClick={() => setMatchType(option.id)}
+                          className={['booking-match-type-option', active ? 'is-active' : ''].join(' ')}
+                        >
+                          {option.title}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {matchType === 'rating' && (
+                    <p className="mt-2 text-xs leading-relaxed text-warm-white/52">
+                      Рейтинг изменится после подтверждения счёта.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              <p className="text-xs leading-relaxed text-warm-white/52">
+                Бронь создаётся без онлайн-оплаты. Администратор клуба подтвердит оплату отдельно.
+              </p>
             </div>
 
-            {isPublicFormat && (
-              <div className="booking-match-type mb-4">
-                <div className="mb-2 text-[10px] font-extrabold uppercase tracking-[0.16em] text-warm-white/42">
-                  Тип матча
-                </div>
-                <div className="booking-match-type-control">
-                  {MATCH_TYPE_OPTIONS.map((option) => {
-                    const active = matchType === option.id;
-                    return (
-                      <button
-                        key={option.id}
-                        type="button"
-                        onClick={() => setMatchType(option.id)}
-                        className={['booking-match-type-option', active ? 'is-active' : ''].join(' ')}
-                      >
-                        {option.title}
-                      </button>
-                    );
-                  })}
-                </div>
-                {matchType === 'rating' && (
-                  <p className="mt-2 text-xs leading-relaxed text-warm-white/52">
-                    Рейтинг изменится после подтверждения счёта.
-                  </p>
-                )}
-              </div>
-            )}
-
-            <p className="mb-4 text-xs leading-relaxed text-warm-white/52">
-              Бронь создаётся без онлайн-оплаты. Администратор клуба подтвердит оплату отдельно.
-            </p>
-
-            <PadelButton
-              type="button"
-              variant="success"
-              size="lg"
-              fullWidth
-              disabled={isSaving}
-              onClick={handleConfirm}
-              className="booking-confirm-cta"
-            >
-              {isSaving ? 'Сохраняем...' : 'Создать бронь'}
-            </PadelButton>
+            <div className="booking-sheet-footer">
+              <PadelButton
+                type="button"
+                variant="success"
+                size="lg"
+                fullWidth
+                disabled={isSaving}
+                onClick={handleConfirm}
+                className="booking-confirm-cta"
+              >
+                {isSaving ? 'Сохраняем...' : 'Создать бронь'}
+              </PadelButton>
+            </div>
           </section>
         </div>
       )}
