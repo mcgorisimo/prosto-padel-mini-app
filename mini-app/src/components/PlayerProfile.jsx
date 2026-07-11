@@ -571,7 +571,7 @@ export default function PlayerProfile({ user, stats, upcomingMatches = [], compl
             }}>
               <span style={{ color: currentLevel.color, fontSize: '11px', fontWeight: 700, letterSpacing: '0.06em', fontVariantNumeric: 'tabular-nums' }}>
                 {isVerified
-                  ? `Подтверждённый рейтинг · ${currentLevel.label} · ${animRating.toFixed(2)}`
+                  ? `Клубный рейтинг · ${currentLevel.label} · ${animRating.toFixed(2)}`
                   : `Рейтинг пока не подтверждён · примерный уровень ${currentLevel.label}`}
               </span>
             </div>
@@ -603,24 +603,16 @@ export default function PlayerProfile({ user, stats, upcomingMatches = [], compl
           </div>
           <LevelSelector currentLevel={currentLevel} />
 
-          {/* Helper text — always visible */}
-          <div style={{ color: '#334155', fontSize: '11px', textAlign: 'center', marginTop: '8px', lineHeight: 1.5 }}>
-            Уровень можно подтвердить у администратора клуба.
-          </div>
+          {!isVerified && (
+            <div style={{ color: '#334155', fontSize: '11px', textAlign: 'center', marginTop: '8px', lineHeight: 1.5 }}>
+              Уровень можно подтвердить у администратора клуба.
+            </div>
+          )}
 
           {/* Verification status block */}
-          <div style={{ marginTop: '10px' }}>
-            {isVerified ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(34,197,94,0.07)', borderRadius: '10px', padding: '10px 12px', border: '1px solid rgba(34,197,94,0.20)' }}>
-                <span style={{ color: C.win, fontSize: '13px', fontWeight: 900 }}>✓</span>
-                <div>
-                  <div style={{ color: C.win, fontSize: '12px', fontWeight: 700 }}>Рейтинг подтверждён</div>
-                  <div style={{ color: C.muted, fontSize: '11px' }}>Это официальный клубный рейтинг для матчей с ограничением по уровню</div>
-                </div>
-              </div>
-            )
-
-            : verifPath === 'training' ? (
+          {!isVerified && (
+            <div style={{ marginTop: '10px' }}>
+              {verifPath === 'training' ? (
               /* ── Ожидает тренера ── */
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(212,175,55,0.07)', borderRadius: '10px', padding: '10px 12px', border: '1px solid rgba(212,175,55,0.2)' }}>
                 <span style={{ color: C.gold, fontSize: '13px', fontWeight: 900 }}>...</span>
@@ -654,8 +646,9 @@ export default function PlayerProfile({ user, stats, upcomingMatches = [], compl
                   До этого уровень отображается как ориентировочный.
                 </div>
               </div>
-            )}
-          </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
