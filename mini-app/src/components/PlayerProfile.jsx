@@ -95,15 +95,13 @@ function PlayerAvatarWithRating({ player, rating, ratingChange, size = 'sm' }) {
     ? ratingChange.after.toFixed(2)
     : typeof rating === 'number'
       ? rating.toFixed(1)
-      : '—';
+      : null;
   const deltaStr = fmtSignedDelta(ratingChange?.delta);
 
   const SIZES = {
     sm: {
       wrapper: 'w-10 h-10 aspect-square',
       text: 'text-sm',
-      badge: 'w-5 h-5 -top-1 -right-1',
-      badgeText: 'text-[10px]',
     },
   };
 
@@ -119,23 +117,11 @@ function PlayerAvatarWithRating({ player, rating, ratingChange, size = 'sm' }) {
             {initials}
           </div>
         )}
-        {/* Rating Badge */}
-        <div className={`absolute ${s.badge} bg-green-600 rounded-full flex items-center justify-center border-2 border-slate-900`}>
-          <span className={`text-white font-bold leading-none ${s.badgeText}`}>
-            {ratingStr}
-          </span>
-        </div>
       </div>
-      {deltaStr && (
-        <div style={{
-          color: ratingChange.delta >= 0 ? C.win : C.loss,
-          fontSize: '10px',
-          fontWeight: 800,
-          textAlign: 'center',
-          marginTop: '4px',
-          fontVariantNumeric: 'tabular-nums',
-        }}>
-          {deltaStr}
+      {(ratingStr || deltaStr) && (
+        <div style={{ display: 'flex', justifyContent: 'center', gap: '3px', marginTop: '4px', fontSize: '10px', fontWeight: 800, lineHeight: 1, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+          {ratingStr && <span style={{ color: C.muted }}>{ratingStr}</span>}
+          {deltaStr && <span style={{ color: ratingChange.delta >= 0 ? C.win : C.loss }}>{deltaStr}</span>}
         </div>
       )}
     </div>
