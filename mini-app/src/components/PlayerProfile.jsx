@@ -62,6 +62,7 @@ const ME_ID = 'me';
 
 const fmtRating  = (n) => (typeof n === 'number' ? n.toFixed(2) : '—');
 const fmtDelta   = (n) => (typeof n === 'number' ? `${n >= 0 ? '+' : ''}${n.toFixed(3)}` : '—');
+const fmtSignedDelta = (n) => (typeof n === 'number' ? `${n >= 0 ? '+' : ''}${n.toFixed(2)}` : null);
 const fmtSetList = (sets) => (sets ?? [])
   .filter(s => (s.t1 ?? 0) + (s.t2 ?? 0) > 0)
   .map(s => `${s.t1}:${s.t2}`)
@@ -88,9 +89,14 @@ const getCompletedResultLabel = (match, userId) => {
 
 // ─── Player Avatar with Rating Badge ──────────────────────────────────────────
 
-function PlayerAvatarWithRating({ player, rating, size = 'sm' }) {
+function PlayerAvatarWithRating({ player, rating, ratingChange, size = 'sm' }) {
   const initials = [player?.firstName?.[0], player?.lastName?.[0]].filter(Boolean).join('') || '?';
-  const ratingStr = typeof rating === 'number' ? rating.toFixed(1) : '—';
+  const ratingStr = typeof ratingChange?.after === 'number'
+    ? ratingChange.after.toFixed(2)
+    : typeof rating === 'number'
+      ? rating.toFixed(1)
+      : '—';
+  const deltaStr = fmtSignedDelta(ratingChange?.delta);
 
   const SIZES = {
     sm: {
@@ -120,6 +126,18 @@ function PlayerAvatarWithRating({ player, rating, size = 'sm' }) {
           </span>
         </div>
       </div>
+      {deltaStr && (
+        <div style={{
+          color: ratingChange.delta >= 0 ? C.win : C.loss,
+          fontSize: '10px',
+          fontWeight: 800,
+          textAlign: 'center',
+          marginTop: '4px',
+          fontVariantNumeric: 'tabular-nums',
+        }}>
+          {deltaStr}
+        </div>
+      )}
     </div>
   );
 }
@@ -132,9 +150,10 @@ function TeamAvatars({ team, ratingChanges }) {
   return (
     <div className="flex items-center gap-2">
       {team.map((p, index) => {
-        const rating = ratingChanges?.[p?.id]?.after;
+        const ratingChange = ratingChanges?.[p?.id];
+        const rating = ratingChange?.after;
         const playerInfo = p?.id === ME_ID ? { firstName: 'Вы' } : p;
-        return <PlayerAvatarWithRating key={p?.id || index} player={playerInfo} rating={rating} />;
+        return <PlayerAvatarWithRating key={p?.id || index} player={playerInfo} rating={rating} ratingChange={ratingChange} />;
       })}
     </div>
   );
@@ -149,6 +168,8 @@ function ProfileMatchCard({ match, type = 'upcoming', onClick, userId }) {
   const title = match.title || (match.type === 'match' ? 'Матч' : 'Бронь');
   const meta = [match.date, match.time, match.courtName || 'Корт'].filter(Boolean).join(' · ');
   const resultLabel = getCompletedResultLabel(match, userId);
+  const ratingChanges = match.ratingChanges ?? match.rating_changes;
+  const hasRatingChanges = ratingChanges && Object.keys(ratingChanges).length > 0;
 
   return (
     <button
@@ -179,11 +200,21 @@ function ProfileMatchCard({ match, type = 'upcoming', onClick, userId }) {
         </div>
       </div>
       {isCompleted && (
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', marginTop: '10px', color: C.muted, fontSize: '11px' }}>
-          <span>{fmtPair(match.team1)}</span>
-          <span style={{ color: C.text, fontWeight: 700 }}>{score}</span>
-          <span>{fmtPair(match.team2)}</span>
-        </div>
+        hasRatingChanges ? (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center', gap: '10px', marginTop: '12px' }}>
+            <TeamAvatars team={match.team1} ratingChanges={ratingChanges} />
+            <span style={{ color: C.text, fontWeight: 800, fontSize: '12px' }}>{score}</span>
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <TeamAvatars team={match.team2} ratingChanges={ratingChanges} />
+            </div>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', marginTop: '10px', color: C.muted, fontSize: '11px' }}>
+            <span>{fmtPair(match.team1)}</span>
+            <span style={{ color: C.text, fontWeight: 700 }}>{score}</span>
+            <span>{fmtPair(match.team2)}</span>
+          </div>
+        )
       )}
     </button>
   );
@@ -494,15 +525,14 @@ export default function PlayerProfile({ user, stats, upcomingMatches = [], compl
   const [verifPath, setVerifPath]       = useState(null);
   const [showTraining, setShowTraining] = useState(false);
 
-  // Lunda screenshot upload
   const fileInputRef                  = useRef(null);
-  const [lundaFile, setLundaFile]     = useState(null);   // filename string
+  const [ratingFile, setRatingFile]   = useState(null);
 
-  const handleLundaFile = (e) => {
+  const handleRatingFile = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    setLundaFile(file.name);
-    setVerifPath('lunda');
+    setRatingFile(file.name);
+    setVerifPath('screenshot');
     showToast('Уведомление отправлено администратору', 'info');
     e.target.value = ''; // reset input
   };
@@ -516,7 +546,7 @@ export default function PlayerProfile({ user, stats, upcomingMatches = [], compl
         ref={fileInputRef}
         type="file"
         accept="image/*"
-        onChange={handleLundaFile}
+        onChange={handleRatingFile}
         style={{ display: 'none' }}
       />
 
@@ -600,7 +630,7 @@ export default function PlayerProfile({ user, stats, upcomingMatches = [], compl
                 </div>
               </div>
 
-            ) : verifPath === 'lunda' ? (
+            ) : verifPath === 'screenshot' ? (
               /* ── Скриншот на проверке ── */
               <div style={{ background: 'rgba(212,175,55,0.07)', borderRadius: '10px', padding: '10px 12px', border: '1px solid rgba(212,175,55,0.2)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
@@ -608,7 +638,7 @@ export default function PlayerProfile({ user, stats, upcomingMatches = [], compl
                   <div style={{ color: C.gold, fontSize: '12px', fontWeight: 700 }}>На проверке у администратора</div>
                 </div>
                 <div style={{ color: C.muted, fontSize: '11px', paddingLeft: '24px' }}>
-                  {lundaFile || 'screenshot.png'} · Ожидайте подтверждения
+                  {ratingFile || 'screenshot.png'} · Ожидайте подтверждения
                 </div>
               </div>
 
@@ -672,7 +702,13 @@ export default function PlayerProfile({ user, stats, upcomingMatches = [], compl
 
         </div>
 
-        {/* ── Rating history chart ── */}
+        <RatingChart
+          currentRating={currentRating}
+          completedMatches={completedMatches}
+          userId={user?.id}
+        />
+
+        {/* ── Match sections ── */}
         <ProfileMatchSection
           title="Предстоящие матчи"
           emptyText="Пока нет предстоящих матчей"
@@ -691,23 +727,25 @@ export default function PlayerProfile({ user, stats, upcomingMatches = [], compl
           userId={user?.id}
         />
 
-        <RatingChart hasCompletedMatches={completedMatches.length > 0} />
-
         {/* ── Family bonus ── */}
         {hasFamilyMembership && <FamilyBonusBlock />}
 
         {/* ── CTAs ── */}
         <PadelButton
-          variant="yellow"
+          variant={onBookCourt ? 'yellow' : 'dark'}
           size="lg"
           fullWidth
           onClick={() => {
-            onBookCourt(); // This is `setActiveTab('booking')`
-            showToast('Сначала выберите свободный корт и время');
+            if (onBookCourt) {
+              onBookCourt();
+              showToast?.('Сначала выберите свободный корт и время');
+              return;
+            }
+            showToast?.('Бронирование через приложение скоро будет обновлено', 'info');
           }}
           className="mb-6"
         >
-          Забронировать / Создать матч
+          {onBookCourt ? 'Забронировать / Создать матч' : 'Бронирование скоро будет обновлено'}
         </PadelButton>
 
         {user?.role === 'admin' && (

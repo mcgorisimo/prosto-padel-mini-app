@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 
 const C = {
   bg:      '#020617',
@@ -35,7 +35,7 @@ const countSetsWon = (score) => {
 
 // ─── Stepper (Apple-style +/-) ───────────────────────────────────────────────
 
-function Stepper({ value, onChange, color }) {
+function Stepper({ value, onChange, color, disabled = false }) {
   const minus = () => onChange(Math.max(0, value - 1));
   const plus  = () => onChange(Math.min(7, value + 1));
   const btn = (disabled) => ({
@@ -49,13 +49,13 @@ function Stepper({ value, onChange, color }) {
   });
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-      <button onClick={minus} disabled={value === 0} style={btn(value === 0)}>−</button>
+      <button onClick={minus} disabled={disabled || value === 0} style={btn(disabled || value === 0)}>−</button>
       <div style={{
         minWidth: 36, textAlign: 'center',
         color: color || C.text, fontSize: 28, fontWeight: 800, letterSpacing: '-0.02em',
         fontVariantNumeric: 'tabular-nums', lineHeight: 1,
       }}>{value}</div>
-      <button onClick={plus} disabled={value === 7} style={btn(value === 7)}>+</button>
+      <button onClick={plus} disabled={disabled || value === 7} style={btn(disabled || value === 7)}>+</button>
     </div>
   );
 }
@@ -140,6 +140,11 @@ export default function FinishMatchModal({ players, onSave, onClose }) {
 
   const team1Players = team1Idx.map(i => players[i]);
   const team2Players = team2Idx.map(i => players[i]);
+  const firstTwoWinners = score.slice(0, 2).map(winnerOfSet);
+  const firstTwoPlayed = firstTwoWinners.every(Boolean);
+  const thirdSetNeeded = firstTwoPlayed && firstTwoWinners[0] !== firstTwoWinners[1];
+  const thirdSetLocked = firstTwoPlayed && firstTwoWinners[0] === firstTwoWinners[1];
+  const effectiveScore = thirdSetLocked ? [score[0], score[1], { t1: 0, t2: 0 }] : score;
 
   // Tap-swap: tap player → highlight; tap an opposite-team player → swap; tap same team → switch selection
   const handleTapPlayer = (origIdx) => {
@@ -164,13 +169,23 @@ export default function FinishMatchModal({ players, onSave, onClose }) {
   const setSetScore = (setIdx, side, val) =>
     setScore(prev => prev.map((s, i) => (i === setIdx ? { ...s, [side]: val } : s)));
 
-  const setsWon    = countSetsWon(score);
+  useEffect(() => {
+    if (!thirdSetLocked && !(!firstTwoPlayed || firstTwoWinners.includes(0))) return;
+    setScore(prev => {
+      const third = prev[2];
+      if ((third?.t1 ?? 0) === 0 && (third?.t2 ?? 0) === 0) return prev;
+      return [prev[0], prev[1], { t1: 0, t2: 0 }];
+    });
+  }, [thirdSetLocked, firstTwoPlayed, firstTwoWinners[0], firstTwoWinners[1]]);
+
+  const setsWon    = countSetsWon(effectiveScore);
   const isTeam1Win = setsWon.t1 > setsWon.t2;
-  const canSave    = setsWon.t1 >= 2 || setsWon.t2 >= 2;
+  const thirdSetWinner = winnerOfSet(score[2]);
+  const canSave    = thirdSetLocked || (thirdSetNeeded && thirdSetWinner !== 0);
 
   const handleSave = () => {
     if (!canSave) return;
-    onSave({ team1: team1Players, team2: team2Players, score, isTeam1Win });
+    onSave({ team1: team1Players, team2: team2Players, score: effectiveScore, isTeam1Win });
   };
 
   return (
@@ -258,10 +273,12 @@ export default function FinishMatchModal({ players, onSave, onClose }) {
           </div>
           {score.map((set, i) => {
             const w = winnerOfSet(set);
+            const disabled = i === 2 && !thirdSetNeeded;
             return (
               <div key={i} style={{
                 display: 'flex', alignItems: 'center', padding: '10px 4px',
                 borderBottom: i < score.length - 1 ? `1px solid ${C.border}55` : 'none',
+                opacity: disabled ? 0.42 : 1,
               }}>
                 <div style={{ width: 40, color: C.muted, fontSize: 13, fontWeight: 600 }}>#{i + 1}</div>
                 <div style={{ flex: 1, display: 'flex', justifyContent: 'center' }}>
@@ -269,6 +286,7 @@ export default function FinishMatchModal({ players, onSave, onClose }) {
                     value={set.t1}
                     onChange={v => setSetScore(i, 't1', v)}
                     color={w === 1 ? C.win : (w === 2 ? '#475569' : C.text)}
+                    disabled={disabled}
                   />
                 </div>
                 <div style={{ width: 16, color: C.muted, fontSize: 18, fontWeight: 600, textAlign: 'center' }}>:</div>
@@ -277,11 +295,15 @@ export default function FinishMatchModal({ players, onSave, onClose }) {
                     value={set.t2}
                     onChange={v => setSetScore(i, 't2', v)}
                     color={w === 2 ? C.win : (w === 1 ? '#475569' : C.text)}
+                    disabled={disabled}
                   />
                 </div>
               </div>
             );
           })}
+        </div>
+        <div style={{ color: C.muted, fontSize: 11, lineHeight: 1.45, textAlign: 'center', marginTop: '-6px', marginBottom: 12 }}>
+          3-й сет нужен только при счёте 1:1 по сетам.
         </div>
 
         {/* ── Status hint ───────────────────────────────────────────────── */}
@@ -291,7 +313,9 @@ export default function FinishMatchModal({ players, onSave, onClose }) {
         }}>
           {canSave
             ? `Победитель: Команда ${isTeam1Win ? '1' : '2'} · ${setsWon.t1}:${setsWon.t2}`
-            : 'Чтобы сохранить, одна из команд должна выиграть 2 сета'}
+            : thirdSetNeeded
+              ? 'При счёте 1:1 нужно сыграть 3-й сет'
+              : 'Чтобы сохранить, одна из команд должна выиграть 2 сета'}
         </div>
 
         {/* ── Buttons ───────────────────────────────────────────────────── */}

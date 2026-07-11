@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { getAvailableBots, applyMatchOutcome, getTestBots } from '../lib/testSeed';
+import { getAvailableBots, getTestBots } from '../lib/testSeed';
 import { getCourtCapacity, getPerPlayerPrice, fmtPrice as fmtPriceLib, isPrimeTime } from '../lib/pricing';
 import { HOURS, WORKING_HOURS, BOOKING_DURATIONS } from '../lib/booking';
 import FinishMatchModal from './FinishMatchModal';
@@ -9,11 +9,12 @@ import PadelButton from './ui/PadelButton';
 import { supabase } from '../lib/supabaseClient';
 import { getMatchLevelBadges, getMatchLevelRequirement } from '../lib/matchLevelRequirement';
 import { getMatchBookingStatus } from '../lib/matchBookingStatus';
+import { isRatingMatch, requiresVerifiedRating as getRequiresVerifiedRating } from '../lib/matchRating';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const RATINGS   = ['D', 'D+', 'C', 'C+', 'B', 'B+', 'A'];
-const LUNDA_NUM = ['1.0–1.9', '1.5–2.4', '2.5–2.9', '3.0–3.4', '3.5–3.9', '4.0–4.4', '4.5+'];
+const NUMERIC_RATING_LABELS = ['1.0–1.9', '1.5–2.4', '2.5–2.9', '3.0–3.4', '3.5–3.9', '4.0–4.4', '4.5+'];
 
 const C = {
   bg:      '#050F0B',
@@ -52,6 +53,7 @@ const fmtSetList = (sets) => (sets ?? [])
   .filter(s => (s.t1 ?? 0) + (s.t2 ?? 0) > 0)
   .map(s => `${s.t1}:${s.t2}`)
   .join(', ');
+const fmtDelta = (value) => (typeof value === 'number' ? `${value >= 0 ? '+' : ''}${value.toFixed(3)}` : null);
 
 const canManageMatch = (user, match) =>
   user.id === (match.ownerId ?? match.owner_id) || user.role === 'admin';
@@ -100,7 +102,7 @@ function BottomSheet({ children, onClose, variant = 'default' }) {
 
 // ─── Player Mini-Profile ──────────────────────────────────────────────────────
 
-function PlayerMiniProfile({ player, onClose }) {
+function PlayerMiniProfile({ player, onClose, onRemove }) {
   const initials = [player.firstName?.[0], player.lastName?.[0]].filter(Boolean).join('') || '?';
   const isGold   = (player.ratingIdx ?? 0) >= 2;
 
@@ -133,7 +135,7 @@ function PlayerMiniProfile({ player, onClose }) {
                 <div style={{ background: 'rgba(216,243,74,0.10)', borderRadius: '6px', padding: '2px 8px', border: '1px solid rgba(216,243,74,0.24)', color: C.gold, fontSize: '12px', fontWeight: 700 }}>
                   {RATINGS[player.ratingIdx]}
                 </div>
-                <div style={{ color: C.muted, fontSize: '11px' }}>{LUNDA_NUM[player.ratingIdx]}</div>
+                <div style={{ color: C.muted, fontSize: '11px' }}>{NUMERIC_RATING_LABELS[player.ratingIdx]}</div>
               </>
             )}
             {player.isVerified && (
@@ -163,6 +165,11 @@ function PlayerMiniProfile({ player, onClose }) {
         </div>
       )}
 
+      {onRemove && (
+        <button onClick={onRemove} style={{ width: '100%', padding: '14px', marginBottom: '10px', background: 'rgba(239,68,68,0.08)', color: C.loss, border: '1px solid rgba(239,68,68,0.24)', borderRadius: '12px', fontSize: '15px', fontWeight: 700, cursor: 'pointer' }}>
+          Убрать из матча
+        </button>
+      )}
       <button onClick={onClose} style={{ width: '100%', padding: '14px', background: 'transparent', color: C.muted, border: `1px solid ${C.border}`, borderRadius: '12px', fontSize: '15px', cursor: 'pointer' }}>
         Закрыть
       </button>
@@ -190,7 +197,7 @@ function RatingGuardBanner({ match, reason }) {
 
 // ─── Player Slot ──────────────────────────────────────────────────────────────
 
-function PlayerSlot({ player, onTap, isOwner, onKick, slotIndex = 0, onSlotClick }) {
+function PlayerSlot({ player, onTap, slotIndex = 0, onSlotClick, ratingChange }) {
   const initials = player
     ? [player.firstName?.[0], player.lastName?.[0]].filter(Boolean).join('') || (player.firstName?.[0] ?? '?')
     : null;
@@ -199,7 +206,12 @@ function PlayerSlot({ player, onTap, isOwner, onKick, slotIndex = 0, onSlotClick
   const hasRealData   = player && !isPlaceholder;
   const isEmpty       = !player; // truly empty — clickable
 
-  const ratingStr = typeof player?.numericRating === 'number' ? player.numericRating.toFixed(1) : null;
+  const ratingStr = typeof ratingChange?.after === 'number'
+    ? ratingChange.after.toFixed(2)
+    : typeof player?.numericRating === 'number'
+      ? player.numericRating.toFixed(1)
+      : null;
+  const deltaStr = fmtDelta(ratingChange?.delta);
   const slotColor   = PLAYER_COLORS[slotIndex % PLAYER_COLORS.length];
   const borderColor = hasRealData ? slotColor : C.border;
 
@@ -291,21 +303,6 @@ function PlayerSlot({ player, onTap, isOwner, onKick, slotIndex = 0, onSlotClick
         )}
       </div>
 
-      {/* Kick button — only match owner, only real non-organizer players */}
-      {isOwner && hasRealData && !isOrganizer && (
-        <button
-          onClick={() => onKick?.(player)}
-          style={{
-            position: 'absolute', top: '-4px', left: '-4px',
-            width: '18px', height: '18px', borderRadius: '50%',
-            background: '#EF4444', border: `2px solid ${C.bg}`,
-            color: '#fff', fontSize: '9px', fontWeight: 900,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            cursor: 'pointer', padding: 0, lineHeight: 1,
-          }}
-        >✕</button>
-      )}
-
       <div style={{
         color: hasRealData ? slotColor : C.muted,
         fontSize: '11px', fontWeight: player ? 600 : 400,
@@ -313,6 +310,17 @@ function PlayerSlot({ player, onTap, isOwner, onKick, slotIndex = 0, onSlotClick
       }}>
         {label}
       </div>
+      {hasRealData && deltaStr && (
+        <div style={{
+          color: ratingChange.delta >= 0 ? C.win : C.loss,
+          fontSize: '10px',
+          fontWeight: 800,
+          lineHeight: 1,
+          fontVariantNumeric: 'tabular-nums',
+        }}>
+          {deltaStr}
+        </div>
+      )}
     </div>
   );
 }
@@ -759,9 +767,31 @@ function ScenarioInfoBlock({ match }) {
   );
 }
 
+function RatingTypeBadge({ match }) {
+  const isRated = isRatingMatch(match);
+
+  return (
+    <div style={{ marginBottom: '16px' }}>
+      <span style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        borderRadius: '999px',
+        padding: '5px 10px',
+        border: isRated ? '1px solid rgba(216,243,74,0.28)' : `1px solid ${C.border}`,
+        background: isRated ? 'rgba(216,243,74,0.08)' : C.card,
+        color: isRated ? C.gold : C.muted,
+        fontSize: '11px',
+        fontWeight: 800,
+      }}>
+        {isRated ? 'Рейтинговая игра' : 'Обычная игра'}
+      </span>
+    </div>
+  );
+}
+
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
-export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinSuccess, onDelete, onComplete, onUpdate, onSlotsChange, allMessages, onSendMessage, onRevertToPrivate, showToast }) {
+export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinSuccess, onDelete, onComplete, onConfirmScore, onDisputeScore, onUpdate, onSlotsChange, allMessages, onSendMessage, onRevertToPrivate, showToast }) {
   const isOwner = canManageMatch(currentUser, match);
 
   const allBots = useMemo(() => getTestBots(), []);
@@ -810,8 +840,14 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
     time:        origTime,
     duration:    origDuration,
   } = match;
-  const requiresVerifiedRating = match.requiresVerifiedRating === true || match.requires_verified_rating === true;
+  const requiresVerifiedRating = getRequiresVerifiedRating(match);
   const levelRequirement = getMatchLevelRequirement(match);
+  const isRatedMatch = isRatingMatch(match);
+  const scoreStatus = match.scoreStatus ?? match.score_status ?? 'none';
+  const isScorePending = scoreStatus === 'pending_confirmation' || status === 'pending_confirmation';
+  const isScoreDisputed = scoreStatus === 'disputed' || status === 'disputed';
+  const isScoreConfirmed = scoreStatus === 'confirmed';
+  const ratingChanges = match.ratingChanges ?? match.rating_changes ?? {};
 
   // Effective values — local overrides original when owner edits
   const dateISO   = localDate  ?? origDateISO;
@@ -869,9 +905,36 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
   const isFull    = allFilled.length >= maxSlots;
   const savedScore = match.finalScore ?? match.score;
   const hasFinalScore = Array.isArray(savedScore) && savedScore.some(s => (s?.t1 ?? 0) + (s?.t2 ?? 0) > 0);
-  const isCompletedMatch = finished || status === 'completed' || status === 'finished' || hasFinalScore;
-  const canEditMatch = isOwner && !isCompletedMatch;
+  const isCompletedMatch = finished || status === 'completed' || status === 'finished' || (hasFinalScore && !isScorePending && !isScoreDisputed && !isRatedMatch);
+  const canEditMatch = isOwner && !isCompletedMatch && !isScorePending && !isScoreDisputed;
   const completedScoreText = fmtSetList(savedScore);
+  const scoreSubmittedBy = match.scoreSubmittedBy ?? match.score_submitted_by;
+
+  const playerTeam = (playerId) => {
+    if (!playerId) return null;
+    if ((match.team1 ?? []).some(player => player?.id === playerId)) return 1;
+    if ((match.team2 ?? []).some(player => player?.id === playerId)) return 2;
+    return null;
+  };
+  const submittedTeam = playerTeam(scoreSubmittedBy) ?? playerTeam(match.ownerId ?? match.owner_id);
+  const currentUserTeam = playerTeam(currentUser.id);
+  const confirmingTeamNumber = submittedTeam === 1 ? 2 : submittedTeam === 2 ? 1 : null;
+  const confirmingPlayers = confirmingTeamNumber === 1
+    ? (match.team1 ?? [])
+    : confirmingTeamNumber === 2
+      ? (match.team2 ?? [])
+      : [];
+  const confirmingPlayersLabel = confirmingPlayers
+    .map(player => [player?.firstName, player?.lastName].filter(Boolean).join(' ').trim() || player?.firstName)
+    .filter(Boolean)
+    .join(' или ');
+  const canConfirmPendingScore =
+    isRatedMatch &&
+    isScorePending &&
+    currentUser.id !== scoreSubmittedBy &&
+    currentUserTeam != null &&
+    submittedTeam != null &&
+    currentUserTeam !== submittedTeam;
 
   // Join guard
   const isParticipant = (match.participants ?? []).includes(currentUser.id)
@@ -952,17 +1015,31 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
 
   const handleKickConfirm = async () => {
     try {
-      await commitSlots(allFilled.filter(p => p !== kickTarget));
+      await commitSlots(allFilled.filter(p => {
+        if (!kickTarget?.id) return p !== kickTarget;
+        return p?.id !== kickTarget.id;
+      }));
       setKickTarget(null);
     } catch {
       showToast?.('Слот не обновлен. Попробуйте еще раз.', 'error');
     }
   };
 
+  const handleRemoveViewedPlayer = () => {
+    if (!canEditMatch || !viewPlayer || viewPlayer.isOrganizer) return;
+    setKickTarget(viewPlayer);
+    setViewPlayer(null);
+  };
+
   // Owner adds a named guest into a specific empty slot
   const handleAddGuest = async (slotIndex, playerData) => {
     if (slots[slotIndex]) {
       showToast?.('Этот слот уже занят.', 'info');
+      return false;
+    }
+
+    if (requiresVerifiedRating && (typeof playerData === 'string' || playerData?.isVerified !== true)) {
+      showToast?.('Для рейтинговой игры можно добавить только игрока с подтверждённым рейтингом.', 'error');
       return false;
     }
 
@@ -991,6 +1068,10 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
   const handleAddBot = async (slotIndex) => {
     if (availableBots.length === 0) return;
     const bot  = availableBots[Math.floor(Math.random() * availableBots.length)];
+    if (requiresVerifiedRating && bot?.isVerified !== true) {
+      showToast?.('Для рейтинговой игры нужен подтверждённый рейтинг участника.', 'error');
+      return;
+    }
     const next = [...slots];
     next[slotIndex] = bot;
     try {
@@ -1002,23 +1083,57 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
   };
 
   const handleFinishMatch = () => {
-    if (!isFull || isCompletedMatch) return;
+    if (!isFull || isCompletedMatch || isScorePending || isScoreDisputed) return;
     setFinishModal(true);
   };
 
   const handleFinalize = async ({ team1, team2, score, isTeam1Win }) => {
-    const result = applyMatchOutcome(team1, team2, isTeam1Win, match.id);
+    let updatedMatch;
     try {
-      await onComplete?.(match.id, { score, isTeam1Win, team1, team2, ratingChanges: result.ratingChanges });
-      setFinished(true);
+      updatedMatch = await onComplete?.(match.id, { score, isTeam1Win, team1, team2 });
+      setFinished(updatedMatch?.status === 'completed' || updatedMatch?.status === 'finished');
       setFinishModal(false);
-    } catch {
-      showToast?.('Р РµР·СѓР»СЊС‚Р°С‚ РЅРµ СЃРѕС…СЂР°РЅРёР»СЃСЏ. РџРѕРїСЂРѕР±СѓР№С‚Рµ РµС‰Рµ СЂР°Р·.', 'error');
+    } catch (error) {
+      const isRatingApprovalError = error?.message === 'Rated match completion requires server-side rating approval';
+      showToast?.(
+        isRatingApprovalError
+          ? 'Рейтинговый матч не завершён: требуется серверное подтверждение рейтинга.'
+          : 'Результат не сохранился. Попробуйте ещё раз.',
+        'error'
+      );
       return;
     }
-    const sign = result.userDelta >= 0 ? '+' : '';
-    setFinishToast(`Рейтинг обновлён: ${sign}${result.userDelta.toFixed(3)}`);
+    const userDelta = updatedMatch?.ratingChanges?.[currentUser.id]?.delta;
+    if (typeof userDelta === 'number') {
+      const sign = userDelta >= 0 ? '+' : '';
+      setFinishToast(`Рейтинг обновлён: ${sign}${userDelta.toFixed(3)}`);
+    } else if (updatedMatch?.scoreStatus === 'pending_confirmation' || updatedMatch?.score_status === 'pending_confirmation') {
+      setFinishToast('Счёт отправлен на подтверждение');
+    } else {
+      setFinishToast('Матч завершён');
+    }
     setTimeout(() => setFinishToast(null), 4000);
+  };
+
+  const handleConfirmScore = async () => {
+    if (!canConfirmPendingScore) return;
+    try {
+      const updatedMatch = await onConfirmScore?.(match.id);
+      if (updatedMatch?.status === 'completed' || updatedMatch?.status === 'finished') {
+        setFinished(true);
+      }
+    } catch {
+      // Parent already shows the concrete Supabase/RPC error.
+    }
+  };
+
+  const handleDisputeScore = async () => {
+    if (!canConfirmPendingScore) return;
+    try {
+      await onDisputeScore?.(match.id);
+    } catch {
+      // Parent already shows the concrete Supabase error.
+    }
   };
 
   // Non-owner takes an empty slot with their own profile
@@ -1162,6 +1277,34 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
 
         {/* ── Scenario status block ─────────────────────────────────────── */}
         <ScenarioInfoBlock match={match} />
+        <RatingTypeBadge match={match} />
+        {(isScorePending || isScoreDisputed || isScoreConfirmed) && (
+          <div style={{
+            background: isScoreDisputed ? 'rgba(239,68,68,0.07)' : isScorePending ? 'rgba(212,175,55,0.07)' : 'rgba(34,197,94,0.07)',
+            borderRadius: '12px',
+            padding: '12px 14px',
+            border: isScoreDisputed ? '1px solid rgba(239,68,68,0.25)' : isScorePending ? '1px solid rgba(212,175,55,0.25)' : '1px solid rgba(34,197,94,0.25)',
+            marginBottom: '16px',
+          }}>
+            <div style={{ color: isScoreDisputed ? C.loss : isScorePending ? C.gold : C.win, fontWeight: 800, fontSize: '13px', marginBottom: completedScoreText ? '4px' : 0 }}>
+              {isScoreDisputed ? 'Счёт оспорен' : isScorePending ? 'Ожидает подтверждения счёта' : 'Счёт подтверждён'}
+            </div>
+            {completedScoreText && (
+              <div style={{ color: C.text, fontSize: '14px', fontWeight: 800, marginBottom: '4px' }}>
+                {completedScoreText}
+              </div>
+            )}
+            <div style={{ color: C.muted, fontSize: '12px', lineHeight: 1.5 }}>
+              {isScoreDisputed
+                ? 'Счёт оспорен. Обратитесь к администратору клуба.'
+                : isScorePending
+                  ? confirmingPlayersLabel
+                    ? `Ожидаем подтверждение от команды ${confirmingTeamNumber}: ${confirmingPlayersLabel}.`
+                    : 'Ожидаем подтверждение от противоположной команды.'
+                  : 'Результат подтверждён и сохранён.'}
+            </div>
+          </div>
+        )}
 
         {/* ── Rating requirement ─────────────────────────────────────────── */}
         <div style={{ marginBottom: '16px' }}>
@@ -1176,7 +1319,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
               <div style={{ color: C.text, fontWeight: 700, fontSize: '14px' }}>
                 {levelRequirement.numericRangeLabel}
               </div>
-              <div style={{ color: C.muted, fontSize: '10px', marginTop: '2px' }}>Lunda Rating</div>
+              <div style={{ color: C.muted, fontSize: '10px', marginTop: '2px' }}>Клубный рейтинг</div>
             </div>
           </div>
           <div style={{ color: C.muted, fontSize: '11px', lineHeight: 1.45, marginTop: '8px', paddingLeft: '2px' }}>
@@ -1198,7 +1341,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
             <div style={{ fontSize: '10px', fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.12em' }}>
               Игроки {allFilled.length}/{maxSlots}
             </div>
-            {canEditMatch && (
+            {canEditMatch && !isFull && (
               <button onClick={() => setInviteSheet(true)} style={{ padding: '5px 12px', background: 'rgba(216,243,74,0.10)', border: '1px solid rgba(216,243,74,0.24)', borderRadius: '8px', color: C.gold, fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}>
                 + Пригласить
               </button>
@@ -1218,8 +1361,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
                   player={enrichedPlayer}
                   slotIndex={i}
                   onTap={setViewPlayer}
-                  isOwner={canEditMatch}
-                  onKick={p => setKickTarget(p)}
+                  ratingChange={enrichedPlayer?.id ? ratingChanges[enrichedPlayer.id] : null}
                   onSlotClick={!isCompletedMatch ? () => handleEmptySlotClick(i) : undefined}
                 />
               );
@@ -1249,7 +1391,32 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
         </div>
 
         {/* ── CTA / owner badge ─────────────────────────────────────────────── */}
-        {isCompletedMatch ? (
+        {isScoreDisputed ? (
+          <div style={{ textAlign: 'center', padding: '18px', background: 'rgba(239,68,68,0.07)', borderRadius: '14px', border: '1px solid rgba(239,68,68,0.25)' }}>
+            <div style={{ color: C.loss, fontWeight: 800, fontSize: '16px' }}>Счёт оспорен</div>
+            <div style={{ color: C.muted, fontSize: '12px', marginTop: '6px' }}>Обратитесь к администратору клуба.</div>
+          </div>
+        ) : isScorePending ? (
+          canConfirmPendingScore ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <PadelButton variant="success" size="lg" fullWidth onClick={handleConfirmScore}>
+                Подтвердить счёт
+              </PadelButton>
+              <PadelButton variant="dark" size="md" fullWidth onClick={handleDisputeScore}>
+                Оспорить
+              </PadelButton>
+            </div>
+          ) : (
+            <div style={{ textAlign: 'center', padding: '18px', background: 'rgba(212,175,55,0.07)', borderRadius: '14px', border: '1px solid rgba(212,175,55,0.24)' }}>
+              <div style={{ color: C.gold, fontWeight: 800, fontSize: '16px' }}>Ожидает подтверждения счёта</div>
+              <div style={{ color: C.muted, fontSize: '12px', marginTop: '6px', lineHeight: 1.45 }}>
+                {confirmingPlayersLabel
+                  ? `Подтвердить может команда ${confirmingTeamNumber}: ${confirmingPlayersLabel}.`
+                  : 'Подтвердить может участник противоположной команды.'}
+              </div>
+            </div>
+          )
+        ) : isCompletedMatch ? (
           <div style={{ textAlign: 'center', padding: '18px', background: 'rgba(34,197,94,0.08)', borderRadius: '14px', border: '1px solid rgba(34,197,94,0.25)' }}>
             <div style={{ color: C.win, fontWeight: 800, fontSize: '17px' }}>✓ Матч завершён</div>
             {completedScoreText && (
@@ -1278,7 +1445,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
                   : `Заполните все слоты (${allFilled.length}/${maxSlots})`}
             </PadelButton>
           </>
-        ) : joined ? (
+        ) : (joined || isParticipant) ? (
           <div style={{ textAlign: 'center', padding: '20px', background: 'rgba(34,197,94,0.08)', borderRadius: '14px', border: '1px solid rgba(34,197,94,0.25)' }}>
             <div style={{ color: C.win, fontWeight: 700, fontSize: '17px' }}>Вы присоединились к матчу!</div>
             <div style={{ color: C.muted, fontSize: '12px', marginTop: '4px' }}>Место сохранено в матче</div>
@@ -1295,14 +1462,20 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
               disabled={!canJoin || joining}
               onClick={handleJoin}
             >
-              {isFull ? 'Мест нет' : canJoin ? 'Присоединиться к игре' : 'Участие недоступно'}
+              {isFull ? 'Матч заполнен' : canJoin ? 'Присоединиться к игре' : 'Участие недоступно'}
             </PadelButton>
           </>
         )}
       </div>
 
       {/* ── Sheets / Dialogs ──────────────────────────────────────────────── */}
-      {viewPlayer  && <PlayerMiniProfile player={viewPlayer} onClose={() => setViewPlayer(null)} />}
+      {viewPlayer  && (
+        <PlayerMiniProfile
+          player={viewPlayer}
+          onClose={() => setViewPlayer(null)}
+          onRemove={canEditMatch && !viewPlayer.isOrganizer ? handleRemoveViewedPlayer : null}
+        />
+      )}
       {editSheet   && canEditMatch && <EditPanel initDate={dateISO} initTime={time} initCourt={courtType} initDuration={duration} initTitle={title} initDescription={description} onSave={handleEditSave} onClose={() => setEditSheet(false)} />}
       {cancelSheet && canEditMatch && <CancelSheet onConfirm={handleCancelConfirm} onClose={() => setCancelSheet(false)} />}
       {inviteSheet && canEditMatch && <InviteSheet matchId={match.id} onClose={() => setInviteSheet(false)} />}
