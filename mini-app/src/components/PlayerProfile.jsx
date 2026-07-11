@@ -490,7 +490,7 @@ export default function PlayerProfile({ user, stats, upcomingMatches = [], compl
   const animRating  = useAnimatedNumber(currentRating);
   const animMatches = useAnimatedNumber(matchesCount);
   const animWinRate = useAnimatedNumber(winRate);
-  const [isVerified, setIsVerified]     = useState(initVerified);
+  const isVerified = user?.isVerified ?? initVerified;
   const [verifPath, setVerifPath]       = useState(null);
   const [showTraining, setShowTraining] = useState(false);
 
@@ -542,7 +542,7 @@ export default function PlayerProfile({ user, stats, upcomingMatches = [], compl
               <span style={{ color: currentLevel.color, fontSize: '11px', fontWeight: 700, letterSpacing: '0.06em', fontVariantNumeric: 'tabular-nums' }}>
                 {isVerified
                   ? `Подтверждённый рейтинг · ${currentLevel.label} · ${animRating.toFixed(2)}`
-                  : `Рейтинг пока не подтверждён · ${currentLevel.label}`}
+                  : `Рейтинг пока не подтверждён · примерный уровень ${currentLevel.label}`}
               </span>
             </div>
             <div style={{ color: C.muted, fontSize: '12px' }}>
@@ -613,15 +613,15 @@ export default function PlayerProfile({ user, stats, upcomingMatches = [], compl
               </div>
 
             ) : (
-              /* ── Не подтверждён — честное MVP-состояние ── */
+              /* ── Не подтверждён ── */
               <div style={{ background: 'rgba(100,116,139,0.06)', borderRadius: '10px', padding: '12px', border: `1px solid ${C.border}` }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '10px' }}>
                   <span style={{ color: C.muted, fontSize: '13px', fontWeight: 900 }}>i</span>
                   <span style={{ color: C.muted, fontSize: '12px' }}>Рейтинг пока не подтверждён</span>
                 </div>
                 <div style={{ color: C.muted, fontSize: '11px', lineHeight: 1.5 }}>
-                  Для участия в матчах с ограничением по уровню нужен подтверждённый рейтинг.
-                  Клуб подтвердит уровень после первых игр или тренировки.
+                  Клуб подтвердит рейтинг после первых игр или тренировки.
+                  До этого уровень отображается как ориентировочный.
                 </div>
               </div>
             )}
@@ -691,7 +691,7 @@ export default function PlayerProfile({ user, stats, upcomingMatches = [], compl
           userId={user?.id}
         />
 
-        <RatingChart />
+        <RatingChart hasCompletedMatches={completedMatches.length > 0} />
 
         {/* ── Family bonus ── */}
         {hasFamilyMembership && <FamilyBonusBlock />}

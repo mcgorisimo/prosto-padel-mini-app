@@ -44,7 +44,7 @@ function buildPath(points, minVal, maxVal) {
   }).join(' ');
 }
 
-export default function RatingChart() {
+export default function RatingChart({ hasCompletedMatches = true }) {
   const [history] = useState(loadHistory);
   const [win, setWin] = useState(15);
 
@@ -73,6 +73,35 @@ export default function RatingChart() {
   const isUp        = stats.change >= 0;
   const changeColor = stats.change === 0 ? C.muted : isUp ? C.win : C.loss;
   const changeSign  = stats.change > 0 ? '+' : '';
+
+  if (!hasCompletedMatches || history.length === 0) {
+    return (
+      <div style={{
+        background:   C.card,
+        borderRadius: '16px',
+        border:       `1px solid ${C.border}`,
+        padding:      '16px',
+        marginBottom: '16px',
+      }}>
+        <div style={{
+          color:           C.muted,
+          fontSize:        '10px',
+          fontWeight:      700,
+          textTransform:   'uppercase',
+          letterSpacing:   '0.1em',
+          marginBottom:    '10px',
+        }}>
+          Динамика по матчам
+        </div>
+        <div style={{ color: C.text, fontSize: '15px', fontWeight: 700, marginBottom: '6px' }}>
+          Динамика появится после первых матчей
+        </div>
+        <div style={{ color: C.muted, fontSize: '13px', lineHeight: 1.55 }}>
+          Подтверждённый рейтинг появится после проверки клуба.
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{

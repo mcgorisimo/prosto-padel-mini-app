@@ -94,7 +94,7 @@ export default function AddPlayerModal({ onSelectPlayer, onClose }) {
     <BottomSheet onClose={onClose}>
       <div style={{ marginBottom: '20px' }}>
         <div style={{ color: C.text, fontSize: '17px', fontWeight: 700 }}>Добавить игрока</div>
-        <div style={{ color: C.muted, fontSize: '12px', marginTop: '3px' }}>Поиск по имени или фамилии</div>
+        <div style={{ color: C.muted, fontSize: '12px', marginTop: '3px' }}>Поиск среди игроков клуба</div>
       </div>
 
       <div style={{ marginBottom: '16px' }}>

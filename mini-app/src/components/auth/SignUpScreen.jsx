@@ -76,6 +76,7 @@ export default function SignUpScreen({ onBack, onSuccess, loading, error: parent
           first_name: firstName.trim(),
           last_name: lastName.trim(),
           rating: selectedLevel.initialRating,
+          self_assessed_level: selectedLevel.label,
         },
       },
     });
@@ -112,7 +113,7 @@ export default function SignUpScreen({ onBack, onSuccess, loading, error: parent
           </div>
         </div>
         <p style={{ color: C.muted, fontSize: '13px', margin: '12px 0 0 56px', lineHeight: 1.55 }}>
-          Создайте профиль игрока «Просто Падел»: уровень, удобная сторона, матчи и клубные события.
+          Создайте профиль игрока «Просто Падел»: укажите примерный уровень, удобную сторону, матчи и клубные события.
         </p>
       </div>
 
@@ -181,7 +182,7 @@ export default function SignUpScreen({ onBack, onSuccess, loading, error: parent
           </div>
 
           <div style={{ marginBottom: '18px' }}>
-            <label style={labelSx}>Уровень игры</label>
+            <label style={labelSx}>Самооценка уровня</label>
             <div style={{ position: 'relative' }}>
               <select
                 value={levelOptionIndex}
@@ -210,6 +211,9 @@ export default function SignUpScreen({ onBack, onSuccess, loading, error: parent
               }}>
                 ▾
               </span>
+            </div>
+            <div style={{ color: C.muted, fontSize: '11px', lineHeight: 1.5, marginTop: '8px' }}>
+              Клуб подтвердит рейтинг после первых игр или тренировки.
             </div>
           </div>
 

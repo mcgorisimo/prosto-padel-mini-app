@@ -55,8 +55,8 @@ export default function TrainingModal({ match, onClose, onConfirm, showToast }) 
 
   const handleCopyLink = () => {
     const link = 'https://t.me/+qTqqdOIDHOU1ZTcy';
-    navigator.clipboard.writeText(link);
-    alert('Ссылка-приглашение скопирована!');
+    navigator.clipboard?.writeText(link);
+    showToast?.('Ссылка на Telegram-группу скопирована', 'info');
   };
 
   const handleConfirm = () => {
@@ -142,7 +142,7 @@ export default function TrainingModal({ match, onClose, onConfirm, showToast }) 
               ))}
             </div>
             <button onClick={handleCopyLink} className="mt-3 text-accent-light text-xs font-bold flex items-center gap-1">
-              Telegram-группа «Просто Падел»
+              Скопировать ссылку на Telegram-группу
             </button>
           </Section>
         )}

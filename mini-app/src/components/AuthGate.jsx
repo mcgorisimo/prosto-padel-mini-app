@@ -60,7 +60,8 @@ const handleSignUp = async ({ email, password, options }) => {
             first_name: options.data.first_name, // Берем из того, что пришло
             last_name: options.data.last_name,   // Берем из того, что пришло
             role: 'user', 
-            rating: options.data.rating || 3.0 
+            rating: options.data.rating || 3.0,
+            is_verified: false,
           }
         ])
         .select('id')

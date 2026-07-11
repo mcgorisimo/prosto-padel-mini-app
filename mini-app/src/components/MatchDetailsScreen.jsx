@@ -617,7 +617,7 @@ function SlotActionSheet({ slotIndex, isOwner, currentUser, matchId, onAddGuest,
       <BottomSheet onClose={onClose}>
         <div style={{ marginBottom: '16px' }}>
           <div style={{ color: C.text, fontSize: '17px', fontWeight: 700 }}>Слот {slotIndex + 1} · Свободно</div>
-          <div style={{ color: C.muted, fontSize: '12px', marginTop: '3px' }}>Поиск игрока в базе</div>
+          <div style={{ color: C.muted, fontSize: '12px', marginTop: '3px' }}>Поиск среди игроков клуба</div>
         </div>
         <input
           type="text"
@@ -647,7 +647,7 @@ function SlotActionSheet({ slotIndex, isOwner, currentUser, matchId, onAddGuest,
           </button>
         )}
         <button onClick={handleCopy} style={{ width: '100%', padding: '14px', marginBottom: '12px', background: copied ? 'rgba(34,197,94,0.08)' : C.surface, color: copied ? C.win : C.text, border: `1px solid ${copied ? 'rgba(34,197,94,0.35)' : C.border}`, borderRadius: '12px', fontWeight: 700, cursor: 'pointer' }}>
-          {copied ? 'Ссылка скопирована' : 'Telegram-группа «Просто Падел»'}
+          {copied ? 'Ссылка скопирована' : 'Скопировать ссылку на Telegram-группу'}
         </button>
         <button onClick={onClose} style={{ width: '100%', padding: '14px', background: 'transparent', color: C.muted, border: `1px solid ${C.border}`, borderRadius: '12px', cursor: 'pointer' }}>Закрыть</button>
       </BottomSheet>
@@ -806,6 +806,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
     time:        origTime,
     duration:    origDuration,
   } = match;
+  const requiresVerifiedRating = match.requiresVerifiedRating === true || match.requires_verified_rating === true;
 
   // Effective values — local overrides original when owner edits
   const dateISO   = localDate  ?? origDateISO;
@@ -861,7 +862,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
 
   // Join guard
   const levelOk    = currentUser.ratingIdx >= ratingMin && currentUser.ratingIdx <= ratingMax;
-  const verifiedOk = currentUser.isVerified === true;
+  const verifiedOk = !requiresVerifiedRating || currentUser.isVerified === true;
   const canJoin    = !isCompletedMatch && !isOwner && !isFull && levelOk && verifiedOk;
   const isParticipant = (match.participants ?? []).includes(currentUser.id);
   const guardReason = !verifiedOk ? 'unverified' : !levelOk ? 'level' : null;
@@ -1107,12 +1108,18 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
               <div style={{ color: C.muted, fontSize: '10px', marginTop: '2px' }}>Lunda Rating</div>
             </div>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '8px', paddingLeft: '2px' }}>
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', background: 'linear-gradient(135deg, #f59e0b, #ca8a04)', borderRadius: '4px', padding: '2px 6px' }}>
-              <span style={{ color: '#fff', fontSize: '9px', fontWeight: 800 }}>✓ Подтверждён</span>
+          {requiresVerifiedRating ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '8px', paddingLeft: '2px' }}>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', background: 'linear-gradient(135deg, #f59e0b, #ca8a04)', borderRadius: '4px', padding: '2px 6px' }}>
+                <span style={{ color: '#fff', fontSize: '9px', fontWeight: 800 }}>✓ Подтверждён</span>
+              </div>
+              <span style={{ color: C.muted, fontSize: '11px' }}>подтверждённый рейтинг обязателен для участия</span>
             </div>
-            <span style={{ color: C.muted, fontSize: '11px' }}>подтверждённый рейтинг обязателен для участия</span>
-          </div>
+          ) : (
+            <div style={{ color: C.muted, fontSize: '11px', lineHeight: 1.45, marginTop: '8px', paddingLeft: '2px' }}>
+              Уровень указан ориентировочно. Клуб может подтвердить рейтинг после первых игр.
+            </div>
+          )}
         </div>
 
         {/* ── Players ──────────────────────────────────────────────────────── */}
@@ -1258,7 +1265,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
           slots={slots} // <-- ВОТ ОНА, САМАЯ ГЛАВНАЯ СТРОКА! Передаем массив слотов родителя
           onAddGuest={handleAddGuest}
           onAddBot={handleAddBot}
-          availableBotsCount={availableBotsCount}
+          availableBotsCount={currentUser?.role === 'admin' ? availableBotsCount : 0}
           onTakeSlot={handleTakeSlot}
           showToast={showToast}
           onClose={() => setTargetSlot(null)}
