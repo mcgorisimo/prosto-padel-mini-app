@@ -1,18 +1,21 @@
 import React, { useEffect, useState } from 'react';
-import { Trash2 } from 'lucide-react';
+import { LogOut } from 'lucide-react';
 import { useTelegram } from '../hooks/useTelegram';
 
 const C = {
   bg:     '#020617',
   card:   '#0f172a',
   border: '#1E2755',
+  accent: '#2563eb',
   text:   '#FFFFFF',
   muted:  '#8B9CC8',
   loss:   '#EF4444',
 };
 
-export default function AccountScreen({ onBack, showToast }) {
+export default function AccountScreen({ onBack, onLogout, showToast }) {
   const { tg } = useTelegram();
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     const back = tg?.BackButton;
@@ -25,24 +28,18 @@ export default function AccountScreen({ onBack, showToast }) {
     };
   }, [tg, onBack]);
 
-  const handleDelete = () => {
-    const message =
-      'Удалить аккаунт?\n\n' +
-      'Все данные (имя, статистика, матчи, настройки) будут стёрты безвозвратно. ' +
-      'Это действие нельзя отменить.';
+  const handleLogout = async () => {
+    if (typeof onLogout !== 'function') return;
+    setIsLoggingOut(true);
+    setError('');
 
-    const proceed = () => {
-      localStorage.clear();
-      showToast('Аккаунт удален!', 'error');
-      window.location.reload();
-    };
-
-    if (tg?.showConfirm) {
-      tg.showConfirm(message, (confirmed) => {
-        if (confirmed) proceed();
-      });
-    } else if (window.confirm(message)) {
-      proceed();
+    try {
+      await onLogout();
+    } catch (err) {
+      const message = 'Не удалось выйти из аккаунта. Попробуйте еще раз.';
+      setError(message);
+      showToast?.(message, 'error');
+      setIsLoggingOut(false);
     }
   };
 
@@ -79,65 +76,70 @@ export default function AccountScreen({ onBack, showToast }) {
 
       <div style={{ padding: '20px 16px 0' }}>
         <div style={{
-          color: C.muted,
-          fontSize: '11px',
-          fontWeight: 600,
-          textTransform: 'uppercase',
-          letterSpacing: '0.08em',
-          marginBottom: '8px',
-          paddingLeft: '4px',
-        }}>
-          Опасная зона
-        </div>
-
-        <div style={{
-          background: 'rgba(239, 68, 68, 0.04)',
-          border: '1px solid rgba(239, 68, 68, 0.25)',
+          background: C.card,
           borderRadius: '14px',
+          border: `1px solid ${C.border}`,
           padding: '16px',
+          marginBottom: '14px',
         }}>
-          <div style={{
-            color: C.text,
-            fontSize: '15px',
-            fontWeight: 600,
-            marginBottom: '6px',
-          }}>
-            Удаление аккаунта
+          <div style={{ color: C.text, fontSize: '15px', fontWeight: 700, marginBottom: '8px' }}>
+            Сессия
           </div>
-          <div style={{
-            color: C.muted,
-            fontSize: '13px',
-            lineHeight: 1.5,
-            marginBottom: '14px',
-          }}>
-            Это действие безвозвратно удалит все ваши данные: профиль, историю матчей, рейтинг, настройки. Восстановить их не получится.
+          <div style={{ color: C.muted, fontSize: '13px', lineHeight: 1.55, marginBottom: '14px' }}>
+            Выход завершит текущую сессию на этом устройстве. После этого нужно будет войти заново.
           </div>
 
           <button
-            onClick={handleDelete}
+            onClick={handleLogout}
+            disabled={isLoggingOut || typeof onLogout !== 'function'}
             style={{
               width: '100%',
               padding: '12px',
-              background: 'transparent',
-              color: C.loss,
-              border: `1px solid ${C.loss}`,
+              background: isLoggingOut ? '#334155' : C.accent,
+              color: '#fff',
+              border: 'none',
               borderRadius: '10px',
               fontSize: '14px',
               fontWeight: 700,
-              cursor: 'pointer',
+              cursor: isLoggingOut ? 'default' : 'pointer',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               gap: '8px',
-              transition: 'background 0.15s ease',
             }}
-            onMouseDown={(e) => { e.currentTarget.style.background = 'rgba(239,68,68,0.08)'; }}
-            onMouseUp={(e)   => { e.currentTarget.style.background = 'transparent'; }}
-            onMouseLeave={(e)=> { e.currentTarget.style.background = 'transparent'; }}
           >
-            <Trash2 size={16} />
-            Удалить аккаунт
+            <LogOut size={16} />
+            {isLoggingOut ? 'Выходим...' : 'Выйти из аккаунта'}
           </button>
+
+          {error && (
+            <div style={{
+              marginTop: '10px',
+              color: C.loss,
+              background: 'rgba(239,68,68,0.08)',
+              border: '1px solid rgba(239,68,68,0.24)',
+              borderRadius: '10px',
+              padding: '10px 12px',
+              fontSize: '13px',
+              lineHeight: 1.4,
+            }}>
+              {error}
+            </div>
+          )}
+        </div>
+
+        <div style={{
+          background: C.card,
+          borderRadius: '14px',
+          border: `1px solid ${C.border}`,
+          padding: '16px',
+        }}>
+          <div style={{ color: C.text, fontSize: '15px', fontWeight: 700, marginBottom: '8px' }}>
+            Удаление аккаунта
+          </div>
+          <div style={{ color: C.muted, fontSize: '13px', lineHeight: 1.55 }}>
+            Удаление аккаунта сейчас выполняется через администратора клуба. Мы поможем удалить профиль и связанные данные по запросу.
+          </div>
         </div>
       </div>
     </div>
