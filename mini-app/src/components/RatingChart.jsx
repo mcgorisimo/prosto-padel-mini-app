@@ -1,107 +1,75 @@
-import React, { useMemo, useState } from 'react';
-import {
-  loadHistory,
-  getLevelForRating,
-  getNextLevelInfo,
-  START_RATING,
-} from '../lib/ratingEngine';
+import React, { useMemo } from 'react';
+import { getLevelForRating } from '../lib/ratingEngine';
+import { isRatingMatch } from '../lib/matchRating';
 
 const C = {
   card:   '#0f172a',
   border: '#1E2755',
-  bg:     '#020617',
   text:   '#FFFFFF',
   muted:  '#8B9CC8',
   win:    '#22C55E',
   loss:   '#EF4444',
 };
 
-const fmt2 = (val) => val.toFixed(2);
-const fmt3 = (val) => val.toFixed(3);
-
-const WINDOWS = [
-  { value: 5,     label: '5'   },
-  { value: 15,    label: '15'  },
-  { value: 'all', label: 'Все' },
-];
-
 const VIEW_W = 400;
-const VIEW_H = 140;
-const PAD_X  = 8;
-const PAD_Y  = 14;
+const VIEW_H = 120;
+const PAD_X = 10;
+const PAD_Y = 14;
+
+const fmt2 = (value) => (typeof value === 'number' ? value.toFixed(2) : '—');
+const fmtDelta = (value) => (typeof value === 'number' ? `${value >= 0 ? '+' : ''}${value.toFixed(3)}` : '—');
+
+function getCompletedTime(match) {
+  const timestamp = match?.completedAt ?? match?.completed_at ?? match?.dateISO ?? match?.date_iso;
+  const parsed = new Date(timestamp).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+}
 
 function buildPath(points, minVal, maxVal) {
   if (points.length === 0) return '';
-  const range  = maxVal - minVal || 1;
+  const range = maxVal - minVal || 1;
   const innerW = VIEW_W - PAD_X * 2;
   const innerH = VIEW_H - PAD_Y * 2;
-  return points.map((p, i) => {
-    const x = points.length === 1
-      ? VIEW_W / 2
-      : PAD_X + (i / (points.length - 1)) * innerW;
-    const y = PAD_Y + (1 - (p.rating - minVal) / range) * innerH;
-    return `${i === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${y.toFixed(2)}`;
+
+  return points.map((point, index) => {
+    const x = points.length === 1 ? VIEW_W / 2 : PAD_X + (index / (points.length - 1)) * innerW;
+    const y = PAD_Y + (1 - (point.rating - minVal) / range) * innerH;
+    return `${index === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${y.toFixed(2)}`;
   }).join(' ');
 }
 
-export default function RatingChart({ hasCompletedMatches = true }) {
-  const [history] = useState(loadHistory);
-  const [win, setWin] = useState(15);
+export default function RatingChart({ currentRating, completedMatches = [], userId }) {
+  const points = useMemo(() => {
+    if (!userId) return [];
 
-  const points = useMemo(
-    () => (win === 'all' ? history : history.slice(-win)),
-    [history, win]
-  );
+    return [...completedMatches]
+      .sort((a, b) => getCompletedTime(a) - getCompletedTime(b))
+      .map(match => {
+        if (!isRatingMatch(match)) return null;
+        const change = match?.ratingChanges?.[userId] ?? match?.rating_changes?.[userId];
+        if (typeof change?.after !== 'number') return null;
+        return {
+          matchId: match.id,
+          date: getCompletedTime(match),
+          rating: change.after,
+          delta: typeof change.delta === 'number' ? change.delta : null,
+        };
+      })
+      .filter(Boolean);
+  }, [completedMatches, userId]);
 
-  const stats = useMemo(() => {
-    if (points.length === 0) {
-      return { current: START_RATING, change: 0, min: START_RATING, max: START_RATING };
-    }
-    const values = points.map(p => p.rating);
-    return {
-      current: values[values.length - 1],
-      change:  values[values.length - 1] - values[0],
-      min:     Math.min(...values),
-      max:     Math.max(...values),
-    };
-  }, [points]);
+  const lastPoint = points[points.length - 1];
+  const hasTrustedHistory =
+    points.length > 0 &&
+    typeof currentRating === 'number' &&
+    Math.abs(lastPoint.rating - currentRating) < 0.001;
 
-  const path  = useMemo(() => buildPath(points, stats.min, stats.max), [points, stats.min, stats.max]);
-  const level = getLevelForRating(stats.current);
-  const next  = getNextLevelInfo(stats.current);
-
-  const isUp        = stats.change >= 0;
-  const changeColor = stats.change === 0 ? C.muted : isUp ? C.win : C.loss;
-  const changeSign  = stats.change > 0 ? '+' : '';
-
-  if (!hasCompletedMatches || history.length === 0) {
-    return (
-      <div style={{
-        background:   C.card,
-        borderRadius: '16px',
-        border:       `1px solid ${C.border}`,
-        padding:      '16px',
-        marginBottom: '16px',
-      }}>
-        <div style={{
-          color:           C.muted,
-          fontSize:        '10px',
-          fontWeight:      700,
-          textTransform:   'uppercase',
-          letterSpacing:   '0.1em',
-          marginBottom:    '10px',
-        }}>
-          Динамика по матчам
-        </div>
-        <div style={{ color: C.text, fontSize: '15px', fontWeight: 700, marginBottom: '6px' }}>
-          Динамика появится после первых матчей
-        </div>
-        <div style={{ color: C.muted, fontSize: '13px', lineHeight: 1.55 }}>
-          Подтверждённый рейтинг появится после проверки клуба.
-        </div>
-      </div>
-    );
-  }
+  const level = getLevelForRating(currentRating || 0);
+  const values = hasTrustedHistory ? points.map(point => point.rating) : [currentRating || 0];
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const path = hasTrustedHistory ? buildPath(points, min, max) : '';
+  const totalDelta = hasTrustedHistory && points.length > 1 ? points[points.length - 1].rating - points[0].rating : 0;
 
   return (
     <div style={{
@@ -111,166 +79,73 @@ export default function RatingChart({ hasCompletedMatches = true }) {
       padding:      '16px',
       marginBottom: '16px',
     }}>
-      {/* Header: rating + level + change | window toggle */}
       <div style={{
-        display:        'flex',
-        alignItems:     'flex-end',
-        justifyContent: 'space-between',
-        marginBottom:   '12px',
-        gap:            '12px',
+        color:           C.muted,
+        fontSize:        '10px',
+        fontWeight:      700,
+        textTransform:   'uppercase',
+        letterSpacing:   '0.1em',
+        marginBottom:    '10px',
       }}>
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{
-            color:           C.muted,
-            fontSize:        '10px',
-            fontWeight:      700,
-            textTransform:   'uppercase',
-            letterSpacing:   '0.1em',
-            marginBottom:    '4px',
-          }}>
-            Динамика по матчам
+        Динамика рейтинга
+      </div>
+
+      {!hasTrustedHistory ? (
+        <>
+          <div style={{ color: C.text, fontSize: '15px', fontWeight: 700, marginBottom: '6px' }}>
+            Текущий клубный рейтинг: {fmt2(currentRating)} · {level.label}
           </div>
-          <div style={{ color: C.muted, fontSize: '11px', lineHeight: 1.45, marginBottom: '4px' }}>
-            Статистика меняется после игр, но не влияет на подтверждённый рейтинг до проверки клуба.
+          <div style={{ color: C.muted, fontSize: '13px', lineHeight: 1.55 }}>
+            Динамика рейтинга появится после рейтинговых матчей клуба.
           </div>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', flexWrap: 'wrap' }}>
-            <span style={{
-              color:              C.text,
-              fontSize:           '26px',
-              fontWeight:         800,
-              letterSpacing:      '-0.03em',
-              lineHeight:         1,
-              fontVariantNumeric: 'tabular-nums',
-            }}>
-              {fmt2(stats.current)}
-            </span>
-            <span style={{ color: level.color, fontSize: '14px', fontWeight: 700 }}>
-              {level.label}
-            </span>
+        </>
+      ) : (
+        <>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'baseline', marginBottom: '12px' }}>
+            <div>
+              <div style={{ color: C.text, fontSize: '26px', fontWeight: 800, lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
+                {fmt2(currentRating)}
+              </div>
+              <div style={{ color: level.color, fontSize: '13px', fontWeight: 700, marginTop: '4px' }}>
+                {level.label}
+              </div>
+            </div>
+            <div style={{ color: totalDelta >= 0 ? C.win : C.loss, fontSize: '13px', fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>
+              {fmtDelta(totalDelta)}
+            </div>
+          </div>
+
+          <svg
+            viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
+            preserveAspectRatio="none"
+            style={{ width: '100%', height: '116px', display: 'block' }}
+          >
             {points.length > 1 && (
-              <span style={{
-                color:              changeColor,
-                fontSize:           '12px',
-                fontWeight:         600,
-                fontVariantNumeric: 'tabular-nums',
-              }}>
-                {changeSign}{stats.change.toFixed(3)}
-              </span>
+              <path
+                d={path}
+                fill="none"
+                stroke={level.color}
+                strokeWidth="2"
+                strokeLinejoin="round"
+                strokeLinecap="round"
+                vectorEffect="non-scaling-stroke"
+              />
             )}
+            {points.map((point, index) => {
+              const range = max - min || 1;
+              const innerW = VIEW_W - PAD_X * 2;
+              const innerH = VIEW_H - PAD_Y * 2;
+              const x = points.length === 1 ? VIEW_W / 2 : PAD_X + (index / (points.length - 1)) * innerW;
+              const y = PAD_Y + (1 - (point.rating - min) / range) * innerH;
+              return <circle key={point.matchId || index} cx={x} cy={y} r="3" fill={level.color} vectorEffect="non-scaling-stroke" />;
+            })}
+          </svg>
+
+          <div style={{ color: C.muted, fontSize: '12px', lineHeight: 1.5, marginTop: '8px' }}>
+            График построен по рейтинговым матчам клуба.
           </div>
-        </div>
-
-        <div style={{
-          display:      'flex',
-          background:   C.bg,
-          borderRadius: '8px',
-          padding:      '2px',
-          border:       `1px solid ${C.border}`,
-          flexShrink:   0,
-        }}>
-          {WINDOWS.map(({ value, label }) => {
-            const active = win === value;
-            return (
-              <button
-                key={String(value)}
-                onClick={() => setWin(value)}
-                style={{
-                  padding:      '5px 10px',
-                  borderRadius: '6px',
-                  border:       'none',
-                  background:   active ? '#1E3AE8' : 'transparent',
-                  color:        active ? '#fff' : C.muted,
-                  fontSize:     '11px',
-                  fontWeight:   active ? 700 : 500,
-                  cursor:       'pointer',
-                  transition:   'all 0.15s ease',
-                }}
-              >
-                {label}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Chart */}
-      <div style={{ position: 'relative' }}>
-        <svg
-          viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
-          preserveAspectRatio="none"
-          style={{ width: '100%', height: '120px', display: 'block' }}
-        >
-          <defs>
-            <linearGradient id="ratingFill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%"   stopColor={level.color} stopOpacity="0.25" />
-              <stop offset="100%" stopColor={level.color} stopOpacity="0"    />
-            </linearGradient>
-          </defs>
-
-          {points.length > 1 && (
-            <path
-              d={`${path} L ${VIEW_W - PAD_X} ${VIEW_H - PAD_Y} L ${PAD_X} ${VIEW_H - PAD_Y} Z`}
-              fill="url(#ratingFill)"
-              stroke="none"
-            />
-          )}
-          {points.length > 1 && (
-            <path
-              d={path}
-              fill="none"
-              stroke={level.color}
-              strokeWidth="2"
-              strokeLinejoin="round"
-              strokeLinecap="round"
-              vectorEffect="non-scaling-stroke"
-            />
-          )}
-          {points.length > 0 && (() => {
-            const range  = stats.max - stats.min || 1;
-            const innerW = VIEW_W - PAD_X * 2;
-            const innerH = VIEW_H - PAD_Y * 2;
-            const last   = points[points.length - 1];
-            const x = points.length === 1 ? VIEW_W / 2 : PAD_X + innerW;
-            const y = PAD_Y + (1 - (last.rating - stats.min) / range) * innerH;
-            return (
-              <>
-                <circle cx={x} cy={y} r="6" fill={level.color} fillOpacity="0.18" vectorEffect="non-scaling-stroke" />
-                <circle cx={x} cy={y} r="3" fill={level.color} vectorEffect="non-scaling-stroke" />
-              </>
-            );
-          })()}
-        </svg>
-
-        <div style={{
-          position:       'absolute',
-          inset:          0,
-          pointerEvents:  'none',
-          display:        'flex',
-          flexDirection:  'column',
-          justifyContent: 'space-between',
-          padding:        '4px 0',
-        }}>
-          <span style={{ color: '#475569', fontSize: '10px', fontVariantNumeric: 'tabular-nums' }}>{fmt2(stats.max)}</span>
-          <span style={{ color: '#475569', fontSize: '10px', fontVariantNumeric: 'tabular-nums' }}>{fmt2(stats.min)}</span>
-        </div>
-      </div>
-
-      {/* Footer: progress to next level */}
-      <div style={{
-        marginTop: '10px',
-        textAlign: 'center',
-        fontSize:  '12px',
-        color:     C.muted,
-      }}>
-        {next ? (
-          <>
-            По динамике до уровня <span style={{ color: next.nextColor, fontWeight: 700 }}>{next.nextLabel}</span>
-            {' '}осталось <span style={{ color: C.text, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{fmt3(next.pointsToGo)}</span>
-          </>
-        ) : (
-          <>Вы на максимальном уровне <span style={{ color: level.color, fontWeight: 700 }}>{level.label}</span></>
-        )}
-      </div>
+        </>
+      )}
     </div>
   );
 }

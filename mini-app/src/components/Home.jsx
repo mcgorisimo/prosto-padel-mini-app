@@ -186,6 +186,14 @@ export default function Home({
     .sort((a, b) => new Date(`${a.dateISO}T${a.time || '00:00'}:00`) - new Date(`${b.dateISO}T${b.time || '00:00'}:00`))[0];
   const rating = user?.numericRating || 3.0;
   const playerName = user?.firstName || 'Игрок';
+  const bookingUnavailableText = 'Бронирование через приложение скоро будет обновлено';
+  const handleBookCourt = () => {
+    if (onBookCourt) {
+      onBookCourt();
+      return;
+    }
+    showToast?.(bookingUnavailableText, 'info');
+  };
 
   const handleUpcomingClick = (match) => {
     if (match.type === 'match') {
@@ -229,12 +237,12 @@ export default function Home({
       </PadelCard>
 
       <div className="mb-7 grid grid-cols-2 gap-3">
-        <QuickAction icon={CalendarDays} label="Бронь" hint="Корт и время" onClick={onBookCourt} />
+        <QuickAction icon={CalendarDays} label="Бронь" hint={onBookCourt ? 'Корт и время' : 'Скоро обновим'} onClick={handleBookCourt} />
         <QuickAction icon={ChartNoAxesCombined} label="Матчи" hint="Открытая лента" onClick={onOpenMatches} />
         <QuickAction icon={Dumbbell} label="Тренировки" hint="С тренером клуба" onClick={() => {
           const training = myTrainings[0] || personalBookings[0];
           if (training) setTrainingSetupMatch(training);
-          else onBookCourt?.();
+          else handleBookCourt();
         }} />
         <QuickAction icon={Trophy} label="Рейтинг" hint="Уровень и прогресс" onClick={onOpenRating} />
       </div>
@@ -260,9 +268,13 @@ export default function Home({
         ) : (
           <PadelCard className="border-dashed py-8 text-center">
             <p className="text-sm text-warm-white/58">У вас пока нет активных броней.</p>
-            <PadelButton variant="ghost" size="md" onClick={onBookCourt} className="mt-4">
-              Выбрать время
-            </PadelButton>
+            {onBookCourt ? (
+              <PadelButton variant="ghost" size="md" onClick={onBookCourt} className="mt-4">
+                Выбрать время
+              </PadelButton>
+            ) : (
+              <p className="mt-4 text-xs leading-relaxed text-warm-white/46">{bookingUnavailableText}</p>
+            )}
           </PadelCard>
         )}
       </section>

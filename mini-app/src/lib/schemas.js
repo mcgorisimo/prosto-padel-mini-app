@@ -77,6 +77,11 @@ export const COURT_TYPES = Object.freeze({
  * @property {number}        ratingMin           0..6
  * @property {number}        ratingMax           0..6
  * @property {string}        scenario            'social' | 'community' | 'private'
+ * @property {boolean}       [isRatingMatch]     true only when the match should affect club rating
+ * @property {('none'|'pending_confirmation'|'confirmed'|'disputed')} [scoreStatus]
+ * @property {string}        [scoreSubmittedBy]
+ * @property {string}        [scoreConfirmedBy]
+ * @property {string}        [scoreDisputedBy]
  * @property {MatchStatus}   status
  * @property {boolean}       [isPrivate]         true = private booking (not in public feed, not searching for partners)
  * @property {('partial'|'full')} [paymentStatus]  'partial' = 25% paid (open match); 'full' = 100% paid (private)
@@ -133,6 +138,11 @@ export const SCHEMAS = Object.freeze({
     team2:         'Player[]?',
     isTeam1Win:    'boolean?',
     ratingChanges: '{ [playerId]: { before, after, delta } }?',
+    isRatingMatch:  'boolean?',
+    scoreStatus:    "'none' | 'pending_confirmation' | 'confirmed' | 'disputed'?",
+    scoreSubmittedBy: 'string?',
+    scoreConfirmedBy: 'string?',
+    scoreDisputedBy:  'string?',
     completedAt:   'number?',
   },
   SetScore: {

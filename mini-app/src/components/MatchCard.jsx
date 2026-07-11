@@ -15,9 +15,9 @@ const C = {
   gold:    '#D4AF37',
 };
 
-const LUNDA_NUM_START = [1.0, 1.5, 2.5, 3.0, 3.5, 4.0, 4.5];
+const NUMERIC_RATING_START = [1.0, 1.5, 2.5, 3.0, 3.5, 4.0, 4.5];
 const ratingFromIdx = (idx) =>
-  (typeof idx === 'number' && idx >= 0 && idx < LUNDA_NUM_START.length) ? LUNDA_NUM_START[idx] : null;
+  (typeof idx === 'number' && idx >= 0 && idx < NUMERIC_RATING_START.length) ? NUMERIC_RATING_START[idx] : null;
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
@@ -279,7 +279,7 @@ export default function MatchCard({ match, playerRating, onJoin, onViewDetails }
               whiteSpace: 'nowrap',
             }}
           >
-            {isFull ? 'Мест нет' : canJoin ? 'Присоединиться →' : 'Уровень не подходит'}
+            {isFull ? 'Матч заполнен' : canJoin ? 'Присоединиться →' : 'Уровень не подходит'}
           </button>
 
           {/* Hint under button */}

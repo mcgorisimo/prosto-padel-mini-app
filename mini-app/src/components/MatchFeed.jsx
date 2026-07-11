@@ -3,6 +3,7 @@ import { MapPin, Plus, UsersRound } from 'lucide-react';
 import { getCourtCapacity, getPerPlayerPrice } from '../lib/pricing';
 import { getMatchLevelRequirement } from '../lib/matchLevelRequirement';
 import { getMatchBookingStatus } from '../lib/matchBookingStatus';
+import { isRatingMatch, requiresVerifiedRating } from '../lib/matchRating';
 
 const C = {
   bg: '#050F0B',
@@ -85,46 +86,48 @@ const canCurrentUserJoin = (match, currentUser) => {
   const ratingMax = match?.ratingMax ?? match?.rating_max ?? 6;
   const ratingIdx = currentUser.ratingIdx ?? 0;
   const levelOk = ratingIdx >= ratingMin && ratingIdx <= ratingMax;
-  const requiresVerifiedRating = match?.requiresVerifiedRating === true || match?.requires_verified_rating === true;
-  const verifiedOk = !requiresVerifiedRating || currentUser.isVerified === true;
+  const verifiedOk = !requiresVerifiedRating(match) || currentUser.isVerified === true;
 
   return levelOk && verifiedOk;
 };
 
-function JoinButton({ onClick }) {
+function JoinButton({ onClick, disabled = false, label = 'Присоединиться' }) {
   const [pressed, setPressed] = useState(false);
 
   return (
     <span
       role="button"
       tabIndex={0}
-      onMouseDown={() => setPressed(true)}
+      onMouseDown={() => !disabled && setPressed(true)}
       onMouseUp={() => setPressed(false)}
       onMouseLeave={() => setPressed(false)}
-      onTouchStart={() => setPressed(true)}
+      onTouchStart={() => !disabled && setPressed(true)}
       onTouchEnd={() => setPressed(false)}
       onClick={(e) => {
         e.stopPropagation();
+        if (disabled) return;
         onClick();
       }}
       onKeyDown={(e) => {
         if (e.key !== 'Enter' && e.key !== ' ') return;
         e.preventDefault();
         e.stopPropagation();
+        if (disabled) return;
         onClick();
       }}
+      aria-disabled={disabled}
       style={{
-        background: 'rgba(216,243,74,0.10)',
-        color: C.lime,
+        background: disabled ? 'rgba(245,241,232,0.06)' : 'rgba(216,243,74,0.10)',
+        color: disabled ? 'rgba(245,241,232,0.46)' : C.lime,
         padding: '11px 16px',
         borderRadius: '16px',
-        border: '1px solid rgba(216,243,74,0.34)',
+        border: disabled ? '1px solid rgba(245,241,232,0.12)' : '1px solid rgba(216,243,74,0.34)',
         fontSize: '14px',
         fontWeight: '800',
-        cursor: 'pointer',
+        cursor: disabled ? 'not-allowed' : 'pointer',
         transition: 'all 0.15s ease-out',
-        transform: pressed ? 'scale(0.97)' : 'scale(1)',
-        boxShadow: '0 12px 30px rgba(0,0,0,0.18)',
+        transform: pressed && !disabled ? 'scale(0.97)' : 'scale(1)',
+        boxShadow: disabled ? 'none' : '0 12px 30px rgba(0,0,0,0.18)',
         outline: 'none',
         WebkitTapHighlightColor: 'transparent',
         display: 'inline-flex',
@@ -132,7 +135,7 @@ function JoinButton({ onClick }) {
         justifyContent: 'center',
       }}
     >
-      Присоединиться
+      {label}
     </span>
   );
 }
@@ -231,12 +234,15 @@ function PlayerSlot({ player }) {
 function MatchCard({ match, onViewDetails }) {
   const filledSlots = Array.isArray(match.filledSlots) ? match.filledSlots.filter(Boolean) : [];
   const filledCount = filledSlots.length;
+  const maxSlots = getCourtCapacity(match.courtType || match.court_type || 'standard');
+  const isFull = filledCount >= maxSlots;
   const pricePerPerson = match.pricePerPerson || getPerPlayerPrice(match.time, match.duration || 1.5, match.courtType, match.dateISO);
   const levelRequirement = getMatchLevelRequirement(match);
 
   const bookingStatus = getMatchBookingStatus(match);
   const statusText = bookingStatus.label;
   const statusColor = bookingStatus.isBooked ? C.lime : C.muted;
+  const isRated = isRatingMatch(match);
 
   return (
     <button
@@ -269,16 +275,31 @@ function MatchCard({ match, onViewDetails }) {
           {statusText}
         </div>
 
-        <div style={{
-          color: C.lime,
-          padding: '5px 10px',
-          borderRadius: '999px',
-          fontSize: '11px',
-          fontWeight: '800',
-          background: 'rgba(216,243,74,0.08)',
-          border: '1px solid rgba(216,243,74,0.20)',
-        }}>
-          {levelRequirement.summaryLabel}
+        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          {isRated && (
+            <div style={{
+              color: C.lime,
+              padding: '5px 10px',
+              borderRadius: '999px',
+              fontSize: '11px',
+              fontWeight: '800',
+              background: 'rgba(216,243,74,0.08)',
+              border: '1px solid rgba(216,243,74,0.20)',
+            }}>
+              Рейтинговая
+            </div>
+          )}
+          <div style={{
+            color: C.lime,
+            padding: '5px 10px',
+            borderRadius: '999px',
+            fontSize: '11px',
+            fontWeight: '800',
+            background: 'rgba(216,243,74,0.08)',
+            border: '1px solid rgba(216,243,74,0.20)',
+          }}>
+            {levelRequirement.summaryLabel}
+          </div>
         </div>
       </div>
 
@@ -299,12 +320,12 @@ function MatchCard({ match, onViewDetails }) {
       </div>
 
       <div style={{ display: 'flex', justifyContent: 'flex-start', gap: '10px', marginBottom: '16px', padding: '4px 0' }}>
-        {[0, 1, 2, 3].map((slotIndex) => (
+        {Array.from({ length: maxSlots }).map((_, slotIndex) => (
           <PlayerSlot key={slotIndex} player={filledSlots[slotIndex]} />
         ))}
         <div style={{ alignSelf: 'center', marginLeft: 'auto', color: C.text, fontSize: '14px', fontWeight: '850', opacity: 0.72, display: 'flex', alignItems: 'center', gap: '5px' }}>
           <UsersRound size={16} />
-          {filledCount}/4
+          {filledCount}/{maxSlots}
         </div>
       </div>
 
@@ -318,7 +339,11 @@ function MatchCard({ match, onViewDetails }) {
           <div style={{ fontSize: '11px', color: C.muted }}>с человека</div>
         </div>
 
-        <JoinButton onClick={() => onViewDetails(match)} />
+        <JoinButton
+          onClick={() => onViewDetails(match)}
+          disabled={isFull}
+          label={isFull ? 'Матч заполнен' : 'Присоединиться'}
+        />
       </div>
     </button>
   );

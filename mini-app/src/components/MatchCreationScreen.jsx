@@ -441,6 +441,35 @@ function PrivacyToggle({ value, onChange }) {
   );
 }
 
+function RatingMatchToggle({ value, onChange }) {
+  return (
+    <label style={{
+      display: 'flex',
+      alignItems: 'flex-start',
+      gap: '12px',
+      background: T.surface,
+      borderRadius: '12px',
+      padding: '14px',
+      border: value ? '1px solid rgba(216,243,74,0.34)' : `1px solid ${T.border}`,
+      cursor: 'pointer',
+      marginBottom: '16px'
+    }}>
+      <input
+        type="checkbox"
+        checked={value}
+        onChange={(e) => onChange(e.target.checked)}
+        style={{ width: '20px', height: '20px', accentColor: T.accent, flexShrink: 0, cursor: 'pointer', marginTop: '2px' }}
+      />
+      <div style={{ flex: 1 }}>
+        <div style={{ color: T.text, fontSize: '14px', fontWeight: 600 }}>Рейтинговая игра</div>
+        <div style={{ color: T.muted, fontSize: '12px', marginTop: '3px', lineHeight: 1.45 }}>
+          Рейтинговая игра влияет на клубный рейтинг после завершения матча. Участникам нужен подтверждённый рейтинг.
+        </div>
+      </div>
+    </label>
+  );
+}
+
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
 export default function MatchCreationScreen({ onBack, onSuccess, user, allMatches, showToast }) {
@@ -458,6 +487,7 @@ export default function MatchCreationScreen({ onBack, onSuccess, user, allMatche
   const [title,       setTitle]      = useState('');
   const [description, setDescription] = useState('');
   const [isPrivate, setIsPrivate] = useState(false);
+  const [isRatingMatch, setIsRatingMatch] = useState(false);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -500,6 +530,10 @@ export default function MatchCreationScreen({ onBack, onSuccess, user, allMatche
 
   const handleCTA = async () => {
     if (saving) return;
+    if (isRatingMatch && user?.isVerified !== true) {
+      showToast?.('Для рейтинговой игры нужен подтверждённый рейтинг.', 'error');
+      return;
+    }
     const selectedCourt = COURTS.find(c => c.id === selectedCourtId);
   if (scenario === 'community') {
     setSaving(true);
@@ -515,6 +549,7 @@ export default function MatchCreationScreen({ onBack, onSuccess, user, allMatche
       scenario: 'community', 
       status: 'searching',
       isPrivate: isPrivate,
+      isRatingMatch,
       dateISO: selectedDate.dateISO,
       date: selectedDate.dateObj.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }).replace(' г.', ''),
       title,
@@ -534,6 +569,10 @@ export default function MatchCreationScreen({ onBack, onSuccess, user, allMatche
 
   const handleSocialConfirm = async () => {
     if (saving) return;
+    if (isRatingMatch && user?.isVerified !== true) {
+      showToast?.('Для рейтинговой игры нужен подтверждённый рейтинг.', 'error');
+      return;
+    }
     const selectedCourt = COURTS.find(c => c.id === selectedCourtId);
     if (!selectedCourt) return;
     setSaving(true);
@@ -545,6 +584,7 @@ export default function MatchCreationScreen({ onBack, onSuccess, user, allMatche
       ownerPaid: courtTotal(time, duration, courtType, selectedDate.dateISO),
       holdAmount: 0,
       isPrivate: isPrivate,
+      isRatingMatch,
       courtId: selectedCourt.id,
       courtName: selectedCourt.name,
   dateISO: selectedDate.dateISO,
@@ -705,6 +745,7 @@ export default function MatchCreationScreen({ onBack, onSuccess, user, allMatche
 
           {/* Privacy Toggle */}
           <div style={{ padding: '0 16px' }}>
+            <RatingMatchToggle value={isRatingMatch} onChange={setIsRatingMatch} />
             <PrivacyToggle value={isPrivate} onChange={setIsPrivate} />
           </div>
 

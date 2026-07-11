@@ -96,17 +96,17 @@ export default function MatchChat({ match, currentUser, messages = [], onSendMes
       const senderName = msg.senderName ?? msg.sender_name;
       const timestamp = msg.timestamp ?? msg.created_at;
       const isMe = senderId === currentUser?.id;
-      const showName = !isMe && (index === 0 || previousSenderId !== senderId);
+      const showName = index === 0 || previousSenderId !== senderId;
 
       return (
         <div key={msg.id || index} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
           {showName && (
-            <span className="text-[10px] text-slate-400 mb-1 ml-1">
-              {senderName || 'Игрок'}
+            <span className={`mb-1 px-1 text-[11px] font-bold ${isMe ? 'text-accent-light/80' : 'text-warm-white/78'}`}>
+              {isMe ? 'Вы' : (senderName || 'Игрок')}
             </span>
           )}
-          <div className={`px-3 py-2 rounded-2xl max-w-[80%] text-sm leading-relaxed ${
-            isMe ? 'bg-accent-light text-app-bg rounded-tr-none' : 'bg-white/[0.06] text-warm-white rounded-tl-none'
+          <div className={`px-3 py-2 rounded-2xl max-w-[80%] text-sm leading-relaxed shadow-[0_10px_24px_rgba(0,0,0,0.18)] ${
+            isMe ? 'bg-accent-light text-app-bg rounded-tr-none' : 'bg-white/[0.075] text-warm-white rounded-tl-none border border-warm-white/10'
           }`}>
             {msg.text}
           </div>

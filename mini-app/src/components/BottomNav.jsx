@@ -1,12 +1,12 @@
 import { CalendarDays, ChartNoAxesCombined, Home, Trophy, UserRound } from 'lucide-react';
 
-export default function BottomNav({ active, setActive }) {
+export default function BottomNav({ active, setActive, isAdmin = false }) {
   const tabs = [
     { id: 'home', label: 'Главная', Icon: Home },
     { id: 'profile', label: 'Профиль', Icon: UserRound },
     { id: 'leaderboard', label: 'Рейтинг', Icon: Trophy },
     { id: 'matches', label: 'Матчи', Icon: ChartNoAxesCombined },
-    { id: 'booking', label: 'Бронь', Icon: CalendarDays },
+    ...(isAdmin ? [{ id: 'booking', label: 'Бронь', Icon: CalendarDays }] : []),
   ];
 
   return (
