@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { CalendarDays, Clock3, LockKeyhole, UsersRound, X } from 'lucide-react';
-import PadelButton from './ui/PadelButton';
 import { BOOKING_DURATIONS, COURTS, WORKING_HOURS, checkAvailability, fromMin } from '../lib/booking';
 import { fmtPrice, getPerPlayerPrice, getTotalPrice } from '../lib/pricing';
 
@@ -147,6 +146,14 @@ export default function BookingScreen({ allMatches = [], onBookSlot, showToast, 
       setSelectedSlot((prev) => prev ? { ...prev, court: next.court } : prev);
     }
   }, [selectedDateISO, duration, courtId, allMatches]);
+
+  useEffect(() => {
+    document.body.classList.toggle('booking-sheet-open', Boolean(selectedSlot));
+
+    return () => {
+      document.body.classList.remove('booking-sheet-open');
+    };
+  }, [selectedSlot]);
 
   const totalPrice = selectedSlot
     ? getTotalPrice(selectedSlot.time, duration, selectedSlot.court.type, selectedDateISO)
@@ -472,18 +479,14 @@ export default function BookingScreen({ allMatches = [], onBookSlot, showToast, 
             </div>
 
             <div className="booking-sheet-footer">
-              <div className="booking-sheet-ready">Форма готова к созданию</div>
-              <PadelButton
+              <button
                 type="button"
-                variant="success"
-                size="lg"
-                fullWidth
                 disabled={isSaving || isRatingMatchBlocked}
                 onClick={handleConfirm}
                 className="booking-confirm-cta"
               >
                 {isSaving ? 'Сохраняем...' : isPublicFormat ? 'Создать матч' : 'Создать бронь'}
-              </PadelButton>
+              </button>
             </div>
           </div>
         </div>
