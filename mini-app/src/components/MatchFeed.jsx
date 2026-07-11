@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { MapPin, Plus, UsersRound } from 'lucide-react';
 import { getPerPlayerPrice } from '../lib/pricing';
 import { getMatchLevelRequirement } from '../lib/matchLevelRequirement';
+import { getMatchBookingStatus } from '../lib/matchBookingStatus';
 
 const C = {
   bg: '#050F0B',
@@ -174,16 +175,9 @@ function MatchCard({ match, onViewDetails }) {
   const pricePerPerson = match.pricePerPerson || getPerPlayerPrice(match.time, match.duration || 1.5, match.courtType, match.dateISO);
   const levelRequirement = getMatchLevelRequirement(match);
 
-  let statusText = 'Не забронировано';
-  let statusColor = C.muted;
-
-  if (match.paymentStatus === 'full' || match.isBooked) {
-    statusText = 'Бронь подтверждена';
-    statusColor = C.lime;
-  } else if (match.paymentStatus === 'partial') {
-    statusText = 'Без онлайн-оплаты';
-    statusColor = C.coral;
-  }
+  const bookingStatus = getMatchBookingStatus(match);
+  const statusText = bookingStatus.label;
+  const statusColor = bookingStatus.isBooked ? C.lime : C.muted;
 
   return (
     <button
@@ -210,8 +204,8 @@ function MatchCard({ match, onViewDetails }) {
           borderRadius: '999px',
           fontSize: '11px',
           fontWeight: '750',
-          border: `1px solid ${statusColor === C.lime ? 'rgba(216,243,74,0.24)' : 'rgba(255,111,97,0.24)'}`,
-          background: statusColor === C.lime ? 'rgba(216,243,74,0.08)' : 'rgba(255,111,97,0.08)',
+          border: `1px solid ${bookingStatus.isBooked ? 'rgba(216,243,74,0.24)' : 'rgba(245,241,232,0.16)'}`,
+          background: bookingStatus.isBooked ? 'rgba(216,243,74,0.08)' : 'rgba(245,241,232,0.06)',
         }}>
           {statusText}
         </div>

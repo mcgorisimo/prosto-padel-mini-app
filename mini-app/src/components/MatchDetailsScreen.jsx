@@ -8,6 +8,7 @@ import MatchChat from './MatchChat';
 import PadelButton from './ui/PadelButton';
 import { supabase } from '../lib/supabaseClient';
 import { getMatchLevelBadges, getMatchLevelRequirement } from '../lib/matchLevelRequirement';
+import { getMatchBookingStatus } from '../lib/matchBookingStatus';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -727,10 +728,10 @@ function PinnedBlock({ msg, isOwner, onSave }) {
 
 // ─── Scenario Info Block ──────────────────────────────────────────────────────
 
-function ScenarioInfoBlock({ scenario, status, isOwner }) {
-  const isConfirmed = status === 'confirmed' || scenario === 'social';
+function ScenarioInfoBlock({ match }) {
+  const bookingStatus = getMatchBookingStatus(match);
 
-  if (isConfirmed) {
+  if (bookingStatus.isBooked) {
     return (
       <div style={{ background: 'rgba(34,197,94,0.06)', borderRadius: '12px', padding: '12px 14px', border: '1px solid rgba(34,197,94,0.25)', display: 'flex', gap: '10px', alignItems: 'flex-start', marginBottom: '16px' }}>
         <span style={{ fontSize: '13px', fontWeight: 900, flexShrink: 0 }}>OK</span>
@@ -1160,7 +1161,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
       <div style={{ padding: '16px' }}>
 
         {/* ── Scenario status block ─────────────────────────────────────── */}
-        <ScenarioInfoBlock scenario={scenario} status={status} isOwner={isOwner} />
+        <ScenarioInfoBlock match={match} />
 
         {/* ── Rating requirement ─────────────────────────────────────────── */}
         <div style={{ marginBottom: '16px' }}>
@@ -1276,16 +1277,6 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
                   ? '🏁 Завершить матч'
                   : `Заполните все слоты (${allFilled.length}/${maxSlots})`}
             </PadelButton>
-            {match.type === 'match' && !isCompletedMatch && (
-              <PadelButton
-                variant="ghost"
-                size="md"
-                fullWidth
-                onClick={() => onRevertToPrivate?.(match.id)}
-              >
-                Отменить матч и вернуть в личные
-              </PadelButton>
-            )}
           </>
         ) : joined ? (
           <div style={{ textAlign: 'center', padding: '20px', background: 'rgba(34,197,94,0.08)', borderRadius: '14px', border: '1px solid rgba(34,197,94,0.25)' }}>

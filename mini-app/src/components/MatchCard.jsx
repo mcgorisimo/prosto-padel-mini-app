@@ -1,6 +1,7 @@
 import React from 'react';
 import { getCourtCapacity, getPerPlayerPrice, fmtPrice } from '../lib/pricing';
 import { getLevelLabelForIndex, getMatchLevelRequirement } from '../lib/matchLevelRequirement';
+import { getMatchBookingStatus } from '../lib/matchBookingStatus';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -62,14 +63,14 @@ function CourtBadge() {
   );
 }
 
-function BookingStatusBadge({ status, scenario }) {
-  const isConfirmed = status === 'confirmed' || scenario === 'social';
+function BookingStatusBadge({ match }) {
+  const bookingStatus = getMatchBookingStatus(match);
 
-  if (isConfirmed) {
+  if (bookingStatus.isBooked) {
     return (
       <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'rgba(34,197,94,0.1)', borderRadius: '8px', padding: '4px 8px', border: '1px solid rgba(34,197,94,0.3)' }}>
         <span style={{ color: '#22C55E', fontSize: '10px', fontWeight: 700 }}>
-          ✅ Корт забронирован
+          ✅ {bookingStatus.label}
         </span>
       </div>
     );
@@ -78,7 +79,7 @@ function BookingStatusBadge({ status, scenario }) {
   return (
     <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'rgba(100,116,139,0.1)', borderRadius: '8px', padding: '4px 8px', border: '1px solid rgba(100,116,139,0.2)' }}>
       <span style={{ color: '#94a3b8', fontSize: '10px', fontWeight: 700 }}>
-        ⚪ Корт не забронирован
+        ⚪ {bookingStatus.label}
       </span>
     </div>
   );
@@ -146,15 +147,13 @@ export default function MatchCard({ match, playerRating, onJoin, onViewDetails }
     ratingMax,
     filledSlots = [],
     courtName,
-    status,
-    scenario,
   } = match;
 
   const isPanoramic    = courtType === 'panoramic';
   const maxSlots       = getCourtCapacity(courtType);
   const pricePerPlayer = getPerPlayerPrice(time, duration, courtType, match.dateISO);
 
-  const isConfirmed = status === 'confirmed' || scenario === 'social';
+  const bookingStatus = getMatchBookingStatus(match);
   const isFull     = (filledSlots?.length ?? 0) >= maxSlots;
   const levelMatch = playerRating >= ratingMin && playerRating <= ratingMax;
   const canJoin    = !isFull && levelMatch;
@@ -166,10 +165,10 @@ export default function MatchCard({ match, playerRating, onJoin, onViewDetails }
       style={{
         background: 'linear-gradient(160deg, #0f172a 0%, #0d1432 100%)',
         borderRadius: '16px',
-        border: isConfirmed
+        border: bookingStatus.isBooked
           ? '1px solid rgba(34,197,94,0.4)'
           : (isPanoramic && isPrime ? '1px solid rgba(212,175,55,0.4)' : `1px solid ${C.border}`),
-        boxShadow: isConfirmed
+        boxShadow: bookingStatus.isBooked
           ? '0 0 0 1px rgba(34,197,94,0.1), 0 4px 24px rgba(34,197,94,0.15)'
           : (isPanoramic && isPrime
             ? '0 0 0 1px rgba(212,175,55,0.08), 0 4px 24px rgba(212,175,55,0.07)'
@@ -190,8 +189,8 @@ export default function MatchCard({ match, playerRating, onJoin, onViewDetails }
       {/* Row 1: badges */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
         <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
-          <BookingStatusBadge status={status} scenario={scenario} />
-          {isConfirmed && (
+          <BookingStatusBadge match={match} />
+          {bookingStatus.isBooked && (
             <div style={{ color: '#94a3b8', fontSize: '10px', fontWeight: 500 }}>
               (бронь подтверждена)
             </div>
