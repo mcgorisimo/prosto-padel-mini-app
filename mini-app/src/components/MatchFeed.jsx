@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { MapPin, Plus, UsersRound } from 'lucide-react';
 import { getPerPlayerPrice } from '../lib/pricing';
+import { getMatchLevelRequirement } from '../lib/matchLevelRequirement';
 
 const C = {
   bg: '#050F0B',
@@ -10,16 +11,6 @@ const C = {
   muted: 'rgba(245,241,232,0.58)',
   lime: '#D8F34A',
   coral: '#FF6F61',
-};
-
-const getLevelLabel = (rating) => {
-  if (rating >= 5.5) return 'A';
-  if (rating >= 5.0) return 'B+';
-  if (rating >= 4.5) return 'B';
-  if (rating >= 4.0) return 'C+';
-  if (rating >= 3.5) return 'C';
-  if (rating >= 3.0) return 'D+';
-  return 'D';
 };
 
 const getSideBadge = (sideStr) => {
@@ -181,6 +172,7 @@ function MatchCard({ match, onViewDetails }) {
   const filledSlots = Array.isArray(match.filledSlots) ? match.filledSlots.filter(Boolean) : [];
   const filledCount = filledSlots.length;
   const pricePerPerson = match.pricePerPerson || getPerPlayerPrice(match.time, match.duration || 1.5, match.courtType, match.dateISO);
+  const levelRequirement = getMatchLevelRequirement(match);
 
   let statusText = 'Не забронировано';
   let statusColor = C.muted;
@@ -233,7 +225,7 @@ function MatchCard({ match, onViewDetails }) {
           background: 'rgba(216,243,74,0.08)',
           border: '1px solid rgba(216,243,74,0.20)',
         }}>
-          {getLevelLabel(match.ratingMin)} — {getLevelLabel(match.ratingMax)}
+          {levelRequirement.summaryLabel}
         </div>
       </div>
 

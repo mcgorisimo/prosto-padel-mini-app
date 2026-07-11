@@ -5,7 +5,6 @@ import PersonalInfoScreen from './PersonalInfoScreen';
 import PrivacyScreen from './PrivacyScreen';
 import SecurityScreen from './SecurityScreen';
 import AccountScreen from './AccountScreen';
-import Toast from "./Toast";// Import Toast component
 
 const C = {
   bg:      '#020617',
@@ -53,7 +52,7 @@ function SettingsRow({ icon: Icon, label, onClick, isLast }) {
   );
 }
 
-export default function EditProfileScreen({ user, onBack, showToast }) {
+export default function EditProfileScreen({ user, onBack, showToast, onProfileSaved, onLogout }) {
   const { tg } = useTelegram();
   const [subScreen, setSubScreen] = useState(null);
 
@@ -76,7 +75,14 @@ export default function EditProfileScreen({ user, onBack, showToast }) {
   };
 
   if (subScreen === 'personal') {
-    return <PersonalInfoScreen user={user} onBack={() => setSubScreen(null)} showToast={showToast} />;
+    return (
+      <PersonalInfoScreen
+        user={user}
+        onBack={() => setSubScreen(null)}
+        showToast={showToast}
+        onProfileSaved={onProfileSaved}
+      />
+    );
   }
   if (subScreen === 'privacy') {
     return <PrivacyScreen user={user} onBack={() => setSubScreen(null)} showToast={showToast} />;
@@ -85,7 +91,7 @@ export default function EditProfileScreen({ user, onBack, showToast }) {
     return <SecurityScreen user={user} onBack={() => setSubScreen(null)} showToast={showToast} />;
   }
   if (subScreen === 'account') {
-    return <AccountScreen user={user} onBack={() => setSubScreen(null)} showToast={showToast} />;
+    return <AccountScreen user={user} onBack={() => setSubScreen(null)} showToast={showToast} onLogout={onLogout} />;
   }
 
   return (

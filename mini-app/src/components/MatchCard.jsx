@@ -1,9 +1,8 @@
 import React from 'react';
 import { getCourtCapacity, getPerPlayerPrice, fmtPrice } from '../lib/pricing';
+import { getLevelLabelForIndex, getMatchLevelRequirement } from '../lib/matchLevelRequirement';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-
-const RATINGS = ['D', 'D+', 'C', 'C+', 'B', 'B+', 'A'];
 
 const C = {
   bg:      '#0A0F2E',
@@ -21,7 +20,9 @@ const ratingFromIdx = (idx) =>
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function LevelBadge({ minIdx, maxIdx }) {
+function LevelBadge({ match }) {
+  const { summaryLabel } = getMatchLevelRequirement(match);
+
   return (
     <div style={{
       display: 'inline-flex', alignItems: 'center', gap: '4px',
@@ -30,7 +31,7 @@ function LevelBadge({ minIdx, maxIdx }) {
     }}>
       <span style={{ fontSize: '10px' }}>🏆</span>
       <span style={{ color: '#94a3b8', fontSize: '12px', fontWeight: 700 }}>
-        {RATINGS[minIdx]} – {RATINGS[maxIdx]}
+        {summaryLabel}
       </span>
     </div>
   );
@@ -196,7 +197,7 @@ export default function MatchCard({ match, playerRating, onJoin, onViewDetails }
             </div>
           )}
         </div>
-        <LevelBadge minIdx={ratingMin} maxIdx={ratingMax} />
+        <LevelBadge match={match} />
       </div>
 
       {/* Row 2: host + court */}
@@ -285,7 +286,7 @@ export default function MatchCard({ match, playerRating, onJoin, onViewDetails }
           {/* Hint under button */}
           {!isFull && !levelMatch && (
             <div style={{ color: '#475569', fontSize: '10px', marginTop: '4px' }}>
-              Ваш уровень: {RATINGS[playerRating]}
+              Ваш уровень: {getLevelLabelForIndex(playerRating)}
             </div>
           )}
         </div>

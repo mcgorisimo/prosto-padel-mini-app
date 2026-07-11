@@ -1,50 +1,24 @@
 import React, { useEffect, useState } from 'react';
-import { Lock as LockIcon } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
 import { useTelegram } from '../hooks/useTelegram';
 
 const C = {
   bg:      '#020617',
   card:    '#0f172a',
-  surface: '#141B3D',
   border:  '#1E2755',
   accent:  '#2563eb',
   text:    '#FFFFFF',
   muted:   '#8B9CC8',
-  gold:    '#D4AF37',
-  win:     '#22C55E',
   loss:    '#EF4444',
 };
-
-const KEYS = {
-  firstName:     'dp_firstName',
-  lastName:      'dp_lastName',
-  birthday:      'dp_birthday',
-  phone:         'dp_phone',
-  email:         'dp_email',
-  language:      'dp_language',
-  preferredSide: 'dp_preferredSide',
-  gender:        'dp_gender',
-};
-const NAME_COUNT_KEY = 'dp_nameCount';
 
 const SIDE_OPTIONS = [
   { value: 'Left',  label: 'Лев.' },
   { value: 'Both',  label: 'Оба'  },
   { value: 'Right', label: 'Прав.' },
 ];
-const LANG_OPTIONS = [
-  { value: 'RU', label: 'Русский' },
-  { value: 'EN', label: 'English' },
-];
-const GENDER_OPTIONS = [
-  { value: 'male',   label: '♂ Мужской' },
-  { value: 'female', label: '♀ Женский' },
-];
 
-// ─── Reusable bits ──────────────────────────────────────────────────────────
-
-function Field({ label, hint, locked, children }) {
+function Field({ label, hint, children }) {
   return (
     <label style={{ display: 'block', marginBottom: '14px' }}>
       <div style={{
@@ -54,7 +28,6 @@ function Field({ label, hint, locked, children }) {
         marginBottom: '6px',
       }}>
         {label}
-        {locked && <LockIcon size={12} color={C.muted} />}
       </div>
       {children}
       {hint && (
@@ -133,33 +106,14 @@ function Segmented({ value, onChange, options }) {
   );
 }
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
-const isValidEmail = (s) => !s || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
-
-// ─── Screen ─────────────────────────────────────────────────────────────────
-export default function PersonalInfoScreen({ user, onBack, showToast }) {
-  const { tg } = useTelegram(); // <--- Здесь больше не должно быть user!
-
-  const initialNameCount = Number(localStorage.getItem(NAME_COUNT_KEY)) || 0;
-  const nameLocked = initialNameCount >= 1;
-
-const [firstName, setFirstName] = useState(user?.firstName || '');
+export default function PersonalInfoScreen({ user, onBack, showToast, onProfileSaved }) {
+  const { tg } = useTelegram();
+  const [firstName, setFirstName] = useState(user?.firstName || '');
   const [lastName, setLastName]   = useState(user?.lastName || '');
-  const [birthday, setBirthday]   = useState(user?.birthday || '');
   const [phone, setPhone]         = useState(user?.phone || '');
-  const [email, setEmail]         = useState(user?.email || '');
-  
-  const [language, setLanguage] = useState(
-    () => localStorage.getItem(KEYS.language) || 'RU'
-  );
-  const [preferredSide, setPreferredSide] = useState(user?.side_preference || 'Both');
-  const [gender, setGender] = useState(
-    () => localStorage.getItem(KEYS.gender) || 'male'
-  );
-
-  const [emailError, setEmailError] = useState(false);
-  const [savedFlash, setSavedFlash] = useState(false);
+  const [preferredSide, setPreferredSide] = useState(user?.side_preference || user?.sidePreference || 'Both');
+  const [saveError, setSaveError] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
 
   // Telegram BackButton
   useEffect(() => {
@@ -174,47 +128,55 @@ const [firstName, setFirstName] = useState(user?.firstName || '');
   }, [tg, onBack]);
 
   const handleSave = async () => {
+    if (!user?.id) {
+      const message = 'Не удалось определить профиль. Войдите заново и попробуйте еще раз.';
+      setSaveError(message);
+      showToast?.(message, 'error');
+      return;
+    }
+
+    setIsSaving(true);
+    setSaveError('');
+
     try {
-      // 1. Отправляем новые данные прямо в Supabase
-      if (user?.id) {
-        const { data, error } = await supabase
-          .from('profiles')
-          .update({
-            first_name: firstName,
-            last_name: lastName,
-            phone: phone,
-            side_preference: preferredSide,
-            // Если в таблице есть поле email, раскомментируй строку ниже:
-            // email: email 
-          })
-          .eq('id', user.id)
-          .select('id');
+      const payload = {
+        first_name: firstName.trim(),
+        last_name: lastName.trim(),
+        phone: phone.trim(),
+        side_preference: preferredSide,
+      };
 
-        if (error) throw error;
-        if (!data?.[0]) throw new Error('Profile update returned no rows');
+      const { data, error } = await supabase
+        .from('profiles')
+        .update(payload)
+        .eq('id', user.id)
+        .select('id, first_name, last_name, phone, side_preference, rating, is_verified, role')
+        .single();
+
+      if (error) throw error;
+      if (!data?.id) {
+        throw new Error('Profile update returned no row');
+      }
+      if (
+        data.first_name !== payload.first_name ||
+        data.last_name !== payload.last_name ||
+        (data.phone || '') !== payload.phone ||
+        (data.side_preference || 'Both') !== payload.side_preference
+      ) {
+        throw new Error('Profile update was not persisted');
       }
 
-      // 2. Безопасный вызов уведомления (чтобы больше не было ошибки!)
-      if (typeof showToast === 'function') {
-        showToast('Профиль успешно обновлен!', 'success');
-      } else {
-        alert('Профиль успешно обновлен!'); // Запасной вариант, если showToast потерялся
-      }
-
-      // 3. Выходим назад в меню настроек
-      if (onBack) onBack();
-
+      onProfileSaved?.(data);
+      showToast?.('Профиль сохранен', 'success');
+      onBack?.();
     } catch (err) {
-      console.error('Ошибка сохранения профиля:', err);
-      if (typeof showToast === 'function') {
-        showToast('Ошибка при сохранении', 'error');
-      } else {
-        alert('Ошибка при сохранении');
-      }
+      const message = 'Профиль не сохранен. Проверьте подключение и попробуйте еще раз.';
+      setSaveError(message);
+      showToast?.(message, 'error');
+    } finally {
+      setIsSaving(false);
     }
   };
-
-  const tgUsername = user?.username ? `@${user.username}` : '';
 
   return (
     <div style={{ background: C.bg, minHeight: '100vh', paddingBottom: '120px' }}>
@@ -248,39 +210,24 @@ const [firstName, setFirstName] = useState(user?.firstName || '');
       </header>
 
       <div style={{ padding: '20px 16px 0' }}>
-        <Field label="Имя" locked={nameLocked} hint={nameLocked ? 'Изменение через администратора клуба' : null}>
+        <Field label="Имя">
           <TextInput
             type="text"
             value={firstName}
             onChange={(e) => setFirstName(e.target.value)}
-            placeholder="Гор"
-            disabled={nameLocked}
+            placeholder="Имя"
             autoComplete="given-name"
           />
         </Field>
 
-        <Field label="Фамилия" locked={nameLocked} hint={nameLocked ? null : 'Имя и фамилию можно изменить только один раз'}>
+        <Field label="Фамилия">
           <TextInput
             type="text"
             value={lastName}
             onChange={(e) => setLastName(e.target.value)}
-            placeholder="Бахшян"
-            disabled={nameLocked}
+            placeholder="Фамилия"
             autoComplete="family-name"
           />
-        </Field>
-
-        <Field label="Дата рождения">
-          <TextInput
-            type="date"
-            value={birthday}
-            onChange={(e) => setBirthday(e.target.value)}
-            max={new Date().toISOString().slice(0, 10)}
-          />
-        </Field>
-
-        <Field label="Пол">
-          <Segmented value={gender} onChange={setGender} options={GENDER_OPTIONS} />
         </Field>
 
         <Field label="Телефон">
@@ -296,7 +243,7 @@ const [firstName, setFirstName] = useState(user?.firstName || '');
 
         <Field label="Telegram" hint="Юзернейм меняется в настройках Telegram">
           <TextInput
-            type="text" // Assuming user object might have a username
+            type="text"
             value={user?.username ? `@${user.username}` : ''}
             placeholder="@username не задан"
             disabled
@@ -304,34 +251,25 @@ const [firstName, setFirstName] = useState(user?.firstName || '');
           />
         </Field>
 
-        <Field
-          label="Email"
-          hint={emailError ? 'Похоже, в email опечатка' : null}
-        >
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => { setEmail(e.target.value); if (emailError) setEmailError(false); }}
-            placeholder="example@mail.ru"
-            inputMode="email"
-            autoComplete="email"
-            style={{
-              ...inputBaseSx,
-              borderColor: emailError ? C.loss : C.border,
-            }}
-          />
-        </Field>
-
-        <Field label="Язык интерфейса">
-          <Segmented value={language} onChange={setLanguage} options={LANG_OPTIONS} />
-        </Field>
-
         <Field label="Предпочтительная сторона" hint="Ваш выбор поможет другим игрокам при поиске партнера">
           <Segmented value={preferredSide} onChange={setPreferredSide} options={SIDE_OPTIONS} />
         </Field>
+
+        {saveError && (
+          <div style={{
+            color: C.loss,
+            background: 'rgba(239,68,68,0.08)',
+            border: '1px solid rgba(239,68,68,0.24)',
+            borderRadius: '10px',
+            padding: '10px 12px',
+            fontSize: '13px',
+            lineHeight: 1.4,
+          }}>
+            {saveError}
+          </div>
+        )}
       </div>
 
-      {/* Sticky save button */}
       <div style={{
         position: 'fixed',
         left: 0, right: 0, bottom: 0,
@@ -340,22 +278,20 @@ const [firstName, setFirstName] = useState(user?.firstName || '');
         padding: '12px 16px calc(12px + env(safe-area-inset-bottom, 0px))',
         background: 'linear-gradient(to top, #020617 60%, rgba(2,6,23,0))',
       }}>
-        <button onClick={handleSave} style={{
+        <button onClick={handleSave} disabled={isSaving} style={{
           width: '100%',
           padding: '15px',
-          background: savedFlash
-            ? 'linear-gradient(135deg, #16a34a, #22c55e)'
-            : 'linear-gradient(135deg, #1E3AE8, #2563eb)',
+          background: isSaving ? '#334155' : 'linear-gradient(135deg, #1E3AE8, #2563eb)',
           color: '#fff',
           border: 'none',
           borderRadius: '14px',
           fontSize: '15px',
           fontWeight: 700,
-          cursor: 'pointer',
+          cursor: isSaving ? 'default' : 'pointer',
           boxShadow: '0 4px 18px rgba(37,99,235,0.35)',
           transition: 'background 0.2s ease',
         }}>
-          {savedFlash ? '✓ Сохранено' : 'Сохранить'}
+          {isSaving ? 'Сохраняем...' : 'Сохранить'}
         </button>
       </div>
     </div>

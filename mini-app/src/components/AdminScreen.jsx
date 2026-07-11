@@ -1,5 +1,6 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { CalendarDays, ClipboardList, UsersRound } from 'lucide-react';
+import AdminPlayersScreen from './AdminPlayersScreen';
 import { useTelegram } from '../hooks/useTelegram';
 
 const C = {
@@ -15,16 +16,19 @@ const C = {
 
 const SECTIONS = [
   {
+    key: 'players',
     title: 'Игроки клуба',
     text: 'Скоро: база зарегистрированных игроков',
     Icon: UsersRound,
   },
   {
+    key: 'calendar',
     title: 'Календарь клуба',
     text: 'Скоро: полный календарь клуба',
     Icon: CalendarDays,
   },
   {
+    key: 'requests',
     title: 'Матчи и заявки',
     text: 'Скоро: управление матчами и заявками',
     Icon: ClipboardList,
@@ -67,8 +71,10 @@ function Header({ onBack }) {
 export default function AdminScreen({ user, onBack }) {
   const { tg } = useTelegram();
   const isAdmin = user?.role === 'admin';
+  const [section, setSection] = useState(null);
 
   useEffect(() => {
+    if (section) return;
     const back = tg?.BackButton;
     if (!back) return;
     back.show();
@@ -77,7 +83,16 @@ export default function AdminScreen({ user, onBack }) {
       back.offClick(onBack);
       back.hide();
     };
-  }, [tg, onBack]);
+  }, [tg, onBack, section]);
+
+  if (section === 'players') {
+    return (
+      <div style={{ background: C.bg, minHeight: '100vh', paddingBottom: '40px' }}>
+        <Header onBack={() => setSection(null)} />
+        <AdminPlayersScreen user={user} onBack={() => setSection(null)} />
+      </div>
+    );
+  }
 
   return (
     <div style={{ background: C.bg, minHeight: '100vh', paddingBottom: '40px' }}>
@@ -119,8 +134,14 @@ export default function AdminScreen({ user, onBack }) {
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            {SECTIONS.map(({ title, text, Icon }) => (
-              <div key={title} style={{
+            {SECTIONS.map(({ key, title, text, Icon }) => {
+              const isClickable = key === 'players';
+              const Tag = isClickable ? 'button' : 'div';
+
+              return (
+              <Tag key={title} onClick={isClickable ? () => setSection(key) : undefined} style={{
+                width: '100%',
+                textAlign: 'left',
                 background: C.card,
                 border: `1px solid ${C.border}`,
                 borderRadius: '16px',
@@ -128,6 +149,7 @@ export default function AdminScreen({ user, onBack }) {
                 display: 'flex',
                 alignItems: 'flex-start',
                 gap: '12px',
+                cursor: isClickable ? 'pointer' : 'default',
               }}>
                 <div style={{
                   width: '38px',
@@ -150,8 +172,9 @@ export default function AdminScreen({ user, onBack }) {
                     {text}
                   </div>
                 </div>
-              </div>
-            ))}
+              </Tag>
+            );
+            })}
           </div>
         </div>
       )}
