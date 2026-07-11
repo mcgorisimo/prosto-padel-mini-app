@@ -1072,6 +1072,7 @@ const handleBookSlot = async (booking) => {
             allMatches={allMatches}
             onBookSlot={handleBookSlot}
             showToast={showToast}
+            isRatingVerified={currentUser?.isVerified === true}
           />
         )}
       </main>

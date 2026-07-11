@@ -85,7 +85,7 @@ function getSlotLabel(state) {
   return 'Занято';
 }
 
-export default function BookingScreen({ allMatches = [], onBookSlot, showToast }) {
+export default function BookingScreen({ allMatches = [], onBookSlot, showToast, isRatingVerified = true }) {
   const dates = useMemo(() => buildDates(14), []);
   const times = useMemo(buildTimes, []);
   const [selectedDateISO, setSelectedDateISO] = useState(dates[0]?.dateISO);
@@ -100,6 +100,7 @@ export default function BookingScreen({ allMatches = [], onBookSlot, showToast }
   const selectedDate = dates.find((item) => item.dateISO === selectedDateISO) ?? dates[0];
   const selectedCourt = selectedSlot?.court ?? COURTS.find((court) => court.id === courtId);
   const isPublicFormat = bookingFormat === 'public';
+  const isRatingMatchBlocked = isPublicFormat && matchType === 'rating' && !isRatingVerified;
 
   const getAvailableCourt = (time) => {
     const candidates = courtId === ANY_COURT
@@ -172,7 +173,7 @@ export default function BookingScreen({ allMatches = [], onBookSlot, showToast }
   };
 
   const handleConfirm = async () => {
-    if (!selectedSlot || isSaving) return;
+    if (!selectedSlot || isSaving || isRatingMatchBlocked) return;
 
     const isRatingBookingMatch = isPublicFormat && matchType === 'rating';
 
@@ -349,35 +350,37 @@ export default function BookingScreen({ allMatches = [], onBookSlot, showToast }
 
       {selectedSlot && (
         <div className="booking-sheet-overlay" role="presentation" onClick={handleCloseConfirm}>
-          <section
-            className="booking-confirm-sheet"
+          <div
+            className="booking-sheet"
             role="dialog"
             aria-modal="true"
             aria-label="Подтверждение брони"
             onClick={(event) => event.stopPropagation()}
           >
-            <div className="booking-sheet-grabber" aria-hidden="true" />
-            <div className="booking-sheet-header flex items-start justify-between gap-3">
-              <div>
-                <div className="mb-1 text-[10px] font-extrabold uppercase tracking-[0.18em] text-warm-white/42">
-                  Подтверждение
+            <div className="booking-sheet-header">
+              <div className="booking-sheet-grabber" aria-hidden="true" />
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="mb-1 text-[10px] font-extrabold uppercase tracking-[0.18em] text-warm-white/42">
+                    Подтверждение
+                  </div>
+                  <h2 className="text-xl font-black">
+                    {selectedDate?.eyebrow}, {selectedDate?.label}
+                  </h2>
+                  <p className="mt-1 text-sm text-warm-white/60">
+                    {selectedSlot.time} · {formatDuration(duration)} · {selectedCourt?.name}
+                  </p>
                 </div>
-                <h2 className="text-xl font-black">
-                  {selectedDate?.eyebrow}, {selectedDate?.label}
-                </h2>
-                <p className="mt-1 text-sm text-warm-white/60">
-                  {selectedSlot.time} · {formatDuration(duration)} · {selectedCourt?.name}
-                </p>
+                <button
+                  type="button"
+                  className="booking-sheet-close"
+                  aria-label="Закрыть подтверждение"
+                  disabled={isSaving}
+                  onClick={handleCloseConfirm}
+                >
+                  <X size={18} />
+                </button>
               </div>
-              <button
-                type="button"
-                className="booking-sheet-close"
-                aria-label="Закрыть подтверждение"
-                disabled={isSaving}
-                onClick={handleCloseConfirm}
-              >
-                <X size={18} />
-              </button>
             </div>
 
             <div className="booking-sheet-body">
@@ -449,9 +452,16 @@ export default function BookingScreen({ allMatches = [], onBookSlot, showToast }
                     })}
                   </div>
                   {matchType === 'rating' && (
-                    <p className="mt-2 text-xs leading-relaxed text-warm-white/52">
-                      Рейтинг изменится после подтверждения счёта.
-                    </p>
+                    <>
+                      <p className="mt-2 text-xs leading-relaxed text-warm-white/52">
+                        Рейтинг изменится после подтверждения счёта.
+                      </p>
+                      {isRatingMatchBlocked && (
+                        <p className="mt-2 text-xs font-semibold leading-relaxed text-coral">
+                          Для рейтингового матча нужен подтверждённый рейтинг.
+                        </p>
+                      )}
+                    </>
                   )}
                 </div>
               )}
@@ -462,19 +472,20 @@ export default function BookingScreen({ allMatches = [], onBookSlot, showToast }
             </div>
 
             <div className="booking-sheet-footer">
+              <div className="booking-sheet-ready">Форма готова к созданию</div>
               <PadelButton
                 type="button"
                 variant="success"
                 size="lg"
                 fullWidth
-                disabled={isSaving}
+                disabled={isSaving || isRatingMatchBlocked}
                 onClick={handleConfirm}
                 className="booking-confirm-cta"
               >
-                {isSaving ? 'Сохраняем...' : 'Создать бронь'}
+                {isSaving ? 'Сохраняем...' : isPublicFormat ? 'Создать матч' : 'Создать бронь'}
               </PadelButton>
             </div>
-          </section>
+          </div>
         </div>
       )}
 
