@@ -6,11 +6,10 @@ import MatchDetailsScreen from './components/MatchDetailsScreen';
 import MatchFeed from './components/MatchFeed';
 import Home from './components/Home';
 import EditProfileScreen from './components/EditProfileScreen';
-import BookingCalendar from './components/BookingCalendar';
+import BookingScreen from './components/BookingScreen';
 import AdminScreen from './components/AdminScreen';
 import { supabase } from './lib/supabaseClient';
 import { useTelegram } from './hooks/useTelegram';
-import { COURTS, checkAvailability } from './lib/booking';
 import { isPrimeTime } from './lib/pricing';
 import { calculateRatingChange, getLevelForRating, MIN_RATING, MAX_RATING } from './lib/ratingEngine';
 import { isRatingMatch } from './lib/matchRating';
@@ -271,13 +270,7 @@ export default function App({ session, showToast }) { // Accept showToast as a p
     };
   }, [profile, session, user?.username]); // <-- добавили session в зависимости
 
-  const canOpenBookingCalendar = currentUser?.role === 'admin';
-
-  useEffect(() => {
-    if (activeTab === 'booking' && !canOpenBookingCalendar) {
-      setActiveTab('home');
-    }
-  }, [activeTab, canOpenBookingCalendar]);
+  const isAdmin = currentUser?.role === 'admin';
 
   // ── Delete match: remove from allMatches (persisted via useLocalStorage) ──
   const handleDeleteMatch = async (matchId) => {
@@ -484,7 +477,7 @@ export default function App({ session, showToast }) { // Accept showToast as a p
     return updatedMatch;
   };
 
-  // ── Booking from BookingCalendar ──
+  // ── Booking from BookingScreen ──
   // Always creates a match in allMatches; the calendar derives slot statuses from it.
   // isPrivate=true  → status='upcoming', paymentStatus='full', invisible in MatchFeed.
   // isPrivate=false → status='open',     paymentStatus='partial', appears in MatchFeed.
@@ -497,6 +490,7 @@ const handleBookSlot = async (booking) => {
 
     const target = new Date(booking.dateISO);
     const dateStr = target.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }).replace(' г.', '');
+    const isRated = !booking.isPrivate && (booking.isRatingMatch === true || booking.is_rating_match === true);
 
     // Безопасно собираем данные организатора (с защитой от null)
     const ownerSlot = {
@@ -523,9 +517,10 @@ const handleBookSlot = async (booking) => {
       ratingMin:     booking.ratingMin ?? 0,
       ratingMax:     booking.ratingMax ?? 6,
       description:   booking.description || '',
-      scenario:      booking.isPrivate ? 'private' : 'community',
+      scenario:      booking.scenario || (booking.isPrivate ? 'private' : 'community'),
       status:        booking.isPrivate ? 'upcoming' : 'open',
       isPrivate:     !!booking.isPrivate,
+      is_rating_match: isRated,
       paymentStatus: booking.paymentStatus || 'partial',
       filledSlots:   [ownerSlot],
       participants:  [ME_ID], // Это ВАЖНО для фильтра на главной!
@@ -684,6 +679,9 @@ const handleBookSlot = async (booking) => {
           withCoach: trainingData.withCoach,
           duration: trainingData.duration,
           guests: trainingData.guests,
+          coachName: trainingData.coachName,
+          coachId: trainingData.coachId,
+          coachStatus: trainingData.coachStatus,
         },
         trainingStatus: 'pending_coach',
       })
@@ -705,10 +703,10 @@ const handleBookSlot = async (booking) => {
     const updatedMatch = normalizeMatch(updatedRow);
     setAllMatches(prev => prev.map(m => m.id === updatedMatch.id ? updatedMatch : m));
     setSelected(prev => prev?.id === updatedMatch.id ? updatedMatch : prev);
-    showToast('Запрос на тренировку отправлен администратору', 'success');
+    showToast('Запрос на тренировку отправлен. Администратор клуба подтвердит тренера и детали.', 'success');
   };
 
-  const handleConvertToPublic = async (matchId) => {
+  const handleConvertToPublic = async (matchId, isRatingMatch = false) => {
     const { data, error } = await supabase
       .from('matches')
       .update({
@@ -716,6 +714,10 @@ const handleBookSlot = async (booking) => {
         isPrivate: false,
         scenario: 'social',
         status: 'open',
+        is_rating_match: isRatingMatch === true,
+        isTraining: false,
+        trainingDetails: null,
+        trainingStatus: null,
       })
       .eq('id', matchId)
       .select();
@@ -821,13 +823,6 @@ const handleBookSlot = async (booking) => {
     tg?.HapticFeedback?.impactOccurred('light');
     setSelected(match);
     setScreen('match-details');
-  };
-
-  // Open match details by id — used from BookingCalendar where we only know the matchId.
-  const openMatchById = (id) => {
-    const match = allMatches.find(m => m.id === id);
-    if (!match) return;
-    openMatchDetails(match);
   };
 
   // ── Match creation: build object and persist ──
@@ -1021,7 +1016,7 @@ const handleBookSlot = async (booking) => {
             upcomingMatches={upcomingMatches}
             completedMatches={completedMatches}
             onViewDetails={openMatchDetails}
-            onBookCourt={canOpenBookingCalendar ? () => setActiveTab('booking') : null}
+            onBookCourt={() => setActiveTab('booking')}
             onSetupTraining={handleSetupTraining}
             onConvertToPublic={handleConvertToPublic} // This needs showToast
             user={currentUser}
@@ -1039,7 +1034,7 @@ const handleBookSlot = async (booking) => {
             completedMatches={completedMatches}
             onViewDetails={openMatchDetails}
             onCreateMatch={openCreateMatch}
-            onBookCourt={canOpenBookingCalendar ? () => setActiveTab('booking') : null}
+            onBookCourt={() => setActiveTab('booking')}
             onLogout={handleLogout}
             onOpenSettings={() => setScreen('edit-profile')} // This needs showToast
             onOpenAdmin={() => {
@@ -1072,21 +1067,16 @@ const handleBookSlot = async (booking) => {
           />
         )}
 
-        {activeTab === 'booking' && canOpenBookingCalendar && (
-  <div style={{ height: 'calc(100dvh - 78px - env(safe-area-inset-bottom, 0px))', display: 'flex', flexDirection: 'column', overflow: 'visible', touchAction: 'pan-x pan-y' }}>
-    <BookingCalendar
-      allMatches={allMatches}
-      userId={ME_ID} // Передаем твой ID
-      userRating={currentUser?.numericRating} // Передаем рейтинг для проверки входа
-      onOpenMatch={openMatchById}
-      onBookSlot={handleBookSlot}
-      showToast={showToast}
-    />
-  </div>
-)}
+        {activeTab === 'booking' && (
+          <BookingScreen
+            allMatches={allMatches}
+            onBookSlot={handleBookSlot}
+            showToast={showToast}
+          />
+        )}
       </main>
 
-      <BottomNav active={activeTab} setActive={setActiveTab} isAdmin={canOpenBookingCalendar} />
+      <BottomNav active={activeTab} setActive={setActiveTab} isAdmin={isAdmin} />
     </div>
   );
 }

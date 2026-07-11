@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { CalendarDays, ChartNoAxesCombined, Dumbbell, Trophy } from 'lucide-react';
+import { Dumbbell } from 'lucide-react';
 import PadelButton from './ui/PadelButton';
 import PadelCard from './ui/PadelCard';
 import TrainingModal from './TrainingModal';
@@ -53,7 +53,14 @@ function CountdownBadge({ matchDateISO, matchTime }) {
 }
 
 function ActionModal({ match, onClose, onConvertToMatch, onSetupTraining }) {
+  const [step, setStep] = useState('actions');
+
   if (!match) return null;
+
+  const handleConvert = (isRatingMatch) => {
+    onConvertToMatch(match.id, isRatingMatch);
+    onClose();
+  };
 
   return (
     <div
@@ -61,34 +68,47 @@ function ActionModal({ match, onClose, onConvertToMatch, onSetupTraining }) {
       className="app-modal-overlay fixed inset-0 z-[9998] flex items-center justify-center p-4"
     >
       <PadelCard onClick={(e) => e.stopPropagation()} padding="lg" className="app-modal-panel w-full max-w-sm">
-        <h3 className="mb-2 text-center text-lg font-bold text-warm-white">Действие с бронью</h3>
+        <h3 className="mb-2 text-center text-lg font-bold text-warm-white">
+          {step === 'match-type' ? 'Тип матча' : 'Действие с бронью'}
+        </h3>
         <p className="mb-6 text-center text-sm text-warm-white/60">
           {getDisplayDate(match.dateISO)}, {match.time}
         </p>
-        <div className="flex flex-col gap-3">
-          <PadelButton
-            variant="ghost"
-            size="lg"
-            fullWidth
-            onClick={() => {
-              onSetupTraining(match);
-              onClose();
-            }}
-          >
-            Оставить как тренировку
-          </PadelButton>
-          <PadelButton
-            variant="yellow"
-            size="lg"
-            fullWidth
-            onClick={() => {
-              onConvertToMatch(match.id);
-              onClose();
-            }}
-          >
-            Создать открытый матч
-          </PadelButton>
-        </div>
+        {step === 'actions' ? (
+          <div className="flex flex-col gap-3">
+            <PadelButton
+              variant="ghost"
+              size="lg"
+              fullWidth
+              onClick={() => {
+                onSetupTraining(match);
+                onClose();
+              }}
+            >
+              Тренировка
+            </PadelButton>
+            <PadelButton
+              variant="yellow"
+              size="lg"
+              fullWidth
+              onClick={() => setStep('match-type')}
+            >
+              Создать открытый матч
+            </PadelButton>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-3">
+            <PadelButton variant="ghost" size="lg" fullWidth onClick={() => handleConvert(false)}>
+              Обычный матч
+            </PadelButton>
+            <PadelButton variant="yellow" size="lg" fullWidth onClick={() => handleConvert(true)}>
+              Рейтинговый матч
+            </PadelButton>
+            <p className="text-center text-xs leading-relaxed text-warm-white/48">
+              Рейтинг изменится после подтверждения счёта.
+            </p>
+          </div>
+        )}
         <button onClick={onClose} className="mt-5 w-full text-center text-sm text-warm-white/45">
           Отмена
         </button>
@@ -149,22 +169,6 @@ function UpcomingRow({ match, onClick }) {
   );
 }
 
-function QuickAction({ icon: Icon, label, hint, onClick }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="flex min-h-[96px] flex-col items-start justify-between rounded-[22px] border border-warm-white/10 bg-white/[0.045] p-4 text-left shadow-[0_16px_42px_rgba(0,0,0,0.22)] transition-transform active:scale-[0.98]"
-    >
-      <Icon size={22} strokeWidth={1.9} className="text-accent-light" />
-      <span>
-        <span className="block text-sm font-bold text-warm-white">{label}</span>
-        <span className="mt-1 block text-xs leading-snug text-warm-white/50">{hint}</span>
-      </span>
-    </button>
-  );
-}
-
 export default function Home({
   upcomingMatches = [],
   onBookCourt,
@@ -178,6 +182,7 @@ export default function Home({
 }) {
   const [actionMatch, setActionMatch] = useState(null);
   const [trainingSetupMatch, setTrainingSetupMatch] = useState(null);
+  const [eventsFilter, setEventsFilter] = useState('all');
 
   const gamesWithPartners = upcomingMatches.filter(m => m.type === 'match');
   const myTrainings = upcomingMatches.filter(m => m.type === 'private' && m.isTraining);
@@ -186,6 +191,20 @@ export default function Home({
     .sort((a, b) => new Date(`${a.dateISO}T${a.time || '00:00'}:00`) - new Date(`${b.dateISO}T${b.time || '00:00'}:00`))[0];
   const rating = user?.numericRating || 3.0;
   const playerName = user?.firstName || 'Игрок';
+  const myEvents = [...personalBookings, ...gamesWithPartners, ...myTrainings]
+    .sort((a, b) => new Date(`${a.dateISO}T${a.time || '00:00'}:00`) - new Date(`${b.dateISO}T${b.time || '00:00'}:00`));
+  const eventTabs = [
+    { id: 'all', label: 'Все', count: myEvents.length },
+    { id: 'bookings', label: 'Брони', count: personalBookings.length },
+    { id: 'matches', label: 'Матчи', count: gamesWithPartners.length },
+    { id: 'trainings', label: 'Тренировки', count: myTrainings.length },
+  ];
+  const visibleEvents = myEvents.filter((event) => {
+    if (eventsFilter === 'bookings') return event.type === 'private' && !event.isTraining;
+    if (eventsFilter === 'matches') return event.type === 'match';
+    if (eventsFilter === 'trainings') return event.type === 'private' && event.isTraining;
+    return true;
+  });
   const bookingUnavailableText = 'Бронирование через приложение скоро будет обновлено';
   const handleBookCourt = () => {
     if (onBookCourt) {
@@ -236,18 +255,7 @@ export default function Home({
         </div>
       </PadelCard>
 
-      <div className="mb-7 grid grid-cols-2 gap-3">
-        <QuickAction icon={CalendarDays} label="Бронь" hint={onBookCourt ? 'Корт и время' : 'Скоро обновим'} onClick={handleBookCourt} />
-        <QuickAction icon={ChartNoAxesCombined} label="Матчи" hint="Открытая лента" onClick={onOpenMatches} />
-        <QuickAction icon={Dumbbell} label="Тренировки" hint="С тренером клуба" onClick={() => {
-          const training = myTrainings[0] || personalBookings[0];
-          if (training) setTrainingSetupMatch(training);
-          else handleBookCourt();
-        }} />
-        <QuickAction icon={Trophy} label="Рейтинг" hint="Уровень и прогресс" onClick={onOpenRating} />
-      </div>
-
-      <section className="space-y-4">
+      <section className="mb-7 space-y-4">
         <div className="text-[10px] font-extrabold uppercase tracking-[0.20em] text-warm-white/42">
           Ближайшее событие
         </div>
@@ -258,10 +266,10 @@ export default function Home({
             {upcomingMatches.length > 1 && (
               <button
                 type="button"
-                onClick={onOpenMatches}
+                onClick={() => setEventsFilter('all')}
                 className="w-full rounded-2xl border border-warm-white/10 px-4 py-3 text-sm font-bold text-warm-white/70"
               >
-                Смотреть все матчи
+                Смотреть все события
               </button>
             )}
           </>
@@ -274,6 +282,63 @@ export default function Home({
               </PadelButton>
             ) : (
               <p className="mt-4 text-xs leading-relaxed text-warm-white/46">{bookingUnavailableText}</p>
+            )}
+          </PadelCard>
+        )}
+      </section>
+
+      <section className="space-y-4">
+        <div className="flex items-end justify-between gap-3">
+          <div>
+            <div className="text-[10px] font-extrabold uppercase tracking-[0.20em] text-warm-white/42">
+              Мои события
+            </div>
+            <p className="mt-1 text-sm text-warm-white/52">
+              Брони, матчи и тренировки в одном месте
+            </p>
+          </div>
+          <Dumbbell size={20} strokeWidth={1.8} className="mb-1 text-accent-light/70" />
+        </div>
+
+        <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
+          {eventTabs.map((tab) => {
+            const active = eventsFilter === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setEventsFilter(tab.id)}
+                className={[
+                  'shrink-0 rounded-full border px-3 py-2 text-xs font-bold transition-colors',
+                  active
+                    ? 'border-accent-light/35 bg-accent-light/12 text-accent-light'
+                    : 'border-warm-white/10 bg-white/[0.035] text-warm-white/58',
+                ].join(' ')}
+              >
+                {tab.label}
+                <span className="ml-1 text-warm-white/38">{tab.count}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        {visibleEvents.length > 0 ? (
+          <div>
+            {visibleEvents.map((event) => (
+              <UpcomingRow
+                key={event.id}
+                match={event}
+                onClick={() => handleUpcomingClick(event)}
+              />
+            ))}
+          </div>
+        ) : (
+          <PadelCard className="border-dashed py-8 text-center">
+            <p className="text-sm text-warm-white/58">В этой категории пока пусто.</p>
+            {eventsFilter === 'bookings' && onBookCourt && (
+              <PadelButton variant="ghost" size="md" onClick={handleBookCourt} className="mt-4">
+                Выбрать время
+              </PadelButton>
             )}
           </PadelCard>
         )}
