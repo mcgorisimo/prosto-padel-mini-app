@@ -204,9 +204,11 @@ export default function App({ session, showToast }) { // Accept showToast as a p
 
     return {
       id: ME_ID, // тут должен быть session?.user?.id (если ты еще не заменил ME_ID везде)
+      rating: numericRating,
       numericRating,
       ratingIdx: ratingIdxFor(numericRating),
-      isVerified: p.is_verified || false,
+      isVerified: p.is_verified === true,
+      is_verified: p.is_verified === true,
       firstName: p.first_name,
       lastName: p.last_name,
       phone: p.phone || '',
