@@ -2,6 +2,15 @@ const tg = typeof window !== 'undefined' && window.Telegram?.WebApp
     ? window.Telegram.WebApp
     : null;
 
+if (tg) {
+    tg.ready?.();
+    tg.expand?.();
+
+    if (typeof tg.disableVerticalSwipes === 'function') {
+        tg.disableVerticalSwipes();
+    }
+}
+
 const isDevelopment = import.meta.env.DEV;
 
 const MOCK_USER = {
