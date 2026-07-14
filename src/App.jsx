@@ -13,7 +13,7 @@ import { useTelegram } from './hooks/useTelegram';
 import { isPrimeTime } from './lib/pricing';
 import { calculateRatingChange, getLevelForRating, MIN_RATING, MAX_RATING } from './lib/ratingEngine';
 import { isRatingMatch } from './lib/matchRating';
-import { getMyProfile, getPublicPlayerProfiles, logSupabaseError } from './lib/profileApi';
+import { getMyProfile, getPublicPlayerProfiles } from './lib/profileApi';
 
 // ─── Seed data (shown until user creates real matches) ────────────────────────
 
@@ -45,22 +45,6 @@ function normalizeMatch(row) {
     scoreSubmittedBy: row.scoreSubmittedBy ?? row.score_submitted_by,
     scoreConfirmedBy: row.scoreConfirmedBy ?? row.score_confirmed_by,
     scoreDisputedBy: row.scoreDisputedBy ?? row.score_disputed_by,
-  };
-}
-
-function summarizeMatchForDiagnostics(match) {
-  const filledSlots = match?.filledSlots ?? match?.filled_slots;
-  const participants = match?.participants;
-
-  return {
-    matchId: match?.id ?? null,
-    type: match?.type ?? null,
-    status: match?.status ?? null,
-    isPrivate: match?.isPrivate ?? match?.is_private ?? null,
-    ratingMin: match?.ratingMin ?? match?.rating_min ?? null,
-    ratingMax: match?.ratingMax ?? match?.rating_max ?? null,
-    participantsCount: Array.isArray(participants) ? participants.length : null,
-    filledSlotsCount: Array.isArray(filledSlots) ? filledSlots.filter(Boolean).length : null,
   };
 }
 
@@ -324,7 +308,6 @@ export default function App({ session, showToast }) { // Accept showToast as a p
           ids: humanIds,
           select: 'id, rating',
           limit: null,
-          diagnosticContext: 'match-rating-fetch.profiles',
         });
         (data ?? []).forEach(profileRow => {
           profileRatings[profileRow.id] = Number(profileRow.rating) || 3.0;
@@ -826,11 +809,9 @@ const handleBookSlot = async (booking) => {
   };
 
   const handleJoinMatch = async (matchId) => {
-    const existingMatch = allMatches.find(match => match.id === matchId) ?? selectedMatch;
     const { data, error } = await supabase.rpc('join_match', { p_match_id: matchId });
 
     if (error) {
-      logSupabaseError('join_match', error, summarizeMatchForDiagnostics(existingMatch));
       showToast?.(getJoinMatchErrorMessage(error), 'error');
       throw error;
     }
@@ -860,11 +841,9 @@ const handleBookSlot = async (booking) => {
   };
 
   const handleLeaveMatch = async (matchId) => {
-    const existingMatch = allMatches.find(match => match.id === matchId) ?? selectedMatch;
     const { data, error } = await supabase.rpc('leave_match', { p_match_id: matchId });
 
     if (error) {
-      logSupabaseError('leave_match', error, summarizeMatchForDiagnostics(existingMatch));
       showToast?.('Не удалось выйти из матча. Попробуйте еще раз.', 'error');
       throw error;
     }

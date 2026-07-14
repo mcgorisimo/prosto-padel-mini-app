@@ -41,34 +41,15 @@ function sanitizeSearchTerm(value) {
     .toLowerCase();
 }
 
-export function logSupabaseError(context, error, extra = {}) {
-  if (!error) return;
-
-  console.error('[Supabase diagnostic]', {
-    context,
-    code: error.code ?? null,
-    message: error.message ?? null,
-    details: error.details ?? null,
-    hint: error.hint ?? null,
-    ...extra,
-  });
-}
-
 export async function getMyProfile() {
   const { data, error } = await supabase.rpc('get_my_profile');
-  if (error) {
-    logSupabaseError('get_my_profile', error);
-    throw error;
-  }
+  if (error) throw error;
   return requireRow(data, 'Profile RPC returned no row');
 }
 
 export async function updateMyProfile(payload) {
   const { data, error } = await supabase.rpc('update_my_profile', normalizeRpcPayload(payload));
-  if (error) {
-    logSupabaseError('update_my_profile', error);
-    throw error;
-  }
+  if (error) throw error;
   return requireRow(data, 'Profile update RPC returned no row');
 }
 
@@ -78,7 +59,6 @@ export async function getPublicPlayerProfiles({
   excludeId,
   limit = 20,
   select = 'id, first_name, last_name, username, photo_url, rating, is_verified, side_preference',
-  diagnosticContext = 'player_public_profiles.search',
 } = {}) {
   if (Array.isArray(ids) && ids.length === 0) return [];
 
@@ -104,16 +84,7 @@ export async function getPublicPlayerProfiles({
   }
 
   const { data, error } = await query;
-  if (error) {
-    logSupabaseError(diagnosticContext, error, {
-      hasSearch: Boolean(safeSearch),
-      hasIds: Array.isArray(ids),
-      excludeSelf: Boolean(excludeId),
-      limit,
-      select,
-    });
-    throw error;
-  }
+  if (error) throw error;
   return data ?? [];
 }
 
@@ -126,13 +97,7 @@ export async function adminListProfiles({
     p_filter: filter || 'all',
   });
 
-  if (error) {
-    logSupabaseError('admin_list_profiles', error, {
-      hasSearch: Boolean(String(search ?? '').trim()),
-      filter: filter || 'all',
-    });
-    throw error;
-  }
+  if (error) throw error;
   return data ?? [];
 }
 
@@ -149,11 +114,6 @@ export async function adminUpdateProfileSecurity({
     p_is_verified: isVerified ?? null,
   });
 
-  if (error) {
-    logSupabaseError('admin_update_profile_security', error, {
-      hasProfileId: Boolean(profileId),
-    });
-    throw error;
-  }
+  if (error) throw error;
   return requireRow(data, 'Admin profile security RPC returned no row');
 }

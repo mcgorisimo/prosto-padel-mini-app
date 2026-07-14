@@ -5,7 +5,6 @@ import SignUpScreen  from './auth/SignUpScreen';
 import LoginScreen   from './auth/LoginScreen';
 import Toast from './Toast'; // Correct path for Toast
 import { supabase } from '../lib/supabaseClient';
-import { logSupabaseError } from '../lib/profileApi';
 import BallLoader from './BallLoader'; // Если мяч лежит в папке components
 
 const normalizeTelegramUsername = (value) =>
@@ -87,7 +86,6 @@ const handleSignUp = async ({ email, password, options }) => {
     // Если сессия не создалась (нужно подтверждение почты),
     // supabase может не залогинить сразу. Но обычно на dev-режиме логинит.
   } catch (error) {
-    logSupabaseError('auth-gate.signup', error);
     setError('Не удалось создать профиль. Проверьте данные и попробуйте еще раз.');
   } finally {
     setLoading(false);
@@ -102,7 +100,6 @@ const handleSignUp = async ({ email, password, options }) => {
       if (error) throw error;
       showToast("С возвращением!", "success");
     } catch (error) {
-      logSupabaseError('auth-gate.login', error);
       setError('Не удалось войти. Проверьте email и пароль.');
     } finally {
       setLoading(false);

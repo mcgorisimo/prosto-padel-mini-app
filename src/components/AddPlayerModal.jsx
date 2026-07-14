@@ -60,7 +60,6 @@ export default function AddPlayerModal({ onSelectPlayer, onClose }) {
           search: searchQuery,
           select: 'id, first_name, last_name, username, rating, is_verified',
           limit: 20,
-          diagnosticContext: 'add-player-modal.search',
         });
         setResults(data || []);
       } catch (error) {
