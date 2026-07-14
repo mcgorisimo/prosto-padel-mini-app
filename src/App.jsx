@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import PlayerProfile from './components/PlayerProfile';
 import BottomNav from './components/BottomNav';
 import MatchCreationScreen from './components/MatchCreationScreen';
@@ -15,11 +15,11 @@ import { calculateRatingChange, getLevelForRating, MIN_RATING, MAX_RATING } from
 import { isRatingMatch } from './lib/matchRating';
 import { getMyProfile, getPublicPlayerProfiles, logSupabaseError } from './lib/profileApi';
 
-// в”Ђв”Ђв”Ђ Seed data (shown until user creates real matches) в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+// ─── Seed data (shown until user creates real matches) ────────────────────────
 
 const SEED_MATCHES = [];
 
-// в”Ђв”Ђв”Ђ Selectors over allMatches (single source of truth) в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+// ─── Selectors over allMatches (single source of truth) ──────────────────────
 
 function normalizeMatch(row) {
   if (!row) return row;
@@ -136,12 +136,12 @@ function getHumanPlayerIds(players) {
   )];
 }
 
-// в”Ђв”Ђв”Ђ App в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+// ─── App ──────────────────────────────────────────────────────────────────────
 
 export default function App({ session, showToast }) { // Accept showToast as a prop
   const { user, tg } = useTelegram();
   
-  // --- 1. РЎРўР•Р™РўР« ---
+  // --- 1. СТЕЙТЫ ---
   const ME_ID = session?.user?.id;
   const [profile, setProfile] = useState(null);
   const [allMatches, setAllMatches] = useState([]);
@@ -159,12 +159,12 @@ export default function App({ session, showToast }) { // Accept showToast as a p
       if (data) setProfile(data);
       return data ?? null;
     } catch (error) {
-      console.error(`РћС€РёР±РєР° РїСЂРё РїРѕР»СѓС‡РµРЅРёРё РїСЂРѕС„РёР»СЏ РёР· Supabase: ${error.message}`);
+      console.error(`Ошибка при получении профиля из Supabase: ${error.message}`);
       return null;
     }
   }, [ME_ID]);
 
-  // --- 2. Р—РђР“Р РЈР—РљРђ Р”РђРќРќР«РҐ ---
+  // --- 2. ЗАГРУЗКА ДАННЫХ ---
   useEffect(() => {
     const fetchData = async () => {
       if (!ME_ID) return;
@@ -175,16 +175,16 @@ export default function App({ session, showToast }) { // Accept showToast as a p
       // Fetch matches
       const { data: matchesData, error: matchesError } = await supabase.from('matches').select('*').order('created_at', { ascending: false });
       if (matchesError) {
-        console.error(`РћС€РёР±РєР° РїСЂРё РїРѕР»СѓС‡РµРЅРёРё РјР°С‚С‡РµР№ РёР· Supabase: ${matchesError.message}`);
-        if (matchesError.code === 'PGRST404') console.warn("РўР°Р±Р»РёС†Р° 'matches' РЅРµ РЅР°Р№РґРµРЅР° РІ Supabase.");
+        console.error(`Ошибка при получении матчей из Supabase: ${matchesError.message}`);
+        if (matchesError.code === 'PGRST404') console.warn("Таблица 'matches' не найдена в Supabase.");
       }
       if (matchesData) setAllMatches(matchesData.map(normalizeMatch));
 
       // Fetch messages
       const { data: messagesData, error: messagesError } = await supabase.from('messages').select('*').order('created_at', { ascending: true });
       if (messagesError) {
-        console.error(`РћС€РёР±РєР° РїСЂРё РїРѕР»СѓС‡РµРЅРёРё СЃРѕРѕР±С‰РµРЅРёР№ РёР· Supabase: ${messagesError.message}`);
-        if (messagesError.code === 'PGRST404') console.warn("РўР°Р±Р»РёС†Р° 'messages' РЅРµ РЅР°Р№РґРµРЅР° РІ Supabase.");
+        console.error(`Ошибка при получении сообщений из Supabase: ${messagesError.message}`);
+        if (messagesError.code === 'PGRST404') console.warn("Таблица 'messages' не найдена в Supabase.");
       }
       if (messagesData) setAllMessages(messagesData.map(normalizeMessage));
 
@@ -249,15 +249,15 @@ export default function App({ session, showToast }) { // Accept showToast as a p
     };
   }, [fetchProfile]);
 
-  // --- 3. РџРћР›Р¬Р—РћР’РђРўР•Р›Р¬ ---
+  // --- 3. ПОЛЬЗОВАТЕЛЬ ---
   const currentUser = useMemo(() => {
-    // 1. Р”РѕСЃС‚Р°РµРј РјРµС‚Р°РґР°РЅРЅС‹Рµ РёР· СЃРµСЃСЃРёРё (С‚Р°Рј С‚РѕС‡РЅРѕ Р»РµР¶Р°С‚ РёРјСЏ Рё С„Р°РјРёР»РёСЏ РёР· С„РѕСЂРјС‹ СЂРµРіРёСЃС‚СЂР°С†РёРё)
+    // 1. Достаем метаданные из сессии (там точно лежат имя и фамилия из формы регистрации)
     const meta = session?.user?.user_metadata || {};
     
-    // 2. Р•СЃР»Рё РїСЂРѕС„РёР»СЏ РІ Р‘Р” РµС‰Рµ РЅРµС‚, Р±РµСЂРµРј РґР°РЅРЅС‹Рµ РёР· meta
+    // 2. Если профиля в БД еще нет, берем данные из meta
     const p = profile || { 
-      first_name: meta.first_name || 'РќРѕРІС‹Р№', 
-      last_name: meta.last_name || 'РРіСЂРѕРє', 
+      first_name: meta.first_name || 'Новый',
+      last_name: meta.last_name || 'Игрок',
       rating: 3.0, 
       role: 'user' 
     };
@@ -268,7 +268,7 @@ export default function App({ session, showToast }) { // Accept showToast as a p
     const ratingIdxFor  = (n) => Math.max(0, RATINGS_ORDER.indexOf(levelLabel));
 
     return {
-      id: ME_ID, // С‚СѓС‚ РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ session?.user?.id (РµСЃР»Рё С‚С‹ РµС‰Рµ РЅРµ Р·Р°РјРµРЅРёР» ME_ID РІРµР·РґРµ)
+      id: ME_ID, // тут должен быть session?.user?.id (если ты еще не заменил ME_ID везде)
       rating: numericRating,
       numericRating,
       ratingIdx: ratingIdxFor(numericRating),
@@ -282,11 +282,11 @@ export default function App({ session, showToast }) { // Accept showToast as a p
       username: p.username || user?.username || meta.username || '',
       role: p.role,
     };
-  }, [profile, session, user?.username]); // <-- РґРѕР±Р°РІРёР»Рё session РІ Р·Р°РІРёСЃРёРјРѕСЃС‚Рё
+  }, [profile, session, user?.username]); // <-- добавили session в зависимости
 
   const isAdmin = currentUser?.role === 'admin';
 
-  // в”Ђв”Ђ Delete match: remove from allMatches (persisted via useLocalStorage) в”Ђв”Ђ
+  // ── Delete match: remove from allMatches (persisted via useLocalStorage) ──
   const handleDeleteMatch = async (matchId) => {
     const { data, error } = await supabase
       .from('matches')
@@ -295,13 +295,13 @@ export default function App({ session, showToast }) { // Accept showToast as a p
       .select('id');
 
     if (error) {
-      showToast?.('РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РјРµРЅРёС‚СЊ РјР°С‚С‡. РџРѕРїСЂРѕР±СѓР№С‚Рµ РµС‰Рµ СЂР°Р·.', 'error');
+      showToast?.('Не удалось отменить матч. Попробуйте еще раз.', 'error');
       throw error;
     }
 
     if (!data?.[0]) {
       const emptyDeleteError = new Error('Match delete returned no rows');
-      showToast?.('РњР°С‚С‡ РЅРµ РѕС‚РјРµРЅРµРЅ. РџСЂРѕРІРµСЂСЊС‚Рµ РїСЂР°РІР° РґРѕСЃС‚СѓРїР°.', 'error');
+      showToast?.('Матч не отменен. Проверьте права доступа.', 'error');
       throw emptyDeleteError;
     }
 
@@ -330,7 +330,7 @@ export default function App({ session, showToast }) { // Accept showToast as a p
           profileRatings[profileRow.id] = Number(profileRow.rating) || 3.0;
         });
       } catch (error) {
-        showToast?.('РќРµ СѓРґР°Р»РѕСЃСЊ Р·Р°РіСЂСѓР·РёС‚СЊ СЂРµР№С‚РёРЅРіРё РёРіСЂРѕРєРѕРІ. Р РµР·СѓР»СЊС‚Р°С‚ РЅРµ СЃРѕС…СЂР°РЅС‘РЅ.', 'error');
+        showToast?.('Не удалось загрузить рейтинги игроков. Результат не сохранён.', 'error');
         throw error;
       }
     }
@@ -382,7 +382,7 @@ export default function App({ session, showToast }) { // Accept showToast as a p
     return normalizeMatch(data);
   };
 
-  // в”Ђв”Ђ Complete match: regular matches finish immediately; rated matches wait for score confirmation в”Ђв”Ђ
+  // ── Complete match: regular matches finish immediately; rated matches wait for score confirmation ──
   const handleCompleteMatch = async (matchId, result) => {
     const match = allMatches.find(m => m.id === matchId) ?? selectedMatch;
     const teamsFlat = [...(result.team1 ?? []), ...(result.team2 ?? [])];
@@ -409,21 +409,21 @@ export default function App({ session, showToast }) { // Accept showToast as a p
       .select();
     
     if (error) {
-      showToast?.('РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕС…СЂР°РЅРёС‚СЊ СЂРµР·СѓР»СЊС‚Р°С‚ РјР°С‚С‡Р°. РџРѕРїСЂРѕР±СѓР№С‚Рµ РµС‰Рµ СЂР°Р·.', 'error');
+      showToast?.('Не удалось сохранить результат матча. Попробуйте еще раз.', 'error');
       throw error;
     }
 
     const updatedRow = data?.[0];
     if (!updatedRow) {
       const emptyUpdateError = new Error('Match completion update returned no rows');
-      showToast?.('РќРµ СѓРґР°Р»РѕСЃСЊ Р·Р°РІРµСЂС€РёС‚СЊ РјР°С‚С‡. РџСЂРѕРІРµСЂСЊС‚Рµ РїСЂР°РІР° РґРѕСЃС‚СѓРїР°.', 'error');
+      showToast?.('Не удалось завершить матч. Проверьте права доступа.', 'error');
       throw emptyUpdateError;
     }
 
     const updatedMatch = normalizeMatch(updatedRow);
     setAllMatches(prev => prev.map(match => match.id === matchId ? updatedMatch : match));
     showToast?.(
-      isRated ? 'РЎС‡С‘С‚ РѕС‚РїСЂР°РІР»РµРЅ РЅР° РїРѕРґС‚РІРµСЂР¶РґРµРЅРёРµ' : 'РњР°С‚С‡ Р·Р°РІРµСЂС€РµРЅ Рё РґРѕР±Р°РІР»РµРЅ РІ РёСЃС‚РѕСЂРёСЋ',
+      isRated ? 'Счёт отправлен на подтверждение' : 'Матч завершен и добавлен в историю',
       'success'
     );
     return updatedMatch;
@@ -446,7 +446,7 @@ export default function App({ session, showToast }) { // Accept showToast as a p
     });
 
     if (error) {
-      showToast?.('РЎС‡С‘С‚ РЅРµ РїРѕРґС‚РІРµСЂР¶РґС‘РЅ: С‚СЂРµР±СѓРµС‚СЃСЏ СЃРµСЂРІРµСЂРЅРѕРµ РїСЂРёРјРµРЅРµРЅРёРµ СЂРµР№С‚РёРЅРіР°.', 'error');
+      showToast?.('Счёт не подтверждён: требуется серверное применение рейтинга.', 'error');
       throw error;
     }
 
@@ -458,7 +458,7 @@ export default function App({ session, showToast }) { // Accept showToast as a p
       setProfile(prev => ({ ...(prev || {}), rating: ratingChanges[currentUser.id].after }));
     }
 
-    showToast?.('РЎС‡С‘С‚ РїРѕРґС‚РІРµСЂР¶РґС‘РЅ. Р РµР№С‚РёРЅРі РѕР±РЅРѕРІР»С‘РЅ.', 'success');
+    showToast?.('Счёт подтверждён. Рейтинг обновлён.', 'success');
     return updatedMatch;
   };
 
@@ -474,43 +474,43 @@ export default function App({ session, showToast }) { // Accept showToast as a p
       .select();
 
     if (error) {
-      showToast?.('РќРµ СѓРґР°Р»РѕСЃСЊ РѕСЃРїРѕСЂРёС‚СЊ СЃС‡С‘С‚. РџРѕРїСЂРѕР±СѓР№С‚Рµ РµС‰С‘ СЂР°Р·.', 'error');
+      showToast?.('Не удалось оспорить счёт. Попробуйте ещё раз.', 'error');
       throw error;
     }
 
     const updatedRow = data?.[0];
     if (!updatedRow) {
       const emptyUpdateError = new Error('Score dispute update returned no rows');
-      showToast?.('РЎС‡С‘С‚ РЅРµ РѕСЃРїРѕСЂРµРЅ. РџСЂРѕРІРµСЂСЊС‚Рµ РїСЂР°РІР° РґРѕСЃС‚СѓРїР°.', 'error');
+      showToast?.('Счёт не оспорен. Проверьте права доступа.', 'error');
       throw emptyUpdateError;
     }
 
     const updatedMatch = normalizeMatch(updatedRow);
     setAllMatches(prev => prev.map(match => match.id === matchId ? updatedMatch : match));
     setSelected(prev => prev?.id === matchId ? updatedMatch : prev);
-    showToast?.('РЎС‡С‘С‚ РѕСЃРїРѕСЂРµРЅ. РћР±СЂР°С‚РёС‚РµСЃСЊ Рє Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂСѓ РєР»СѓР±Р°.', 'info');
+    showToast?.('Счёт оспорен. Обратитесь к администратору клуба.', 'info');
     return updatedMatch;
   };
 
-  // в”Ђв”Ђ Booking from BookingScreen в”Ђв”Ђ
+  // ── Booking from BookingScreen ──
   // Always creates a match in allMatches; the calendar derives slot statuses from it.
   // isPrivate=true  в†’ status='upcoming', paymentStatus='full', invisible in MatchFeed.
   // isPrivate=false в†’ status='open',     paymentStatus='partial', appears in MatchFeed.
 const handleBookSlot = async (booking) => {
-    // РџСЂРѕРІРµСЂРєР°: РµСЃС‚СЊ Р»Рё ID РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ?
+    // Проверка: есть ли ID пользователя?
     if (!ME_ID) {
-      console.error("РћС€РёР±РєР°: ME_ID РЅРµ РѕРїСЂРµРґРµР»РµРЅ");
+      console.error("Ошибка: ME_ID не определен");
       return;
     }
 
     const target = new Date(booking.dateISO);
-    const dateStr = target.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }).replace(' Рі.', '');
+    const dateStr = target.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }).replace(' г.', '');
     const isRated = !booking.isPrivate && (booking.isRatingMatch === true || booking.is_rating_match === true);
 
-    // Р‘РµР·РѕРїР°СЃРЅРѕ СЃРѕР±РёСЂР°РµРј РґР°РЅРЅС‹Рµ РѕСЂРіР°РЅРёР·Р°С‚РѕСЂР° (СЃ Р·Р°С‰РёС‚РѕР№ РѕС‚ null)
+    // Безопасно собираем данные организатора (с защитой от null)
     const ownerSlot = {
       id:          ME_ID,
-      firstName:   currentUser?.firstName || 'РРіСЂРѕРє',
+      firstName:   currentUser?.firstName || 'Игрок',
       lastName:    currentUser?.lastName || '',
       ratingIdx:   currentUser?.ratingIdx || 0,
       numericRating: currentUser?.numericRating || 3.0,
@@ -519,13 +519,13 @@ const handleBookSlot = async (booking) => {
     };
 
     const newMatch = {
-      owner_id:      ME_ID, // РСЃРїРѕР»СЊР·СѓРµРј ME_ID РЅР°РїСЂСЏРјСѓСЋ, РѕРЅ РЅР°РґРµР¶РЅРµРµ
+      owner_id:      ME_ID, // Используем ME_ID напрямую, он надежнее
       date:          dateStr,
       dateISO:       booking.dateISO,
       time:          booking.time,
       duration:      booking.duration || 1.5,
       courtId:       booking.court?.id || '1',
-      courtName:     booking.court?.name || 'РљРѕСЂС‚',
+      courtName:     booking.court?.name || 'Корт',
       courtType:     booking.court?.type || 'standard',
       isPrime:       isPrimeTime(booking?.time || '00:00', booking.dateISO),
       type:          booking.type || 'match',
@@ -538,32 +538,32 @@ const handleBookSlot = async (booking) => {
       is_rating_match: isRated,
       paymentStatus: booking.paymentStatus || 'partial',
       filledSlots:   [ownerSlot],
-      participants:  [ME_ID], // Р­С‚Рѕ Р’РђР–РќРћ РґР»СЏ С„РёР»СЊС‚СЂР° РЅР° РіР»Р°РІРЅРѕР№!
+      participants:  [ME_ID], // Это ВАЖНО для фильтра на главной!
     };
 
     const { data, error } = await supabase.from('matches').insert([newMatch]).select();
     
     if (error) {
-      console.error("РљР РРўРР§Р•РЎРљРђРЇ РћРЁРР‘РљРђ Р‘Р”:", error);
-      showToast?.('РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕС…СЂР°РЅРёС‚СЊ Р±СЂРѕРЅСЊ. РџРѕРїСЂРѕР±СѓР№С‚Рµ РµС‰Рµ СЂР°Р·.', 'error');
+      console.error("КРИТИЧЕСКАЯ ОШИБКА БД:", error);
+      showToast?.('Не удалось сохранить бронь. Попробуйте еще раз.', 'error');
       throw error;
     }
 
     const insertedRow = data?.[0];
     if (!insertedRow) {
       const emptyInsertError = new Error('Booking creation returned no rows');
-      showToast?.('Р‘СЂРѕРЅСЊ РЅРµ СЃРѕС…СЂР°РЅРµРЅР°. РџСЂРѕРІРµСЂСЊС‚Рµ РїСЂР°РІР° РґРѕСЃС‚СѓРїР° Рё РїРѕРїСЂРѕР±СѓР№С‚Рµ РµС‰Рµ СЂР°Р·.', 'error');
+      showToast?.('Бронь не сохранена. Проверьте права доступа и попробуйте еще раз.', 'error');
       throw emptyInsertError;
     }
 
     setAllMatches(prev => [normalizeMatch(insertedRow), ...prev]);
-    // Р•СЃР»Рё СЌС‚Рѕ РїСѓР±Р»РёС‡РЅС‹Р№ РјР°С‚С‡ вЂ” РёРґРµРј РІ Р»РµРЅС‚Сѓ, РµСЃР»Рё РїСЂРёРІР°С‚ вЂ” РѕСЃС‚Р°РµРјСЃСЏ РІ РєР°Р»РµРЅРґР°СЂРµ
+    // Если это публичный матч — идем в ленту, если приват — остаемся в календаре
     if (!booking.isPrivate) {
       setActiveTab('matches');
     }
   };
 
-  // в”Ђв”Ђв”Ђ 2. РСЃРїСЂР°РІР»РµРЅРЅС‹Р№ handleRevertToPrivate в”Ђв”Ђв”Ђ
+  // ─── 2. Исправленный handleRevertToPrivate ───
   const handleRevertToPrivate = async (matchId) => {
     const { data, error } = await supabase
       .from('matches')
@@ -578,10 +578,10 @@ const handleBookSlot = async (booking) => {
         isTraining: false,
         trainingDetails: null,
         trainingStatus: null,
-        // РЎР±СЂР°СЃС‹РІР°РµРј СЃР»РѕС‚С‹ РґРѕ С‚РѕР»СЊРєРѕ РІР»Р°РґРµР»СЊС†Р°
+        // Сбрасываем слоты до только владельца
         filledSlots: [{ 
           id: ME_ID, 
-          firstName: currentUser?.firstName || 'РРіСЂРѕРє', 
+          firstName: currentUser?.firstName || 'Игрок',
           lastName: currentUser?.lastName || '', 
           ratingIdx: currentUser?.ratingIdx || 0, 
           numericRating: currentUser?.numericRating || 3.0, 
@@ -594,29 +594,29 @@ const handleBookSlot = async (booking) => {
       .select();
 
     if (error) {
-      console.error("РћС€РёР±РєР° РїСЂРё РѕС‚РјРµРЅРµ РјР°С‚С‡Р°:", error);
-      showToast?.('РќРµ СѓРґР°Р»РѕСЃСЊ РїРµСЂРµРІРµСЃС‚Рё РјР°С‚С‡ РІ РїСЂРёРІР°С‚РЅС‹Р№ СЂРµР¶РёРј', 'error');
+      console.error("Ошибка при отмене матча:", error);
+      showToast?.('Не удалось перевести матч в приватный режим', 'error');
       throw error;
     }
 
     const updatedRow = data?.[0];
     if (!updatedRow) {
       const emptyUpdateError = new Error('Revert to private returned no rows');
-      showToast?.('Р‘СЂРѕРЅСЊ РЅРµ РѕР±РЅРѕРІР»РµРЅР°. РџСЂРѕРІРµСЂСЊС‚Рµ РїСЂР°РІР° РґРѕСЃС‚СѓРїР°.', 'error');
+      showToast?.('Бронь не обновлена. Проверьте права доступа.', 'error');
       throw emptyUpdateError;
     }
 
     const updatedMatch = normalizeMatch(updatedRow);
     setAllMatches(prev => prev.map(m => m.id === matchId ? updatedMatch : m));
     setSelected(prev => prev?.id === matchId ? updatedMatch : prev);
-    showToast('РњР°С‚С‡ РѕС‚РјРµРЅРµРЅ, Р±СЂРѕРЅСЊ РїРµСЂРµРІРµРґРµРЅР° РІ Р»РёС‡РЅСѓСЋ С‚СЂРµРЅРёСЂРѕРІРєСѓ', 'info');
+    showToast('Матч отменен, бронь переведена в личную тренировку', 'info');
     setActiveTab('home'); 
   };
 
   const handleUpdateMatch = async (matchId, updates) => {
     const dateISO = updates.dateISO ?? updates.date;
     const dateLabel = dateISO
-      ? new Date(dateISO).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }).replace(' Рі.', '')
+      ? new Date(dateISO).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }).replace(' г.', '')
       : undefined;
 
     const payload = {
@@ -638,21 +638,21 @@ const handleBookSlot = async (booking) => {
       .select();
 
     if (error) {
-      showToast?.('РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕС…СЂР°РЅРёС‚СЊ РёР·РјРµРЅРµРЅРёСЏ РјР°С‚С‡Р°. РџРѕРїСЂРѕР±СѓР№С‚Рµ РµС‰Рµ СЂР°Р·.', 'error');
+      showToast?.('Не удалось сохранить изменения матча. Попробуйте еще раз.', 'error');
       throw error;
     }
 
     const updatedRow = data?.[0];
     if (!updatedRow) {
       const emptyUpdateError = new Error('Match edit returned no rows');
-      showToast?.('РР·РјРµРЅРµРЅРёСЏ РЅРµ СЃРѕС…СЂР°РЅРµРЅС‹. РџСЂРѕРІРµСЂСЊС‚Рµ РїСЂР°РІР° РґРѕСЃС‚СѓРїР° РёР»Рё СЃС‚Р°С‚СѓСЃ РјР°С‚С‡Р°.', 'error');
+      showToast?.('Изменения не сохранены. Проверьте права доступа или статус матча.', 'error');
       throw emptyUpdateError;
     }
 
     const updatedMatch = normalizeMatch(updatedRow);
     setAllMatches(prev => prev.map(m => m.id === updatedMatch.id ? updatedMatch : m));
     setSelected(prev => prev?.id === updatedMatch.id ? updatedMatch : prev);
-    showToast?.('РњР°С‚С‡ РѕР±РЅРѕРІР»РµРЅ', 'success');
+    showToast?.('Матч обновлен', 'success');
     return updatedMatch;
   };
 
@@ -660,22 +660,22 @@ const handleBookSlot = async (booking) => {
     const senderId = sender?.id ?? ME_ID;
 
     if (!senderId) {
-      showToast?.('РќРµ СѓРґР°Р»РѕСЃСЊ РѕРїСЂРµРґРµР»РёС‚СЊ РёРіСЂРѕРєР°. РџРѕРїСЂРѕР±СѓР№С‚Рµ РІРѕР№С‚Рё Р·Р°РЅРѕРІРѕ.', 'error');
+      showToast?.('Не удалось определить игрока. Попробуйте войти заново.', 'error');
       throw new Error('Cannot send message without sender id');
     }
 
     const newMessage = {
       match_id: matchId,
       sender_id: senderId,
-      sender_name: sender?.firstName || 'РРіСЂРѕРє',
+      sender_name: sender?.firstName || 'Игрок',
       text,
     };
 
     const { data, error } = await supabase.from('messages').insert([newMessage]).select();
 
     if (error) {
-      console.error(`РћС€РёР±РєР° РїСЂРё РѕС‚РїСЂР°РІРєРµ СЃРѕРѕР±С‰РµРЅРёСЏ: ${error.message}`);
-      showToast?.('РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РїСЂР°РІРёС‚СЊ СЃРѕРѕР±С‰РµРЅРёРµ', 'error');
+      console.error(`Ошибка при отправке сообщения: ${error.message}`);
+      showToast?.('Не удалось отправить сообщение', 'error');
       throw error;
     }
 
@@ -704,21 +704,21 @@ const handleBookSlot = async (booking) => {
       .select();
 
     if (error) {
-      showToast?.('РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РїСЂР°РІРёС‚СЊ Р·Р°РїСЂРѕСЃ РЅР° С‚СЂРµРЅРёСЂРѕРІРєСѓ. РџРѕРїСЂРѕР±СѓР№С‚Рµ РµС‰Рµ СЂР°Р·.', 'error');
+      showToast?.('Не удалось отправить запрос на тренировку. Попробуйте еще раз.', 'error');
       throw error;
     }
 
     const updatedRow = data?.[0];
     if (!updatedRow) {
       const emptyUpdateError = new Error('Training setup returned no rows');
-      showToast?.('РўСЂРµРЅРёСЂРѕРІРєР° РЅРµ СЃРѕС…СЂР°РЅРµРЅР°. РџСЂРѕРІРµСЂСЊС‚Рµ РїСЂР°РІР° РґРѕСЃС‚СѓРїР°.', 'error');
+      showToast?.('Тренировка не сохранена. Проверьте права доступа.', 'error');
       throw emptyUpdateError;
     }
 
     const updatedMatch = normalizeMatch(updatedRow);
     setAllMatches(prev => prev.map(m => m.id === updatedMatch.id ? updatedMatch : m));
     setSelected(prev => prev?.id === updatedMatch.id ? updatedMatch : prev);
-    showToast('Р—Р°РїСЂРѕСЃ РЅР° С‚СЂРµРЅРёСЂРѕРІРєСѓ РѕС‚РїСЂР°РІР»РµРЅ. РђРґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂ РєР»СѓР±Р° РїРѕРґС‚РІРµСЂРґРёС‚ С‚СЂРµРЅРµСЂР° Рё РґРµС‚Р°Р»Рё.', 'success');
+    showToast('Запрос на тренировку отправлен. Администратор клуба подтвердит тренера и детали.', 'success');
   };
 
   const handleConvertToPublic = async (matchId, isRatingMatch = false) => {
@@ -738,14 +738,14 @@ const handleBookSlot = async (booking) => {
       .select();
 
     if (error) {
-      showToast?.('РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РєСЂС‹С‚СЊ СЃР±РѕСЂ РёРіСЂРѕРєРѕРІ. РџРѕРїСЂРѕР±СѓР№С‚Рµ РµС‰Рµ СЂР°Р·.', 'error');
+      showToast?.('Не удалось открыть сбор игроков. Попробуйте еще раз.', 'error');
       throw error;
     }
 
     const updatedRow = data?.[0];
     if (!updatedRow) {
       const emptyUpdateError = new Error('Convert to public returned no rows');
-      showToast?.('РњР°С‚С‡ РЅРµ РѕРїСѓР±Р»РёРєРѕРІР°РЅ. РџСЂРѕРІРµСЂСЊС‚Рµ РїСЂР°РІР° РґРѕСЃС‚СѓРїР°.', 'error');
+      showToast?.('Матч не опубликован. Проверьте права доступа.', 'error');
       throw emptyUpdateError;
     }
 
@@ -754,7 +754,7 @@ const handleBookSlot = async (booking) => {
     openMatchDetails(updatedMatch);
   };
 
-  // в”Ђв”Ђ Slot changes: persist filledSlots, recompute participants + status в”Ђв”Ђ
+  // ── Slot changes: persist filledSlots, recompute participants + status ──
   const handleSlotsChange = async (matchId, newFilledSlots) => {
     const currentMatch = allMatches.find(m => m.id === matchId);
     const { participants, status: derivedStatus } = deriveParticipantsAndStatus(newFilledSlots, currentMatch?.status);
@@ -766,8 +766,8 @@ const handleBookSlot = async (booking) => {
       .select();
 
     if (error) {
-      console.error(`РћС€РёР±РєР° РїСЂРё СЃРѕС…СЂР°РЅРµРЅРёРё СЃР»РѕС‚Р°: ${error.message}`);
-      showToast?.('РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕС…СЂР°РЅРёС‚СЊ СЃР»РѕС‚. РџРѕРїСЂРѕР±СѓР№С‚Рµ РµС‰Рµ СЂР°Р·.', 'error');
+      console.error(`Ошибка при сохранении слота: ${error.message}`);
+      showToast?.('Не удалось сохранить слот. Попробуйте еще раз.', 'error');
       throw error;
     }
 
@@ -775,7 +775,7 @@ const handleBookSlot = async (booking) => {
     if (!updatedRow) {
       const emptyUpdateError = new Error('Match slot update returned no rows');
       console.error(emptyUpdateError);
-      showToast?.('РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕС…СЂР°РЅРёС‚СЊ СЃР»РѕС‚. РџСЂРѕРІРµСЂСЊС‚Рµ РїСЂР°РІР° РґРѕСЃС‚СѓРїР° Рє РјР°С‚С‡Сѓ.', 'error');
+      showToast?.('Не удалось сохранить слот. Проверьте права доступа к матчу.', 'error');
       throw emptyUpdateError;
     }
 
@@ -788,7 +788,7 @@ const handleBookSlot = async (booking) => {
     if (!slotsSaved || !participantsSaved) {
       const persistError = new Error('Match slot update was not persisted');
       console.error(persistError);
-      showToast?.('РЎР»РѕС‚ РЅРµ СЃРѕС…СЂР°РЅРёР»СЃСЏ. РџРѕРїСЂРѕР±СѓР№С‚Рµ РµС‰Рµ СЂР°Р·.', 'error');
+      showToast?.('Слот не сохранился. Попробуйте еще раз.', 'error');
       throw persistError;
     }
 
@@ -807,22 +807,22 @@ const handleBookSlot = async (booking) => {
     const message = `${error?.message ?? ''} ${error?.details ?? ''} ${error?.hint ?? ''}`.toLowerCase();
 
     if (message.includes('full') || message.includes('slot') || message.includes('no free')) {
-      return 'РЎРІРѕР±РѕРґРЅРѕРµ РјРµСЃС‚Рѕ СѓР¶Рµ Р·Р°РЅСЏС‚Рѕ. РћР±РЅРѕРІРёС‚Рµ РјР°С‚С‡ Рё РїРѕРїСЂРѕР±СѓР№С‚Рµ РґСЂСѓРіРѕР№.';
+      return 'Свободное место уже занято. Обновите матч и попробуйте другой.';
     }
     if (message.includes('private')) {
-      return 'Р­С‚Рѕ РїСЂРёРІР°С‚РЅС‹Р№ РјР°С‚С‡. РџСЂРёСЃРѕРµРґРёРЅРёС‚СЊСЃСЏ РјРѕР¶РЅРѕ С‚РѕР»СЊРєРѕ РїРѕ РїСЂРёРіР»Р°С€РµРЅРёСЋ РѕСЂРіР°РЅРёР·Р°С‚РѕСЂР°.';
+      return 'Это приватный матч. Присоединиться можно только по приглашению организатора.';
     }
     if (message.includes('rating') || message.includes('level')) {
-      return 'Р’Р°С€ СѓСЂРѕРІРµРЅСЊ РЅРµ РІС…РѕРґРёС‚ РІ РґРёР°РїР°Р·РѕРЅ СЌС‚РѕРіРѕ РјР°С‚С‡Р°.';
+      return 'Ваш уровень не входит в диапазон этого матча.';
     }
     if (message.includes('already') || message.includes('participant')) {
-      return 'Р’С‹ СѓР¶Рµ СѓС‡Р°СЃС‚РІСѓРµС‚Рµ РІ СЌС‚РѕРј РјР°С‚С‡Рµ.';
+      return 'Вы уже участвуете в этом матче.';
     }
     if (message.includes('started') || message.includes('completed') || message.includes('cancel')) {
-      return 'РЈС‡Р°СЃС‚РёРµ РІ РјР°С‚С‡Рµ СЃРµР№С‡Р°СЃ РЅРµРґРѕСЃС‚СѓРїРЅРѕ.';
+      return 'Участие в матче сейчас недоступно.';
     }
 
-    return 'РќРµ СѓРґР°Р»РѕСЃСЊ РїСЂРёСЃРѕРµРґРёРЅРёС‚СЊСЃСЏ Рє РјР°С‚С‡Сѓ. РџРѕРїСЂРѕР±СѓР№С‚Рµ РµС‰Рµ СЂР°Р·.';
+    return 'Не удалось присоединиться к матчу. Попробуйте еще раз.';
   };
 
   const handleJoinMatch = async (matchId) => {
@@ -842,7 +842,7 @@ const handleBookSlot = async (booking) => {
     if (!returnedRow?.id) {
       const emptyRpcError = new Error('join_match returned no match row');
       console.error(emptyRpcError);
-      showToast?.('РќРµ СѓРґР°Р»РѕСЃСЊ РѕР±РЅРѕРІРёС‚СЊ РјР°С‚С‡ РїРѕСЃР»Рµ РїСЂРёСЃРѕРµРґРёРЅРµРЅРёСЏ. РџРѕРїСЂРѕР±СѓР№С‚Рµ РµС‰Рµ СЂР°Р·.', 'error');
+      showToast?.('Не удалось обновить матч после присоединения. Попробуйте еще раз.', 'error');
       throw emptyRpcError;
     }
 
@@ -865,7 +865,7 @@ const handleBookSlot = async (booking) => {
 
     if (error) {
       logSupabaseError('leave_match', error, summarizeMatchForDiagnostics(existingMatch));
-      showToast?.('РќРµ СѓРґР°Р»РѕСЃСЊ РІС‹Р№С‚Рё РёР· РјР°С‚С‡Р°. РџРѕРїСЂРѕР±СѓР№С‚Рµ РµС‰Рµ СЂР°Р·.', 'error');
+      showToast?.('Не удалось выйти из матча. Попробуйте еще раз.', 'error');
       throw error;
     }
 
@@ -876,7 +876,7 @@ const handleBookSlot = async (booking) => {
     if (!returnedRow?.id) {
       const emptyRpcError = new Error('leave_match returned no match row');
       console.error(emptyRpcError);
-      showToast?.('РќРµ СѓРґР°Р»РѕСЃСЊ РѕР±РЅРѕРІРёС‚СЊ РјР°С‚С‡ РїРѕСЃР»Рµ РІС‹С…РѕРґР°. РџРѕРїСЂРѕР±СѓР№С‚Рµ РµС‰Рµ СЂР°Р·.', 'error');
+      showToast?.('Не удалось обновить матч после выхода. Попробуйте еще раз.', 'error');
       throw emptyRpcError;
     }
 
@@ -893,17 +893,17 @@ const handleBookSlot = async (booking) => {
     return updatedMatch;
   };
 
-  // в”Ђв”Ђ Dev reset (clears localStorage and reloads) в”Ђв”Ђ
+  // ── Dev reset (clears localStorage and reloads) ──
   const handleReset = () => {
     localStorage.clear();
     window.location.reload();
   };
 
-  // в”Ђв”Ђ Logout в”Ђв”Ђ
+  // ── Logout ──
   const handleLogout = async () => {
     const { error } = await supabase.auth.signOut();
     if (error) {
-      showToast?.('РќРµ СѓРґР°Р»РѕСЃСЊ РІС‹Р№С‚Рё РёР· Р°РєРєР°СѓРЅС‚Р°. РџРѕРїСЂРѕР±СѓР№С‚Рµ РµС‰Рµ СЂР°Р·.', 'error');
+      showToast?.('Не удалось выйти из аккаунта. Попробуйте еще раз.', 'error');
       throw error;
     }
     localStorage.clear();
@@ -919,7 +919,7 @@ const handleBookSlot = async (booking) => {
   // This local toast state is for app-specific messages that don't come from AuthGate.
   const [screen, setScreen] = useState(null); // Moved here to be after currentUser
 
-  // в”Ђв”Ђ Navigation helpers в”Ђв”Ђ
+  // ── Navigation helpers ──
   const openCreateMatch = () => {
     tg?.HapticFeedback?.impactOccurred('medium');
     setScreen('create-match');
@@ -931,7 +931,7 @@ const handleBookSlot = async (booking) => {
     setScreen('match-details');
   };
 
-  // в”Ђв”Ђ Match creation: build object and persist в”Ђв”Ђ
+  // ── Match creation: build object and persist ──
   const handleMatchSuccess = async (data) => {
     const isRated = data.isRatingMatch === true || data.is_rating_match === true;
 
@@ -977,14 +977,14 @@ const handleBookSlot = async (booking) => {
     const { data: insertedData, error } = await supabase.from('matches').insert([newMatch]).select();
 
     if (error) {
-      showToast?.('РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕР·РґР°С‚СЊ РјР°С‚С‡. РџРѕРїСЂРѕР±СѓР№С‚Рµ РµС‰Рµ СЂР°Р·.', 'error');
+      showToast?.('Не удалось создать матч. Попробуйте еще раз.', 'error');
       throw error;
     }
 
     const insertedRow = insertedData?.[0];
     if (!insertedRow) {
       const emptyInsertError = new Error('Match creation returned no rows');
-      showToast?.('РњР°С‚С‡ РЅРµ СЃРѕР·РґР°РЅ. РџСЂРѕРІРµСЂСЊС‚Рµ РїСЂР°РІР° РґРѕСЃС‚СѓРїР°.', 'error');
+      showToast?.('Матч не создан. Проверьте права доступа.', 'error');
       throw emptyInsertError;
     }
 
@@ -1005,7 +1005,7 @@ const handleBookSlot = async (booking) => {
   const completedMatches = getUserMatchHistory(allMatches, ME_ID);
   // Public feed shows only non-private open matches.
   const openMatches = allMatches.filter(m => {
-    // Р’РѕСЃСЃС‚Р°РЅР°РІР»РёРІР°РµРј СЃС‚СЂРѕРіРёР№ С„РёР»СЊС‚СЂ: С‚РѕР»СЊРєРѕ РїСѓР±Р»РёС‡РЅС‹Рµ, РЅРµ Р·Р°РІРµСЂС€РµРЅРЅС‹Рµ РјР°С‚С‡Рё
+    // Восстанавливаем строгий фильтр: только публичные, не завершенные матчи
     const isPublicFeedMatch = m.type === 'match' && m.isPrivate === false && m.status !== 'completed';
     if (!isPublicFeedMatch) {
       return false;
@@ -1017,12 +1017,12 @@ const handleBookSlot = async (booking) => {
 
   // Real profile stats derived from allMatches + live rating.
   const profileStats = useMemo(() => {
-    // Р‘РµР·РѕРїР°СЃРЅРѕ Р±РµСЂРµРј СЂРµР№С‚РёРЅРі
+    // Безопасно берем рейтинг
     const numericRating = currentUser?.rating || currentUser?.numericRating || 3.0;
     const matchesCount = completedMatches?.length || 0;
     
     const winsCount = (completedMatches || []).filter(m => {
-      const myId = currentUser?.id; // РСЃРїРѕР»СЊР·СѓРµРј ID С‚РµРєСѓС‰РµРіРѕ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ
+      const myId = currentUser?.id; // Используем ID текущего пользователя
       // Ensure myId is defined before using it in .some() to prevent errors
       if (!myId) {
         console.warn("currentUser.id is undefined when calculating winsCount.");
@@ -1047,7 +1047,7 @@ const handleBookSlot = async (booking) => {
     return <div style={{ background: '#050F0B', minHeight: '100dvh' }} />; // Or a proper loading spinner
   }
 
-  // в”Ђв”Ђ Full-screen routes (hide BottomNav) в”Ђв”Ђ
+  // ── Full-screen routes (hide BottomNav) ──
   if (screen === 'create-match') {
     return (
       <MatchCreationScreen
@@ -1104,7 +1104,7 @@ const handleBookSlot = async (booking) => {
   return (
     <div className="app-container">
       {/* isDevMode check needs to be updated if role is in profile table */}
-      {/* Dev mode badge вЂ” visible only for admin accounts */}
+      {/* Dev mode badge — visible only for admin accounts */}
       {currentUser.role === 'admin' && (
         <div style={{
           position: 'fixed', top: '10px', right: '10px', zIndex: 9999,
@@ -1114,7 +1114,7 @@ const handleBookSlot = async (booking) => {
           letterSpacing: '0.08em', pointerEvents: 'none',
           backdropFilter: 'blur(4px)',
         }}>
-          Р Р•Р–РРњ Р РђР—Р РђР‘РћРўР§РРљРђ
+          РЕЖИМ РАЗРАБОТЧИКА
         </div>
       )}
 
@@ -1155,10 +1155,10 @@ const handleBookSlot = async (booking) => {
 
         {activeTab === 'leaderboard' && (
           <div className="tab-placeholder" style={{ padding: '40px 16px', color: 'rgba(245,241,232,0.62)', textAlign: 'center' }}>
-            <h2 style={{ color: '#F5F1E8', marginBottom: '8px' }}>Р РµР№С‚РёРЅРі РєР»СѓР±Р°</h2>
-            <p style={{ marginBottom: '8px' }}>Р РµР№С‚РёРЅРі РєР»СѓР±Р° РїРѕСЏРІРёС‚СЃСЏ РїРѕСЃР»Рµ РїРµСЂРІС‹С… РёРіСЂ.</p>
+            <h2 style={{ color: '#F5F1E8', marginBottom: '8px' }}>Рейтинг клуба</h2>
+            <p style={{ marginBottom: '8px' }}>Рейтинг клуба появится после первых игр.</p>
             <p style={{ fontSize: '13px', lineHeight: 1.5 }}>
-              РЎРµР№С‡Р°СЃ РІ MVP РїРѕРєР°Р·С‹РІР°РµРј Р»РёС‡РЅС‹Р№ СѓСЂРѕРІРµРЅСЊ Рё РёСЃС‚РѕСЂРёСЋ РјР°С‚С‡РµР№ РІ РїСЂРѕС„РёР»Рµ.
+              Сейчас в MVP показываем личный уровень и историю матчей в профиле.
             </p>
           </div>
         )}
