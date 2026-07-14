@@ -1,11 +1,12 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import App          from '../App';
 import WelcomeScreen from './auth/WelcomeScreen';
 import SignUpScreen  from './auth/SignUpScreen';
 import LoginScreen   from './auth/LoginScreen';
 import Toast from './Toast'; // Correct path for Toast
 import { supabase } from '../lib/supabaseClient';
-import BallLoader from './BallLoader'; // Если мяч лежит в папке components
+import { logSupabaseError } from '../lib/profileApi';
+import BallLoader from './BallLoader'; // Р•СЃР»Рё РјСЏС‡ Р»РµР¶РёС‚ РІ РїР°РїРєРµ components
 
 const normalizeTelegramUsername = (value) =>
   String(value ?? '')
@@ -47,7 +48,7 @@ const handleSignUp = async ({ email, password, options }) => {
   setLoading(true);
   setError('');
   try {
-    // 1. Регистрируем в Auth (данные из options.data попадут в метаданные)
+    // 1. Р РµРіРёСЃС‚СЂРёСЂСѓРµРј РІ Auth (РґР°РЅРЅС‹Рµ РёР· options.data РїРѕРїР°РґСѓС‚ РІ РјРµС‚Р°РґР°РЅРЅС‹Рµ)
     const { data: authData, error: authError } = await supabase.auth.signUp({ 
       email, 
       password, 
@@ -56,15 +57,15 @@ const handleSignUp = async ({ email, password, options }) => {
 
     if (authError) throw authError;
 
-    // 2. СРАЗУ создаем запись в таблице profiles, используя те же данные
+    // 2. РЎР РђР—РЈ СЃРѕР·РґР°РµРј Р·Р°РїРёСЃСЊ РІ С‚Р°Р±Р»РёС†Рµ profiles, РёСЃРїРѕР»СЊР·СѓСЏ С‚Рµ Р¶Рµ РґР°РЅРЅС‹Рµ
     if (authData.user) {
       const { data: profileData, error: profileError } = await supabase
         .from('profiles')
         .insert([
           { 
             id: authData.user.id, 
-            first_name: options.data.first_name, // Берем из того, что пришло
-            last_name: options.data.last_name,   // Берем из того, что пришло
+            first_name: options.data.first_name, // Р‘РµСЂРµРј РёР· С‚РѕРіРѕ, С‡С‚Рѕ РїСЂРёС€Р»Рѕ
+            last_name: options.data.last_name,   // Р‘РµСЂРµРј РёР· С‚РѕРіРѕ, С‡С‚Рѕ РїСЂРёС€Р»Рѕ
             username: normalizeTelegramUsername(options.data.username) || null,
             role: 'user', 
             rating: options.data.rating || 3.0,
@@ -83,9 +84,10 @@ const handleSignUp = async ({ email, password, options }) => {
       }
     }
     
-    // Если сессия не создалась (нужно подтверждение почты), 
-    // supabase может не залогинить сразу. Но обычно на dev-режиме логинит.
+    // Р•СЃР»Рё СЃРµСЃСЃРёСЏ РЅРµ СЃРѕР·РґР°Р»Р°СЃСЊ (РЅСѓР¶РЅРѕ РїРѕРґС‚РІРµСЂР¶РґРµРЅРёРµ РїРѕС‡С‚С‹), 
+    // supabase РјРѕР¶РµС‚ РЅРµ Р·Р°Р»РѕРіРёРЅРёС‚СЊ СЃСЂР°Р·Сѓ. РќРѕ РѕР±С‹С‡РЅРѕ РЅР° dev-СЂРµР¶РёРјРµ Р»РѕРіРёРЅРёС‚.
   } catch (error) {
+    logSupabaseError('auth-gate.signup', error);
     setError(error.message);
   } finally {
     setLoading(false);
@@ -98,15 +100,16 @@ const handleSignUp = async ({ email, password, options }) => {
     try {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
-      showToast("С возвращением!", "success");
+      showToast("РЎ РІРѕР·РІСЂР°С‰РµРЅРёРµРј!", "success");
     } catch (error) {
+      logSupabaseError('auth-gate.login', error);
       setError(error.message);
     } finally {
       setLoading(false);
     }
   };
 
-  // 1. Показываем лоадер (если ты сделал BallLoader, используй его тут!)
+  // 1. РџРѕРєР°Р·С‹РІР°РµРј Р»РѕР°РґРµСЂ (РµСЃР»Рё С‚С‹ СЃРґРµР»Р°Р» BallLoader, РёСЃРїРѕР»СЊР·СѓР№ РµРіРѕ С‚СѓС‚!)
   if (loading) return <BallLoader />;
 
   const toast = toastMessage && (
@@ -117,7 +120,7 @@ const handleSignUp = async ({ email, password, options }) => {
     />
   );
 
-  // 2. Если залогинены — пускаем в само приложение
+  // 2. Р•СЃР»Рё Р·Р°Р»РѕРіРёРЅРµРЅС‹ вЂ” РїСѓСЃРєР°РµРј РІ СЃР°РјРѕ РїСЂРёР»РѕР¶РµРЅРёРµ
   if (session) {
     return (
       <>
@@ -127,10 +130,10 @@ const handleSignUp = async ({ email, password, options }) => {
     );
   }
 
-  // 3. Главный рендер экранов авторизации + Toast
+  // 3. Р“Р»Р°РІРЅС‹Р№ СЂРµРЅРґРµСЂ СЌРєСЂР°РЅРѕРІ Р°РІС‚РѕСЂРёР·Р°С†РёРё + Toast
   // Note: WelcomeScreen, SignUpScreen, LoginScreen should also receive showToast if they use it.
 
-  // 3. Главный рендер экранов авторизации + Toast
+  // 3. Р“Р»Р°РІРЅС‹Р№ СЂРµРЅРґРµСЂ СЌРєСЂР°РЅРѕРІ Р°РІС‚РѕСЂРёР·Р°С†РёРё + Toast
   return (
     <>
       {authView === 'welcome' && (

@@ -662,6 +662,7 @@ function SlotActionSheet({ slotIndex, isOwner, currentUser, matchId, onAddGuest,
           excludeId: currentUser?.id,
           select: 'id, first_name, last_name, username, rating, is_verified, side_preference',
           limit: 5,
+          diagnosticContext: 'match-slot-action-sheet.search',
         });
         setSearchResults(data || []);
       } finally {

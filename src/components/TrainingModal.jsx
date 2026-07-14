@@ -72,6 +72,7 @@ function ParticipantPicker({ index, value, onChange }) {
           search: trimmed,
           select: 'id, first_name, last_name, username, rating, is_verified',
           limit: 8,
+          diagnosticContext: 'training-participant-picker.search',
         });
         setResults(data ?? []);
       } catch (error) {
