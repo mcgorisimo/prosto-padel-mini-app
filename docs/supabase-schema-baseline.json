@@ -1,0 +1,2452 @@
+{
+  "tables": [
+    {
+      "owner": "postgres",
+      "schema": "public",
+      "rls_forced": false,
+      "table_name": "matches",
+      "rls_enabled": true,
+      "relation_type": "table"
+    },
+    {
+      "owner": "postgres",
+      "schema": "public",
+      "rls_forced": false,
+      "table_name": "messages",
+      "rls_enabled": true,
+      "relation_type": "table"
+    },
+    {
+      "owner": "postgres",
+      "schema": "public",
+      "rls_forced": false,
+      "table_name": "profiles",
+      "rls_enabled": true,
+      "relation_type": "table"
+    }
+  ],
+  "columns": [
+    {
+      "table": "matches",
+      "column": "id",
+      "schema": "public",
+      "identity": null,
+      "nullable": false,
+      "data_type": "uuid",
+      "generated": null,
+      "database_type": "uuid",
+      "default_value": "gen_random_uuid()",
+      "ordinal_position": 1
+    },
+    {
+      "table": "matches",
+      "column": "owner_id",
+      "schema": "public",
+      "identity": null,
+      "nullable": false,
+      "data_type": "uuid",
+      "generated": null,
+      "database_type": "uuid",
+      "default_value": null,
+      "ordinal_position": 2
+    },
+    {
+      "table": "matches",
+      "column": "ownerId",
+      "schema": "public",
+      "identity": null,
+      "nullable": true,
+      "data_type": "uuid",
+      "generated": "s",
+      "database_type": "uuid",
+      "default_value": "owner_id",
+      "ordinal_position": 3
+    },
+    {
+      "table": "matches",
+      "column": "created_at",
+      "schema": "public",
+      "identity": null,
+      "nullable": false,
+      "data_type": "timestamp with time zone",
+      "generated": null,
+      "database_type": "timestamp with time zone",
+      "default_value": "now()",
+      "ordinal_position": 4
+    },
+    {
+      "table": "matches",
+      "column": "updated_at",
+      "schema": "public",
+      "identity": null,
+      "nullable": false,
+      "data_type": "timestamp with time zone",
+      "generated": null,
+      "database_type": "timestamp with time zone",
+      "default_value": "now()",
+      "ordinal_position": 5
+    },
+    {
+      "table": "matches",
+      "column": "date",
+      "schema": "public",
+      "identity": null,
+      "nullable": true,
+      "data_type": "text",
+      "generated": null,
+      "database_type": "text",
+      "default_value": null,
+      "ordinal_position": 6
+    },
+    {
+      "table": "matches",
+      "column": "dateISO",
+      "schema": "public",
+      "identity": null,
+      "nullable": true,
+      "data_type": "date",
+      "generated": null,
+      "database_type": "date",
+      "default_value": null,
+      "ordinal_position": 7
+    },
+    {
+      "table": "matches",
+      "column": "time",
+      "schema": "public",
+      "identity": null,
+      "nullable": true,
+      "data_type": "text",
+      "generated": null,
+      "database_type": "text",
+      "default_value": null,
+      "ordinal_position": 8
+    },
+    {
+      "table": "matches",
+      "column": "duration",
+      "schema": "public",
+      "identity": null,
+      "nullable": true,
+      "data_type": "numeric",
+      "generated": null,
+      "database_type": "numeric",
+      "default_value": null,
+      "ordinal_position": 9
+    },
+    {
+      "table": "matches",
+      "column": "courtId",
+      "schema": "public",
+      "identity": null,
+      "nullable": true,
+      "data_type": "text",
+      "generated": null,
+      "database_type": "text",
+      "default_value": null,
+      "ordinal_position": 10
+    },
+    {
+      "table": "matches",
+      "column": "courtName",
+      "schema": "public",
+      "identity": null,
+      "nullable": true,
+      "data_type": "text",
+      "generated": null,
+      "database_type": "text",
+      "default_value": null,
+      "ordinal_position": 11
+    },
+    {
+      "table": "matches",
+      "column": "courtType",
+      "schema": "public",
+      "identity": null,
+      "nullable": true,
+      "data_type": "text",
+      "generated": null,
+      "database_type": "text",
+      "default_value": null,
+      "ordinal_position": 12
+    },
+    {
+      "table": "matches",
+      "column": "isPrime",
+      "schema": "public",
+      "identity": null,
+      "nullable": false,
+      "data_type": "boolean",
+      "generated": null,
+      "database_type": "boolean",
+      "default_value": "false",
+      "ordinal_position": 13
+    },
+    {
+      "table": "matches",
+      "column": "type",
+      "schema": "public",
+      "identity": null,
+      "nullable": false,
+      "data_type": "text",
+      "generated": null,
+      "database_type": "text",
+      "default_value": "'match'::text",
+      "ordinal_position": 14
+    },
+    {
+      "table": "matches",
+      "column": "scenario",
+      "schema": "public",
+      "identity": null,
+      "nullable": true,
+      "data_type": "text",
+      "generated": null,
+      "database_type": "text",
+      "default_value": null,
+      "ordinal_position": 15
+    },
+    {
+      "table": "matches",
+      "column": "title",
+      "schema": "public",
+      "identity": null,
+      "nullable": true,
+      "data_type": "text",
+      "generated": null,
+      "database_type": "text",
+      "default_value": null,
+      "ordinal_position": 16
+    },
+    {
+      "table": "matches",
+      "column": "description",
+      "schema": "public",
+      "identity": null,
+      "nullable": true,
+      "data_type": "text",
+      "generated": null,
+      "database_type": "text",
+      "default_value": null,
+      "ordinal_position": 17
+    },
+    {
+      "table": "matches",
+      "column": "status",
+      "schema": "public",
+      "identity": null,
+      "nullable": false,
+      "data_type": "text",
+      "generated": null,
+      "database_type": "text",
+      "default_value": "'open'::text",
+      "ordinal_position": 18
+    },
+    {
+      "table": "matches",
+      "column": "ratingMin",
+      "schema": "public",
+      "identity": null,
+      "nullable": false,
+      "data_type": "integer",
+      "generated": null,
+      "database_type": "integer",
+      "default_value": "0",
+      "ordinal_position": 19
+    },
+    {
+      "table": "matches",
+      "column": "ratingMax",
+      "schema": "public",
+      "identity": null,
+      "nullable": false,
+      "data_type": "integer",
+      "generated": null,
+      "database_type": "integer",
+      "default_value": "6",
+      "ordinal_position": 20
+    },
+    {
+      "table": "matches",
+      "column": "players",
+      "schema": "public",
+      "identity": null,
+      "nullable": true,
+      "data_type": "integer",
+      "generated": null,
+      "database_type": "integer",
+      "default_value": null,
+      "ordinal_position": 21
+    },
+    {
+      "table": "matches",
+      "column": "filledSlots",
+      "schema": "public",
+      "identity": null,
+      "nullable": false,
+      "data_type": "jsonb",
+      "generated": null,
+      "database_type": "jsonb",
+      "default_value": "'[]'::jsonb",
+      "ordinal_position": 22
+    },
+    {
+      "table": "matches",
+      "column": "participants",
+      "schema": "public",
+      "identity": null,
+      "nullable": false,
+      "data_type": "text[]",
+      "generated": null,
+      "database_type": "text[]",
+      "default_value": "'{}'::text[]",
+      "ordinal_position": 23
+    },
+    {
+      "table": "matches",
+      "column": "isPrivate",
+      "schema": "public",
+      "identity": null,
+      "nullable": false,
+      "data_type": "boolean",
+      "generated": null,
+      "database_type": "boolean",
+      "default_value": "false",
+      "ordinal_position": 24
+    },
+    {
+      "table": "matches",
+      "column": "paymentStatus",
+      "schema": "public",
+      "identity": null,
+      "nullable": true,
+      "data_type": "text",
+      "generated": null,
+      "database_type": "text",
+      "default_value": null,
+      "ordinal_position": 25
+    },
+    {
+      "table": "matches",
+      "column": "syncToCalendar",
+      "schema": "public",
+      "identity": null,
+      "nullable": false,
+      "data_type": "boolean",
+      "generated": null,
+      "database_type": "boolean",
+      "default_value": "false",
+      "ordinal_position": 26
+    },
+    {
+      "table": "matches",
+      "column": "ownerPaid",
+      "schema": "public",
+      "identity": null,
+      "nullable": true,
+      "data_type": "numeric",
+      "generated": null,
+      "database_type": "numeric",
+      "default_value": null,
+      "ordinal_position": 27
+    },
+    {
+      "table": "matches",
+      "column": "holdAmount",
+      "schema": "public",
+      "identity": null,
+      "nullable": true,
+      "data_type": "numeric",
+      "generated": null,
+      "database_type": "numeric",
+      "default_value": null,
+      "ordinal_position": 28
+    },
+    {
+      "table": "matches",
+      "column": "pricePerPerson",
+      "schema": "public",
+      "identity": null,
+      "nullable": true,
+      "data_type": "numeric",
+      "generated": null,
+      "database_type": "numeric",
+      "default_value": null,
+      "ordinal_position": 29
+    },
+    {
+      "table": "matches",
+      "column": "ownerName",
+      "schema": "public",
+      "identity": null,
+      "nullable": true,
+      "data_type": "text",
+      "generated": null,
+      "database_type": "text",
+      "default_value": null,
+      "ordinal_position": 30
+    },
+    {
+      "table": "matches",
+      "column": "isBooked",
+      "schema": "public",
+      "identity": null,
+      "nullable": false,
+      "data_type": "boolean",
+      "generated": null,
+      "database_type": "boolean",
+      "default_value": "false",
+      "ordinal_position": 31
+    },
+    {
+      "table": "matches",
+      "column": "isTraining",
+      "schema": "public",
+      "identity": null,
+      "nullable": false,
+      "data_type": "boolean",
+      "generated": null,
+      "database_type": "boolean",
+      "default_value": "false",
+      "ordinal_position": 32
+    },
+    {
+      "table": "matches",
+      "column": "trainingDetails",
+      "schema": "public",
+      "identity": null,
+      "nullable": true,
+      "data_type": "jsonb",
+      "generated": null,
+      "database_type": "jsonb",
+      "default_value": null,
+      "ordinal_position": 33
+    },
+    {
+      "table": "matches",
+      "column": "trainingStatus",
+      "schema": "public",
+      "identity": null,
+      "nullable": true,
+      "data_type": "text",
+      "generated": null,
+      "database_type": "text",
+      "default_value": null,
+      "ordinal_position": 34
+    },
+    {
+      "table": "matches",
+      "column": "completedAt",
+      "schema": "public",
+      "identity": null,
+      "nullable": true,
+      "data_type": "timestamp with time zone",
+      "generated": null,
+      "database_type": "timestamp with time zone",
+      "default_value": null,
+      "ordinal_position": 35
+    },
+    {
+      "table": "matches",
+      "column": "finalScore",
+      "schema": "public",
+      "identity": null,
+      "nullable": true,
+      "data_type": "jsonb",
+      "generated": null,
+      "database_type": "jsonb",
+      "default_value": null,
+      "ordinal_position": 36
+    },
+    {
+      "table": "matches",
+      "column": "isTeam1Win",
+      "schema": "public",
+      "identity": null,
+      "nullable": true,
+      "data_type": "boolean",
+      "generated": null,
+      "database_type": "boolean",
+      "default_value": null,
+      "ordinal_position": 37
+    },
+    {
+      "table": "matches",
+      "column": "team1",
+      "schema": "public",
+      "identity": null,
+      "nullable": true,
+      "data_type": "jsonb",
+      "generated": null,
+      "database_type": "jsonb",
+      "default_value": null,
+      "ordinal_position": 38
+    },
+    {
+      "table": "matches",
+      "column": "team2",
+      "schema": "public",
+      "identity": null,
+      "nullable": true,
+      "data_type": "jsonb",
+      "generated": null,
+      "database_type": "jsonb",
+      "default_value": null,
+      "ordinal_position": 39
+    },
+    {
+      "table": "matches",
+      "column": "ratingChanges",
+      "schema": "public",
+      "identity": null,
+      "nullable": true,
+      "data_type": "jsonb",
+      "generated": null,
+      "database_type": "jsonb",
+      "default_value": null,
+      "ordinal_position": 40
+    },
+    {
+      "table": "matches",
+      "column": "host",
+      "schema": "public",
+      "identity": null,
+      "nullable": true,
+      "data_type": "jsonb",
+      "generated": null,
+      "database_type": "jsonb",
+      "default_value": null,
+      "ordinal_position": 41
+    },
+    {
+      "table": "matches",
+      "column": "is_rating_match",
+      "schema": "public",
+      "identity": null,
+      "nullable": false,
+      "data_type": "boolean",
+      "generated": null,
+      "database_type": "boolean",
+      "default_value": "false",
+      "ordinal_position": 42
+    },
+    {
+      "table": "matches",
+      "column": "score_status",
+      "schema": "public",
+      "identity": null,
+      "nullable": false,
+      "data_type": "text",
+      "generated": null,
+      "database_type": "text",
+      "default_value": "'none'::text",
+      "ordinal_position": 43
+    },
+    {
+      "table": "matches",
+      "column": "score_submitted_by",
+      "schema": "public",
+      "identity": null,
+      "nullable": true,
+      "data_type": "uuid",
+      "generated": null,
+      "database_type": "uuid",
+      "default_value": null,
+      "ordinal_position": 44
+    },
+    {
+      "table": "matches",
+      "column": "score_confirmed_by",
+      "schema": "public",
+      "identity": null,
+      "nullable": true,
+      "data_type": "uuid",
+      "generated": null,
+      "database_type": "uuid",
+      "default_value": null,
+      "ordinal_position": 45
+    },
+    {
+      "table": "matches",
+      "column": "score_disputed_by",
+      "schema": "public",
+      "identity": null,
+      "nullable": true,
+      "data_type": "uuid",
+      "generated": null,
+      "database_type": "uuid",
+      "default_value": null,
+      "ordinal_position": 46
+    },
+    {
+      "table": "messages",
+      "column": "id",
+      "schema": "public",
+      "identity": null,
+      "nullable": false,
+      "data_type": "uuid",
+      "generated": null,
+      "database_type": "uuid",
+      "default_value": "gen_random_uuid()",
+      "ordinal_position": 1
+    },
+    {
+      "table": "messages",
+      "column": "match_id",
+      "schema": "public",
+      "identity": null,
+      "nullable": false,
+      "data_type": "uuid",
+      "generated": null,
+      "database_type": "uuid",
+      "default_value": null,
+      "ordinal_position": 2
+    },
+    {
+      "table": "messages",
+      "column": "matchId",
+      "schema": "public",
+      "identity": null,
+      "nullable": true,
+      "data_type": "uuid",
+      "generated": "s",
+      "database_type": "uuid",
+      "default_value": "match_id",
+      "ordinal_position": 3
+    },
+    {
+      "table": "messages",
+      "column": "sender_id",
+      "schema": "public",
+      "identity": null,
+      "nullable": false,
+      "data_type": "uuid",
+      "generated": null,
+      "database_type": "uuid",
+      "default_value": null,
+      "ordinal_position": 4
+    },
+    {
+      "table": "messages",
+      "column": "senderId",
+      "schema": "public",
+      "identity": null,
+      "nullable": true,
+      "data_type": "uuid",
+      "generated": "s",
+      "database_type": "uuid",
+      "default_value": "sender_id",
+      "ordinal_position": 5
+    },
+    {
+      "table": "messages",
+      "column": "sender_name",
+      "schema": "public",
+      "identity": null,
+      "nullable": false,
+      "data_type": "text",
+      "generated": null,
+      "database_type": "text",
+      "default_value": null,
+      "ordinal_position": 6
+    },
+    {
+      "table": "messages",
+      "column": "senderName",
+      "schema": "public",
+      "identity": null,
+      "nullable": true,
+      "data_type": "text",
+      "generated": "s",
+      "database_type": "text",
+      "default_value": "sender_name",
+      "ordinal_position": 7
+    },
+    {
+      "table": "messages",
+      "column": "text",
+      "schema": "public",
+      "identity": null,
+      "nullable": false,
+      "data_type": "text",
+      "generated": null,
+      "database_type": "text",
+      "default_value": null,
+      "ordinal_position": 8
+    },
+    {
+      "table": "messages",
+      "column": "timestamp",
+      "schema": "public",
+      "identity": null,
+      "nullable": false,
+      "data_type": "timestamp with time zone",
+      "generated": null,
+      "database_type": "timestamp with time zone",
+      "default_value": "now()",
+      "ordinal_position": 9
+    },
+    {
+      "table": "messages",
+      "column": "created_at",
+      "schema": "public",
+      "identity": null,
+      "nullable": false,
+      "data_type": "timestamp with time zone",
+      "generated": null,
+      "database_type": "timestamp with time zone",
+      "default_value": "now()",
+      "ordinal_position": 10
+    },
+    {
+      "table": "profiles",
+      "column": "id",
+      "schema": "public",
+      "identity": null,
+      "nullable": false,
+      "data_type": "uuid",
+      "generated": null,
+      "database_type": "uuid",
+      "default_value": null,
+      "ordinal_position": 1
+    },
+    {
+      "table": "profiles",
+      "column": "created_at",
+      "schema": "public",
+      "identity": null,
+      "nullable": false,
+      "data_type": "timestamp with time zone",
+      "generated": null,
+      "database_type": "timestamp with time zone",
+      "default_value": "now()",
+      "ordinal_position": 2
+    },
+    {
+      "table": "profiles",
+      "column": "updated_at",
+      "schema": "public",
+      "identity": null,
+      "nullable": false,
+      "data_type": "timestamp with time zone",
+      "generated": null,
+      "database_type": "timestamp with time zone",
+      "default_value": "now()",
+      "ordinal_position": 3
+    },
+    {
+      "table": "profiles",
+      "column": "first_name",
+      "schema": "public",
+      "identity": null,
+      "nullable": false,
+      "data_type": "text",
+      "generated": null,
+      "database_type": "text",
+      "default_value": null,
+      "ordinal_position": 4
+    },
+    {
+      "table": "profiles",
+      "column": "last_name",
+      "schema": "public",
+      "identity": null,
+      "nullable": false,
+      "data_type": "text",
+      "generated": null,
+      "database_type": "text",
+      "default_value": "''::text",
+      "ordinal_position": 5
+    },
+    {
+      "table": "profiles",
+      "column": "email",
+      "schema": "public",
+      "identity": null,
+      "nullable": true,
+      "data_type": "text",
+      "generated": null,
+      "database_type": "text",
+      "default_value": null,
+      "ordinal_position": 6
+    },
+    {
+      "table": "profiles",
+      "column": "phone",
+      "schema": "public",
+      "identity": null,
+      "nullable": true,
+      "data_type": "text",
+      "generated": null,
+      "database_type": "text",
+      "default_value": null,
+      "ordinal_position": 7
+    },
+    {
+      "table": "profiles",
+      "column": "username",
+      "schema": "public",
+      "identity": null,
+      "nullable": true,
+      "data_type": "text",
+      "generated": null,
+      "database_type": "text",
+      "default_value": null,
+      "ordinal_position": 8
+    },
+    {
+      "table": "profiles",
+      "column": "photo_url",
+      "schema": "public",
+      "identity": null,
+      "nullable": true,
+      "data_type": "text",
+      "generated": null,
+      "database_type": "text",
+      "default_value": null,
+      "ordinal_position": 9
+    },
+    {
+      "table": "profiles",
+      "column": "role",
+      "schema": "public",
+      "identity": null,
+      "nullable": false,
+      "data_type": "text",
+      "generated": null,
+      "database_type": "text",
+      "default_value": "'user'::text",
+      "ordinal_position": 10
+    },
+    {
+      "table": "profiles",
+      "column": "rating",
+      "schema": "public",
+      "identity": null,
+      "nullable": false,
+      "data_type": "numeric(4,2)",
+      "generated": null,
+      "database_type": "numeric",
+      "default_value": "3.00",
+      "ordinal_position": 11
+    },
+    {
+      "table": "profiles",
+      "column": "is_verified",
+      "schema": "public",
+      "identity": null,
+      "nullable": false,
+      "data_type": "boolean",
+      "generated": null,
+      "database_type": "boolean",
+      "default_value": "false",
+      "ordinal_position": 12
+    },
+    {
+      "table": "profiles",
+      "column": "side_preference",
+      "schema": "public",
+      "identity": null,
+      "nullable": true,
+      "data_type": "text",
+      "generated": null,
+      "database_type": "text",
+      "default_value": null,
+      "ordinal_position": 13
+    },
+    {
+      "table": "profiles",
+      "column": "birthday",
+      "schema": "public",
+      "identity": null,
+      "nullable": true,
+      "data_type": "date",
+      "generated": null,
+      "database_type": "date",
+      "default_value": null,
+      "ordinal_position": 14
+    },
+    {
+      "table": "profiles",
+      "column": "gender",
+      "schema": "public",
+      "identity": null,
+      "nullable": true,
+      "data_type": "text",
+      "generated": null,
+      "database_type": "text",
+      "default_value": null,
+      "ordinal_position": 15
+    },
+    {
+      "table": "profiles",
+      "column": "language",
+      "schema": "public",
+      "identity": null,
+      "nullable": true,
+      "data_type": "text",
+      "generated": null,
+      "database_type": "text",
+      "default_value": "'RU'::text",
+      "ordinal_position": 16
+    }
+  ],
+  "indexes": [
+    {
+      "table": "matches",
+      "schema": "public",
+      "unique": false,
+      "primary": false,
+      "definition": "CREATE INDEX matches_calendar_idx ON public.matches USING btree (\"dateISO\", \"courtId\", \"time\")",
+      "index_name": "matches_calendar_idx"
+    },
+    {
+      "table": "matches",
+      "schema": "public",
+      "unique": false,
+      "primary": false,
+      "definition": "CREATE INDEX matches_created_at_idx ON public.matches USING btree (created_at DESC)",
+      "index_name": "matches_created_at_idx"
+    },
+    {
+      "table": "matches",
+      "schema": "public",
+      "unique": false,
+      "primary": false,
+      "definition": "CREATE INDEX matches_owner_id_idx ON public.matches USING btree (owner_id)",
+      "index_name": "matches_owner_id_idx"
+    },
+    {
+      "table": "matches",
+      "schema": "public",
+      "unique": false,
+      "primary": false,
+      "definition": "CREATE INDEX matches_participants_idx ON public.matches USING gin (participants)",
+      "index_name": "matches_participants_idx"
+    },
+    {
+      "table": "matches",
+      "schema": "public",
+      "unique": true,
+      "primary": true,
+      "definition": "CREATE UNIQUE INDEX matches_pkey ON public.matches USING btree (id)",
+      "index_name": "matches_pkey"
+    },
+    {
+      "table": "matches",
+      "schema": "public",
+      "unique": false,
+      "primary": false,
+      "definition": "CREATE INDEX matches_status_type_idx ON public.matches USING btree (status, type)",
+      "index_name": "matches_status_type_idx"
+    },
+    {
+      "table": "messages",
+      "schema": "public",
+      "unique": false,
+      "primary": false,
+      "definition": "CREATE INDEX messages_match_timestamp_idx ON public.messages USING btree (match_id, \"timestamp\")",
+      "index_name": "messages_match_timestamp_idx"
+    },
+    {
+      "table": "messages",
+      "schema": "public",
+      "unique": true,
+      "primary": true,
+      "definition": "CREATE UNIQUE INDEX messages_pkey ON public.messages USING btree (id)",
+      "index_name": "messages_pkey"
+    },
+    {
+      "table": "profiles",
+      "schema": "public",
+      "unique": false,
+      "primary": false,
+      "definition": "CREATE INDEX profiles_first_name_trgm_idx ON public.profiles USING gin (lower(first_name) gin_trgm_ops)",
+      "index_name": "profiles_first_name_trgm_idx"
+    },
+    {
+      "table": "profiles",
+      "schema": "public",
+      "unique": false,
+      "primary": false,
+      "definition": "CREATE INDEX profiles_last_name_trgm_idx ON public.profiles USING gin (lower(last_name) gin_trgm_ops)",
+      "index_name": "profiles_last_name_trgm_idx"
+    },
+    {
+      "table": "profiles",
+      "schema": "public",
+      "unique": true,
+      "primary": true,
+      "definition": "CREATE UNIQUE INDEX profiles_pkey ON public.profiles USING btree (id)",
+      "index_name": "profiles_pkey"
+    }
+  ],
+  "schemas": [
+    {
+      "owner": "supabase_admin",
+      "schema": "graphql"
+    },
+    {
+      "owner": "supabase_admin",
+      "schema": "graphql_public"
+    },
+    {
+      "owner": "pg_database_owner",
+      "schema": "public"
+    }
+  ],
+  "policies": [
+    {
+      "roles": [
+        "authenticated"
+      ],
+      "table": "matches",
+      "schema": "public",
+      "command": "DELETE",
+      "permissive": "PERMISSIVE",
+      "policy_name": "matches_delete_owner_or_admin",
+      "using_expression": "((auth.uid() = owner_id) OR is_admin())",
+      "with_check_expression": null
+    },
+    {
+      "roles": [
+        "authenticated"
+      ],
+      "table": "matches",
+      "schema": "public",
+      "command": "INSERT",
+      "permissive": "PERMISSIVE",
+      "policy_name": "matches_insert_own",
+      "using_expression": null,
+      "with_check_expression": "(auth.uid() = owner_id)"
+    },
+    {
+      "roles": [
+        "authenticated"
+      ],
+      "table": "matches",
+      "schema": "public",
+      "command": "SELECT",
+      "permissive": "PERMISSIVE",
+      "policy_name": "matches_select_authenticated",
+      "using_expression": "true",
+      "with_check_expression": null
+    },
+    {
+      "roles": [
+        "authenticated"
+      ],
+      "table": "matches",
+      "schema": "public",
+      "command": "UPDATE",
+      "permissive": "PERMISSIVE",
+      "policy_name": "matches_update_owner_participant_or_admin",
+      "using_expression": "((auth.uid() = owner_id) OR ((auth.uid())::text = ANY (participants)) OR is_admin())",
+      "with_check_expression": "((auth.uid() = owner_id) OR ((auth.uid())::text = ANY (participants)) OR is_admin())"
+    },
+    {
+      "roles": [
+        "authenticated"
+      ],
+      "table": "matches",
+      "schema": "public",
+      "command": "UPDATE",
+      "permissive": "PERMISSIVE",
+      "policy_name": "players_can_join_open_public_matches",
+      "using_expression": "((type = 'match'::text) AND (COALESCE(\"isPrivate\", false) = false) AND (status = ANY (ARRAY['open'::text, 'upcoming'::text, 'searching'::text, 'confirmed'::text])))",
+      "with_check_expression": "((type = 'match'::text) AND (COALESCE(\"isPrivate\", false) = false) AND (status = ANY (ARRAY['open'::text, 'upcoming'::text, 'searching'::text, 'confirmed'::text])) AND ((auth.uid())::text = ANY (participants)))"
+    },
+    {
+      "roles": [
+        "authenticated"
+      ],
+      "table": "messages",
+      "schema": "public",
+      "command": "INSERT",
+      "permissive": "PERMISSIVE",
+      "policy_name": "messages_insert_match_members",
+      "using_expression": null,
+      "with_check_expression": "((sender_id = auth.uid()) AND (EXISTS ( SELECT 1\n   FROM matches m\n  WHERE ((m.id = messages.match_id) AND ((m.owner_id = auth.uid()) OR ((auth.uid())::text = ANY (m.participants)) OR is_admin())))))"
+    },
+    {
+      "roles": [
+        "authenticated"
+      ],
+      "table": "messages",
+      "schema": "public",
+      "command": "SELECT",
+      "permissive": "PERMISSIVE",
+      "policy_name": "messages_select_match_members",
+      "using_expression": "(EXISTS ( SELECT 1\n   FROM matches m\n  WHERE ((m.id = messages.match_id) AND ((m.owner_id = auth.uid()) OR ((auth.uid())::text = ANY (m.participants)) OR is_admin()))))",
+      "with_check_expression": null
+    },
+    {
+      "roles": [
+        "authenticated"
+      ],
+      "table": "profiles",
+      "schema": "public",
+      "command": "INSERT",
+      "permissive": "PERMISSIVE",
+      "policy_name": "profiles_insert_own",
+      "using_expression": null,
+      "with_check_expression": "(auth.uid() = id)"
+    },
+    {
+      "roles": [
+        "authenticated"
+      ],
+      "table": "profiles",
+      "schema": "public",
+      "command": "SELECT",
+      "permissive": "PERMISSIVE",
+      "policy_name": "profiles_select_authenticated",
+      "using_expression": "true",
+      "with_check_expression": null
+    },
+    {
+      "roles": [
+        "authenticated"
+      ],
+      "table": "profiles",
+      "schema": "public",
+      "command": "UPDATE",
+      "permissive": "PERMISSIVE",
+      "policy_name": "profiles_update_own_or_admin",
+      "using_expression": "((auth.uid() = id) OR is_admin())",
+      "with_check_expression": "((auth.uid() = id) OR is_admin())"
+    }
+  ],
+  "triggers": [
+    {
+      "table": "matches",
+      "schema": "public",
+      "definition": "CREATE TRIGGER set_matches_updated_at BEFORE UPDATE ON matches FOR EACH ROW EXECUTE FUNCTION set_updated_at()",
+      "trigger_name": "set_matches_updated_at",
+      "enabled_status": "O",
+      "linked_function": {
+        "schema": "public",
+        "function_name": "set_updated_at",
+        "identity_arguments": ""
+      }
+    },
+    {
+      "table": "profiles",
+      "schema": "public",
+      "definition": "CREATE TRIGGER set_profiles_updated_at BEFORE UPDATE ON profiles FOR EACH ROW EXECUTE FUNCTION set_updated_at()",
+      "trigger_name": "set_profiles_updated_at",
+      "enabled_status": "O",
+      "linked_function": {
+        "schema": "public",
+        "function_name": "set_updated_at",
+        "identity_arguments": ""
+      }
+    }
+  ],
+  "functions": [
+    {
+      "schema": "graphql_public",
+      "language": "plpgsql",
+      "definition": "CREATE OR REPLACE FUNCTION graphql_public.graphql(\"operationName\" text DEFAULT NULL::text, query text DEFAULT NULL::text, variables jsonb DEFAULT NULL::jsonb, extensions jsonb DEFAULT NULL::jsonb)\n RETURNS jsonb\n LANGUAGE plpgsql\nAS $function$\n            DECLARE\n                server_version float;\n            BEGIN\n                server_version = (SELECT (SPLIT_PART((select version()), ' ', 2))::float);\n\n                IF server_version >= 14 THEN\n                    RETURN jsonb_build_object(\n                        'errors', jsonb_build_array(\n                            jsonb_build_object(\n                                'message', 'pg_graphql extension is not enabled.'\n                            )\n                        )\n                    );\n                ELSE\n                    RETURN jsonb_build_object(\n                        'errors', jsonb_build_array(\n                            jsonb_build_object(\n                                'message', 'pg_graphql is only available on projects running Postgres 14 onwards.'\n                            )\n                        )\n                    );\n                END IF;\n            END;\n        $function$\n",
+      "volatility": "v",
+      "result_type": "jsonb",
+      "function_name": "graphql",
+      "security_definer": false,
+      "identity_arguments": "\"operationName\" text, query text, variables jsonb, extensions jsonb"
+    },
+    {
+      "schema": "public",
+      "language": "plpgsql",
+      "definition": "CREATE OR REPLACE FUNCTION public.confirm_rating_match_score(p_match_id uuid, p_confirmed_by uuid, p_rating_changes jsonb)\n RETURNS void\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\r\ndeclare\r\n  v_match public.matches%rowtype;\r\n  v_submitter_team int;\r\n  v_confirmer_team int;\r\n  v_player_id text;\r\n  v_change jsonb;\r\nbegin\r\n  if auth.uid() is null or auth.uid() <> p_confirmed_by then\r\n    raise exception 'invalid confirmer' using errcode = '42501';\r\n  end if;\r\n\r\n  select * into v_match\r\n  from public.matches\r\n  where id = p_match_id\r\n  for update;\r\n\r\n  if not found or v_match.is_rating_match is not true then\r\n    raise exception 'rated pending match not found';\r\n  end if;\r\n\r\n  if v_match.score_status <> 'pending_confirmation' then\r\n    raise exception 'score is not pending confirmation';\r\n  end if;\r\n\r\n  select case\r\n    when exists (\r\n      select 1 from jsonb_array_elements(coalesce(v_match.team1, '[]'::jsonb)) p\r\n      where p->>'id' = v_match.score_submitted_by::text\r\n    ) then 1\r\n    when exists (\r\n      select 1 from jsonb_array_elements(coalesce(v_match.team2, '[]'::jsonb)) p\r\n      where p->>'id' = v_match.score_submitted_by::text\r\n    ) then 2\r\n  end into v_submitter_team;\r\n\r\n  select case\r\n    when exists (\r\n      select 1 from jsonb_array_elements(coalesce(v_match.team1, '[]'::jsonb)) p\r\n      where p->>'id' = p_confirmed_by::text\r\n    ) then 1\r\n    when exists (\r\n      select 1 from jsonb_array_elements(coalesce(v_match.team2, '[]'::jsonb)) p\r\n      where p->>'id' = p_confirmed_by::text\r\n    ) then 2\r\n  end into v_confirmer_team;\r\n\r\n  if v_submitter_team is null or v_confirmer_team is null or v_submitter_team = v_confirmer_team then\r\n    raise exception 'confirmation must come from opposite team' using errcode = '42501';\r\n  end if;\r\n\r\n  for v_player_id, v_change in\r\n    select key, value from jsonb_each(p_rating_changes)\r\n  loop\r\n    update public.profiles\r\n    set rating = (v_change->>'after')::numeric\r\n    where id::text = v_player_id;\r\n  end loop;\r\n\r\n  update public.matches\r\n  set status = 'completed',\r\n      score_status = 'confirmed',\r\n      score_confirmed_by = p_confirmed_by,\r\n      \"completedAt\" = now(),\r\n      \"ratingChanges\" = p_rating_changes\r\n  where id = p_match_id;\r\nend;\r\n$function$\n",
+      "volatility": "v",
+      "result_type": "void",
+      "function_name": "confirm_rating_match_score",
+      "security_definer": true,
+      "identity_arguments": "p_match_id uuid, p_confirmed_by uuid, p_rating_changes jsonb"
+    },
+    {
+      "schema": "public",
+      "language": "c",
+      "definition": "CREATE OR REPLACE FUNCTION public.gin_extract_query_trgm(text, internal, smallint, internal, internal, internal, internal)\n RETURNS internal\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/pg_trgm', $function$gin_extract_query_trgm$function$\n",
+      "volatility": "i",
+      "result_type": "internal",
+      "function_name": "gin_extract_query_trgm",
+      "security_definer": false,
+      "identity_arguments": "text, internal, smallint, internal, internal, internal, internal"
+    },
+    {
+      "schema": "public",
+      "language": "c",
+      "definition": "CREATE OR REPLACE FUNCTION public.gin_extract_value_trgm(text, internal)\n RETURNS internal\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/pg_trgm', $function$gin_extract_value_trgm$function$\n",
+      "volatility": "i",
+      "result_type": "internal",
+      "function_name": "gin_extract_value_trgm",
+      "security_definer": false,
+      "identity_arguments": "text, internal"
+    },
+    {
+      "schema": "public",
+      "language": "c",
+      "definition": "CREATE OR REPLACE FUNCTION public.gin_trgm_consistent(internal, smallint, text, integer, internal, internal, internal, internal)\n RETURNS boolean\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/pg_trgm', $function$gin_trgm_consistent$function$\n",
+      "volatility": "i",
+      "result_type": "boolean",
+      "function_name": "gin_trgm_consistent",
+      "security_definer": false,
+      "identity_arguments": "internal, smallint, text, integer, internal, internal, internal, internal"
+    },
+    {
+      "schema": "public",
+      "language": "c",
+      "definition": "CREATE OR REPLACE FUNCTION public.gin_trgm_triconsistent(internal, smallint, text, integer, internal, internal, internal)\n RETURNS \"char\"\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/pg_trgm', $function$gin_trgm_triconsistent$function$\n",
+      "volatility": "i",
+      "result_type": "\"char\"",
+      "function_name": "gin_trgm_triconsistent",
+      "security_definer": false,
+      "identity_arguments": "internal, smallint, text, integer, internal, internal, internal"
+    },
+    {
+      "schema": "public",
+      "language": "c",
+      "definition": "CREATE OR REPLACE FUNCTION public.gtrgm_compress(internal)\n RETURNS internal\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/pg_trgm', $function$gtrgm_compress$function$\n",
+      "volatility": "i",
+      "result_type": "internal",
+      "function_name": "gtrgm_compress",
+      "security_definer": false,
+      "identity_arguments": "internal"
+    },
+    {
+      "schema": "public",
+      "language": "c",
+      "definition": "CREATE OR REPLACE FUNCTION public.gtrgm_consistent(internal, text, smallint, oid, internal)\n RETURNS boolean\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/pg_trgm', $function$gtrgm_consistent$function$\n",
+      "volatility": "i",
+      "result_type": "boolean",
+      "function_name": "gtrgm_consistent",
+      "security_definer": false,
+      "identity_arguments": "internal, text, smallint, oid, internal"
+    },
+    {
+      "schema": "public",
+      "language": "c",
+      "definition": "CREATE OR REPLACE FUNCTION public.gtrgm_decompress(internal)\n RETURNS internal\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/pg_trgm', $function$gtrgm_decompress$function$\n",
+      "volatility": "i",
+      "result_type": "internal",
+      "function_name": "gtrgm_decompress",
+      "security_definer": false,
+      "identity_arguments": "internal"
+    },
+    {
+      "schema": "public",
+      "language": "c",
+      "definition": "CREATE OR REPLACE FUNCTION public.gtrgm_distance(internal, text, smallint, oid, internal)\n RETURNS double precision\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/pg_trgm', $function$gtrgm_distance$function$\n",
+      "volatility": "i",
+      "result_type": "double precision",
+      "function_name": "gtrgm_distance",
+      "security_definer": false,
+      "identity_arguments": "internal, text, smallint, oid, internal"
+    },
+    {
+      "schema": "public",
+      "language": "c",
+      "definition": "CREATE OR REPLACE FUNCTION public.gtrgm_in(cstring)\n RETURNS gtrgm\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/pg_trgm', $function$gtrgm_in$function$\n",
+      "volatility": "i",
+      "result_type": "gtrgm",
+      "function_name": "gtrgm_in",
+      "security_definer": false,
+      "identity_arguments": "cstring"
+    },
+    {
+      "schema": "public",
+      "language": "c",
+      "definition": "CREATE OR REPLACE FUNCTION public.gtrgm_options(internal)\n RETURNS void\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE\nAS '$libdir/pg_trgm', $function$gtrgm_options$function$\n",
+      "volatility": "i",
+      "result_type": "void",
+      "function_name": "gtrgm_options",
+      "security_definer": false,
+      "identity_arguments": "internal"
+    },
+    {
+      "schema": "public",
+      "language": "c",
+      "definition": "CREATE OR REPLACE FUNCTION public.gtrgm_out(gtrgm)\n RETURNS cstring\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/pg_trgm', $function$gtrgm_out$function$\n",
+      "volatility": "i",
+      "result_type": "cstring",
+      "function_name": "gtrgm_out",
+      "security_definer": false,
+      "identity_arguments": "gtrgm"
+    },
+    {
+      "schema": "public",
+      "language": "c",
+      "definition": "CREATE OR REPLACE FUNCTION public.gtrgm_penalty(internal, internal, internal)\n RETURNS internal\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/pg_trgm', $function$gtrgm_penalty$function$\n",
+      "volatility": "i",
+      "result_type": "internal",
+      "function_name": "gtrgm_penalty",
+      "security_definer": false,
+      "identity_arguments": "internal, internal, internal"
+    },
+    {
+      "schema": "public",
+      "language": "c",
+      "definition": "CREATE OR REPLACE FUNCTION public.gtrgm_picksplit(internal, internal)\n RETURNS internal\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/pg_trgm', $function$gtrgm_picksplit$function$\n",
+      "volatility": "i",
+      "result_type": "internal",
+      "function_name": "gtrgm_picksplit",
+      "security_definer": false,
+      "identity_arguments": "internal, internal"
+    },
+    {
+      "schema": "public",
+      "language": "c",
+      "definition": "CREATE OR REPLACE FUNCTION public.gtrgm_same(gtrgm, gtrgm, internal)\n RETURNS internal\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/pg_trgm', $function$gtrgm_same$function$\n",
+      "volatility": "i",
+      "result_type": "internal",
+      "function_name": "gtrgm_same",
+      "security_definer": false,
+      "identity_arguments": "gtrgm, gtrgm, internal"
+    },
+    {
+      "schema": "public",
+      "language": "c",
+      "definition": "CREATE OR REPLACE FUNCTION public.gtrgm_union(internal, internal)\n RETURNS gtrgm\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/pg_trgm', $function$gtrgm_union$function$\n",
+      "volatility": "i",
+      "result_type": "gtrgm",
+      "function_name": "gtrgm_union",
+      "security_definer": false,
+      "identity_arguments": "internal, internal"
+    },
+    {
+      "schema": "public",
+      "language": "sql",
+      "definition": "CREATE OR REPLACE FUNCTION public.is_admin()\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\r\n  select exists (\r\n    select 1\r\n    from public.profiles p\r\n    where p.id = auth.uid()\r\n      and p.role = 'admin'\r\n  );\r\n$function$\n",
+      "volatility": "s",
+      "result_type": "boolean",
+      "function_name": "is_admin",
+      "security_definer": true,
+      "identity_arguments": ""
+    },
+    {
+      "schema": "public",
+      "language": "plpgsql",
+      "definition": "CREATE OR REPLACE FUNCTION public.rls_auto_enable()\n RETURNS event_trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'pg_catalog'\nAS $function$\nDECLARE\n  cmd record;\nBEGIN\n  FOR cmd IN\n    SELECT *\n    FROM pg_event_trigger_ddl_commands()\n    WHERE command_tag IN ('CREATE TABLE', 'CREATE TABLE AS', 'SELECT INTO')\n      AND object_type IN ('table','partitioned table')\n  LOOP\n     IF cmd.schema_name IS NOT NULL AND cmd.schema_name IN ('public') AND cmd.schema_name NOT IN ('pg_catalog','information_schema') AND cmd.schema_name NOT LIKE 'pg_toast%' AND cmd.schema_name NOT LIKE 'pg_temp%' THEN\n      BEGIN\n        EXECUTE format('alter table if exists %s enable row level security', cmd.object_identity);\n        RAISE LOG 'rls_auto_enable: enabled RLS on %', cmd.object_identity;\n      EXCEPTION\n        WHEN OTHERS THEN\n          RAISE LOG 'rls_auto_enable: failed to enable RLS on %', cmd.object_identity;\n      END;\n     ELSE\n        RAISE LOG 'rls_auto_enable: skip % (either system schema or not in enforced list: %.)', cmd.object_identity, cmd.schema_name;\n     END IF;\n  END LOOP;\nEND;\n$function$\n",
+      "volatility": "v",
+      "result_type": "event_trigger",
+      "function_name": "rls_auto_enable",
+      "security_definer": true,
+      "identity_arguments": ""
+    },
+    {
+      "schema": "public",
+      "language": "c",
+      "definition": "CREATE OR REPLACE FUNCTION public.set_limit(real)\n RETURNS real\n LANGUAGE c\n STRICT\nAS '$libdir/pg_trgm', $function$set_limit$function$\n",
+      "volatility": "v",
+      "result_type": "real",
+      "function_name": "set_limit",
+      "security_definer": false,
+      "identity_arguments": "real"
+    },
+    {
+      "schema": "public",
+      "language": "plpgsql",
+      "definition": "CREATE OR REPLACE FUNCTION public.set_updated_at()\n RETURNS trigger\n LANGUAGE plpgsql\nAS $function$\r\nbegin\r\n  new.updated_at = now();\r\n  return new;\r\nend;\r\n$function$\n",
+      "volatility": "v",
+      "result_type": "trigger",
+      "function_name": "set_updated_at",
+      "security_definer": false,
+      "identity_arguments": ""
+    },
+    {
+      "schema": "public",
+      "language": "c",
+      "definition": "CREATE OR REPLACE FUNCTION public.show_limit()\n RETURNS real\n LANGUAGE c\n STABLE PARALLEL SAFE STRICT\nAS '$libdir/pg_trgm', $function$show_limit$function$\n",
+      "volatility": "s",
+      "result_type": "real",
+      "function_name": "show_limit",
+      "security_definer": false,
+      "identity_arguments": ""
+    },
+    {
+      "schema": "public",
+      "language": "c",
+      "definition": "CREATE OR REPLACE FUNCTION public.show_trgm(text)\n RETURNS text[]\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/pg_trgm', $function$show_trgm$function$\n",
+      "volatility": "i",
+      "result_type": "text[]",
+      "function_name": "show_trgm",
+      "security_definer": false,
+      "identity_arguments": "text"
+    },
+    {
+      "schema": "public",
+      "language": "c",
+      "definition": "CREATE OR REPLACE FUNCTION public.similarity(text, text)\n RETURNS real\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/pg_trgm', $function$similarity$function$\n",
+      "volatility": "i",
+      "result_type": "real",
+      "function_name": "similarity",
+      "security_definer": false,
+      "identity_arguments": "text, text"
+    },
+    {
+      "schema": "public",
+      "language": "c",
+      "definition": "CREATE OR REPLACE FUNCTION public.similarity_dist(text, text)\n RETURNS real\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/pg_trgm', $function$similarity_dist$function$\n",
+      "volatility": "i",
+      "result_type": "real",
+      "function_name": "similarity_dist",
+      "security_definer": false,
+      "identity_arguments": "text, text"
+    },
+    {
+      "schema": "public",
+      "language": "c",
+      "definition": "CREATE OR REPLACE FUNCTION public.similarity_op(text, text)\n RETURNS boolean\n LANGUAGE c\n STABLE PARALLEL SAFE STRICT\nAS '$libdir/pg_trgm', $function$similarity_op$function$\n",
+      "volatility": "s",
+      "result_type": "boolean",
+      "function_name": "similarity_op",
+      "security_definer": false,
+      "identity_arguments": "text, text"
+    },
+    {
+      "schema": "public",
+      "language": "c",
+      "definition": "CREATE OR REPLACE FUNCTION public.strict_word_similarity(text, text)\n RETURNS real\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/pg_trgm', $function$strict_word_similarity$function$\n",
+      "volatility": "i",
+      "result_type": "real",
+      "function_name": "strict_word_similarity",
+      "security_definer": false,
+      "identity_arguments": "text, text"
+    },
+    {
+      "schema": "public",
+      "language": "c",
+      "definition": "CREATE OR REPLACE FUNCTION public.strict_word_similarity_commutator_op(text, text)\n RETURNS boolean\n LANGUAGE c\n STABLE PARALLEL SAFE STRICT\nAS '$libdir/pg_trgm', $function$strict_word_similarity_commutator_op$function$\n",
+      "volatility": "s",
+      "result_type": "boolean",
+      "function_name": "strict_word_similarity_commutator_op",
+      "security_definer": false,
+      "identity_arguments": "text, text"
+    },
+    {
+      "schema": "public",
+      "language": "c",
+      "definition": "CREATE OR REPLACE FUNCTION public.strict_word_similarity_dist_commutator_op(text, text)\n RETURNS real\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/pg_trgm', $function$strict_word_similarity_dist_commutator_op$function$\n",
+      "volatility": "i",
+      "result_type": "real",
+      "function_name": "strict_word_similarity_dist_commutator_op",
+      "security_definer": false,
+      "identity_arguments": "text, text"
+    },
+    {
+      "schema": "public",
+      "language": "c",
+      "definition": "CREATE OR REPLACE FUNCTION public.strict_word_similarity_dist_op(text, text)\n RETURNS real\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/pg_trgm', $function$strict_word_similarity_dist_op$function$\n",
+      "volatility": "i",
+      "result_type": "real",
+      "function_name": "strict_word_similarity_dist_op",
+      "security_definer": false,
+      "identity_arguments": "text, text"
+    },
+    {
+      "schema": "public",
+      "language": "c",
+      "definition": "CREATE OR REPLACE FUNCTION public.strict_word_similarity_op(text, text)\n RETURNS boolean\n LANGUAGE c\n STABLE PARALLEL SAFE STRICT\nAS '$libdir/pg_trgm', $function$strict_word_similarity_op$function$\n",
+      "volatility": "s",
+      "result_type": "boolean",
+      "function_name": "strict_word_similarity_op",
+      "security_definer": false,
+      "identity_arguments": "text, text"
+    },
+    {
+      "schema": "public",
+      "language": "c",
+      "definition": "CREATE OR REPLACE FUNCTION public.word_similarity(text, text)\n RETURNS real\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/pg_trgm', $function$word_similarity$function$\n",
+      "volatility": "i",
+      "result_type": "real",
+      "function_name": "word_similarity",
+      "security_definer": false,
+      "identity_arguments": "text, text"
+    },
+    {
+      "schema": "public",
+      "language": "c",
+      "definition": "CREATE OR REPLACE FUNCTION public.word_similarity_commutator_op(text, text)\n RETURNS boolean\n LANGUAGE c\n STABLE PARALLEL SAFE STRICT\nAS '$libdir/pg_trgm', $function$word_similarity_commutator_op$function$\n",
+      "volatility": "s",
+      "result_type": "boolean",
+      "function_name": "word_similarity_commutator_op",
+      "security_definer": false,
+      "identity_arguments": "text, text"
+    },
+    {
+      "schema": "public",
+      "language": "c",
+      "definition": "CREATE OR REPLACE FUNCTION public.word_similarity_dist_commutator_op(text, text)\n RETURNS real\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/pg_trgm', $function$word_similarity_dist_commutator_op$function$\n",
+      "volatility": "i",
+      "result_type": "real",
+      "function_name": "word_similarity_dist_commutator_op",
+      "security_definer": false,
+      "identity_arguments": "text, text"
+    },
+    {
+      "schema": "public",
+      "language": "c",
+      "definition": "CREATE OR REPLACE FUNCTION public.word_similarity_dist_op(text, text)\n RETURNS real\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/pg_trgm', $function$word_similarity_dist_op$function$\n",
+      "volatility": "i",
+      "result_type": "real",
+      "function_name": "word_similarity_dist_op",
+      "security_definer": false,
+      "identity_arguments": "text, text"
+    },
+    {
+      "schema": "public",
+      "language": "c",
+      "definition": "CREATE OR REPLACE FUNCTION public.word_similarity_op(text, text)\n RETURNS boolean\n LANGUAGE c\n STABLE PARALLEL SAFE STRICT\nAS '$libdir/pg_trgm', $function$word_similarity_op$function$\n",
+      "volatility": "s",
+      "result_type": "boolean",
+      "function_name": "word_similarity_op",
+      "security_definer": false,
+      "identity_arguments": "text, text"
+    }
+  ],
+  "rls_status": [
+    {
+      "table": "matches",
+      "schema": "public",
+      "rls_forced": false,
+      "rls_enabled": true
+    },
+    {
+      "table": "messages",
+      "schema": "public",
+      "rls_forced": false,
+      "rls_enabled": true
+    },
+    {
+      "table": "profiles",
+      "schema": "public",
+      "rls_forced": false,
+      "rls_enabled": true
+    }
+  ],
+  "constraints": [
+    {
+      "type": "check",
+      "table": "matches",
+      "schema": "public",
+      "definition": "CHECK (duration IS NULL OR duration > 0::numeric)",
+      "constraint_name": "matches_duration_check"
+    },
+    {
+      "type": "foreign_key",
+      "table": "matches",
+      "schema": "public",
+      "definition": "FOREIGN KEY (owner_id) REFERENCES profiles(id) ON DELETE CASCADE",
+      "constraint_name": "matches_owner_id_fkey"
+    },
+    {
+      "type": "primary_key",
+      "table": "matches",
+      "schema": "public",
+      "definition": "PRIMARY KEY (id)",
+      "constraint_name": "matches_pkey"
+    },
+    {
+      "type": "check",
+      "table": "matches",
+      "schema": "public",
+      "definition": "CHECK (\"ratingMin\" <= \"ratingMax\")",
+      "constraint_name": "matches_rating_range_check"
+    },
+    {
+      "type": "foreign_key",
+      "table": "messages",
+      "schema": "public",
+      "definition": "FOREIGN KEY (match_id) REFERENCES matches(id) ON DELETE CASCADE",
+      "constraint_name": "messages_match_id_fkey"
+    },
+    {
+      "type": "primary_key",
+      "table": "messages",
+      "schema": "public",
+      "definition": "PRIMARY KEY (id)",
+      "constraint_name": "messages_pkey"
+    },
+    {
+      "type": "foreign_key",
+      "table": "messages",
+      "schema": "public",
+      "definition": "FOREIGN KEY (sender_id) REFERENCES profiles(id) ON DELETE CASCADE",
+      "constraint_name": "messages_sender_id_fkey"
+    },
+    {
+      "type": "foreign_key",
+      "table": "profiles",
+      "schema": "public",
+      "definition": "FOREIGN KEY (id) REFERENCES auth.users(id) ON DELETE CASCADE",
+      "constraint_name": "profiles_id_fkey"
+    },
+    {
+      "type": "primary_key",
+      "table": "profiles",
+      "schema": "public",
+      "definition": "PRIMARY KEY (id)",
+      "constraint_name": "profiles_pkey"
+    },
+    {
+      "type": "check",
+      "table": "profiles",
+      "schema": "public",
+      "definition": "CHECK (rating >= 0::numeric AND rating <= 10::numeric)",
+      "constraint_name": "profiles_rating_check"
+    },
+    {
+      "type": "check",
+      "table": "profiles",
+      "schema": "public",
+      "definition": "CHECK (role = ANY (ARRAY['user'::text, 'admin'::text]))",
+      "constraint_name": "profiles_role_check"
+    }
+  ],
+  "custom_types": [],
+  "foreign_keys": [
+    {
+      "definition": "FOREIGN KEY (owner_id) REFERENCES profiles(id) ON DELETE CASCADE",
+      "delete_rule": "cascade",
+      "update_rule": "no_action",
+      "source_table": "matches",
+      "target_table": "profiles",
+      "source_schema": "public",
+      "target_schema": "public",
+      "source_columns": [
+        "owner_id"
+      ],
+      "target_columns": [
+        "id"
+      ],
+      "constraint_name": "matches_owner_id_fkey"
+    },
+    {
+      "definition": "FOREIGN KEY (match_id) REFERENCES matches(id) ON DELETE CASCADE",
+      "delete_rule": "cascade",
+      "update_rule": "no_action",
+      "source_table": "messages",
+      "target_table": "matches",
+      "source_schema": "public",
+      "target_schema": "public",
+      "source_columns": [
+        "match_id"
+      ],
+      "target_columns": [
+        "id"
+      ],
+      "constraint_name": "messages_match_id_fkey"
+    },
+    {
+      "definition": "FOREIGN KEY (sender_id) REFERENCES profiles(id) ON DELETE CASCADE",
+      "delete_rule": "cascade",
+      "update_rule": "no_action",
+      "source_table": "messages",
+      "target_table": "profiles",
+      "source_schema": "public",
+      "target_schema": "public",
+      "source_columns": [
+        "sender_id"
+      ],
+      "target_columns": [
+        "id"
+      ],
+      "constraint_name": "messages_sender_id_fkey"
+    },
+    {
+      "definition": "FOREIGN KEY (id) REFERENCES auth.users(id) ON DELETE CASCADE",
+      "delete_rule": "cascade",
+      "update_rule": "no_action",
+      "source_table": "profiles",
+      "target_table": "users",
+      "source_schema": "public",
+      "target_schema": "auth",
+      "source_columns": [
+        "id"
+      ],
+      "target_columns": [
+        "id"
+      ],
+      "constraint_name": "profiles_id_fkey"
+    }
+  ],
+  "project_info": {
+    "source": "postgres_system_catalogs",
+    "generated_at": "2026-07-14T03:14:54.25707+00:00",
+    "database_name": "postgres",
+    "excluded_schemas": [
+      "auth",
+      "extensions",
+      "information_schema",
+      "pg_catalog",
+      "realtime",
+      "storage",
+      "supabase_functions",
+      "vault"
+    ],
+    "included_schemas": [
+      "graphql",
+      "graphql_public",
+      "public"
+    ]
+  },
+  "function_arguments": [
+    {
+      "schema": "graphql_public",
+      "data_type": "text",
+      "argument_mode": "i",
+      "argument_name": "operationName",
+      "function_name": "graphql",
+      "ordinal_position": 1,
+      "identity_arguments": "\"operationName\" text, query text, variables jsonb, extensions jsonb"
+    },
+    {
+      "schema": "graphql_public",
+      "data_type": "text",
+      "argument_mode": "i",
+      "argument_name": "query",
+      "function_name": "graphql",
+      "ordinal_position": 2,
+      "identity_arguments": "\"operationName\" text, query text, variables jsonb, extensions jsonb"
+    },
+    {
+      "schema": "graphql_public",
+      "data_type": "jsonb",
+      "argument_mode": "i",
+      "argument_name": "variables",
+      "function_name": "graphql",
+      "ordinal_position": 3,
+      "identity_arguments": "\"operationName\" text, query text, variables jsonb, extensions jsonb"
+    },
+    {
+      "schema": "graphql_public",
+      "data_type": "jsonb",
+      "argument_mode": "i",
+      "argument_name": "extensions",
+      "function_name": "graphql",
+      "ordinal_position": 4,
+      "identity_arguments": "\"operationName\" text, query text, variables jsonb, extensions jsonb"
+    },
+    {
+      "schema": "public",
+      "data_type": "uuid",
+      "argument_mode": "i",
+      "argument_name": "p_match_id",
+      "function_name": "confirm_rating_match_score",
+      "ordinal_position": 1,
+      "identity_arguments": "p_match_id uuid, p_confirmed_by uuid, p_rating_changes jsonb"
+    },
+    {
+      "schema": "public",
+      "data_type": "uuid",
+      "argument_mode": "i",
+      "argument_name": "p_confirmed_by",
+      "function_name": "confirm_rating_match_score",
+      "ordinal_position": 2,
+      "identity_arguments": "p_match_id uuid, p_confirmed_by uuid, p_rating_changes jsonb"
+    },
+    {
+      "schema": "public",
+      "data_type": "jsonb",
+      "argument_mode": "i",
+      "argument_name": "p_rating_changes",
+      "function_name": "confirm_rating_match_score",
+      "ordinal_position": 3,
+      "identity_arguments": "p_match_id uuid, p_confirmed_by uuid, p_rating_changes jsonb"
+    },
+    {
+      "schema": "public",
+      "data_type": "text",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "gin_extract_query_trgm",
+      "ordinal_position": 1,
+      "identity_arguments": "text, internal, smallint, internal, internal, internal, internal"
+    },
+    {
+      "schema": "public",
+      "data_type": "internal",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "gin_extract_query_trgm",
+      "ordinal_position": 2,
+      "identity_arguments": "text, internal, smallint, internal, internal, internal, internal"
+    },
+    {
+      "schema": "public",
+      "data_type": "smallint",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "gin_extract_query_trgm",
+      "ordinal_position": 3,
+      "identity_arguments": "text, internal, smallint, internal, internal, internal, internal"
+    },
+    {
+      "schema": "public",
+      "data_type": "internal",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "gin_extract_query_trgm",
+      "ordinal_position": 4,
+      "identity_arguments": "text, internal, smallint, internal, internal, internal, internal"
+    },
+    {
+      "schema": "public",
+      "data_type": "internal",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "gin_extract_query_trgm",
+      "ordinal_position": 5,
+      "identity_arguments": "text, internal, smallint, internal, internal, internal, internal"
+    },
+    {
+      "schema": "public",
+      "data_type": "internal",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "gin_extract_query_trgm",
+      "ordinal_position": 6,
+      "identity_arguments": "text, internal, smallint, internal, internal, internal, internal"
+    },
+    {
+      "schema": "public",
+      "data_type": "internal",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "gin_extract_query_trgm",
+      "ordinal_position": 7,
+      "identity_arguments": "text, internal, smallint, internal, internal, internal, internal"
+    },
+    {
+      "schema": "public",
+      "data_type": "text",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "gin_extract_value_trgm",
+      "ordinal_position": 1,
+      "identity_arguments": "text, internal"
+    },
+    {
+      "schema": "public",
+      "data_type": "internal",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "gin_extract_value_trgm",
+      "ordinal_position": 2,
+      "identity_arguments": "text, internal"
+    },
+    {
+      "schema": "public",
+      "data_type": "internal",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "gin_trgm_consistent",
+      "ordinal_position": 1,
+      "identity_arguments": "internal, smallint, text, integer, internal, internal, internal, internal"
+    },
+    {
+      "schema": "public",
+      "data_type": "smallint",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "gin_trgm_consistent",
+      "ordinal_position": 2,
+      "identity_arguments": "internal, smallint, text, integer, internal, internal, internal, internal"
+    },
+    {
+      "schema": "public",
+      "data_type": "text",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "gin_trgm_consistent",
+      "ordinal_position": 3,
+      "identity_arguments": "internal, smallint, text, integer, internal, internal, internal, internal"
+    },
+    {
+      "schema": "public",
+      "data_type": "integer",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "gin_trgm_consistent",
+      "ordinal_position": 4,
+      "identity_arguments": "internal, smallint, text, integer, internal, internal, internal, internal"
+    },
+    {
+      "schema": "public",
+      "data_type": "internal",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "gin_trgm_consistent",
+      "ordinal_position": 5,
+      "identity_arguments": "internal, smallint, text, integer, internal, internal, internal, internal"
+    },
+    {
+      "schema": "public",
+      "data_type": "internal",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "gin_trgm_consistent",
+      "ordinal_position": 6,
+      "identity_arguments": "internal, smallint, text, integer, internal, internal, internal, internal"
+    },
+    {
+      "schema": "public",
+      "data_type": "internal",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "gin_trgm_consistent",
+      "ordinal_position": 7,
+      "identity_arguments": "internal, smallint, text, integer, internal, internal, internal, internal"
+    },
+    {
+      "schema": "public",
+      "data_type": "internal",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "gin_trgm_consistent",
+      "ordinal_position": 8,
+      "identity_arguments": "internal, smallint, text, integer, internal, internal, internal, internal"
+    },
+    {
+      "schema": "public",
+      "data_type": "internal",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "gin_trgm_triconsistent",
+      "ordinal_position": 1,
+      "identity_arguments": "internal, smallint, text, integer, internal, internal, internal"
+    },
+    {
+      "schema": "public",
+      "data_type": "smallint",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "gin_trgm_triconsistent",
+      "ordinal_position": 2,
+      "identity_arguments": "internal, smallint, text, integer, internal, internal, internal"
+    },
+    {
+      "schema": "public",
+      "data_type": "text",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "gin_trgm_triconsistent",
+      "ordinal_position": 3,
+      "identity_arguments": "internal, smallint, text, integer, internal, internal, internal"
+    },
+    {
+      "schema": "public",
+      "data_type": "integer",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "gin_trgm_triconsistent",
+      "ordinal_position": 4,
+      "identity_arguments": "internal, smallint, text, integer, internal, internal, internal"
+    },
+    {
+      "schema": "public",
+      "data_type": "internal",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "gin_trgm_triconsistent",
+      "ordinal_position": 5,
+      "identity_arguments": "internal, smallint, text, integer, internal, internal, internal"
+    },
+    {
+      "schema": "public",
+      "data_type": "internal",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "gin_trgm_triconsistent",
+      "ordinal_position": 6,
+      "identity_arguments": "internal, smallint, text, integer, internal, internal, internal"
+    },
+    {
+      "schema": "public",
+      "data_type": "internal",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "gin_trgm_triconsistent",
+      "ordinal_position": 7,
+      "identity_arguments": "internal, smallint, text, integer, internal, internal, internal"
+    },
+    {
+      "schema": "public",
+      "data_type": "internal",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "gtrgm_compress",
+      "ordinal_position": 1,
+      "identity_arguments": "internal"
+    },
+    {
+      "schema": "public",
+      "data_type": "internal",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "gtrgm_consistent",
+      "ordinal_position": 1,
+      "identity_arguments": "internal, text, smallint, oid, internal"
+    },
+    {
+      "schema": "public",
+      "data_type": "text",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "gtrgm_consistent",
+      "ordinal_position": 2,
+      "identity_arguments": "internal, text, smallint, oid, internal"
+    },
+    {
+      "schema": "public",
+      "data_type": "smallint",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "gtrgm_consistent",
+      "ordinal_position": 3,
+      "identity_arguments": "internal, text, smallint, oid, internal"
+    },
+    {
+      "schema": "public",
+      "data_type": "oid",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "gtrgm_consistent",
+      "ordinal_position": 4,
+      "identity_arguments": "internal, text, smallint, oid, internal"
+    },
+    {
+      "schema": "public",
+      "data_type": "internal",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "gtrgm_consistent",
+      "ordinal_position": 5,
+      "identity_arguments": "internal, text, smallint, oid, internal"
+    },
+    {
+      "schema": "public",
+      "data_type": "internal",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "gtrgm_decompress",
+      "ordinal_position": 1,
+      "identity_arguments": "internal"
+    },
+    {
+      "schema": "public",
+      "data_type": "internal",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "gtrgm_distance",
+      "ordinal_position": 1,
+      "identity_arguments": "internal, text, smallint, oid, internal"
+    },
+    {
+      "schema": "public",
+      "data_type": "text",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "gtrgm_distance",
+      "ordinal_position": 2,
+      "identity_arguments": "internal, text, smallint, oid, internal"
+    },
+    {
+      "schema": "public",
+      "data_type": "smallint",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "gtrgm_distance",
+      "ordinal_position": 3,
+      "identity_arguments": "internal, text, smallint, oid, internal"
+    },
+    {
+      "schema": "public",
+      "data_type": "oid",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "gtrgm_distance",
+      "ordinal_position": 4,
+      "identity_arguments": "internal, text, smallint, oid, internal"
+    },
+    {
+      "schema": "public",
+      "data_type": "internal",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "gtrgm_distance",
+      "ordinal_position": 5,
+      "identity_arguments": "internal, text, smallint, oid, internal"
+    },
+    {
+      "schema": "public",
+      "data_type": "cstring",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "gtrgm_in",
+      "ordinal_position": 1,
+      "identity_arguments": "cstring"
+    },
+    {
+      "schema": "public",
+      "data_type": "internal",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "gtrgm_options",
+      "ordinal_position": 1,
+      "identity_arguments": "internal"
+    },
+    {
+      "schema": "public",
+      "data_type": "gtrgm",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "gtrgm_out",
+      "ordinal_position": 1,
+      "identity_arguments": "gtrgm"
+    },
+    {
+      "schema": "public",
+      "data_type": "internal",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "gtrgm_penalty",
+      "ordinal_position": 1,
+      "identity_arguments": "internal, internal, internal"
+    },
+    {
+      "schema": "public",
+      "data_type": "internal",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "gtrgm_penalty",
+      "ordinal_position": 2,
+      "identity_arguments": "internal, internal, internal"
+    },
+    {
+      "schema": "public",
+      "data_type": "internal",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "gtrgm_penalty",
+      "ordinal_position": 3,
+      "identity_arguments": "internal, internal, internal"
+    },
+    {
+      "schema": "public",
+      "data_type": "internal",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "gtrgm_picksplit",
+      "ordinal_position": 1,
+      "identity_arguments": "internal, internal"
+    },
+    {
+      "schema": "public",
+      "data_type": "internal",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "gtrgm_picksplit",
+      "ordinal_position": 2,
+      "identity_arguments": "internal, internal"
+    },
+    {
+      "schema": "public",
+      "data_type": "gtrgm",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "gtrgm_same",
+      "ordinal_position": 1,
+      "identity_arguments": "gtrgm, gtrgm, internal"
+    },
+    {
+      "schema": "public",
+      "data_type": "gtrgm",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "gtrgm_same",
+      "ordinal_position": 2,
+      "identity_arguments": "gtrgm, gtrgm, internal"
+    },
+    {
+      "schema": "public",
+      "data_type": "internal",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "gtrgm_same",
+      "ordinal_position": 3,
+      "identity_arguments": "gtrgm, gtrgm, internal"
+    },
+    {
+      "schema": "public",
+      "data_type": "internal",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "gtrgm_union",
+      "ordinal_position": 1,
+      "identity_arguments": "internal, internal"
+    },
+    {
+      "schema": "public",
+      "data_type": "internal",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "gtrgm_union",
+      "ordinal_position": 2,
+      "identity_arguments": "internal, internal"
+    },
+    {
+      "schema": "public",
+      "data_type": "real",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "set_limit",
+      "ordinal_position": 1,
+      "identity_arguments": "real"
+    },
+    {
+      "schema": "public",
+      "data_type": "text",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "show_trgm",
+      "ordinal_position": 1,
+      "identity_arguments": "text"
+    },
+    {
+      "schema": "public",
+      "data_type": "text",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "similarity",
+      "ordinal_position": 1,
+      "identity_arguments": "text, text"
+    },
+    {
+      "schema": "public",
+      "data_type": "text",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "similarity",
+      "ordinal_position": 2,
+      "identity_arguments": "text, text"
+    },
+    {
+      "schema": "public",
+      "data_type": "text",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "similarity_dist",
+      "ordinal_position": 1,
+      "identity_arguments": "text, text"
+    },
+    {
+      "schema": "public",
+      "data_type": "text",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "similarity_dist",
+      "ordinal_position": 2,
+      "identity_arguments": "text, text"
+    },
+    {
+      "schema": "public",
+      "data_type": "text",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "similarity_op",
+      "ordinal_position": 1,
+      "identity_arguments": "text, text"
+    },
+    {
+      "schema": "public",
+      "data_type": "text",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "similarity_op",
+      "ordinal_position": 2,
+      "identity_arguments": "text, text"
+    },
+    {
+      "schema": "public",
+      "data_type": "text",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "strict_word_similarity",
+      "ordinal_position": 1,
+      "identity_arguments": "text, text"
+    },
+    {
+      "schema": "public",
+      "data_type": "text",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "strict_word_similarity",
+      "ordinal_position": 2,
+      "identity_arguments": "text, text"
+    },
+    {
+      "schema": "public",
+      "data_type": "text",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "strict_word_similarity_commutator_op",
+      "ordinal_position": 1,
+      "identity_arguments": "text, text"
+    },
+    {
+      "schema": "public",
+      "data_type": "text",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "strict_word_similarity_commutator_op",
+      "ordinal_position": 2,
+      "identity_arguments": "text, text"
+    },
+    {
+      "schema": "public",
+      "data_type": "text",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "strict_word_similarity_dist_commutator_op",
+      "ordinal_position": 1,
+      "identity_arguments": "text, text"
+    },
+    {
+      "schema": "public",
+      "data_type": "text",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "strict_word_similarity_dist_commutator_op",
+      "ordinal_position": 2,
+      "identity_arguments": "text, text"
+    },
+    {
+      "schema": "public",
+      "data_type": "text",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "strict_word_similarity_dist_op",
+      "ordinal_position": 1,
+      "identity_arguments": "text, text"
+    },
+    {
+      "schema": "public",
+      "data_type": "text",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "strict_word_similarity_dist_op",
+      "ordinal_position": 2,
+      "identity_arguments": "text, text"
+    },
+    {
+      "schema": "public",
+      "data_type": "text",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "strict_word_similarity_op",
+      "ordinal_position": 1,
+      "identity_arguments": "text, text"
+    },
+    {
+      "schema": "public",
+      "data_type": "text",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "strict_word_similarity_op",
+      "ordinal_position": 2,
+      "identity_arguments": "text, text"
+    },
+    {
+      "schema": "public",
+      "data_type": "text",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "word_similarity",
+      "ordinal_position": 1,
+      "identity_arguments": "text, text"
+    },
+    {
+      "schema": "public",
+      "data_type": "text",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "word_similarity",
+      "ordinal_position": 2,
+      "identity_arguments": "text, text"
+    },
+    {
+      "schema": "public",
+      "data_type": "text",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "word_similarity_commutator_op",
+      "ordinal_position": 1,
+      "identity_arguments": "text, text"
+    },
+    {
+      "schema": "public",
+      "data_type": "text",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "word_similarity_commutator_op",
+      "ordinal_position": 2,
+      "identity_arguments": "text, text"
+    },
+    {
+      "schema": "public",
+      "data_type": "text",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "word_similarity_dist_commutator_op",
+      "ordinal_position": 1,
+      "identity_arguments": "text, text"
+    },
+    {
+      "schema": "public",
+      "data_type": "text",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "word_similarity_dist_commutator_op",
+      "ordinal_position": 2,
+      "identity_arguments": "text, text"
+    },
+    {
+      "schema": "public",
+      "data_type": "text",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "word_similarity_dist_op",
+      "ordinal_position": 1,
+      "identity_arguments": "text, text"
+    },
+    {
+      "schema": "public",
+      "data_type": "text",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "word_similarity_dist_op",
+      "ordinal_position": 2,
+      "identity_arguments": "text, text"
+    },
+    {
+      "schema": "public",
+      "data_type": "text",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "word_similarity_op",
+      "ordinal_position": 1,
+      "identity_arguments": "text, text"
+    },
+    {
+      "schema": "public",
+      "data_type": "text",
+      "argument_mode": "i",
+      "argument_name": "",
+      "function_name": "word_similarity_op",
+      "ordinal_position": 2,
+      "identity_arguments": "text, text"
+    }
+  ]
+}

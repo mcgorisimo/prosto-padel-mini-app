@@ -1,0 +1,12 @@
+node_modules
+dist
+build
+.vercel
+test-results
+playwright-report
+coverage
+
+.env
+.env.*
+!.env.example
+!.env.e2e.example
