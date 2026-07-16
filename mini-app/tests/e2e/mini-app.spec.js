@@ -137,6 +137,7 @@ async function mockSupabase(page, options = {}) {
     messages: options.messages ? structuredClone(options.messages) : [],
     publicProfiles: options.publicProfiles ? structuredClone(options.publicProfiles) : [structuredClone(profile)],
     invitationRows: options.invitationRows ? structuredClone(options.invitationRows) : [],
+    waitlistRows: options.waitlistRows ? structuredClone(options.waitlistRows) : [],
     notifications: options.notifications ? structuredClone(options.notifications) : [],
     matchUpdates: [],
     messageCreates: [],
@@ -151,6 +152,10 @@ async function mockSupabase(page, options = {}) {
     declineInvitationRequests: 0,
     cancelInvitationRequests: 0,
     markNotificationReadRequests: 0,
+    joinWaitlistRequests: 0,
+    leaveWaitlistRequests: 0,
+    waitlistPositionRequests: 0,
+    waitlistCountRequests: 0,
   };
   let matchesGetFailures = options.matchesGetFailures || 0;
   let messagesGetFailures = options.messagesGetFailures || 0;
@@ -300,6 +305,72 @@ async function mockSupabase(page, options = {}) {
     const notification = state.notifications.find((row) => row.notification_id === notificationId);
     if (notification) notification.read_at = new Date().toISOString();
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(notification || null) });
+  });
+
+  const waitingRowsFor = (matchId) => state.waitlistRows
+    .filter((row) => String(row.match_id) === String(matchId) && row.status === 'waiting')
+    .sort((left, right) => String(left.joined_at).localeCompare(String(right.joined_at)) || String(left.id).localeCompare(String(right.id)));
+
+  await page.route(`${SUPABASE_URL}/rest/v1/rpc/get_my_match_waitlist_position`, async (route) => {
+    state.waitlistPositionRequests += 1;
+    const matchId = route.request().postDataJSON()?.p_match_id;
+    const rows = waitingRowsFor(matchId);
+    const index = rows.findIndex((row) => row.user_id === testUser.id);
+    const payload = index >= 0 ? [{
+      waitlist_id: rows[index].id,
+      status: rows[index].status,
+      queue_position: index + 1,
+      joined_at: rows[index].joined_at,
+    }] : [];
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(payload) });
+  });
+
+  await page.route(`${SUPABASE_URL}/rest/v1/rpc/get_match_waitlist_count`, async (route) => {
+    state.waitlistCountRequests += 1;
+    const matchId = route.request().postDataJSON()?.p_match_id;
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(waitingRowsFor(matchId).length) });
+  });
+
+  await page.route(`${SUPABASE_URL}/rest/v1/rpc/join_match_waitlist`, async (route) => {
+    state.joinWaitlistRequests += 1;
+    if (options.joinWaitlistDelayMs) await new Promise(resolve => setTimeout(resolve, options.joinWaitlistDelayMs));
+    const matchId = route.request().postDataJSON()?.p_match_id;
+    const match = state.matches.find((row) => String(row.id) === String(matchId));
+    const confirmedCount = (match?.filledSlots || []).filter(Boolean).length;
+    const pendingCount = state.invitationRows.filter((row) => String(row.match_id) === String(matchId) && row.status === 'pending').length;
+    const existing = waitingRowsFor(matchId).find((row) => row.user_id === testUser.id);
+    let errorMessage = null;
+    if (!match) errorMessage = 'WAITLIST_MATCH_NOT_FOUND';
+    else if ((match.participants || []).includes(testUser.id)) errorMessage = 'WAITLIST_ALREADY_PARTICIPANT';
+    else if (existing) errorMessage = 'WAITLIST_ALREADY_WAITING';
+    else if (confirmedCount + pendingCount < 4) errorMessage = 'WAITLIST_MATCH_HAS_FREE_SLOT';
+
+    if (errorMessage) {
+      await route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ code: 'P0001', message: errorMessage }) });
+      return;
+    }
+
+    const created = {
+      id: `waitlist-${state.joinWaitlistRequests}`,
+      match_id: matchId,
+      user_id: testUser.id,
+      status: 'waiting',
+      joined_at: new Date().toISOString(),
+    };
+    state.waitlistRows.push(created);
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(created) });
+  });
+
+  await page.route(`${SUPABASE_URL}/rest/v1/rpc/leave_match_waitlist`, async (route) => {
+    state.leaveWaitlistRequests += 1;
+    const matchId = route.request().postDataJSON()?.p_match_id;
+    const row = state.waitlistRows.find((item) => String(item.match_id) === String(matchId) && item.user_id === testUser.id && item.status === 'waiting');
+    if (!row) {
+      await route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ code: 'P0001', message: 'WAITLIST_NOT_WAITING' }) });
+      return;
+    }
+    row.status = 'left';
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(row) });
   });
 
   await page.route(`${SUPABASE_URL}/rest/v1/rpc/join_match`, async (route) => {
@@ -1045,7 +1116,7 @@ base('OPEN-MATCH chat shows a retryable load error', async ({ page }) => {
   await expect(page.getByText('Сообщений пока нет. Начните общение!')).toBeVisible();
 });
 
-test('OPEN-MATCH joins once, leaves, reloads and can join again', async ({ page }) => {
+test('JOIN open match with a free slot works once, leaves, reloads and can join again', async ({ page }) => {
   const supabaseState = await mockSupabase(page, {
     matches: [createOpenJoinableMatch({ title: 'Join smoke match' })],
     joinDelayMs: 200,
@@ -1196,6 +1267,142 @@ test('OPEN-MATCH chat sends once, stays scoped and persists after reload', async
   await expect(page.getByText(messageText, { exact: true })).toHaveCount(1);
 });
 
+test.describe('WAITLIST frontend flow', () => {
+  const fullMatch = (overrides = {}) => {
+    const owner = createOpenJoinableMatch().filledSlots[0];
+    const filledSlots = [
+      { ...owner, slotIndex: 0 },
+      { id: 'full-player-2', firstName: 'Ирина', lastName: 'Вторая', ratingIdx: 3, numericRating: 3.2, isVerified: true, slotIndex: 1 },
+      { id: 'full-player-3', firstName: 'Максим', lastName: 'Третий', ratingIdx: 3, numericRating: 3.5, isVerified: true, slotIndex: 2 },
+      { id: 'full-player-4', firstName: 'Анна', lastName: 'Четвёртая', ratingIdx: 3, numericRating: 3.1, isVerified: true, slotIndex: 3 },
+    ];
+    return createOpenJoinableMatch({
+      id: 'waitlist-full-match',
+      title: 'Полный матч с очередью',
+      status: 'upcoming',
+      filledSlots,
+      participants: filledSlots.map((player) => player.id),
+      ...overrides,
+    });
+  };
+
+  test('WAITLIST full public match shows queue action while private match does not', async ({ page }) => {
+    const publicMatch = fullMatch();
+    const privateMatch = fullMatch({
+      id: 'waitlist-private-match',
+      title: 'Частный матч без очереди',
+      owner_id: 'user-owner-1',
+      ownerId: 'user-owner-1',
+      type: 'private',
+      scenario: 'private',
+      isPrivate: true,
+      filledSlots: [
+        fullMatch().filledSlots[0],
+        { id: testUser.id, firstName: 'QA', lastName: 'Player', ratingIdx: 3, numericRating: 3.4, isVerified: true, slotIndex: 1 },
+      ],
+      participants: ['user-owner-1', testUser.id],
+    });
+    await mockSupabase(page, { matches: [publicMatch, privateMatch] });
+    await mockTelegram(page);
+    await setAuthenticatedSession(page);
+    await page.goto('/');
+
+    await openMatchesTab(page);
+    await page.getByText(publicMatch.title, { exact: true }).click();
+    await expect(page.getByTestId('match-waitlist-join-button')).toBeVisible();
+    await expect(page.getByTestId('match-waitlist-join-button')).toHaveText('Встать в лист ожидания');
+    await page.getByRole('button', { name: '←' }).click();
+    await openProfileTab(page);
+    await page.getByText(privateMatch.title, { exact: true }).click();
+    await expect(page.getByTestId('match-waitlist')).toHaveCount(0);
+  });
+
+  test('WAITLIST join shows position, blocks double request and leave removes position', async ({ page }) => {
+    const match = fullMatch({ title: 'Очередь с позицией' });
+    const state = await mockSupabase(page, {
+      matches: [match],
+      joinWaitlistDelayMs: 150,
+      waitlistRows: [{
+        id: 'waitlist-before-me', match_id: match.id, user_id: 'waiting-player-1',
+        status: 'waiting', joined_at: '2026-01-01T10:00:00.000Z',
+      }],
+    });
+    await mockTelegram(page);
+    await setAuthenticatedSession(page);
+    await page.goto('/');
+    await openMatchesTab(page);
+    await page.getByText(match.title, { exact: true }).click();
+
+    const joinButton = page.getByTestId('match-waitlist-join-button');
+    await expect(joinButton).toBeVisible();
+    await joinButton.evaluate((button) => { button.click(); button.click(); });
+    await expect(page.getByTestId('match-waitlist-position')).toHaveText('Вы 2-й в очереди');
+    await expect(page.getByTestId('match-waitlist-count')).toHaveText('Всего ожидают: 2');
+    await expect.poll(() => state.joinWaitlistRequests).toBe(1);
+
+    await page.getByTestId('match-waitlist-leave-button').click();
+    await expect(page.getByTestId('match-waitlist-position')).toHaveCount(0);
+    await expect(page.getByTestId('match-waitlist-join-button')).toBeVisible();
+    await expect(page.getByTestId('match-waitlist-count')).toHaveText('В очереди: 1');
+    await expect.poll(() => state.leaveWaitlistRequests).toBe(1);
+    expect(state.waitlistRows.find((row) => row.user_id === testUser.id)?.status).toBe('left');
+  });
+
+  test('WAITLIST server promotion refreshes confirmed roster and notification opens match', async ({ page }) => {
+    const match = fullMatch({ title: 'Матч с автопродвижением' });
+    const currentWaitlist = {
+      id: 'waitlist-current-user', match_id: match.id, user_id: testUser.id,
+      status: 'waiting', joined_at: '2026-01-01T10:00:00.000Z',
+    };
+    const state = await mockSupabase(page, { matches: [match], waitlistRows: [currentWaitlist] });
+    await mockTelegram(page);
+    await setAuthenticatedSession(page);
+    await page.goto('/');
+    await openMatchesTab(page);
+    await page.getByText(match.title, { exact: true }).click();
+    await expect(page.getByTestId('match-waitlist-position')).toHaveText('Вы 1-й в очереди');
+
+    currentWaitlist.status = 'promoted';
+    state.waitlistRows[0].status = 'promoted';
+    const promotedSlot = {
+      id: testUser.id, firstName: 'QA', lastName: 'Player', ratingIdx: 3,
+      numericRating: 3.4, isVerified: true, isOrganizer: false, slotIndex: 3,
+    };
+    state.matches[0] = {
+      ...state.matches[0],
+      filledSlots: [...state.matches[0].filledSlots.slice(0, 3), promotedSlot],
+      participants: [...state.matches[0].participants.slice(0, 3), testUser.id],
+    };
+    const notification = {
+      notification_id: 'waitlist-auto-promotion-notification',
+      notification_type: 'waitlist_promoted',
+      match_id: match.id,
+      invitation_id: null,
+      title: 'Вы попали в игру',
+      body: 'Для вас освободилось место в матче.',
+      data: {},
+      created_at: new Date().toISOString(),
+      read_at: null,
+    };
+    state.notifications.push(notification);
+
+    await page.reload();
+    await expect(page.locator('.bottom-nav')).toBeVisible();
+    await openMatchesTab(page);
+    await page.getByText(match.title, { exact: true }).click();
+    await expect(page.getByTestId('match-joined-state')).toBeVisible();
+    await expect(page.getByTestId('match-waitlist')).toHaveCount(0);
+    await expect(page.getByTestId('match-filled-slot-3')).toContainText('QP');
+    expect(state.matches[0].participants).toContain(testUser.id);
+
+    await page.getByRole('button', { name: '←' }).click();
+    await expect(page.getByTestId('profile-notification-badge')).toHaveText('1');
+    await openProfileTab(page);
+    await page.getByTestId(`notification-card-${notification.notification_id}`).click();
+    await expect(page.getByText(match.title, { exact: true }).first()).toBeVisible();
+  });
+});
+
 test.describe('INVITATION frontend flow', () => {
   const invitedPlayer = {
     id: 'invited-player-1', first_name: 'Анна', last_name: 'Соколова', username: 'anna_sokolova',
@@ -1292,6 +1499,96 @@ test.describe('INVITATION frontend flow', () => {
     const secondBox = await rail.locator('.profile-notification-card').nth(1).boundingBox();
     expect(firstBox.width).toBeGreaterThan((await rail.boundingBox()).width * 0.8);
     expect(secondBox.x).toBeGreaterThan(firstBox.x);
+  });
+
+  test('INVITATION match screen replaces regular join and accepts into confirmed roster', async ({ page }) => {
+    const { match, invitation, notification } = incomingFixture();
+    const state = await mockSupabase(page, {
+      matches: [match], invitationRows: [invitation], notifications: [notification],
+      publicProfiles: [profile, ownerProfile],
+    });
+    await mockTelegram(page);
+    await setAuthenticatedSession(page);
+    await page.goto('/');
+    await openMatchesTab(page);
+    await page.getByText(match.title, { exact: true }).click();
+
+    const panel = page.getByTestId('match-invitation-panel');
+    await expect(panel).toContainText('Вас пригласили в эту игру');
+    await expect(page.getByTestId('match-invitation-accept-button')).toHaveText('Принять приглашение');
+    await expect(page.getByTestId('match-invitation-decline-button')).toBeVisible();
+    await expect(page.getByTestId('match-self-join-button')).toHaveCount(0);
+
+    await page.getByTestId('match-invitation-accept-button').click();
+    await expect(page.getByTestId('match-joined-state')).toBeVisible();
+    await expect.poll(() => state.acceptInvitationRequests).toBe(1);
+    expect(state.joinRequests).toBe(0);
+    expect(state.invitationRows[0].status).toBe('accepted');
+    expect(state.matches[0].participants).toContain(testUser.id);
+    expect(state.matches[0].filledSlots.some((slot) => slot?.id === testUser.id)).toBe(true);
+  });
+
+  test('INVITATION tapping a free slot accepts reservation without join_match', async ({ page }) => {
+    const { match, invitation, notification } = incomingFixture();
+    const state = await mockSupabase(page, {
+      matches: [match], invitationRows: [invitation], notifications: [notification],
+      publicProfiles: [profile, ownerProfile],
+    });
+    await mockTelegram(page);
+    await setAuthenticatedSession(page);
+    await page.goto('/');
+    await openMatchesTab(page);
+    await page.getByText(match.title, { exact: true }).click();
+
+    await page.getByTestId('match-empty-slot-1').click();
+    await expect(page.getByTestId('match-joined-state')).toBeVisible();
+    await expect.poll(() => state.acceptInvitationRequests).toBe(1);
+    expect(state.joinRequests).toBe(0);
+    expect(state.matches[0].participants).toContain(testUser.id);
+  });
+
+  test('INVITATION decline from match screen releases reservation and restores regular join', async ({ page }) => {
+    const { match, invitation, notification } = incomingFixture();
+    const state = await mockSupabase(page, {
+      matches: [match], invitationRows: [invitation], notifications: [notification],
+      publicProfiles: [profile, ownerProfile],
+    });
+    await mockTelegram(page);
+    await setAuthenticatedSession(page);
+    await page.goto('/');
+    await openMatchesTab(page);
+    await page.getByText(match.title, { exact: true }).click();
+
+    await page.getByTestId('match-invitation-decline-button').click();
+    await expect(page.getByTestId('match-invitation-panel')).toHaveCount(0);
+    await expect(page.getByTestId('match-self-join-button')).toHaveText('Присоединиться к игре');
+    await expect.poll(() => state.declineInvitationRequests).toBe(1);
+    expect(state.invitationRows[0].status).toBe('declined');
+    expect(state.matches[0].participants).not.toContain(testUser.id);
+    expect(state.matches[0].filledSlots).toHaveLength(1);
+  });
+
+  test('INVITATION handled on another device refreshes match screen to current action', async ({ page }) => {
+    const { match, invitation, notification } = incomingFixture();
+    const state = await mockSupabase(page, {
+      matches: [match], invitationRows: [invitation], notifications: [notification],
+      publicProfiles: [profile, ownerProfile],
+    });
+    await mockTelegram(page);
+    await setAuthenticatedSession(page);
+    await page.goto('/');
+    await openMatchesTab(page);
+    await page.getByText(match.title, { exact: true }).click();
+    await expect(page.getByTestId('match-invitation-panel')).toBeVisible();
+
+    state.invitationRows[0].status = 'cancelled';
+    await page.reload();
+    await expect(page.locator('.bottom-nav')).toBeVisible();
+    await openMatchesTab(page);
+    await page.getByText(match.title, { exact: true }).click();
+    await expect(page.getByTestId('match-invitation-panel')).toHaveCount(0);
+    await expect(page.getByTestId('match-self-join-button')).toHaveText('Присоединиться к игре');
+    expect(state.joinRequests).toBe(0);
   });
 
   test('INVITATION acceptance adds invitee, marks notification read and opens match', async ({ page }) => {
@@ -1467,7 +1764,7 @@ test('PROFILE-RESULTS use a horizontal rail, real outcomes and real statistics',
   expect(horizontalOverflow).toBeLessThanOrEqual(0);
 });
 
-test('PROFILE-NOTIFICATIONS waitlist promotion opens its match and becomes read', async ({ page }) => {
+test('WAITLIST promotion notification opens its match and becomes read', async ({ page }) => {
   const match = createOpenJoinableMatch({
     id: 'waitlist-promoted-match',
     title: 'Матч после листа ожидания',

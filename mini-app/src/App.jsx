@@ -933,6 +933,9 @@ const handleBookSlot = async (booking) => {
   const getJoinMatchErrorMessage = (error) => {
     const message = `${error?.message ?? ''} ${error?.details ?? ''} ${error?.hint ?? ''}`.toLowerCase();
 
+    if (message.includes('pending invitation')) {
+      return 'В эту игру вас пригласили. Примите или отклоните приглашение';
+    }
     if (message.includes('full') || message.includes('slot') || message.includes('no free')) {
       return 'Свободное место уже занято. Обновите матч и попробуйте другой.';
     }
@@ -956,6 +959,12 @@ const handleBookSlot = async (booking) => {
     const { data, error } = await supabase.rpc('join_match', { p_match_id: matchId });
 
     if (error) {
+      const code = getInvitationErrorCode(error);
+      if (code.includes('PENDING INVITATION')) {
+        showToast?.('В эту игру вас пригласили. Примите или отклоните приглашение', 'info');
+        await Promise.all([loadInvitations(), loadMatches(), loadNotifications()]);
+        throw error;
+      }
       console.error(`Ошибка при присоединении к матчу: ${error.message}`);
       showToast?.(getJoinMatchErrorMessage(error), 'error');
       throw error;
@@ -1073,6 +1082,15 @@ const handleBookSlot = async (booking) => {
     setAllMatches(prev => prev.some(match => match.id === updatedMatch.id)
       ? prev.map(match => match.id === updatedMatch.id ? updatedMatch : match)
       : [updatedMatch, ...prev]);
+    setSelected(prev => prev?.id === updatedMatch.id ? updatedMatch : prev);
+    return updatedMatch;
+  };
+
+  const handleRefreshMatch = async (matchId) => {
+    const rows = await loadMatches();
+    const row = rows?.find((item) => String(item.id) === String(matchId));
+    if (!row) return null;
+    const updatedMatch = normalizeMatch(row);
     setSelected(prev => prev?.id === updatedMatch.id ? updatedMatch : prev);
     return updatedMatch;
   };
@@ -1400,8 +1418,12 @@ const handleBookSlot = async (booking) => {
         onSlotsChange={handleSlotsChange}
         onJoinMatch={handleJoinMatch}
         onLeaveMatch={handleLeaveMatch}
+        onRefreshMatch={handleRefreshMatch}
+        incomingInvitation={incomingInvitations.find((invitation) => invitation.match_id === selectedMatch.id) ?? null}
         pendingInvitations={outgoingInvitations.filter((invitation) => invitation.match_id === selectedMatch.id)}
         invitationActions={invitationActions}
+        onAcceptInvitation={handleAcceptInvitation}
+        onDeclineInvitation={handleDeclineInvitation}
         onCreateInvitation={handleCreateInvitation}
         onCancelInvitation={handleCancelInvitation}
         onRemoveParticipant={handleRemoveParticipant}
