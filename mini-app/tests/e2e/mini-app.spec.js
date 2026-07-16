@@ -136,6 +136,8 @@ async function mockSupabase(page, options = {}) {
     matches: options.matches ? structuredClone(options.matches) : [],
     messages: options.messages ? structuredClone(options.messages) : [],
     publicProfiles: options.publicProfiles ? structuredClone(options.publicProfiles) : [structuredClone(profile)],
+    invitationRows: options.invitationRows ? structuredClone(options.invitationRows) : [],
+    notifications: options.notifications ? structuredClone(options.notifications) : [],
     matchUpdates: [],
     messageCreates: [],
     joinRequests: 0,
@@ -144,6 +146,11 @@ async function mockSupabase(page, options = {}) {
     bookingPayloads: [],
     directMatchInserts: 0,
     profileSearchRequests: [],
+    createInvitationRequests: 0,
+    acceptInvitationRequests: 0,
+    declineInvitationRequests: 0,
+    cancelInvitationRequests: 0,
+    markNotificationReadRequests: 0,
   };
   let matchesGetFailures = options.matchesGetFailures || 0;
   let messagesGetFailures = options.messagesGetFailures || 0;
@@ -179,6 +186,120 @@ async function mockSupabase(page, options = {}) {
       contentType: 'application/json',
       body: JSON.stringify(filterPublicProfiles(route.request().url(), state.publicProfiles)),
     });
+  });
+
+  const incomingInvitationPayload = () => state.invitationRows
+    .filter((invitation) => invitation.invited_user_id === testUser.id && invitation.status === 'pending')
+    .map((invitation) => {
+      const match = state.matches.find((row) => row.id === invitation.match_id) || {};
+      const organizer = state.publicProfiles.find((row) => row.id === match.owner_id) || {};
+      return {
+        invitation_id: invitation.id,
+        match_id: invitation.match_id,
+        invited_by: invitation.invited_by,
+        organizer_id: match.owner_id,
+        organizer_first_name: organizer.first_name || 'Owner',
+        organizer_last_name: organizer.last_name || 'Player',
+        date_iso: match.dateISO,
+        start_time: match.time,
+        court_id: match.courtId,
+        court_name: match.courtName,
+        court_type: match.courtType,
+        match_type: match.type,
+        scenario: match.scenario,
+        is_private: match.isPrivate,
+        rating_min: match.ratingMin,
+        rating_max: match.ratingMax,
+        price_per_person: match.pricePerPerson,
+        slot_index: invitation.slot_index,
+        created_at: invitation.created_at,
+        match_status: match.status,
+      };
+    });
+
+  await page.route(`${SUPABASE_URL}/rest/v1/rpc/get_incoming_match_invitations`, async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(incomingInvitationPayload()) });
+  });
+
+  await page.route(`${SUPABASE_URL}/rest/v1/match_invitations**`, async (route) => {
+    const params = new URL(route.request().url()).searchParams;
+    const invitedBy = params.get('invited_by')?.replace(/^eq\./, '');
+    const status = params.get('status')?.replace(/^eq\./, '');
+    const rows = state.invitationRows.filter((invitation) =>
+      (!invitedBy || invitation.invited_by === invitedBy) && (!status || invitation.status === status)
+    );
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(rows) });
+  });
+
+  await page.route(`${SUPABASE_URL}/rest/v1/rpc/create_match_invitation`, async (route) => {
+    state.createInvitationRequests += 1;
+    if (options.createInvitationDelayMs) await new Promise(resolve => setTimeout(resolve, options.createInvitationDelayMs));
+    const body = route.request().postDataJSON();
+    const invitation = {
+      id: `invitation-created-${state.createInvitationRequests}`,
+      match_id: body.p_match_id,
+      invited_by: testUser.id,
+      invited_user_id: body.p_invited_user_id,
+      slot_index: body.p_slot_index,
+      status: 'pending',
+      created_at: new Date().toISOString(),
+    };
+    state.invitationRows.push(invitation);
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(invitation) });
+  });
+
+  await page.route(`${SUPABASE_URL}/rest/v1/rpc/accept_match_invitation`, async (route) => {
+    state.acceptInvitationRequests += 1;
+    const invitationId = route.request().postDataJSON()?.p_invitation_id;
+    const invitation = state.invitationRows.find((row) => row.id === invitationId);
+    const match = state.matches.find((row) => row.id === invitation?.match_id);
+    invitation.status = 'accepted';
+    const updated = {
+      ...match,
+      filledSlots: [...(match.filledSlots || []), {
+        id: testUser.id,
+        firstName: profile.first_name,
+        lastName: profile.last_name,
+        numericRating: profile.rating,
+        isVerified: profile.is_verified,
+        isOrganizer: false,
+        slotIndex: invitation.slot_index,
+      }],
+      participants: [...new Set([...(match.participants || []), testUser.id])],
+    };
+    state.matches = state.matches.map((row) => row.id === updated.id ? updated : row);
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(updated) });
+  });
+
+  await page.route(`${SUPABASE_URL}/rest/v1/rpc/decline_match_invitation`, async (route) => {
+    state.declineInvitationRequests += 1;
+    const invitation = state.invitationRows.find((row) => row.id === route.request().postDataJSON()?.p_invitation_id);
+    invitation.status = 'declined';
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(invitation) });
+  });
+
+  await page.route(`${SUPABASE_URL}/rest/v1/rpc/cancel_match_invitation`, async (route) => {
+    state.cancelInvitationRequests += 1;
+    const invitation = state.invitationRows.find((row) => row.id === route.request().postDataJSON()?.p_invitation_id);
+    invitation.status = 'cancelled';
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(invitation) });
+  });
+
+  await page.route(`${SUPABASE_URL}/rest/v1/rpc/get_my_notifications`, async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(state.notifications) });
+  });
+
+  await page.route(`${SUPABASE_URL}/rest/v1/rpc/get_unread_notification_count`, async (route) => {
+    const count = state.notifications.filter((notification) => !notification.read_at).length;
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(count) });
+  });
+
+  await page.route(`${SUPABASE_URL}/rest/v1/rpc/mark_notification_read`, async (route) => {
+    state.markNotificationReadRequests += 1;
+    const notificationId = route.request().postDataJSON()?.p_notification_id;
+    const notification = state.notifications.find((row) => row.notification_id === notificationId);
+    if (notification) notification.read_at = new Date().toISOString();
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(notification || null) });
   });
 
   await page.route(`${SUPABASE_URL}/rest/v1/rpc/join_match`, async (route) => {
@@ -247,6 +368,19 @@ async function mockSupabase(page, options = {}) {
       contentType: 'application/json',
       body: JSON.stringify(updated),
     });
+  });
+
+  await page.route(`${SUPABASE_URL}/rest/v1/rpc/remove_match_participant`, async (route) => {
+    const body = route.request().postDataJSON();
+    const match = state.matches.find(row => row.id === body.p_match_id);
+    const updated = {
+      ...match,
+      status: 'open',
+      filledSlots: (match.filledSlots || []).filter(slot => slot?.id !== body.p_user_id),
+      participants: (match.participants || []).filter(id => id !== body.p_user_id),
+    };
+    state.matches = state.matches.map(row => row.id === updated.id ? updated : row);
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(updated) });
   });
 
   await page.route(`${SUPABASE_URL}/rest/v1/rpc/create_booking`, async (route) => {
@@ -546,6 +680,12 @@ async function openBookingTab(page) {
   const bookingTab = page.locator('.bottom-nav').getByRole('button', { name: 'Бронь' });
   await bookingTab.click();
   await expect(bookingTab).toHaveAttribute('aria-current', 'page');
+}
+
+async function openProfileTab(page) {
+  const profileTab = page.locator('.bottom-nav').getByRole('button', { name: 'Профиль' });
+  await profileTab.click();
+  await expect(profileTab).toHaveAttribute('aria-current', 'page');
 }
 
 async function selectTomorrowCourtOneAtSeven(page) {
@@ -1054,4 +1194,310 @@ test('OPEN-MATCH chat sends once, stays scoped and persists after reload', async
   await page.getByText('Chat smoke match').click();
   await chatButton.click();
   await expect(page.getByText(messageText, { exact: true })).toHaveCount(1);
+});
+
+test.describe('INVITATION frontend flow', () => {
+  const invitedPlayer = {
+    id: 'invited-player-1', first_name: 'Анна', last_name: 'Соколова', username: 'anna_sokolova',
+    rating: 3.1, is_verified: true, side_preference: 'Both',
+  };
+  const ownerProfile = {
+    id: 'user-owner-1', first_name: 'Олег', last_name: 'Организатор', username: 'owner_oleg',
+    rating: 3.4, is_verified: true,
+  };
+
+  const ownerMatch = (overrides = {}) => createOpenJoinableMatch({
+    id: 'invitation-owner-match', owner_id: testUser.id, ownerId: testUser.id,
+    title: 'Матч с приглашением', courtName: 'Панорама 1', pricePerPerson: 1250,
+    filledSlots: [{
+      id: testUser.id, firstName: 'QA', lastName: 'Player', ratingIdx: 3,
+      numericRating: 3.4, isVerified: true, isOrganizer: true, slotIndex: 0,
+    }],
+    participants: [testUser.id],
+    ...overrides,
+  });
+
+  const incomingFixture = () => {
+    const match = createOpenJoinableMatch({
+      id: 'invitation-incoming-match', title: 'Входящий матч', courtName: 'Корт Центр',
+      ratingMin: 2, ratingMax: 4, pricePerPerson: 990,
+    });
+    const invitation = {
+      id: 'incoming-invitation-1', match_id: match.id, invited_by: match.owner_id,
+      invited_user_id: testUser.id, slot_index: 1, status: 'pending', created_at: new Date().toISOString(),
+    };
+    const notification = {
+      notification_id: 'notification-invitation-1', notification_type: 'match_invitation',
+      match_id: match.id, invitation_id: invitation.id, title: 'Новое приглашение',
+      body: 'Олег приглашает вас в матч', data: {}, created_at: new Date().toISOString(), read_at: null,
+    };
+    return { match, invitation, notification };
+  };
+
+  test('INVITATION organizer sends one RPC request and pending player is not confirmed', async ({ page }) => {
+    const match = ownerMatch();
+    const state = await mockSupabase(page, {
+      matches: [match], publicProfiles: [profile, invitedPlayer], createInvitationDelayMs: 150,
+    });
+    await mockTelegram(page);
+    await setAuthenticatedSession(page);
+    await page.goto('/');
+    await expect(page.locator('.bottom-nav')).toBeVisible();
+    await openMatchesTab(page);
+    await page.getByText(match.title, { exact: true }).click();
+    await page.getByTestId('match-empty-slot-1').click();
+    await page.getByTestId('player-search-input').fill('Анна');
+    const result = page.getByTestId(`player-search-result-${invitedPlayer.id}`);
+    await expect(result).toBeVisible();
+    await result.evaluate((button) => { button.click(); button.click(); });
+
+    await expect.poll(() => state.createInvitationRequests).toBe(1);
+    await expect(page.getByText('Ожидает ответа', { exact: true }).first()).toBeVisible();
+    expect(state.matches[0].participants).toEqual([testUser.id]);
+    expect(state.matches[0].filledSlots).toHaveLength(1);
+    expect(state.invitationRows).toHaveLength(1);
+  });
+
+  test('PROFILE-NOTIFICATIONS are absent on Home and visible as a horizontal rail in Profile', async ({ page }) => {
+    const { match, invitation, notification } = incomingFixture();
+    const notifications = Array.from({ length: 12 }, (_, index) => ({
+      ...notification, notification_id: `notification-${index + 1}`,
+      invitation_id: index === 0 ? invitation.id : `other-${index}`,
+      notification_type: index === 0 ? 'match_invitation' : 'waitlist_promoted',
+    }));
+    await mockSupabase(page, {
+      matches: [match], invitationRows: [invitation], notifications,
+      publicProfiles: [profile, ownerProfile],
+    });
+    await mockTelegram(page);
+    await setAuthenticatedSession(page);
+    await page.goto('/');
+
+    await expect(page.getByTestId('profile-notifications')).toHaveCount(0);
+    await expect(page.getByTestId(`invitation-card-${invitation.id}`)).toHaveCount(0);
+    await expect(page.getByTestId('profile-notification-badge')).toHaveText('9+');
+    await openProfileTab(page);
+
+    const card = page.getByTestId(`invitation-card-${invitation.id}`);
+    await expect(card).toBeVisible();
+    await expect(card).toContainText('Олег Организатор');
+    await expect(card).toContainText(match.time);
+    await expect(card).toContainText(match.courtName);
+    await expect(card).toContainText('C–B');
+    await expect(card).toContainText('990 ₽');
+    const rail = page.getByTestId('profile-notifications-rail');
+    await expect(rail).toBeVisible();
+    expect(await rail.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
+    const firstBox = await rail.locator('.profile-notification-card').nth(0).boundingBox();
+    const secondBox = await rail.locator('.profile-notification-card').nth(1).boundingBox();
+    expect(firstBox.width).toBeGreaterThan((await rail.boundingBox()).width * 0.8);
+    expect(secondBox.x).toBeGreaterThan(firstBox.x);
+  });
+
+  test('INVITATION acceptance adds invitee, marks notification read and opens match', async ({ page }) => {
+    const { match, invitation, notification } = incomingFixture();
+    const state = await mockSupabase(page, {
+      matches: [match], invitationRows: [invitation], notifications: [notification],
+      publicProfiles: [profile, ownerProfile],
+    });
+    await mockTelegram(page);
+    await setAuthenticatedSession(page);
+    await page.goto('/');
+
+    await openProfileTab(page);
+    await page.getByTestId(`invitation-accept-${invitation.id}`).click();
+    await expect(page.getByTestId(`invitation-card-${invitation.id}`)).toHaveCount(0);
+    await expect.poll(() => state.acceptInvitationRequests).toBe(1);
+    await expect.poll(() => state.markNotificationReadRequests).toBe(1);
+    await expect(page.getByRole('button', { name: '←' })).toBeVisible();
+    await expect(page.getByText(match.title, { exact: true }).first()).toBeVisible();
+    expect(state.matches[0].participants).toContain(testUser.id);
+    expect(state.matches[0].filledSlots.some((slot) => slot?.id === testUser.id)).toBe(true);
+
+    await page.reload();
+    await expect(page.locator('.bottom-nav')).toBeVisible();
+    await openProfileTab(page);
+    await expect(page.getByTestId(`invitation-card-${invitation.id}`)).toHaveCount(0);
+    await expect(page.getByTestId(`notification-card-${notification.notification_id}`)).toHaveCount(0);
+    await expect(page.getByText(match.title, { exact: true }).first()).toBeVisible();
+  });
+
+  test('INVITATION decline removes card immediately and releases reservation', async ({ page }) => {
+    const { match, invitation, notification } = incomingFixture();
+    const state = await mockSupabase(page, {
+      matches: [match], invitationRows: [invitation], notifications: [notification],
+      publicProfiles: [profile, ownerProfile],
+    });
+    await mockTelegram(page);
+    await setAuthenticatedSession(page);
+    await page.goto('/');
+
+    await openProfileTab(page);
+    await page.getByTestId(`invitation-decline-${invitation.id}`).click();
+    await expect(page.getByTestId(`invitation-card-${invitation.id}`)).toHaveCount(0);
+    await expect(page.getByTestId('profile-notification-badge')).toHaveCount(0);
+    expect(state.declineInvitationRequests).toBe(1);
+    expect(state.invitationRows[0].status).toBe('declined');
+    expect(state.matches[0].participants).not.toContain(testUser.id);
+    expect(state.matches[0].filledSlots).toHaveLength(1);
+    await expect(page.getByText('Вы отказались от приглашения. Слот освобождён.')).toBeVisible();
+
+    await page.reload();
+    await expect(page.locator('.bottom-nav')).toBeVisible();
+    await openProfileTab(page);
+    await expect(page.getByTestId(`invitation-card-${invitation.id}`)).toHaveCount(0);
+    await expect(page.getByTestId(`notification-card-${notification.notification_id}`)).toHaveCount(0);
+  });
+
+  test('INVITATION cancelled on another device is not rendered from notification history', async ({ page }) => {
+    const { match, invitation, notification } = incomingFixture();
+    invitation.status = 'cancelled';
+    const waitlistNotification = {
+      notification_id: 'waitlist-still-visible',
+      notification_type: 'waitlist_promoted',
+      match_id: match.id,
+      invitation_id: null,
+      title: 'Вы попали в игру',
+      body: 'Освободилось место.',
+      data: {},
+      created_at: new Date().toISOString(),
+      read_at: null,
+    };
+    await mockSupabase(page, {
+      matches: [match],
+      invitationRows: [invitation],
+      notifications: [notification, waitlistNotification],
+      publicProfiles: [profile, ownerProfile],
+    });
+    await mockTelegram(page);
+    await setAuthenticatedSession(page);
+    await page.goto('/');
+    await openProfileTab(page);
+
+    await expect(page.getByTestId(`invitation-card-${invitation.id}`)).toHaveCount(0);
+    await expect(page.getByTestId(`notification-card-${notification.notification_id}`)).toHaveCount(0);
+    await expect(page.getByTestId(`notification-card-${waitlistNotification.notification_id}`)).toBeVisible();
+  });
+
+  test('INVITATION organizer cancels pending invitation and slot becomes free', async ({ page }) => {
+    const match = ownerMatch();
+    const invitation = {
+      id: 'outgoing-invitation-1', match_id: match.id, invited_by: testUser.id,
+      invited_user_id: invitedPlayer.id, slot_index: 1, status: 'pending', created_at: new Date().toISOString(),
+    };
+    const state = await mockSupabase(page, {
+      matches: [match], invitationRows: [invitation], publicProfiles: [profile, invitedPlayer],
+    });
+    await mockTelegram(page);
+    await setAuthenticatedSession(page);
+    await page.goto('/');
+    await openMatchesTab(page);
+    await page.getByText(match.title, { exact: true }).click();
+
+    await expect(page.getByTestId(`pending-invitation-${invitation.id}`)).toBeVisible();
+    await page.getByTestId(`cancel-invitation-${invitation.id}`).click();
+    await expect(page.getByTestId(`pending-invitation-${invitation.id}`)).toHaveCount(0);
+    await expect(page.getByTestId('match-empty-slot-1')).toBeVisible();
+    expect(state.cancelInvitationRequests).toBe(1);
+    expect(state.invitationRows[0].status).toBe('cancelled');
+  });
+});
+
+test('PROFILE-RESULTS use a horizontal rail, real outcomes and real statistics', async ({ page }) => {
+  const teammate = { id: 'result-player-2', firstName: 'Очень Длинное Имя', lastName: 'Партнёра', numericRating: 3.2, isVerified: true };
+  const opponentOne = { id: 'result-player-3', firstName: 'Мария', lastName: 'Смирнова', numericRating: 3.5, isVerified: true };
+  const opponentTwo = { id: 'result-player-4', firstName: 'Илья', lastName: 'Петров', numericRating: 3.0, isVerified: true };
+  const me = { id: testUser.id, firstName: 'QA', lastName: 'Player', numericRating: 3.4, isVerified: true };
+  const completedMatch = ({ id, title, isTeam1Win, completedAt, delta, score }) => createOpenJoinableMatch({
+    id,
+    title,
+    status: 'completed',
+    completedAt,
+    participants: [testUser.id, teammate.id, opponentOne.id, opponentTwo.id],
+    filledSlots: [me, teammate, opponentOne, opponentTwo],
+    team1: [me, teammate],
+    team2: [opponentOne, opponentTwo],
+    isTeam1Win,
+    finalScore: score,
+    ratingChanges: {
+      [testUser.id]: { before: 3.4, after: 3.4 + delta, delta },
+      [teammate.id]: { before: 3.2, after: 3.2 + delta, delta },
+      [opponentOne.id]: { before: 3.5, after: 3.5 - delta, delta: -delta },
+      [opponentTwo.id]: { before: 3.0, after: 3.0 - delta, delta: -delta },
+    },
+  });
+  const win = completedMatch({
+    id: 'profile-result-win', title: 'Победный матч', isTeam1Win: true,
+    completedAt: '2026-07-16T18:30:00.000Z', delta: 0.08,
+    score: [{ t1: 6, t2: 3 }, { t1: 6, t2: 4 }],
+  });
+  const loss = completedMatch({
+    id: 'profile-result-loss', title: 'Проигранный матч', isTeam1Win: false,
+    completedAt: '2026-07-15T18:30:00.000Z', delta: -0.05,
+    score: [{ t1: 4, t2: 6 }, { t1: 3, t2: 6 }],
+  });
+
+  await mockSupabase(page, { matches: [win, loss] });
+  await mockTelegram(page);
+  await setAuthenticatedSession(page);
+  await page.goto('/');
+  await openProfileTab(page);
+
+  const rail = page.getByTestId('profile-results-rail');
+  await expect(rail).toBeVisible();
+  await expect(page.getByTestId('result-card-win')).toBeVisible();
+  await expect(page.getByTestId('result-card-loss')).toBeVisible();
+  const winBox = await page.getByTestId('result-card-win').boundingBox();
+  const lossBox = await page.getByTestId('result-card-loss').boundingBox();
+  expect(Math.abs(winBox.y - lossBox.y)).toBeLessThan(2);
+  expect(lossBox.x).toBeGreaterThan(winBox.x);
+  expect(await rail.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
+  await rail.evaluate((element) => element.scrollTo({ left: element.scrollWidth, behavior: 'auto' }));
+  await expect.poll(() => rail.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
+
+  const stats = page.getByTestId('profile-match-stats');
+  await expect(stats).toContainText('50%');
+  await expect(stats).toContainText('2');
+  await expect(stats).toContainText('Выиграно');
+  await expect(stats).toContainText('Проиграно');
+  await expect(page.getByTestId('result-card-win')).toContainText('+0.080');
+  await expect(page.getByTestId('result-card-loss')).toContainText('-0.050');
+
+  const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  expect(horizontalOverflow).toBeLessThanOrEqual(0);
+});
+
+test('PROFILE-NOTIFICATIONS waitlist promotion opens its match and becomes read', async ({ page }) => {
+  const match = createOpenJoinableMatch({
+    id: 'waitlist-promoted-match',
+    title: 'Матч после листа ожидания',
+    filledSlots: [
+      createOpenJoinableMatch().filledSlots[0],
+      { id: testUser.id, firstName: 'QA', lastName: 'Player', numericRating: 3.4, isVerified: true, slotIndex: 1 },
+    ],
+    participants: ['user-owner-1', testUser.id],
+  });
+  const notification = {
+    notification_id: 'waitlist-promoted-notification',
+    notification_type: 'waitlist_promoted',
+    match_id: match.id,
+    invitation_id: null,
+    title: 'Вы попали в игру',
+    body: 'Для вас освободилось место в матче.',
+    data: {},
+    created_at: new Date().toISOString(),
+    read_at: null,
+  };
+  const state = await mockSupabase(page, { matches: [match], notifications: [notification] });
+  await mockTelegram(page);
+  await setAuthenticatedSession(page);
+  await page.goto('/');
+  await openProfileTab(page);
+
+  await page.getByTestId(`notification-card-${notification.notification_id}`).click();
+  await expect(page.getByRole('button', { name: '←' })).toBeVisible();
+  await expect(page.getByText(match.title, { exact: true }).first()).toBeVisible();
+  expect(state.markNotificationReadRequests).toBe(1);
+  await page.getByRole('button', { name: '←' }).click();
+  await expect(page.getByTestId('profile-notification-badge')).toHaveCount(0);
 });

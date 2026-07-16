@@ -22,7 +22,7 @@ function CourtIcon({ size = 21, strokeWidth = 2 }) {
   );
 }
 
-export default function BottomNav({ active, setActive }) {
+export default function BottomNav({ active, setActive, profileBadgeCount = 0 }) {
   const tabs = [
     { id: 'home', label: 'Главная', Icon: Home },
     { id: 'matches', label: 'Матчи', Icon: Swords },
@@ -45,6 +45,14 @@ export default function BottomNav({ active, setActive }) {
           >
             <span className="icon" aria-hidden="true">
               <Icon size={21} strokeWidth={isActive ? 2.4 : 1.9} />
+              {id === 'profile' && profileBadgeCount > 0 && (
+                <span
+                  className="nav-notification-badge"
+                  data-testid="profile-notification-badge"
+                >
+                  {profileBadgeCount > 9 ? '9+' : profileBadgeCount}
+                </span>
+              )}
             </span>
             <span className="label">{label}</span>
           </button>

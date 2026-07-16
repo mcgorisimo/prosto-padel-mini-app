@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import PlayerProfile from './components/PlayerProfile';
 import BottomNav from './components/BottomNav';
 import MatchCreationScreen from './components/MatchCreationScreen';
@@ -15,6 +15,18 @@ import { isPrimeTime } from './lib/pricing';
 import { calculateRatingChange, getLevelForRating, MIN_RATING, MAX_RATING } from './lib/ratingEngine';
 import { isRatingMatch } from './lib/matchRating';
 import { getMyProfile, getPublicPlayerProfiles } from './lib/profileApi';
+import {
+  acceptMatchInvitation,
+  cancelMatchInvitation,
+  createMatchInvitation,
+  declineMatchInvitation,
+  getIncomingMatchInvitations,
+  getInvitationErrorCode,
+  getNotificationCenter,
+  getOutgoingMatchInvitations,
+  markNotificationRead,
+  removeMatchParticipant,
+} from './lib/invitationApi';
 
 // ─── Seed data (shown until user creates real matches) ────────────────────────
 
@@ -121,6 +133,37 @@ function getHumanPlayerIds(players) {
   )];
 }
 
+function getUserMatchOutcome(match, userId) {
+  if (!userId || typeof match?.isTeam1Win !== 'boolean') return 'neutral';
+  const inTeam1 = (match.team1 ?? []).some((player) => player?.id === userId);
+  const inTeam2 = (match.team2 ?? []).some((player) => player?.id === userId);
+  if (!inTeam1 && !inTeam2) return 'neutral';
+  return (inTeam1 ? match.isTeam1Win : !match.isTeam1Win) ? 'win' : 'loss';
+}
+
+function getCreateInvitationErrorMessage(error) {
+  const code = getInvitationErrorCode(error);
+  if (code.includes('ALREADY_PENDING')) return 'Этому игроку уже отправлено приглашение.';
+  if (code.includes('ALREADY_PARTICIPANT')) return 'Этот игрок уже участвует в матче.';
+  if (code.includes('SLOT_OCCUPIED') || code.includes('SLOT_RESERVED') || code.includes('MATCH_FULL')) {
+    return 'Этот слот уже занят или зарезервирован. Обновите матч и выберите другой.';
+  }
+  if (code.includes('MATCH_NOT_ACTIVE') || code.includes('MATCH_ALREADY_STARTED') || code.includes('MATCH_NOT_FOUND')) {
+    return 'Матч уже недоступен для приглашений.';
+  }
+  return 'Не удалось отправить приглашение. Попробуйте ещё раз.';
+}
+
+function isStaleInvitationError(error) {
+  const code = getInvitationErrorCode(error);
+  return code.includes('INVITATION_NOT_PENDING')
+    || code.includes('INVITATION_NOT_FOUND')
+    || code.includes('INVITATION_MATCH_NOT_FOUND')
+    || code.includes('INVITATION_MATCH_NOT_ACTIVE')
+    || code.includes('INVITATION_MATCH_ALREADY_STARTED')
+    || code.includes('INVITATION_SLOT_UNAVAILABLE');
+}
+
 // ─── App ──────────────────────────────────────────────────────────────────────
 
 export default function App({ session, showToast }) { // Accept showToast as a prop
@@ -139,6 +182,15 @@ export default function App({ session, showToast }) { // Accept showToast as a p
   const [activeTab, setActiveTab]    = useState('home');
   const [toast, setToast]            = useState(null);
   const [selectedMatch, setSelected] = useState(null);
+  const [incomingInvitations, setIncomingInvitations] = useState([]);
+  const [outgoingInvitations, setOutgoingInvitations] = useState([]);
+  const [invitationsLoading, setInvitationsLoading] = useState(true);
+  const [invitationsLoadError, setInvitationsLoadError] = useState('');
+  const [notificationCenter, setNotificationCenter] = useState({ items: [], unreadCount: 0 });
+  const [notificationsLoading, setNotificationsLoading] = useState(true);
+  const [notificationsLoadError, setNotificationsLoadError] = useState('');
+  const [invitationActions, setInvitationActions] = useState(() => new Set());
+  const invitationActionRef = useRef(new Set());
 
   const fetchProfile = useCallback(async () => {
     if (!ME_ID) return null;
@@ -197,6 +249,45 @@ export default function App({ session, showToast }) { // Accept showToast as a p
     }
   }, []);
 
+  const loadInvitations = useCallback(async () => {
+    if (!ME_ID) return null;
+    setInvitationsLoading(true);
+    setInvitationsLoadError('');
+
+    try {
+      const [incoming, outgoing] = await Promise.all([
+        getIncomingMatchInvitations(),
+        getOutgoingMatchInvitations(ME_ID),
+      ]);
+      setIncomingInvitations(incoming);
+      setOutgoingInvitations(outgoing);
+      return incoming;
+    } catch (error) {
+      console.error(`Ошибка при получении приглашений: ${error.message}`);
+      setInvitationsLoadError('Не удалось загрузить приглашения. Проверьте подключение и попробуйте ещё раз.');
+      return null;
+    } finally {
+      setInvitationsLoading(false);
+    }
+  }, [ME_ID]);
+
+  const loadNotifications = useCallback(async () => {
+    if (!ME_ID) return null;
+    setNotificationsLoading(true);
+    setNotificationsLoadError('');
+    try {
+      const center = await getNotificationCenter();
+      setNotificationCenter(center);
+      return center;
+    } catch (error) {
+      console.error(`Ошибка при получении уведомлений: ${error.message}`);
+      setNotificationsLoadError('Не удалось загрузить уведомления. Проверьте подключение и попробуйте ещё раз.');
+      return null;
+    } finally {
+      setNotificationsLoading(false);
+    }
+  }, [ME_ID]);
+
   const fetchData = useCallback(async () => {
     if (!ME_ID) {
       setLoading(false);
@@ -204,11 +295,11 @@ export default function App({ session, showToast }) { // Accept showToast as a p
     }
 
     try {
-      await Promise.all([fetchProfile(), loadMatches(), loadMessages()]);
+      await Promise.all([fetchProfile(), loadMatches(), loadMessages(), loadInvitations(), loadNotifications()]);
     } finally {
       setLoading(false);
     }
-  }, [ME_ID, fetchProfile, loadMatches, loadMessages]);
+  }, [ME_ID, fetchProfile, loadMatches, loadMessages, loadInvitations, loadNotifications]);
 
   // --- 2. ЗАГРУЗКА ДАННЫХ ---
   useEffect(() => {
@@ -242,9 +333,22 @@ export default function App({ session, showToast }) { // Accept showToast as a p
       })
       .subscribe();
 
+    const invitationsSubscription = supabase.channel('public:match_invitations')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'match_invitations' }, () => {
+        loadInvitations();
+        loadNotifications();
+      })
+      .subscribe();
+
+    const notificationsSubscription = supabase.channel('public:notifications')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications' }, loadNotifications)
+      .subscribe();
+
     return () => {
       supabase.removeChannel(matchesSubscription);
       supabase.removeChannel(messagesSubscription);
+      supabase.removeChannel(invitationsSubscription);
+      supabase.removeChannel(notificationsSubscription);
     };
   }, [fetchData]);
 
@@ -952,6 +1056,202 @@ const handleBookSlot = async (booking) => {
     setScreen('match-details');
   };
 
+  const beginInvitationAction = (key) => {
+    if (invitationActionRef.current.has(key)) return false;
+    invitationActionRef.current.add(key);
+    setInvitationActions(new Set(invitationActionRef.current));
+    return true;
+  };
+
+  const endInvitationAction = (key) => {
+    invitationActionRef.current.delete(key);
+    setInvitationActions(new Set(invitationActionRef.current));
+  };
+
+  const storeUpdatedMatch = (row) => {
+    const updatedMatch = normalizeMatch(row);
+    setAllMatches(prev => prev.some(match => match.id === updatedMatch.id)
+      ? prev.map(match => match.id === updatedMatch.id ? updatedMatch : match)
+      : [updatedMatch, ...prev]);
+    setSelected(prev => prev?.id === updatedMatch.id ? updatedMatch : prev);
+    return updatedMatch;
+  };
+
+  const markInvitationHandled = async (invitationId) => {
+    const notification = notificationCenter.items.find((item) =>
+      item.invitation_id === invitationId && !item.read_at
+    );
+
+    if (notification?.notification_id) {
+      try {
+        await markNotificationRead(notification.notification_id);
+        setNotificationCenter((prev) => ({
+          items: prev.items.map((item) => item.notification_id === notification.notification_id
+            ? { ...item, read_at: new Date().toISOString() }
+            : item),
+          unreadCount: Math.max(0, prev.unreadCount - 1),
+        }));
+      } catch (error) {
+        console.error(`Не удалось отметить уведомление прочитанным: ${error.message}`);
+      }
+    }
+  };
+
+  const handleViewNotification = async (notification) => {
+    if (!notification) return;
+
+    if (!notification.read_at && notification.notification_id) {
+      try {
+        await markNotificationRead(notification.notification_id);
+        setNotificationCenter((prev) => ({
+          items: prev.items.map((item) => item.notification_id === notification.notification_id
+            ? { ...item, read_at: new Date().toISOString() }
+            : item),
+          unreadCount: Math.max(0, prev.unreadCount - 1),
+        }));
+      } catch (error) {
+        console.error(`Не удалось отметить уведомление прочитанным: ${error.message}`);
+        showToast?.('Не удалось обновить уведомление. Попробуйте ещё раз.', 'error');
+        return;
+      }
+    }
+
+    if (notification.match_id) {
+      try {
+        const match = allMatches.find((item) => item.id === notification.match_id)
+          ?? await fetchMatchById(notification.match_id);
+        if (match) openMatchDetails(match);
+      } catch (error) {
+        console.error(`Не удалось открыть матч из уведомления: ${error.message}`);
+        showToast?.('Связанный матч больше недоступен.', 'info');
+      }
+    }
+
+    loadNotifications();
+  };
+
+  const handleCreateInvitation = async (matchId, player, slotIndex) => {
+    const key = `create:${matchId}:${slotIndex}`;
+    if (!beginInvitationAction(key)) return null;
+
+    try {
+      const invitation = await createMatchInvitation({
+        matchId,
+        invitedUserId: player.id,
+        slotIndex,
+      });
+      setOutgoingInvitations(prev => [
+        ...prev.filter((item) => item.id !== invitation.id),
+        { ...invitation, invitation_id: invitation.id, player },
+      ]);
+      showToast?.(`Приглашение для ${player.firstName || 'игрока'} отправлено`, 'success');
+      return invitation;
+    } catch (error) {
+      console.error(`Ошибка create_match_invitation: ${error.message}`);
+      showToast?.(getCreateInvitationErrorMessage(error), 'error');
+      if (isStaleInvitationError(error)) await loadInvitations();
+      throw error;
+    } finally {
+      endInvitationAction(key);
+    }
+  };
+
+  const handleCancelInvitation = async (invitationId) => {
+    const key = `cancel:${invitationId}`;
+    if (!beginInvitationAction(key)) return null;
+
+    try {
+      await cancelMatchInvitation(invitationId);
+      setOutgoingInvitations(prev => prev.filter((item) => item.id !== invitationId));
+      showToast?.('Приглашение отменено. Слот снова свободен.', 'info');
+      return true;
+    } catch (error) {
+      console.error(`Ошибка cancel_match_invitation: ${error.message}`);
+      if (isStaleInvitationError(error)) {
+        setOutgoingInvitations(prev => prev.filter((item) => item.id !== invitationId));
+        showToast?.('Приглашение уже обработано на другом устройстве.', 'info');
+        await loadInvitations();
+        return false;
+      }
+      showToast?.('Не удалось отменить приглашение. Попробуйте ещё раз.', 'error');
+      throw error;
+    } finally {
+      endInvitationAction(key);
+    }
+  };
+
+  const handleAcceptInvitation = async (invitation) => {
+    const invitationId = invitation.invitation_id;
+    const key = `accept:${invitationId}`;
+    if (!beginInvitationAction(key)) return null;
+
+    try {
+      const updatedMatch = storeUpdatedMatch(await acceptMatchInvitation(invitationId));
+      setIncomingInvitations(prev => prev.filter((item) => item.invitation_id !== invitationId));
+      await markInvitationHandled(invitationId);
+      await Promise.all([loadInvitations(), loadMatches(), loadNotifications()]);
+      showToast?.('Приглашение принято. Вы добавлены в состав.', 'success');
+      openMatchDetails(updatedMatch);
+      return updatedMatch;
+    } catch (error) {
+      if (isStaleInvitationError(error)) {
+        setIncomingInvitations(prev => prev.filter((item) => item.invitation_id !== invitationId));
+        showToast?.('Приглашение уже обработано или устарело.', 'info');
+        await Promise.all([loadInvitations(), loadMatches(), loadNotifications()]);
+        return null;
+      }
+      console.error(`Ошибка accept_match_invitation: ${error.message}`);
+      showToast?.('Не удалось принять приглашение. Попробуйте ещё раз.', 'error');
+      throw error;
+    } finally {
+      endInvitationAction(key);
+    }
+  };
+
+  const handleDeclineInvitation = async (invitation) => {
+    const invitationId = invitation.invitation_id;
+    const key = `decline:${invitationId}`;
+    if (!beginInvitationAction(key)) return null;
+
+    try {
+      await declineMatchInvitation(invitationId);
+      setIncomingInvitations(prev => prev.filter((item) => item.invitation_id !== invitationId));
+      await markInvitationHandled(invitationId);
+      await Promise.all([loadInvitations(), loadMatches(), loadNotifications()]);
+      showToast?.('Вы отказались от приглашения. Слот освобождён.', 'info');
+      return true;
+    } catch (error) {
+      if (isStaleInvitationError(error)) {
+        setIncomingInvitations(prev => prev.filter((item) => item.invitation_id !== invitationId));
+        showToast?.('Приглашение уже обработано на другом устройстве.', 'info');
+        await Promise.all([loadInvitations(), loadMatches(), loadNotifications()]);
+        return false;
+      }
+      console.error(`Ошибка decline_match_invitation: ${error.message}`);
+      showToast?.('Не удалось отказаться от приглашения. Попробуйте ещё раз.', 'error');
+      throw error;
+    } finally {
+      endInvitationAction(key);
+    }
+  };
+
+  const handleRemoveParticipant = async (matchId, userId) => {
+    try {
+      const updatedMatch = storeUpdatedMatch(await removeMatchParticipant(matchId, userId));
+      showToast?.('Игрок удалён из матча.', 'info');
+      return updatedMatch;
+    } catch (error) {
+      const code = getInvitationErrorCode(error);
+      const message = code.includes('PAID_SLOT_FORBIDDEN')
+        ? 'Нельзя удалить игрока с подтверждённой оплатой.'
+        : code.includes('MATCH_ALREADY_STARTED') || code.includes('MATCH_NOT_ACTIVE')
+          ? 'Состав этого матча уже нельзя изменить.'
+          : 'Не удалось удалить игрока. Попробуйте ещё раз.';
+      showToast?.(message, 'error');
+      throw error;
+    }
+  };
+
   // ── Match creation: build object and persist ──
   const handleMatchSuccess = async (data) => {
     const isRated = data.isRatingMatch === true || data.is_rating_match === true;
@@ -1024,6 +1324,13 @@ const handleBookSlot = async (booking) => {
     return matchEndDateTime > new Date();
   });
   const completedMatches = getUserMatchHistory(allMatches, ME_ID);
+  const profileResultMatches = allMatches.filter((match) => {
+    if (!Array.isArray(match.participants) || !match.participants.includes(ME_ID)) return false;
+    if (isMatchCompleted(match) || ['cancelled', 'canceled'].includes(match.status)) return true;
+    const start = new Date(`${match.dateISO}T${match.time || '00:00'}:00`);
+    const end = new Date(start.getTime() + (match.duration || 1.5) * 3600 * 1000);
+    return Number.isFinite(end.getTime()) && end <= new Date();
+  });
   // Public feed shows only non-private open matches.
   const openMatches = allMatches.filter(m => {
     // Восстанавливаем строгий фильтр: только публичные, не завершенные матчи
@@ -1038,30 +1345,27 @@ const handleBookSlot = async (booking) => {
 
   // Real profile stats derived from allMatches + live rating.
   const profileStats = useMemo(() => {
-    // Безопасно берем рейтинг
     const numericRating = currentUser?.rating || currentUser?.numericRating || 3.0;
     const matchesCount = completedMatches?.length || 0;
-    
-    const winsCount = (completedMatches || []).filter(m => {
-      const myId = currentUser?.id; // Используем ID текущего пользователя
-      // Ensure myId is defined before using it in .some() to prevent errors
-      if (!myId) {
-        console.warn("currentUser.id is undefined when calculating winsCount.");
-        return false;
-      }
-      if (!m.team1 && !m.team2) { // Handle cases where teams might be undefined
-        return false;
-      }
-
-      const inT1 = (m.team1 || []).some(p => p?.id === myId);
-      const inT2 = (m.team2 || []).some(p => p?.id === myId);
-      if (inT1) return !!m.isTeam1Win;
-      if (inT2) return !m.isTeam1Win;
-      return false;
-    }).length;
-
-    const winRate = matchesCount > 0 ? Math.round((winsCount / matchesCount) * 100) : 0;
-    return { numericRating, matchesCount, winsCount, winRate };
+    const orderedOutcomes = [...(completedMatches || [])]
+      .sort((left, right) => {
+        const leftDate = new Date(left.completedAt ?? left.completed_at ?? left.dateISO ?? 0).getTime();
+        const rightDate = new Date(right.completedAt ?? right.completed_at ?? right.dateISO ?? 0).getTime();
+        return rightDate - leftDate;
+      })
+      .map((match) => getUserMatchOutcome(match, currentUser?.id));
+    const winsCount = orderedOutcomes.filter((outcome) => outcome === 'win').length;
+    const lossesCount = orderedOutcomes.filter((outcome) => outcome === 'loss').length;
+    const decidedCount = winsCount + lossesCount;
+    const winRate = decidedCount > 0 ? Math.round((winsCount / decidedCount) * 100) : 0;
+    return {
+      numericRating,
+      matchesCount,
+      winsCount,
+      lossesCount,
+      winRate,
+      recentForm: orderedOutcomes.slice(0, 5),
+    };
   }, [completedMatches, currentUser]);
 
   if (loading || !currentUser) {
@@ -1096,6 +1400,11 @@ const handleBookSlot = async (booking) => {
         onSlotsChange={handleSlotsChange}
         onJoinMatch={handleJoinMatch}
         onLeaveMatch={handleLeaveMatch}
+        pendingInvitations={outgoingInvitations.filter((invitation) => invitation.match_id === selectedMatch.id)}
+        invitationActions={invitationActions}
+        onCreateInvitation={handleCreateInvitation}
+        onCancelInvitation={handleCancelInvitation}
+        onRemoveParticipant={handleRemoveParticipant}
         allMessages={allMessages}
         messagesLoading={messagesLoading}
         messagesLoadError={messagesLoadError}
@@ -1164,7 +1473,17 @@ const handleBookSlot = async (booking) => {
             stats={profileStats}
             upcomingMatches={upcomingMatches} // This needs to be passed `currentUser`
             completedMatches={completedMatches}
+            resultMatches={profileResultMatches}
             onViewDetails={openMatchDetails}
+            notifications={notificationCenter.items}
+            notificationsLoading={notificationsLoading || invitationsLoading}
+            notificationsLoadError={notificationsLoadError || invitationsLoadError}
+            invitations={incomingInvitations}
+            invitationActions={invitationActions}
+            onRetryNotifications={() => Promise.all([loadNotifications(), loadInvitations()])}
+            onViewNotification={handleViewNotification}
+            onAcceptInvitation={handleAcceptInvitation}
+            onDeclineInvitation={handleDeclineInvitation}
             onCreateMatch={openCreateMatch}
             onBookCourt={() => setActiveTab('booking')}
             onLogout={handleLogout}
@@ -1212,7 +1531,12 @@ const handleBookSlot = async (booking) => {
         )}
       </main>
 
-      <BottomNav active={activeTab} setActive={setActiveTab} isAdmin={isAdmin} />
+      <BottomNav
+        active={activeTab}
+        setActive={setActiveTab}
+        isAdmin={isAdmin}
+        profileBadgeCount={notificationCenter.unreadCount}
+      />
     </div>
   );
 }

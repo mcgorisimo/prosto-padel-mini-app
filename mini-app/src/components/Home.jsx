@@ -227,7 +227,7 @@ export default function Home({
   };
 
   return (
-    <div className="min-h-screen bg-app-bg px-4 pb-24 pt-5">
+    <div className="min-h-screen bg-app-bg px-4 pb-24 pt-5" style={{ paddingTop: 'calc(1.25rem + env(safe-area-inset-top, 0px))' }}>
       <header className="mb-5">
         <div className="mb-2 text-[11px] font-extrabold uppercase tracking-[0.18em] text-warm-white/48">
           {CLUB.name}

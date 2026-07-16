@@ -6,7 +6,6 @@ import FinishMatchModal from './FinishMatchModal';
 import PadelCard from './ui/PadelCard';
 import MatchChat from './MatchChat';
 import PadelButton from './ui/PadelButton';
-import { supabase } from '../lib/supabaseClient';
 import { getMatchLevelBadges, getMatchLevelRequirement } from '../lib/matchLevelRequirement';
 import { getMatchBookingStatus } from '../lib/matchBookingStatus';
 import { isRatingMatch, requiresVerifiedRating as getRequiresVerifiedRating } from '../lib/matchRating';
@@ -224,6 +223,7 @@ function PlayerSlot({ player, onTap, slotIndex = 0, onSlotClick, ratingChange })
     : null;
   const isPlaceholder = player?.firstName === '—';
   const isOrganizer   = !!player?.isOrganizer;
+  const isPendingInvitation = player?.isPendingInvitation === true;
   const hasRealData   = player && !isPlaceholder;
   const isEmpty       = !player; // truly empty — clickable
 
@@ -234,7 +234,7 @@ function PlayerSlot({ player, onTap, slotIndex = 0, onSlotClick, ratingChange })
       : null;
   const deltaStr = fmtDelta(ratingChange?.delta);
   const slotColor   = PLAYER_COLORS[slotIndex % PLAYER_COLORS.length];
-  const borderColor = hasRealData ? slotColor : C.border;
+  const borderColor = isPendingInvitation ? C.loss : hasRealData ? slotColor : C.border;
 
   const avatarBg = !hasRealData
     ? C.surface
@@ -248,7 +248,7 @@ function PlayerSlot({ player, onTap, slotIndex = 0, onSlotClick, ratingChange })
   else                    label = player.firstName || 'Занято';
 
   const handleClick = () => {
-    if (hasRealData) onTap(player);
+    if (hasRealData && !isPendingInvitation) onTap(player);
     else if (isEmpty) onSlotClick?.();
   };
 
@@ -265,7 +265,7 @@ function PlayerSlot({ player, onTap, slotIndex = 0, onSlotClick, ratingChange })
           position: 'relative',
           width: '58px',
           height: '56px',
-          cursor: (hasRealData || isEmpty) ? 'pointer' : 'default',
+          cursor: (hasRealData && !isPendingInvitation) || isEmpty ? 'pointer' : 'default',
           overflow: 'visible',
         }}
       >
@@ -329,12 +329,17 @@ function PlayerSlot({ player, onTap, slotIndex = 0, onSlotClick, ratingChange })
       </div>
 
       <div style={{
-        color: hasRealData ? slotColor : C.muted,
+        color: isPendingInvitation ? C.text : hasRealData ? slotColor : C.muted,
         fontSize: '11px', fontWeight: player ? 600 : 400,
         textAlign: 'center', maxWidth: '56px', lineHeight: 1.2,
       }}>
         {label}
       </div>
+      {isPendingInvitation && (
+        <div style={{ color: C.loss, fontSize: '8px', fontWeight: 800, lineHeight: 1.15, textAlign: 'center', maxWidth: '64px' }}>
+          Ожидает ответа
+        </div>
+      )}
       {hasRealData && deltaStr && (
         <div style={{
           color: ratingChange.delta >= 0 ? C.win : C.loss,
@@ -618,13 +623,13 @@ function LevelOverrideConfirm({ message, onConfirm, onCancel }) {
     <div data-testid="level-override-modal" className="app-modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.92)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '20px' }}>
       <div className="app-modal-panel" style={{ background: '#07160F', borderRadius: '16px', padding: '24px', width: '100%', maxWidth: '320px', border: '1px solid rgba(245,241,232,0.16)', textAlign: 'center' }}>
         <div style={{ color: C.gold, fontSize: '13px', fontWeight: 900, letterSpacing: '0.12em', marginBottom: '12px' }}>LEVEL</div>
-        <div style={{ color: C.text, fontWeight: 700, fontSize: '16px', marginBottom: '8px' }}>Добавить игрока вне диапазона?</div>
+        <div style={{ color: C.text, fontWeight: 700, fontSize: '16px', marginBottom: '8px' }}>Пригласить игрока вне диапазона?</div>
         <div style={{ color: C.muted, fontSize: '13px', marginBottom: '24px', lineHeight: 1.5 }}>
           {message}
         </div>
         <div style={{ display: 'flex', gap: '8px' }}>
           <button onClick={onCancel} style={{ flex: 1, padding: '12px', background: 'transparent', color: C.muted, border: `1px solid ${C.border}`, borderRadius: '10px', fontSize: '14px', cursor: 'pointer' }}>Отмена</button>
-          <button data-testid="level-override-confirm" onClick={onConfirm} style={{ flex: 1, padding: '12px', background: C.accent, color: '#07160F', border: 'none', borderRadius: '10px', fontSize: '14px', fontWeight: 800, cursor: 'pointer' }}>Добавить</button>
+          <button data-testid="level-override-confirm" onClick={onConfirm} style={{ flex: 1, padding: '12px', background: C.accent, color: '#07160F', border: 'none', borderRadius: '10px', fontSize: '14px', fontWeight: 800, cursor: 'pointer' }}>Пригласить</button>
         </div>
       </div>
     </div>
@@ -636,6 +641,8 @@ function SlotActionSheet({ slotIndex, isOwner, currentUser, matchId, onAddGuest,
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [invitingPlayerId, setInvitingPlayerId] = useState(null);
+  const invitationInFlightRef = useRef(false);
 
   // Проверяем, играет ли уже юзер в матче
   const isParticipant = slots?.some(player => player?.id === currentUser?.id);
@@ -672,17 +679,25 @@ function SlotActionSheet({ slotIndex, isOwner, currentUser, matchId, onAddGuest,
   }, [searchTerm, isOwner, currentUser?.id]);
 
   const handleSelectPlayer = async (player) => {
-    const result = await onAddGuest(slotIndex, {
-      id: player.id,
-      firstName: player.first_name,
-      lastName: player.last_name,
-      username: player.username,
-      numericRating: player.rating,
-      isVerified: player.is_verified,
-      sidePreference: player.side_preference || 'LR',
-      isOrganizer: false,
-    });
-    if (result !== false) onClose();
+    if (invitationInFlightRef.current) return;
+    invitationInFlightRef.current = true;
+    setInvitingPlayerId(player.id);
+    try {
+      const result = await onAddGuest(slotIndex, {
+        id: player.id,
+        firstName: player.first_name,
+        lastName: player.last_name,
+        username: player.username,
+        numericRating: player.rating,
+        isVerified: player.is_verified,
+        sidePreference: player.side_preference || 'LR',
+        isOrganizer: false,
+      });
+      if (result !== false) onClose();
+    } finally {
+      invitationInFlightRef.current = false;
+      setInvitingPlayerId(null);
+    }
   };
 
   // 1. ИНТЕРФЕЙС ОРГАНИЗАТОРА ИЛИ УЧАСТНИКА (Поиск)
@@ -710,10 +725,13 @@ function SlotActionSheet({ slotIndex, isOwner, currentUser, matchId, onAddGuest,
                 key={player.id}
                 data-testid={`player-search-result-${player.id}`}
                 onClick={() => handleSelectPlayer(player)}
+                disabled={invitingPlayerId !== null}
                 style={{ width: '100%', padding: '12px', background: 'transparent', border: 'none', borderBottom: `1px solid ${C.border}`, color: C.text, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
               >
                 <span>{player.first_name} {player.last_name}{player.username ? ` · @${player.username}` : ''}</span>
-                <span style={{ color: C.gold, fontSize: '11px', fontWeight: 700 }}>★ {player.rating?.toFixed(1) || '3.0'}</span>
+                <span style={{ color: C.gold, fontSize: '11px', fontWeight: 700 }}>
+                  {invitingPlayerId === player.id ? 'Отправляем…' : 'Пригласить'}
+                </span>
               </button>
             ))}
           </div>
@@ -857,7 +875,7 @@ function RatingTypeBadge({ match }) {
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
-export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinSuccess, onDelete, onComplete, onConfirmScore, onDisputeScore, onUpdate, onSlotsChange, onJoinMatch, onLeaveMatch, allMessages, messagesLoading, messagesLoadError, onRetryMessages, onSendMessage, onRevertToPrivate, showToast }) {
+export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinSuccess, onDelete, onComplete, onConfirmScore, onDisputeScore, onUpdate, onSlotsChange, onJoinMatch, onLeaveMatch, pendingInvitations = [], invitationActions = new Set(), onCreateInvitation, onCancelInvitation, onRemoveParticipant, allMessages, messagesLoading, messagesLoadError, onRetryMessages, onSendMessage, onRevertToPrivate, showToast }) {
   const isOwner = canManageMatch(currentUser, match);
 
   const allBots = useMemo(() => getTestBots(), []);
@@ -874,7 +892,6 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
   const [cancelled,   setCancelled]   = useState(false);
   const [editSheet,   setEditSheet]   = useState(false);
   const [cancelSheet, setCancelSheet] = useState(false);
-  const [inviteSheet, setInviteSheet] = useState(false);
   const [kickTarget,  setKickTarget]  = useState(null);
   const [leaveTarget, setLeaveTarget] = useState(null);
   const [pinnedMsg,   setPinnedMsg]   = useState('');
@@ -974,9 +991,41 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
   } else {
     baseSlots = [];
   }
-  const allFilled = baseSlots.slice(0, maxSlots);
-  const slots     = [...allFilled, ...Array(Math.max(0, maxSlots - allFilled.length)).fill(null)];
-  const isFull    = allFilled.length >= maxSlots;
+  const confirmedPlayers = baseSlots.slice(0, maxSlots);
+  const slots = Array(maxSlots).fill(null);
+
+  confirmedPlayers.forEach((player) => {
+    const explicitIndex = Number(player?.slotIndex);
+    const slotIndex = Number.isInteger(explicitIndex)
+      && explicitIndex >= 0
+      && explicitIndex < maxSlots
+      && !slots[explicitIndex]
+      ? explicitIndex
+      : slots.findIndex((slot) => !slot);
+    if (slotIndex >= 0) slots[slotIndex] = player;
+  });
+
+  pendingInvitations.forEach((invitation) => {
+    const slotIndex = Number(invitation.slot_index);
+    if (!Number.isInteger(slotIndex) || slotIndex < 0 || slotIndex >= maxSlots || slots[slotIndex]) return;
+    const player = invitation.player ?? {};
+    slots[slotIndex] = {
+      id: invitation.invited_user_id,
+      firstName: player.firstName ?? player.first_name ?? 'Игрок',
+      lastName: player.lastName ?? player.last_name ?? '',
+      numericRating: player.numericRating ?? player.rating,
+      isVerified: player.isVerified ?? player.is_verified,
+      isOrganizer: false,
+      isPendingInvitation: true,
+      invitationId: invitation.id,
+      slotIndex,
+    };
+  });
+
+  const allFilled = slots.filter((player) => player && !player.isPendingInvitation);
+  const visiblePendingInvitations = slots.filter((player) => player?.isPendingInvitation);
+  const isFull = allFilled.length >= maxSlots;
+  const isCapacityReserved = slots.every(Boolean);
   const savedScore = match.finalScore ?? match.score;
   const hasFinalScore = Array.isArray(savedScore) && savedScore.some(s => (s?.t1 ?? 0) + (s?.t2 ?? 0) > 0);
   const isCompletedMatch = finished || status === 'completed' || status === 'finished' || (hasFinalScore && !isScorePending && !isScoreDisputed && !isRatedMatch);
@@ -1026,7 +1075,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
     if (isCompletedMatch) return 'completed';
     if (isOwner) return 'owner';
     if (isParticipant) return 'participant';
-    if (isFull) return 'full';
+    if (isCapacityReserved) return 'full';
     if (privateJoinBlocked) return 'private';
     if (!verifiedOk) return 'unverified';
     if (!levelOk) return 'level';
@@ -1035,7 +1084,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
   const joinBlockReason = getJoinBlockReason();
   const canJoin = joinBlockReason === null;
   const guardReason = joinBlockReason === 'unverified' || joinBlockReason === 'level' ? joinBlockReason : null;
-  const showRatingGuard = !isOwner && !isParticipant && !isFull && guardReason;
+  const showRatingGuard = !isOwner && !isParticipant && !isCapacityReserved && guardReason;
   const getJoinBlockedText = (reason = joinBlockReason) => {
     if (reason === 'completed') return 'Матч уже завершён.';
     if (reason === 'participant') return 'Вы уже участвуете в этом матче.';
@@ -1093,13 +1142,14 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
 
   const handleKickConfirm = async () => {
     try {
-      await commitSlots(allFilled.filter(p => {
-        if (!kickTarget?.id) return p !== kickTarget;
-        return p?.id !== kickTarget.id;
-      }));
+      if (!kickTarget?.id || !onRemoveParticipant) {
+        throw new Error('remove_match_participant RPC handler is not available');
+      }
+      const updatedMatch = await onRemoveParticipant(match.id, kickTarget.id);
+      setLocalSlots(updatedMatch?.filledSlots ?? allFilled);
       setKickTarget(null);
     } catch {
-      showToast?.('Слот не обновлен. Попробуйте еще раз.', 'error');
+      // Parent shows the concrete RPC error.
     }
   };
 
@@ -1145,7 +1195,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
     }
   };
 
-  // Owner adds a named guest into a specific empty slot
+  // The organizer reserves a slot by invitation; the player is added only after accepting it.
   const handleAddGuest = async (slotIndex, playerData, options = {}) => {
     if (slots[slotIndex]) {
       showToast?.('Этот слот уже занят.', 'info');
@@ -1153,7 +1203,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
     }
 
     if (playerData?.id && slots.some((player, index) => index !== slotIndex && player?.id === playerData.id)) {
-      showToast?.('Этот игрок уже добавлен в матч.', 'info');
+      showToast?.('Этот игрок уже участвует в матче или ожидает ответа.', 'info');
       return false;
     }
 
@@ -1168,25 +1218,17 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
       setLevelOverride({
         slotIndex,
         playerData,
-        message: `Уровень игрока ${formatPlayerRating(playerData)} ${direction} диапазона матча ${levelRequirement.numericRangeLabel}. Всё равно добавить?`,
+        message: `Уровень игрока ${formatPlayerRating(playerData)} ${direction} диапазона матча ${levelRequirement.numericRangeLabel}. Всё равно пригласить?`,
       });
       return true;
     }
 
-    const next = [...slots];
-    if (typeof playerData === 'string') {
-      // Old behavior: just a name string
-      next[slotIndex] = { firstName: playerData, isOrganizer: false, isVerified: false };
-    } else {
-      // New behavior: full player object from database
-      next[slotIndex] = playerData;
-    }
+    if (!playerData?.id || !onCreateInvitation) return false;
     try {
-      await commitSlots(next.filter(Boolean));
+      await onCreateInvitation(match.id, playerData, slotIndex);
       setTargetSlot(null);
       return true;
     } catch {
-      showToast?.('Игрок не добавлен. Попробуйте еще раз.', 'error');
       return false;
     }
   };
@@ -1213,7 +1255,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
     const next = [...slots];
     next[slotIndex] = bot;
     try {
-      await commitSlots(next.filter(Boolean));
+      await commitSlots(next.filter((player) => player && !player.isPendingInvitation));
       setTargetSlot(null);
     } catch {
       showToast?.('Слот не обновлен. Попробуйте еще раз.', 'error');
@@ -1478,8 +1520,8 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
             <div style={{ fontSize: '10px', fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.12em' }}>
               Игроки {allFilled.length}/{maxSlots}
             </div>
-            {canEditMatch && !isFull && (
-              <button onClick={() => setInviteSheet(true)} style={{ padding: '5px 12px', background: 'rgba(216,243,74,0.10)', border: '1px solid rgba(216,243,74,0.24)', borderRadius: '8px', color: C.gold, fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}>
+            {canEditMatch && !isCapacityReserved && (
+              <button onClick={() => setTargetSlot(slots.findIndex((slot) => !slot))} style={{ padding: '5px 12px', background: 'rgba(216,243,74,0.10)', border: '1px solid rgba(216,243,74,0.24)', borderRadius: '8px', color: C.gold, fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}>
                 + Пригласить
               </button>
             )}
@@ -1504,6 +1546,36 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
               );
             })}
           </PadelCard>
+          {visiblePendingInvitations.length > 0 && (
+            <div className="mt-3 space-y-2" data-testid="pending-invitations-list">
+              {visiblePendingInvitations.map((player) => {
+                const cancelling = invitationActions.has(`cancel:${player.invitationId}`);
+                return (
+                  <div
+                    key={player.invitationId}
+                    data-testid={`pending-invitation-${player.invitationId}`}
+                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', padding: '10px 12px', borderRadius: '12px', background: 'rgba(255,111,97,0.06)', border: '1px solid rgba(255,111,97,0.18)' }}
+                  >
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ color: C.text, fontSize: '12px', fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {player.firstName} {player.lastName}
+                      </div>
+                      <div style={{ color: C.loss, fontSize: '10px', fontWeight: 700, marginTop: '2px' }}>Ожидает ответа</div>
+                    </div>
+                    <button
+                      type="button"
+                      data-testid={`cancel-invitation-${player.invitationId}`}
+                      disabled={cancelling}
+                      onClick={() => onCancelInvitation?.(player.invitationId).catch(() => {})}
+                      style={{ flexShrink: 0, padding: '7px 9px', borderRadius: '9px', border: '1px solid rgba(255,111,97,0.28)', background: 'transparent', color: C.loss, fontSize: '10px', fontWeight: 800, opacity: cancelling ? 0.55 : 1, cursor: cancelling ? 'not-allowed' : 'pointer' }}
+                    >
+                      {cancelling ? 'Отменяем…' : 'Отменить приглашение'}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
         
         {isParticipant && (
@@ -1600,7 +1672,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
               disabled={!canJoin || joining}
               onClick={handleJoin}
             >
-              {isFull ? 'Матч заполнен' : canJoin ? 'Присоединиться к игре' : 'Участие недоступно'}
+              {isFull ? 'Матч заполнен' : isCapacityReserved ? 'Свободных мест нет' : canJoin ? 'Присоединиться к игре' : 'Участие недоступно'}
             </PadelButton>
           </>
         )}
@@ -1623,7 +1695,6 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
       )}
       {editSheet   && canEditMatch && <EditPanel initDate={dateISO} initTime={time} initCourt={courtType} initDuration={duration} initTitle={title} initDescription={description} onSave={handleEditSave} onClose={() => setEditSheet(false)} />}
       {cancelSheet && canEditMatch && <CancelSheet onConfirm={handleCancelConfirm} onClose={() => setCancelSheet(false)} />}
-      {inviteSheet && canEditMatch && <InviteSheet matchId={match.id} onClose={() => setInviteSheet(false)} />}
       {kickTarget  && canEditMatch && <KickConfirm player={kickTarget} onConfirm={handleKickConfirm} onCancel={() => setKickTarget(null)} />}
       {leaveTarget && <LeaveConfirm onConfirm={handleLeaveConfirm} onCancel={() => setLeaveTarget(null)} />}
       {levelOverride && canEditMatch && (
