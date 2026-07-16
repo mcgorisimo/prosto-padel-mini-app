@@ -7,6 +7,12 @@ import Toast from './Toast'; // Correct path for Toast
 import { supabase } from '../lib/supabaseClient';
 import BallLoader from './BallLoader'; // Если мяч лежит в папке components
 
+const normalizeTelegramUsername = (value) =>
+  String(value ?? '')
+    .trim()
+    .replace(/^@+/, '')
+    .replace(/\s+/g, '');
+
 export default function AuthGate() {
   const [session, setSession] = useState(null);
   const [authView, setAuthView] = useState('welcome'); // welcome, signup, login
@@ -59,6 +65,7 @@ const handleSignUp = async ({ email, password, options }) => {
             id: authData.user.id, 
             first_name: options.data.first_name, // Берем из того, что пришло
             last_name: options.data.last_name,   // Берем из того, что пришло
+            username: normalizeTelegramUsername(options.data.username) || null,
             role: 'user', 
             rating: options.data.rating || 3.0,
             is_verified: false,

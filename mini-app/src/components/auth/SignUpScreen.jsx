@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTelegram } from '../../hooks/useTelegram';
 
 const C = {
   bg: '#050F0B',
@@ -41,10 +42,18 @@ const inputSx = {
   fontFamily: 'inherit',
 };
 
+const normalizeTelegramUsername = (value) =>
+  String(value ?? '')
+    .trim()
+    .replace(/^@+/, '')
+    .replace(/\s+/g, '');
+
 export default function SignUpScreen({ onBack, onSuccess, loading, error: parentError }) {
+  const { user: telegramUser } = useTelegram();
   const [show, setShow] = useState(false);
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
+  const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [levelOptionIndex, setLevelOptionIndex] = useState(0);
@@ -59,6 +68,11 @@ export default function SignUpScreen({ onBack, onSuccess, loading, error: parent
     if (parentError) setError('');
   }, [parentError]);
 
+  useEffect(() => {
+    const tgUsername = normalizeTelegramUsername(telegramUser?.username);
+    if (tgUsername) setUsername(tgUsername);
+  }, [telegramUser?.username]);
+
   const handleSubmit = async (e) => {
     if (e) e.preventDefault();
     if (!firstName.trim()) return setError('Введите имя');
@@ -67,6 +81,7 @@ export default function SignUpScreen({ onBack, onSuccess, loading, error: parent
     setError('');
 
     const selectedLevel = LEVEL_OPTIONS[levelOptionIndex];
+    const normalizedUsername = normalizeTelegramUsername(username);
 
     onSuccess({
       email: email.trim().toLowerCase(),
@@ -75,6 +90,7 @@ export default function SignUpScreen({ onBack, onSuccess, loading, error: parent
         data: {
           first_name: firstName.trim(),
           last_name: lastName.trim(),
+          username: normalizedUsername || null,
           rating: selectedLevel.initialRating,
           self_assessed_level: selectedLevel.label,
         },
@@ -163,6 +179,18 @@ export default function SignUpScreen({ onBack, onSuccess, loading, error: parent
               type="email"
               placeholder="player@example.com"
               autoComplete="email"
+              style={inputSx}
+              {...focusProps}
+            />
+          </div>
+
+          <div style={{ marginBottom: '18px' }}>
+            <label style={labelSx}>Telegram username</label>
+            <input
+              value={username ? `@${username}` : ''}
+              onChange={(e) => setUsername(normalizeTelegramUsername(e.target.value))}
+              placeholder="@username"
+              autoComplete="username"
               style={inputSx}
               {...focusProps}
             />

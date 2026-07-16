@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import PadelButton from './ui/PadelButton';
 import PadelCard from './ui/PadelCard';
-import { supabase } from '../lib/supabaseClient';
+import { getPublicPlayerProfiles } from '../lib/profileApi';
 
 const FORMATS = [
   { id: 'individual', label: 'Индивидуальная', mark: '1', maxGuests: 0 },
@@ -66,19 +66,17 @@ function ParticipantPicker({ index, value, onChange }) {
     }
 
     const timer = setTimeout(async () => {
-      const safeQuery = trimmed.replace(/[,()%]/g, ' ');
       setLoading(true);
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('id, first_name, last_name, phone, rating, is_verified')
-        .or(`first_name.ilike.%${safeQuery}%,last_name.ilike.%${safeQuery}%,phone.ilike.%${safeQuery}%`)
-        .limit(8);
-
-      if (error) {
+      try {
+        const data = await getPublicPlayerProfiles({
+          search: trimmed,
+          select: 'id, first_name, last_name, username, rating, is_verified',
+          limit: 8,
+        });
+        setResults(data ?? []);
+      } catch (error) {
         console.error('Training participant search error:', error);
         setResults([]);
-      } else {
-        setResults(data ?? []);
       }
       setLoading(false);
     }, 300);
@@ -116,7 +114,7 @@ function ParticipantPicker({ index, value, onChange }) {
       <input
         value={query}
         onChange={(event) => setQuery(event.target.value)}
-        placeholder={`Участник ${index + 1}: имя, фамилия или телефон`}
+        placeholder={`Участник ${index + 1}: имя, фамилия или username`}
         className="w-full rounded-xl border border-warm-white/10 bg-app-bg/70 p-3 text-sm text-warm-white outline-none transition-colors placeholder:text-warm-white/34 focus:border-accent-light/45"
       />
 
@@ -135,7 +133,6 @@ function ParticipantPicker({ index, value, onChange }) {
                   id: player.id,
                   firstName: player.first_name,
                   lastName: player.last_name,
-                  phone: player.phone,
                   numericRating: player.rating || 3.0,
                   isVerified: player.is_verified === true,
                 });
@@ -149,7 +146,7 @@ function ParticipantPicker({ index, value, onChange }) {
                   {[player.first_name, player.last_name].filter(Boolean).join(' ')}
                 </span>
                 <span className="mt-1 block text-xs text-warm-white/42">
-                  {player.phone || `Рейтинг ${(player.rating || 3.0).toFixed(2)}`}
+                  {`Рейтинг ${(player.rating || 3.0).toFixed(2)}`}
                 </span>
               </span>
               <span className="text-xs font-bold text-accent-light">Выбрать</span>

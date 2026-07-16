@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { CalendarDays, Clock3, LockKeyhole, UsersRound, X } from 'lucide-react';
 import { BOOKING_DURATIONS, COURTS, WORKING_HOURS, checkAvailability, fromMin } from '../lib/booking';
 import { fmtPrice, getPerPlayerPrice, getTotalPrice } from '../lib/pricing';
@@ -95,6 +95,7 @@ export default function BookingScreen({ allMatches = [], onBookSlot, showToast, 
   const [matchType, setMatchType] = useState('casual');
   const [isSaving, setIsSaving] = useState(false);
   const [successText, setSuccessText] = useState('');
+  const isSavingRef = useRef(false);
 
   const selectedDate = dates.find((item) => item.dateISO === selectedDateISO) ?? dates[0];
   const selectedCourt = selectedSlot?.court ?? COURTS.find((court) => court.id === courtId);
@@ -175,15 +176,16 @@ export default function BookingScreen({ allMatches = [], onBookSlot, showToast, 
   };
 
   const handleCloseConfirm = () => {
-    if (isSaving) return;
+    if (isSavingRef.current) return;
     setSelectedSlot(null);
   };
 
   const handleConfirm = async () => {
-    if (!selectedSlot || isSaving || isRatingMatchBlocked) return;
+    if (!selectedSlot || isSavingRef.current || isRatingMatchBlocked) return;
 
     const isRatingBookingMatch = isPublicFormat && matchType === 'rating';
 
+    isSavingRef.current = true;
     setIsSaving(true);
     try {
       await onBookSlot?.({
@@ -212,6 +214,7 @@ export default function BookingScreen({ allMatches = [], onBookSlot, showToast, 
     } catch (error) {
       console.error(error);
     } finally {
+      isSavingRef.current = false;
       setIsSaving(false);
     }
   };

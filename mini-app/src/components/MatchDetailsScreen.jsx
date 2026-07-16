@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { getAvailableBots, getTestBots } from '../lib/testSeed';
 import { getCourtCapacity, getPerPlayerPrice, fmtPrice as fmtPriceLib, isPrimeTime } from '../lib/pricing';
 import { HOURS, WORKING_HOURS, BOOKING_DURATIONS } from '../lib/booking';
@@ -10,6 +10,8 @@ import { supabase } from '../lib/supabaseClient';
 import { getMatchLevelBadges, getMatchLevelRequirement } from '../lib/matchLevelRequirement';
 import { getMatchBookingStatus } from '../lib/matchBookingStatus';
 import { isRatingMatch, requiresVerifiedRating as getRequiresVerifiedRating } from '../lib/matchRating';
+import { getPublicPlayerProfiles } from '../lib/profileApi';
+import { getLevelForRating } from '../lib/ratingEngine';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -58,6 +60,25 @@ const fmtDelta = (value) => (typeof value === 'number' ? `${value >= 0 ? '+' : '
 const canManageMatch = (user, match) =>
   user.id === (match.ownerId ?? match.owner_id) || user.role === 'admin';
 
+const getRatingIndexForPlayer = (player) => {
+  const explicitIdx = Number(player?.ratingIdx);
+  if (Number.isFinite(explicitIdx)) {
+    return Math.max(0, Math.min(RATINGS.length - 1, Math.round(explicitIdx)));
+  }
+
+  const numericRating = Number(player?.numericRating ?? player?.rating);
+  if (!Number.isFinite(numericRating)) return null;
+
+  const levelLabel = getLevelForRating(numericRating)?.label;
+  const idx = RATINGS.indexOf(levelLabel);
+  return idx >= 0 ? idx : null;
+};
+
+const formatPlayerRating = (player) => {
+  const numericRating = Number(player?.numericRating ?? player?.rating);
+  return Number.isFinite(numericRating) ? numericRating.toFixed(1) : '—';
+};
+
 // ─── BottomSheet ──────────────────────────────────────────────────────────────
 
 function BottomSheet({ children, onClose, variant = 'default' }) {
@@ -102,7 +123,7 @@ function BottomSheet({ children, onClose, variant = 'default' }) {
 
 // ─── Player Mini-Profile ──────────────────────────────────────────────────────
 
-function PlayerMiniProfile({ player, onClose, onRemove }) {
+function PlayerMiniProfile({ player, onClose, onRemove, removeLabel = 'Убрать из матча' }) {
   const initials = [player.firstName?.[0], player.lastName?.[0]].filter(Boolean).join('') || '?';
   const isGold   = (player.ratingIdx ?? 0) >= 2;
 
@@ -166,8 +187,8 @@ function PlayerMiniProfile({ player, onClose, onRemove }) {
       )}
 
       {onRemove && (
-        <button onClick={onRemove} style={{ width: '100%', padding: '14px', marginBottom: '10px', background: 'rgba(239,68,68,0.08)', color: C.loss, border: '1px solid rgba(239,68,68,0.24)', borderRadius: '12px', fontSize: '15px', fontWeight: 700, cursor: 'pointer' }}>
-          Убрать из матча
+        <button data-testid="player-slot-remove-action" onClick={onRemove} style={{ width: '100%', padding: '14px', marginBottom: '10px', background: 'rgba(239,68,68,0.08)', color: C.loss, border: '1px solid rgba(239,68,68,0.24)', borderRadius: '12px', fontSize: '15px', fontWeight: 700, cursor: 'pointer' }}>
+          {removeLabel}
         </button>
       )}
       <button onClick={onClose} style={{ width: '100%', padding: '14px', background: 'transparent', color: C.muted, border: `1px solid ${C.border}`, borderRadius: '12px', fontSize: '15px', cursor: 'pointer' }}>
@@ -232,9 +253,13 @@ function PlayerSlot({ player, onTap, slotIndex = 0, onSlotClick, ratingChange })
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', position: 'relative', flexShrink: 0, overflow: 'visible' }}>
+    <div
+      data-testid={`match-player-slot-${slotIndex}`}
+      style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', position: 'relative', flexShrink: 0, overflow: 'visible' }}
+    >
       {/* Внешний контейнер (Wrapper) для аватара и бейджей */}
       <div
+        data-testid={isEmpty ? `match-empty-slot-${slotIndex}` : `match-filled-slot-${slotIndex}`}
         onClick={handleClick}
         style={{
           position: 'relative',
@@ -553,7 +578,7 @@ function InviteSheet({ matchId, onClose }) {
 
 function KickConfirm({ player, onConfirm, onCancel }) {
   return (
-    <div className="app-modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.92)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '20px' }}>
+    <div data-testid="match-leave-confirm" className="app-modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.92)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '20px' }}>
       <div className="app-modal-panel" style={{ background: '#07160F', borderRadius: '16px', padding: '24px', width: '100%', maxWidth: '320px', border: '1px solid rgba(245,241,232,0.16)', textAlign: 'center' }}>
         <div style={{ color: C.gold, fontSize: '13px', fontWeight: 900, letterSpacing: '0.12em', marginBottom: '12px' }}>PLAYER</div>
         <div style={{ color: C.text, fontWeight: 700, fontSize: '16px', marginBottom: '8px' }}>Удалить игрока?</div>
@@ -569,7 +594,43 @@ function KickConfirm({ player, onConfirm, onCancel }) {
   );
 }
 
+function LeaveConfirm({ onConfirm, onCancel }) {
+  return (
+    <div className="app-modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.92)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '20px' }}>
+      <div className="app-modal-panel" style={{ background: '#07160F', borderRadius: '16px', padding: '24px', width: '100%', maxWidth: '320px', border: '1px solid rgba(245,241,232,0.16)', textAlign: 'center' }}>
+        <div style={{ color: C.gold, fontSize: '13px', fontWeight: 900, letterSpacing: '0.12em', marginBottom: '12px' }}>PLAYER</div>
+        <div style={{ color: C.text, fontWeight: 700, fontSize: '16px', marginBottom: '8px' }}>Выйти из матча?</div>
+        <div style={{ color: C.muted, fontSize: '13px', marginBottom: '24px', lineHeight: 1.5 }}>
+          Ваше место станет свободным
+        </div>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button onClick={onCancel} style={{ flex: 1, padding: '12px', background: 'transparent', color: C.muted, border: `1px solid ${C.border}`, borderRadius: '10px', fontSize: '14px', cursor: 'pointer' }}>Отмена</button>
+          <button data-testid="match-leave-confirm-button" onClick={onConfirm} style={{ flex: 1, padding: '12px', background: 'linear-gradient(135deg, #dc2626, #ef4444)', color: '#fff', border: 'none', borderRadius: '10px', fontSize: '14px', fontWeight: 700, cursor: 'pointer' }}>Выйти</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Slot Action Sheet ────────────────────────────────────────────────────────
+function LevelOverrideConfirm({ message, onConfirm, onCancel }) {
+  return (
+    <div data-testid="level-override-modal" className="app-modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.92)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '20px' }}>
+      <div className="app-modal-panel" style={{ background: '#07160F', borderRadius: '16px', padding: '24px', width: '100%', maxWidth: '320px', border: '1px solid rgba(245,241,232,0.16)', textAlign: 'center' }}>
+        <div style={{ color: C.gold, fontSize: '13px', fontWeight: 900, letterSpacing: '0.12em', marginBottom: '12px' }}>LEVEL</div>
+        <div style={{ color: C.text, fontWeight: 700, fontSize: '16px', marginBottom: '8px' }}>Добавить игрока вне диапазона?</div>
+        <div style={{ color: C.muted, fontSize: '13px', marginBottom: '24px', lineHeight: 1.5 }}>
+          {message}
+        </div>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button onClick={onCancel} style={{ flex: 1, padding: '12px', background: 'transparent', color: C.muted, border: `1px solid ${C.border}`, borderRadius: '10px', fontSize: '14px', cursor: 'pointer' }}>Отмена</button>
+          <button data-testid="level-override-confirm" onClick={onConfirm} style={{ flex: 1, padding: '12px', background: C.accent, color: '#07160F', border: 'none', borderRadius: '10px', fontSize: '14px', fontWeight: 800, cursor: 'pointer' }}>Добавить</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SlotActionSheet({ slotIndex, isOwner, currentUser, matchId, onAddGuest, onAddBot, availableBotsCount = 0, onTakeSlot, onClose, showToast, slots }) {
   const [copied, setCopied] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -596,13 +657,13 @@ function SlotActionSheet({ slotIndex, isOwner, currentUser, matchId, onAddGuest,
     setIsSearching(true);
     const delayDebounceFn = setTimeout(async () => {
       try {
-        const { data, error } = await supabase
-          .from('profiles')
-          .select('id, first_name, last_name, rating, is_verified, side_preference')
-          .or(`first_name.ilike.%${searchTerm}%,last_name.ilike.%${searchTerm}%`)
-          .neq('id', currentUser?.id)
-          .limit(5);
-        if (!error) setSearchResults(data || []);
+        const data = await getPublicPlayerProfiles({
+          search: searchTerm,
+          excludeId: currentUser?.id,
+          select: 'id, first_name, last_name, username, rating, is_verified, side_preference',
+          limit: 5,
+        });
+        setSearchResults(data || []);
       } finally {
         setIsSearching(false);
       }
@@ -610,32 +671,35 @@ function SlotActionSheet({ slotIndex, isOwner, currentUser, matchId, onAddGuest,
     return () => clearTimeout(delayDebounceFn);
   }, [searchTerm, isOwner, currentUser?.id]);
 
-  const handleSelectPlayer = (player) => {
-    onAddGuest(slotIndex, {
+  const handleSelectPlayer = async (player) => {
+    const result = await onAddGuest(slotIndex, {
       id: player.id,
       firstName: player.first_name,
       lastName: player.last_name,
+      username: player.username,
       numericRating: player.rating,
       isVerified: player.is_verified,
       sidePreference: player.side_preference || 'LR',
       isOrganizer: false,
     });
-    onClose();
+    if (result !== false) onClose();
   };
 
   // 1. ИНТЕРФЕЙС ОРГАНИЗАТОРА ИЛИ УЧАСТНИКА (Поиск)
   if (isOwner) {
     return (
       <BottomSheet onClose={onClose}>
+        <div data-testid="slot-action-sheet">
         <div style={{ marginBottom: '16px' }}>
           <div style={{ color: C.text, fontSize: '17px', fontWeight: 700 }}>Слот {slotIndex + 1} · Свободно</div>
           <div style={{ color: C.muted, fontSize: '12px', marginTop: '3px' }}>Поиск среди игроков клуба</div>
         </div>
         <input
+          data-testid="player-search-input"
           type="text"
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
-          placeholder="Введите имя..."
+          placeholder="Имя, фамилия или @username"
           style={{ width: '100%', padding: '12px', borderRadius: '12px', background: C.surface, color: C.text, border: `1px solid ${C.border}`, boxSizing: 'border-box', marginBottom: '16px', outline: 'none' }}
         />
         {isSearching && <div style={{ color: C.gold, fontSize: '12px', textAlign: 'center', marginBottom: '16px' }}>Ищем...</div>}
@@ -644,10 +708,11 @@ function SlotActionSheet({ slotIndex, isOwner, currentUser, matchId, onAddGuest,
             {searchResults.map((player) => (
               <button
                 key={player.id}
+                data-testid={`player-search-result-${player.id}`}
                 onClick={() => handleSelectPlayer(player)}
                 style={{ width: '100%', padding: '12px', background: 'transparent', border: 'none', borderBottom: `1px solid ${C.border}`, color: C.text, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
               >
-                <span>{player.first_name} {player.last_name}</span>
+                <span>{player.first_name} {player.last_name}{player.username ? ` · @${player.username}` : ''}</span>
                 <span style={{ color: C.gold, fontSize: '11px', fontWeight: 700 }}>★ {player.rating?.toFixed(1) || '3.0'}</span>
               </button>
             ))}
@@ -662,6 +727,7 @@ function SlotActionSheet({ slotIndex, isOwner, currentUser, matchId, onAddGuest,
           {copied ? 'Ссылка скопирована' : 'Скопировать ссылку на Telegram-группу'}
         </button>
         <button onClick={onClose} style={{ width: '100%', padding: '14px', background: 'transparent', color: C.muted, border: `1px solid ${C.border}`, borderRadius: '12px', cursor: 'pointer' }}>Закрыть</button>
+        </div>
       </BottomSheet>
     );
   }
@@ -791,7 +857,7 @@ function RatingTypeBadge({ match }) {
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
-export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinSuccess, onDelete, onComplete, onConfirmScore, onDisputeScore, onUpdate, onSlotsChange, allMessages, onSendMessage, onRevertToPrivate, showToast }) {
+export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinSuccess, onDelete, onComplete, onConfirmScore, onDisputeScore, onUpdate, onSlotsChange, onJoinMatch, onLeaveMatch, allMessages, messagesLoading, messagesLoadError, onRetryMessages, onSendMessage, onRevertToPrivate, showToast }) {
   const isOwner = canManageMatch(currentUser, match);
 
   const allBots = useMemo(() => getTestBots(), []);
@@ -810,12 +876,20 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
   const [cancelSheet, setCancelSheet] = useState(false);
   const [inviteSheet, setInviteSheet] = useState(false);
   const [kickTarget,  setKickTarget]  = useState(null);
+  const [leaveTarget, setLeaveTarget] = useState(null);
   const [pinnedMsg,   setPinnedMsg]   = useState('');
   const [targetSlot,  setTargetSlot]  = useState(null); // index of tapped empty slot
   const [finished,    setFinished]    = useState(match.status === 'completed');
   const [finishToast, setFinishToast] = useState(null);
   const [finishModal, setFinishModal] = useState(false);
   const [chatOpen,    setChatOpen]    = useState(false);
+  const [levelOverride, setLevelOverride] = useState(null);
+  const joinInFlightRef = useRef(false);
+  const joinSuccessTimerRef = useRef(null);
+
+  useEffect(() => () => {
+    if (joinSuccessTimerRef.current) clearTimeout(joinSuccessTimerRef.current);
+  }, []);
 
   // Owner-editable fields (null = use original from match prop)
   const [localDate, setLocalDate] = useState(null);
@@ -861,7 +935,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
   const isActuallyPrime = isPrimeTime(time, dateISO);
   const isPanoramic     = courtType === 'panoramic';
   const maxSlots        = getCourtCapacity(courtType);
-  const pricePerPl      = calcPerPlayer(time, duration, courtType, dateISO);
+  const pricePerPl      = match.pricePerPerson ?? match.price_per_person ?? calcPerPlayer(time, duration, courtType, dateISO);
 
   // Owner's real profile for the first slot
   const ownerSlot = {
@@ -909,6 +983,12 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
   const canEditMatch = isOwner && !isCompletedMatch && !isScorePending && !isScoreDisputed;
   const completedScoreText = fmtSetList(savedScore);
   const scoreSubmittedBy = match.scoreSubmittedBy ?? match.score_submitted_by;
+  const matchStartMs = new Date(`${dateISO}T${time || '00:00'}:00`).getTime();
+  const matchHasNotStarted = !Number.isFinite(matchStartMs) || matchStartMs > Date.now();
+  const isPaidParticipation = (player) => {
+    const paymentStatus = String(player?.paymentStatus ?? player?.payment_status ?? '').toLowerCase();
+    return player?.paid === true || player?.isPaid === true || paymentStatus === 'paid' || paymentStatus === 'full';
+  };
 
   const playerTeam = (playerId) => {
     if (!playerId) return null;
@@ -937,15 +1017,17 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
     currentUserTeam !== submittedTeam;
 
   // Join guard
-  const isParticipant = (match.participants ?? []).includes(currentUser.id)
+  const isParticipant = isOwner || (match.participants ?? []).includes(currentUser.id)
     || allFilled.some(player => player?.id === currentUser.id);
   const levelOk    = currentUser.ratingIdx >= ratingMin && currentUser.ratingIdx <= ratingMax;
+  const privateJoinBlocked = match.isPrivate === true;
   const verifiedOk = !requiresVerifiedRating || currentUser.isVerified === true;
   const getJoinBlockReason = () => {
     if (isCompletedMatch) return 'completed';
     if (isOwner) return 'owner';
     if (isParticipant) return 'participant';
     if (isFull) return 'full';
+    if (privateJoinBlocked) return 'private';
     if (!verifiedOk) return 'unverified';
     if (!levelOk) return 'level';
     return null;
@@ -958,13 +1040,14 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
     if (reason === 'completed') return 'Матч уже завершён.';
     if (reason === 'participant') return 'Вы уже участвуете в этом матче.';
     if (reason === 'full') return 'В матче больше нет свободных мест.';
+    if (reason === 'private') return 'Это приватный матч. Присоединиться можно только по приглашению организатора.';
     if (reason === 'unverified') return 'Для участия нужен подтверждённый рейтинг. Обратитесь к администратору клуба.';
     if (reason === 'level') return `Ваш уровень не входит в диапазон ${levelRequirement.summaryLabel} этого матча.`;
     return 'Участие в матче сейчас недоступно.';
   };
 
   const handleJoin = async () => {
-    if (joining) return;
+    if (joinInFlightRef.current) return;
     if (!canJoin) {
       showToast?.(getJoinBlockedText(), guardReason ? 'error' : 'info');
       return;
@@ -976,12 +1059,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
       return;
     }
 
-    setJoining(true);
-    try {
-      await handleTakeSlot(firstFreeSlotIndex);
-    } finally {
-      setJoining(false);
-    }
+    await handleTakeSlot(firstFreeSlotIndex);
   };
   
   const handleEditSave = async ({ date: dt, time: t, courtType: ct, duration: d, title: newTitle, description: newDesc }) => {
@@ -1031,16 +1109,68 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
     setViewPlayer(null);
   };
 
+  const canLeaveViewedPlayer = !!viewPlayer
+    && viewPlayer.id === currentUser.id
+    && isParticipant
+    && !isOwner
+    && !viewPlayer.isOrganizer
+    && matchHasNotStarted
+    && !isCompletedMatch
+    && !isScorePending
+    && !isScoreDisputed
+    && !isPaidParticipation(viewPlayer);
+
+  const handleLeaveViewedPlayer = () => {
+    if (!canLeaveViewedPlayer) return;
+    setLeaveTarget(viewPlayer);
+    setViewPlayer(null);
+  };
+
+  const handleLeaveConfirm = async () => {
+    try {
+      if (!onLeaveMatch) {
+        throw new Error('leave_match RPC handler is not available');
+      }
+
+      const updatedMatch = await onLeaveMatch(match.id);
+      if (joinSuccessTimerRef.current) {
+        clearTimeout(joinSuccessTimerRef.current);
+        joinSuccessTimerRef.current = null;
+      }
+      setLocalSlots(updatedMatch?.filledSlots ?? allFilled);
+      setJoined(false);
+      setLeaveTarget(null);
+    } catch {
+      // The parent handler shows the concrete RPC error without duplicating the message.
+    }
+  };
+
   // Owner adds a named guest into a specific empty slot
-  const handleAddGuest = async (slotIndex, playerData) => {
+  const handleAddGuest = async (slotIndex, playerData, options = {}) => {
     if (slots[slotIndex]) {
       showToast?.('Этот слот уже занят.', 'info');
       return false;
     }
 
-    if (requiresVerifiedRating && (typeof playerData === 'string' || playerData?.isVerified !== true)) {
-      showToast?.('Для рейтинговой игры можно добавить только игрока с подтверждённым рейтингом.', 'error');
+    if (playerData?.id && slots.some((player, index) => index !== slotIndex && player?.id === playerData.id)) {
+      showToast?.('Этот игрок уже добавлен в матч.', 'info');
       return false;
+    }
+
+    const playerRatingIdx = getRatingIndexForPlayer(playerData);
+    if (
+      !options.skipLevelWarning &&
+      typeof playerData !== 'string' &&
+      playerRatingIdx != null &&
+      (playerRatingIdx < levelRequirement.minIdx || playerRatingIdx > levelRequirement.maxIdx)
+    ) {
+      const direction = playerRatingIdx < levelRequirement.minIdx ? 'ниже' : 'выше';
+      setLevelOverride({
+        slotIndex,
+        playerData,
+        message: `Уровень игрока ${formatPlayerRating(playerData)} ${direction} диапазона матча ${levelRequirement.numericRangeLabel}. Всё равно добавить?`,
+      });
+      return true;
     }
 
     const next = [...slots];
@@ -1054,10 +1184,18 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
     try {
       await commitSlots(next.filter(Boolean));
       setTargetSlot(null);
-      setAddPlayerModal(null);
+      return true;
     } catch {
       showToast?.('Игрок не добавлен. Попробуйте еще раз.', 'error');
+      return false;
     }
+  };
+
+  const handleConfirmLevelOverride = async () => {
+    if (!levelOverride) return;
+    const pending = levelOverride;
+    setLevelOverride(null);
+    await handleAddGuest(pending.slotIndex, pending.playerData, { skipLevelWarning: true });
   };
 
   // Owner drops a random available test-bot into an empty slot
@@ -1138,6 +1276,8 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
 
   // Non-owner takes an empty slot with their own profile
   const handleTakeSlot = async (slotIndex) => {
+    if (joinInFlightRef.current) return false;
+
     if (!currentUser?.id) {
       showToast?.('Не удалось определить игрока. Попробуйте войти заново.', 'error');
       return false;
@@ -1153,24 +1293,21 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
       return false;
     }
 
-    const next = [...slots];
-    next[slotIndex] = {
-      id:          currentUser.id,
-      firstName:   currentUser.firstName,
-      lastName:    currentUser.lastName,
-      ratingIdx:   currentUser.ratingIdx,
-      numericRating: currentUser.numericRating,
-      isVerified:  currentUser.isVerified,
-      isOrganizer: false,
-    };
+    joinInFlightRef.current = true;
+    setJoining(true);
+
     try {
-      await commitSlots(next.filter(Boolean));
+      const updatedMatch = await onJoinMatch?.(match.id);
+      setLocalSlots(updatedMatch?.filledSlots ?? slots);
       setTargetSlot(null);
       setJoined(true);
-      setTimeout(() => onJoinSuccess?.(match), 1500);
+      joinSuccessTimerRef.current = setTimeout(() => onJoinSuccess?.(updatedMatch ?? match), 1500);
       return true;
     } catch {
       return false;
+    } finally {
+      joinInFlightRef.current = false;
+      setJoining(false);
     }
   };
 
@@ -1446,7 +1583,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
             </PadelButton>
           </>
         ) : (joined || isParticipant) ? (
-          <div style={{ textAlign: 'center', padding: '20px', background: 'rgba(34,197,94,0.08)', borderRadius: '14px', border: '1px solid rgba(34,197,94,0.25)' }}>
+          <div data-testid="match-joined-state" style={{ textAlign: 'center', padding: '20px', background: 'rgba(34,197,94,0.08)', borderRadius: '14px', border: '1px solid rgba(34,197,94,0.25)' }}>
             <div style={{ color: C.win, fontWeight: 700, fontSize: '17px' }}>Вы присоединились к матчу!</div>
             <div style={{ color: C.muted, fontSize: '12px', marginTop: '4px' }}>Место сохранено в матче</div>
           </div>
@@ -1456,6 +1593,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
               <RatingGuardBanner match={match} reason={guardReason} />
             )}
             <PadelButton
+              data-testid="match-self-join-button"
               variant={canJoin ? (isActuallyPrime ? 'yellow' : 'info') : 'dark'}
               size="lg"
               fullWidth
@@ -1473,18 +1611,36 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
         <PlayerMiniProfile
           player={viewPlayer}
           onClose={() => setViewPlayer(null)}
-          onRemove={canEditMatch && !viewPlayer.isOrganizer ? handleRemoveViewedPlayer : null}
+          onRemove={
+            canEditMatch && !viewPlayer.isOrganizer
+              ? handleRemoveViewedPlayer
+              : canLeaveViewedPlayer
+                ? handleLeaveViewedPlayer
+                : null
+          }
+          removeLabel={canLeaveViewedPlayer ? 'Выйти из матча' : 'Убрать из матча'}
         />
       )}
       {editSheet   && canEditMatch && <EditPanel initDate={dateISO} initTime={time} initCourt={courtType} initDuration={duration} initTitle={title} initDescription={description} onSave={handleEditSave} onClose={() => setEditSheet(false)} />}
       {cancelSheet && canEditMatch && <CancelSheet onConfirm={handleCancelConfirm} onClose={() => setCancelSheet(false)} />}
       {inviteSheet && canEditMatch && <InviteSheet matchId={match.id} onClose={() => setInviteSheet(false)} />}
       {kickTarget  && canEditMatch && <KickConfirm player={kickTarget} onConfirm={handleKickConfirm} onCancel={() => setKickTarget(null)} />}
+      {leaveTarget && <LeaveConfirm onConfirm={handleLeaveConfirm} onCancel={() => setLeaveTarget(null)} />}
+      {levelOverride && canEditMatch && (
+        <LevelOverrideConfirm
+          message={levelOverride.message}
+          onConfirm={handleConfirmLevelOverride}
+          onCancel={() => setLevelOverride(null)}
+        />
+      )}
       {chatOpen && (
         <MatchChat
           match={match}
           currentUser={currentUser}
           messages={allMessages.filter(m => (m.matchId ?? m.match_id) === match.id)}
+          loading={messagesLoading}
+          loadError={messagesLoadError}
+          onRetry={onRetryMessages}
           onSendMessage={(text) => onSendMessage(match.id, currentUser, text)}
           onClose={() => setChatOpen(false)}
         />

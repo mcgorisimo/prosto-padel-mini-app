@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { supabase } from '../lib/supabaseClient';
+import { getPublicPlayerProfiles } from '../lib/profileApi';
 
 const C = {
   bg:      '#020617',
@@ -55,21 +55,16 @@ export default function AddPlayerModal({ onSelectPlayer, onClose }) {
 
     const searchPlayers = async () => {
       setLoading(true);
-      const query = searchQuery.trim().toLowerCase();
-
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('id, first_name, last_name, rating')
-        .or(
-          `first_name.ilike.%${query}%,last_name.ilike.%${query}%`
-        )
-        .limit(20);
-
-      if (error) {
+      try {
+        const data = await getPublicPlayerProfiles({
+          search: searchQuery,
+          select: 'id, first_name, last_name, username, rating, is_verified',
+          limit: 20,
+        });
+        setResults(data || []);
+      } catch (error) {
         console.error('Error searching players:', error);
         setResults([]);
-      } else {
-        setResults(data || []);
       }
       setLoading(false);
     };
@@ -85,7 +80,7 @@ export default function AddPlayerModal({ onSelectPlayer, onClose }) {
       lastName: player.last_name,
       numericRating: player.rating || 3.0,
       isOrganizer: false,
-      isVerified: false,
+      isVerified: player.is_verified === true,
     });
     onClose();
   };
@@ -102,7 +97,7 @@ export default function AddPlayerModal({ onSelectPlayer, onClose }) {
           autoFocus
           value={searchQuery}
           onChange={e => setSearchQuery(e.target.value)}
-          placeholder="Имя или фамилия"
+          placeholder="Имя, фамилия или @username"
           style={{
             width: '100%',
             background: C.surface,
@@ -183,7 +178,7 @@ export default function AddPlayerModal({ onSelectPlayer, onClose }) {
                 {player.first_name} {player.last_name}
               </div>
               <div style={{ color: C.muted, fontSize: '11px', marginTop: '2px' }}>
-                Рейтинг: {(player.rating || 3.0).toFixed(2)}
+                {player.username ? `@${player.username} · ` : ''}Рейтинг: {(player.rating || 3.0).toFixed(2)}
               </div>
             </div>
           </button>

@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Search } from 'lucide-react';
 import AdminPlayerDetails from './AdminPlayerDetails';
 import { getLevelForRating } from '../lib/ratingEngine';
-import { supabase } from '../lib/supabaseClient';
+import { adminListProfiles } from '../lib/profileApi';
 import { useTelegram } from '../hooks/useTelegram';
 
 const C = {
@@ -16,8 +16,6 @@ const C = {
   coral: '#FF6F61',
   win: '#D8F34A',
 };
-
-const SELECT_FIELDS = 'id, first_name, last_name, phone, rating, is_verified, role, side_preference, created_at';
 
 const FILTERS = [
   { key: 'all', label: 'Все' },
@@ -141,10 +139,13 @@ export default function AdminPlayersScreen({ user, onBack }) {
       setLoading(true);
       setError('');
 
-      const { data, error: loadError } = await supabase
-        .from('profiles')
-        .select(SELECT_FIELDS)
-        .order('created_at', { ascending: false });
+      let data = [];
+      let loadError = null;
+      try {
+        data = await adminListProfiles({ search: query, filter });
+      } catch (error) {
+        loadError = error;
+      }
 
       if (loadError) {
         setPlayers([]);
@@ -157,7 +158,7 @@ export default function AdminPlayersScreen({ user, onBack }) {
     };
 
     loadPlayers();
-  }, [isAdmin]);
+  }, [isAdmin, query, filter]);
 
   const filteredPlayers = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();

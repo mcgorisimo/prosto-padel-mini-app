@@ -49,7 +49,18 @@ function killProcessTree(pid) {
 }
 
 async function main() {
-  const extraArgs = process.argv.slice(2);
+  const rawArgs = process.argv.slice(2);
+  const liveDefaultsIndex = rawArgs.indexOf('--live-defaults');
+  const useLiveDefaults = liveDefaultsIndex !== -1;
+  const passedArgs = useLiveDefaults
+    ? rawArgs.filter((arg, index) => index !== liveDefaultsIndex)
+    : rawArgs;
+  const extraArgs = useLiveDefaults && passedArgs.length === 0
+    ? ['tests/e2e/padel-domain.live.spec.js', '--grep', '@live', '--workers=1']
+    : [
+        ...(useLiveDefaults ? ['tests/e2e/padel-domain.live.spec.js'] : []),
+        ...passedArgs,
+      ];
   let viteProcess = null;
   let ownsServer = false;
 

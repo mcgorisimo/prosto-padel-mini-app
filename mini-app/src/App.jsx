@@ -8,11 +8,13 @@ import Home from './components/Home';
 import EditProfileScreen from './components/EditProfileScreen';
 import BookingScreen from './components/BookingScreen';
 import AdminScreen from './components/AdminScreen';
+import BallLoader from './components/BallLoader';
 import { supabase } from './lib/supabaseClient';
 import { useTelegram } from './hooks/useTelegram';
 import { isPrimeTime } from './lib/pricing';
 import { calculateRatingChange, getLevelForRating, MIN_RATING, MAX_RATING } from './lib/ratingEngine';
 import { isRatingMatch } from './lib/matchRating';
+import { getMyProfile, getPublicPlayerProfiles } from './lib/profileApi';
 
 // ─── Seed data (shown until user creates real matches) ────────────────────────
 
@@ -101,8 +103,10 @@ function deriveParticipantsAndStatus(filledSlots, prevStatus) {
     .filter(p => p?.id != null)
     .map(p => p.id);
   let status = prevStatus;
-  if (prevStatus === 'searching' || prevStatus === 'confirmed') {
-    status = prevStatus;
+  if (prevStatus === 'searching') {
+    status = 'searching';
+  } else if (prevStatus === 'confirmed') {
+    status = filled.length >= 4 ? 'confirmed' : 'open';
   } else if (prevStatus !== 'completed' && prevStatus !== 'finished' && prevStatus !== 'cancelled' && prevStatus !== 'canceled') {
     status = filled.length >= 4 ? 'upcoming' : 'open';
   }
@@ -128,6 +132,10 @@ export default function App({ session, showToast }) { // Accept showToast as a p
   const [allMatches, setAllMatches] = useState([]);
   const [allMessages, setAllMessages] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [matchesLoading, setMatchesLoading] = useState(true);
+  const [matchesLoadError, setMatchesLoadError] = useState('');
+  const [messagesLoading, setMessagesLoading] = useState(true);
+  const [messagesLoadError, setMessagesLoadError] = useState('');
   const [activeTab, setActiveTab]    = useState('home');
   const [toast, setToast]            = useState(null);
   const [selectedMatch, setSelected] = useState(null);
@@ -135,48 +143,75 @@ export default function App({ session, showToast }) { // Accept showToast as a p
   const fetchProfile = useCallback(async () => {
     if (!ME_ID) return null;
 
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', ME_ID)
-      .single();
-
-    if (error && error.code !== 'PGRST116') {
+    try {
+      const data = await getMyProfile();
+      if (data) setProfile(data);
+      return data ?? null;
+    } catch (error) {
       console.error(`Ошибка при получении профиля из Supabase: ${error.message}`);
       return null;
     }
-
-    if (data) setProfile(data);
-    return data ?? null;
   }, [ME_ID]);
+
+  const loadMatches = useCallback(async () => {
+    setMatchesLoading(true);
+    setMatchesLoadError('');
+
+    try {
+      const { data, error } = await supabase
+        .from('matches')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setAllMatches((data ?? []).map(normalizeMatch));
+      return data ?? [];
+    } catch (error) {
+      console.error(`Ошибка при получении матчей из Supabase: ${error.message}`);
+      setMatchesLoadError('Не удалось загрузить матчи. Проверьте подключение и попробуйте ещё раз.');
+      return null;
+    } finally {
+      setMatchesLoading(false);
+    }
+  }, []);
+
+  const loadMessages = useCallback(async () => {
+    setMessagesLoading(true);
+    setMessagesLoadError('');
+
+    try {
+      const { data, error } = await supabase
+        .from('messages')
+        .select('*')
+        .order('created_at', { ascending: true });
+
+      if (error) throw error;
+      setAllMessages((data ?? []).map(normalizeMessage));
+      return data ?? [];
+    } catch (error) {
+      console.error(`Ошибка при получении сообщений из Supabase: ${error.message}`);
+      setMessagesLoadError('Не удалось загрузить сообщения. Попробуйте ещё раз.');
+      return null;
+    } finally {
+      setMessagesLoading(false);
+    }
+  }, []);
+
+  const fetchData = useCallback(async () => {
+    if (!ME_ID) {
+      setLoading(false);
+      return;
+    }
+
+    try {
+      await Promise.all([fetchProfile(), loadMatches(), loadMessages()]);
+    } finally {
+      setLoading(false);
+    }
+  }, [ME_ID, fetchProfile, loadMatches, loadMessages]);
 
   // --- 2. ЗАГРУЗКА ДАННЫХ ---
   useEffect(() => {
-    const fetchData = async () => {
-      if (!ME_ID) return;
-
-      // Fetch profile
-      await fetchProfile();
-
-      // Fetch matches
-      const { data: matchesData, error: matchesError } = await supabase.from('matches').select('*').order('created_at', { ascending: false });
-      if (matchesError) {
-        console.error(`Ошибка при получении матчей из Supabase: ${matchesError.message}`);
-        if (matchesError.code === 'PGRST404') console.warn("Таблица 'matches' не найдена в Supabase.");
-      }
-      if (matchesData) setAllMatches(matchesData.map(normalizeMatch));
-
-      // Fetch messages
-      const { data: messagesData, error: messagesError } = await supabase.from('messages').select('*').order('created_at', { ascending: true });
-      if (messagesError) {
-        console.error(`Ошибка при получении сообщений из Supabase: ${messagesError.message}`);
-        if (messagesError.code === 'PGRST404') console.warn("Таблица 'messages' не найдена в Supabase.");
-      }
-      if (messagesData) setAllMessages(messagesData.map(normalizeMessage));
-
-      setLoading(false);
-    };
-
     fetchData();
 
     const matchesSubscription = supabase.channel('public:matches')
@@ -211,7 +246,7 @@ export default function App({ session, showToast }) { // Accept showToast as a p
       supabase.removeChannel(matchesSubscription);
       supabase.removeChannel(messagesSubscription);
     };
-  }, [ME_ID, fetchProfile]);
+  }, [fetchData]);
 
   useEffect(() => {
     if (activeTab === 'profile') {
@@ -265,7 +300,7 @@ export default function App({ session, showToast }) { // Accept showToast as a p
       lastName: p.last_name,
       phone: p.phone || '',
       side_preference: p.side_preference || 'Both',
-      username: user?.username || meta.username || '',
+      username: p.username || user?.username || meta.username || '',
       role: p.role,
     };
   }, [profile, session, user?.username]); // <-- добавили session в зависимости
@@ -305,19 +340,19 @@ export default function App({ session, showToast }) { // Accept showToast as a p
     const profileRatings = {};
 
     if (humanIds.length > 0) {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('id, rating')
-        .in('id', humanIds);
-
-      if (error) {
+      try {
+        const data = await getPublicPlayerProfiles({
+          ids: humanIds,
+          select: 'id, rating',
+          limit: null,
+        });
+        (data ?? []).forEach(profileRow => {
+          profileRatings[profileRow.id] = Number(profileRow.rating) || 3.0;
+        });
+      } catch (error) {
         showToast?.('Не удалось загрузить рейтинги игроков. Результат не сохранён.', 'error');
         throw error;
       }
-
-      (data ?? []).forEach(profileRow => {
-        profileRatings[profileRow.id] = Number(profileRow.rating) || 3.0;
-      });
     }
 
     const ratingFor = (player) => {
@@ -482,29 +517,18 @@ export default function App({ session, showToast }) { // Accept showToast as a p
   // isPrivate=true  → status='upcoming', paymentStatus='full', invisible in MatchFeed.
   // isPrivate=false → status='open',     paymentStatus='partial', appears in MatchFeed.
 const handleBookSlot = async (booking) => {
-    // Проверка: есть ли ID пользователя?
     if (!ME_ID) {
-      console.error("Ошибка: ME_ID не определен");
-      return;
+      const authError = new Error('Booking requires an authenticated user');
+      console.error(authError);
+      showToast?.('Не удалось определить пользователя. Войдите снова и повторите попытку.', 'error');
+      throw authError;
     }
 
     const target = new Date(booking.dateISO);
     const dateStr = target.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }).replace(' г.', '');
     const isRated = !booking.isPrivate && (booking.isRatingMatch === true || booking.is_rating_match === true);
 
-    // Безопасно собираем данные организатора (с защитой от null)
-    const ownerSlot = {
-      id:          ME_ID,
-      firstName:   currentUser?.firstName || 'Игрок',
-      lastName:    currentUser?.lastName || '',
-      ratingIdx:   currentUser?.ratingIdx || 0,
-      numericRating: currentUser?.numericRating || 3.0,
-      isVerified:  currentUser?.isVerified || false,
-      isOrganizer: true,
-    };
-
-    const newMatch = {
-      owner_id:      ME_ID, // Используем ME_ID напрямую, он надежнее
+    const bookingPayload = {
       date:          dateStr,
       dateISO:       booking.dateISO,
       time:          booking.time,
@@ -518,34 +542,48 @@ const handleBookSlot = async (booking) => {
       ratingMax:     booking.ratingMax ?? 6,
       description:   booking.description || '',
       scenario:      booking.scenario || (booking.isPrivate ? 'private' : 'community'),
-      status:        booking.isPrivate ? 'upcoming' : 'open',
       isPrivate:     !!booking.isPrivate,
+      isRatingMatch: isRated,
       is_rating_match: isRated,
       paymentStatus: booking.paymentStatus || 'partial',
-      filledSlots:   [ownerSlot],
-      participants:  [ME_ID], // Это ВАЖНО для фильтра на главной!
     };
 
-    const { data, error } = await supabase.from('matches').insert([newMatch]).select();
+    const { data, error } = await supabase.rpc('create_booking', {
+      p_booking: bookingPayload,
+    });
     
     if (error) {
-      console.error("КРИТИЧЕСКАЯ ОШИБКА БД:", error);
+      const errorText = [error.message, error.details, error.hint].filter(Boolean).join(' ');
+      const isSlotTaken = error.code === '23P01' || errorText.includes('BOOKING_SLOT_TAKEN');
+
+      if (isSlotTaken) {
+        showToast?.('Это время уже заняли. Выберите другой интервал', 'error');
+        await loadMatches();
+        throw error;
+      }
+
+      console.error('Ошибка create_booking:', error);
       showToast?.('Не удалось сохранить бронь. Попробуйте еще раз.', 'error');
       throw error;
     }
 
-    const insertedRow = data?.[0];
+    const insertedRow = Array.isArray(data) ? data[0] : data;
     if (!insertedRow) {
-      const emptyInsertError = new Error('Booking creation returned no rows');
+      const emptyInsertError = new Error('create_booking returned no match row');
       showToast?.('Бронь не сохранена. Проверьте права доступа и попробуйте еще раз.', 'error');
       throw emptyInsertError;
     }
 
-    setAllMatches(prev => [normalizeMatch(insertedRow), ...prev]);
+    const createdMatch = normalizeMatch(insertedRow);
+    setAllMatches(prev => prev.some(match => match.id === createdMatch.id)
+      ? prev.map(match => match.id === createdMatch.id ? createdMatch : match)
+      : [createdMatch, ...prev]);
     // Если это публичный матч — идем в ленту, если приват — остаемся в календаре
     if (!booking.isPrivate) {
       setActiveTab('matches');
     }
+
+    return createdMatch;
   };
 
   // ─── 2. Исправленный handleRevertToPrivate ───
@@ -741,7 +779,9 @@ const handleBookSlot = async (booking) => {
 
   // ── Slot changes: persist filledSlots, recompute participants + status ──
   const handleSlotsChange = async (matchId, newFilledSlots) => {
-    const { participants, status } = deriveParticipantsAndStatus(newFilledSlots, allMatches.find(m => m.id === matchId)?.status);
+    const currentMatch = allMatches.find(m => m.id === matchId);
+    const { participants, status: derivedStatus } = deriveParticipantsAndStatus(newFilledSlots, currentMatch?.status);
+    const status = currentMatch?.isPrivate === true ? currentMatch.status : derivedStatus;
     const { data, error } = await supabase
       .from('matches')
       .update({ filledSlots: newFilledSlots, participants, status })
@@ -767,14 +807,101 @@ const handleBookSlot = async (booking) => {
     const savedSlots = updatedMatch.filledSlots ?? [];
     const slotsSaved = newFilledSlots.every(slot => !slot?.id || savedSlots.some(savedSlot => savedSlot?.id === slot.id));
     const participantsSaved = participants.every(id => savedParticipants.includes(id));
-    const statusSaved = updatedMatch.status === status;
 
-    if (!slotsSaved || !participantsSaved || !statusSaved) {
+    if (!slotsSaved || !participantsSaved) {
       const persistError = new Error('Match slot update was not persisted');
       console.error(persistError);
       showToast?.('Слот не сохранился. Попробуйте еще раз.', 'error');
       throw persistError;
     }
+
+    setAllMatches(prev => {
+      const exists = prev.some(m => m.id === updatedMatch.id);
+      return exists
+        ? prev.map(m => m.id === updatedMatch.id ? updatedMatch : m)
+        : [updatedMatch, ...prev];
+    });
+    setSelected(prev => prev?.id === updatedMatch.id ? updatedMatch : prev);
+
+    return updatedMatch;
+  };
+
+  const getJoinMatchErrorMessage = (error) => {
+    const message = `${error?.message ?? ''} ${error?.details ?? ''} ${error?.hint ?? ''}`.toLowerCase();
+
+    if (message.includes('full') || message.includes('slot') || message.includes('no free')) {
+      return 'Свободное место уже занято. Обновите матч и попробуйте другой.';
+    }
+    if (message.includes('private')) {
+      return 'Это приватный матч. Присоединиться можно только по приглашению организатора.';
+    }
+    if (message.includes('rating') || message.includes('level')) {
+      return 'Ваш уровень не входит в диапазон этого матча.';
+    }
+    if (message.includes('already') || message.includes('participant')) {
+      return 'Вы уже участвуете в этом матче.';
+    }
+    if (message.includes('started') || message.includes('completed') || message.includes('cancel')) {
+      return 'Участие в матче сейчас недоступно.';
+    }
+
+    return 'Не удалось присоединиться к матчу. Попробуйте еще раз.';
+  };
+
+  const handleJoinMatch = async (matchId) => {
+    const { data, error } = await supabase.rpc('join_match', { p_match_id: matchId });
+
+    if (error) {
+      console.error(`Ошибка при присоединении к матчу: ${error.message}`);
+      showToast?.(getJoinMatchErrorMessage(error), 'error');
+      throw error;
+    }
+
+    const returnedRow = Array.isArray(data)
+      ? data[0]
+      : data?.match ?? data;
+
+    if (!returnedRow?.id) {
+      const emptyRpcError = new Error('join_match returned no match row');
+      console.error(emptyRpcError);
+      showToast?.('Не удалось обновить матч после присоединения. Попробуйте еще раз.', 'error');
+      throw emptyRpcError;
+    }
+
+    const updatedMatch = normalizeMatch(returnedRow);
+
+    setAllMatches(prev => {
+      const exists = prev.some(m => m.id === updatedMatch.id);
+      return exists
+        ? prev.map(m => m.id === updatedMatch.id ? updatedMatch : m)
+        : [updatedMatch, ...prev];
+    });
+    setSelected(prev => prev?.id === updatedMatch.id ? updatedMatch : prev);
+
+    return updatedMatch;
+  };
+
+  const handleLeaveMatch = async (matchId) => {
+    const { data, error } = await supabase.rpc('leave_match', { p_match_id: matchId });
+
+    if (error) {
+      console.error(`Ошибка при выходе из матча: ${error.message}`);
+      showToast?.('Не удалось выйти из матча. Попробуйте еще раз.', 'error');
+      throw error;
+    }
+
+    const returnedRow = Array.isArray(data)
+      ? data[0]
+      : data?.match ?? data;
+
+    if (!returnedRow?.id) {
+      const emptyRpcError = new Error('leave_match returned no match row');
+      console.error(emptyRpcError);
+      showToast?.('Не удалось обновить матч после выхода. Попробуйте еще раз.', 'error');
+      throw emptyRpcError;
+    }
+
+    const updatedMatch = normalizeMatch(returnedRow);
 
     setAllMatches(prev => {
       const exists = prev.some(m => m.id === updatedMatch.id);
@@ -938,7 +1065,7 @@ const handleBookSlot = async (booking) => {
   }, [completedMatches, currentUser]);
 
   if (loading || !currentUser) {
-    return <div style={{ background: '#050F0B', minHeight: '100dvh' }} />; // Or a proper loading spinner
+    return <BallLoader />;
   }
 
   // ── Full-screen routes (hide BottomNav) ──
@@ -967,7 +1094,12 @@ const handleBookSlot = async (booking) => {
         onDisputeScore={handleDisputeScore}
         onUpdate={handleUpdateMatch}
         onSlotsChange={handleSlotsChange}
+        onJoinMatch={handleJoinMatch}
+        onLeaveMatch={handleLeaveMatch}
         allMessages={allMessages}
+        messagesLoading={messagesLoading}
+        messagesLoadError={messagesLoadError}
+        onRetryMessages={loadMessages}
         onSendMessage={handleSendMessage}
         onRevertToPrivate={handleRevertToPrivate}
         showToast={showToast}
@@ -1063,6 +1195,9 @@ const handleBookSlot = async (booking) => {
             onJoin={(match) => console.log('join', match.id)}
             onViewDetails={openMatchDetails} // This needs showToast
             onCreateMatch={openCreateMatch} // This needs showToast
+            loading={matchesLoading}
+            loadError={matchesLoadError}
+            onRetry={loadMatches}
             onReset={currentUser?.role === 'admin' ? handleReset : null}
           />
         )}

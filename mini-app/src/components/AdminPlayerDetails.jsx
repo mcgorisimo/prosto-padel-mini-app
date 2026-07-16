@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { getLevelForRating } from '../lib/ratingEngine';
-import { supabase } from '../lib/supabaseClient';
+import { adminUpdateProfileSecurity } from '../lib/profileApi';
 
 const C = {
   bg: '#050F0B',
@@ -13,8 +13,6 @@ const C = {
   coral: '#FF6F61',
   win: '#D8F34A',
 };
-
-const SELECT_FIELDS = 'id, first_name, last_name, phone, rating, is_verified, role, side_preference, created_at';
 
 const formatName = (player) =>
   [player?.first_name, player?.last_name].filter(Boolean).join(' ') || 'Игрок без имени';
@@ -65,15 +63,12 @@ export default function AdminPlayerDetails({ user, player, onBack, onSaved }) {
         is_verified: isVerified,
       };
 
-      const { data, error: updateError } = await supabase
-        .from('profiles')
-        .update(payload)
-        .eq('id', player.id)
-        .select(SELECT_FIELDS)
-        .single();
+      const data = await adminUpdateProfileSecurity({
+        profileId: player.id,
+        rating: payload.rating,
+        isVerified: payload.is_verified,
+      });
 
-      if (updateError) throw updateError;
-      if (!data?.id) throw new Error('Profile update returned no row');
       if (Number(data.rating) !== payload.rating || isPlayerRatingVerified(data) !== payload.is_verified) {
         throw new Error('Profile update was not persisted');
       }

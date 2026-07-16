@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { supabase } from '../lib/supabaseClient';
 import { useTelegram } from '../hooks/useTelegram';
+import { updateMyProfile } from '../lib/profileApi';
 
 const C = {
   bg:      '#020617',
@@ -146,17 +146,7 @@ export default function PersonalInfoScreen({ user, onBack, showToast, onProfileS
         side_preference: preferredSide,
       };
 
-      const { data, error } = await supabase
-        .from('profiles')
-        .update(payload)
-        .eq('id', user.id)
-        .select('id, first_name, last_name, phone, side_preference, rating, is_verified, role')
-        .single();
-
-      if (error) throw error;
-      if (!data?.id) {
-        throw new Error('Profile update returned no row');
-      }
+      const data = await updateMyProfile(payload);
       if (
         data.first_name !== payload.first_name ||
         data.last_name !== payload.last_name ||
