@@ -4,6 +4,7 @@ import RatingChart from './RatingChart';
 import PadelButton from './ui/PadelButton';
 import { RATING_CONFIG, getLevelForRating } from '../lib/ratingEngine';
 import { CLUB, PRICING } from '../lib/clubConfig';
+import { formatParticipationPrice, getParticipationPrice } from '../lib/pricing';
 
 // ─── Count-up animation ──────────────────────────────────────────────────────
 // Eases from previous value to current target using requestAnimationFrame.
@@ -270,7 +271,10 @@ function InvitationNotificationCard({ notification, invitation, processing, onAc
   const levels = ['D', 'D+', 'C', 'C+', 'B', 'B+', 'A'];
   const minLevel = levels[invitation.rating_min] ?? invitation.rating_min;
   const maxLevel = levels[invitation.rating_max] ?? invitation.rating_max;
-  const price = Number(invitation.price_per_person);
+  const pricePerPerson = getParticipationPrice(invitation, { allowFallback: false });
+  const priceLabel = formatParticipationPrice(pricePerPerson, {
+    isFree: invitation.is_free === true || invitation.isFree === true,
+  });
 
   return (
     <article data-testid={`invitation-card-${invitation.invitation_id}`} className="profile-notification-card" style={{ borderColor: notification?.read_at ? C.border : 'rgba(255,111,97,0.34)' }}>
@@ -284,7 +288,7 @@ function InvitationNotificationCard({ notification, invitation, processing, onAc
       <div style={{ color: C.muted, fontSize: '11px', lineHeight: 1.45, marginTop: '8px', minHeight: '32px' }}>{details || 'Детали матча доступны после принятия приглашения'}</div>
       <div style={{ display: 'flex', gap: '12px', color: C.muted, fontSize: '10px', marginTop: '7px' }}>
         {minLevel != null && maxLevel != null && <span>Уровень <strong style={{ color: C.text }}>{minLevel}–{maxLevel}</strong></span>}
-        {Number.isFinite(price) && <span><strong style={{ color: C.win }}>{price.toLocaleString('ru-RU')} ₽</strong></span>}
+        <span><strong data-testid={`invitation-price-${invitation.invitation_id}`} style={{ color: C.win }}>{priceLabel}</strong></span>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginTop: '12px' }}>
         <button type="button" data-testid={`invitation-decline-${invitation.invitation_id}`} disabled={processing} onClick={() => onDecline(invitation).catch(() => {})} style={{ minHeight: '44px', borderRadius: '13px', border: `1px solid ${C.border}`, background: 'transparent', color: C.text, fontSize: '12px', fontWeight: 800, opacity: processing ? 0.55 : 1 }}>Отказаться</button>

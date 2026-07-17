@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { MapPin, Plus, UsersRound } from 'lucide-react';
-import { getCourtCapacity, getPerPlayerPrice } from '../lib/pricing';
+import { formatParticipationPrice, getCourtCapacity, getParticipationPrice } from '../lib/pricing';
 import { getMatchLevelRequirement } from '../lib/matchLevelRequirement';
 import { getMatchBookingStatus } from '../lib/matchBookingStatus';
 import { isRatingMatch, requiresVerifiedRating } from '../lib/matchRating';
@@ -248,9 +248,9 @@ function MatchCard({ match, currentUser, onViewDetails }) {
   const maxSlots = getCourtCapacity(match.courtType || match.court_type || 'standard');
   const isFull = filledCount >= maxSlots;
   const freeCount = Math.max(0, maxSlots - filledCount);
-  const pricePerPerson = match.pricePerPerson
-    ?? match.price_per_person
-    ?? getPerPlayerPrice(match.time, match.duration || 1.5, match.courtType ?? match.court_type, match.dateISO ?? match.date_iso);
+  const pricePerPerson = getParticipationPrice(match, { allowFallback: true });
+  const isExplicitlyFree = match.isFree === true || match.is_free === true;
+  const priceLabel = formatParticipationPrice(pricePerPerson, { isFree: isExplicitlyFree });
   const levelRequirement = getMatchLevelRequirement(match);
 
   const bookingStatus = getMatchBookingStatus(match);
@@ -367,9 +367,11 @@ function MatchCard({ match, currentUser, onViewDetails }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
         <div>
           <div style={{ fontSize: '20px', fontWeight: '900', color: C.text }}>
-            {pricePerPerson} ₽
+            {priceLabel}
           </div>
-          <div style={{ fontSize: '11px', color: C.muted }}>с человека</div>
+          {pricePerPerson != null && (pricePerPerson > 0 || isExplicitlyFree) && (
+            <div style={{ fontSize: '11px', color: C.muted }}>с человека</div>
+          )}
         </div>
 
         <JoinButton

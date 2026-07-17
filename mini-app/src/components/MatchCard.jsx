@@ -1,5 +1,5 @@
 import React from 'react';
-import { getCourtCapacity, getPerPlayerPrice, fmtPrice } from '../lib/pricing';
+import { formatParticipationPrice, getCourtCapacity, getParticipationPrice } from '../lib/pricing';
 import { getLevelLabelForIndex, getMatchLevelRequirement } from '../lib/matchLevelRequirement';
 import { getMatchBookingStatus } from '../lib/matchBookingStatus';
 
@@ -151,7 +151,9 @@ export default function MatchCard({ match, playerRating, onJoin, onViewDetails }
 
   const isPanoramic    = courtType === 'panoramic';
   const maxSlots       = getCourtCapacity(courtType);
-  const pricePerPlayer = getPerPlayerPrice(time, duration, courtType, match.dateISO);
+  const pricePerPlayer = getParticipationPrice(match, { allowFallback: true });
+  const isExplicitlyFree = match.isFree === true || match.is_free === true;
+  const priceLabel = formatParticipationPrice(pricePerPlayer, { isFree: isExplicitlyFree });
 
   const bookingStatus = getMatchBookingStatus(match);
   const isFull     = (filledSlots?.length ?? 0) >= maxSlots;
@@ -247,11 +249,11 @@ export default function MatchCard({ match, playerRating, onJoin, onViewDetails }
             color: isPrime ? C.gold : C.text,
             fontSize: '20px', fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 1,
           }}>
-            {fmtPrice(pricePerPlayer)}
+            {priceLabel}
           </div>
-          <div style={{ color: C.muted, fontSize: '11px', marginTop: '3px' }}>
-            с человека · тариф по времени ÷ {maxSlots}
-          </div>
+          {pricePerPlayer != null && (pricePerPlayer > 0 || isExplicitlyFree) && (
+            <div style={{ color: C.muted, fontSize: '11px', marginTop: '3px' }}>с человека</div>
+          )}
         </div>
 
         {/* CTA */}

@@ -145,9 +145,15 @@ async function mockSupabase(page, options = {}) {
     leaveRequests: 0,
     bookingRequests: 0,
     bookingPayloads: [],
+    bookingRpcBodies: [],
+    bookingRpcResponses: [],
+    matchesReadSnapshots: [],
+    matchWriteRequests: [],
+    deleteMatchRequests: [],
     directMatchInserts: 0,
     profileSearchRequests: [],
     createInvitationRequests: 0,
+    incomingInvitationRequests: 0,
     acceptInvitationRequests: 0,
     declineInvitationRequests: 0,
     cancelInvitationRequests: 0,
@@ -267,7 +273,7 @@ async function mockSupabase(page, options = {}) {
         is_private: match.isPrivate,
         rating_min: match.ratingMin,
         rating_max: match.ratingMax,
-        price_per_person: match.pricePerPerson,
+        price_per_person: match.pricePerPerson ?? match.price_per_person,
         slot_index: invitation.slot_index,
         created_at: invitation.created_at,
         match_status: match.status,
@@ -275,7 +281,11 @@ async function mockSupabase(page, options = {}) {
     });
 
   await page.route(`${SUPABASE_URL}/rest/v1/rpc/get_incoming_match_invitations`, async (route) => {
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(incomingInvitationPayload()) });
+    state.incomingInvitationRequests += 1;
+    const payload = incomingInvitationPayload();
+    const delayMs = options.incomingInvitationDelays?.[state.incomingInvitationRequests - 1] ?? 0;
+    if (delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(payload) });
   });
 
   await page.route(`${SUPABASE_URL}/rest/v1/match_invitations**`, async (route) => {
@@ -466,12 +476,25 @@ async function mockSupabase(page, options = {}) {
     const match = state.matches.find(row => String(row.id) === String(matchId));
     const filledSlots = Array.isArray(match?.filledSlots) ? match.filledSlots.filter(Boolean) : [];
     const participants = Array.isArray(match?.participants) ? match.participants : [];
+    const hasPendingInvitation = state.invitationRows.some((row) =>
+      String(row.match_id) === String(matchId)
+        && row.invited_user_id === testUser.id
+        && row.status === 'pending'
+    );
 
-    if (!match || filledSlots.length >= 4 || participants.includes(testUser.id)) {
+    if (!match || filledSlots.length >= 4 || participants.includes(testUser.id) || hasPendingInvitation) {
       await route.fulfill({
         status: 409,
         contentType: 'application/json',
-        body: JSON.stringify({ message: !match ? 'Match not found' : filledSlots.length >= 4 ? 'Match has no free slots' : 'User is already a participant' }),
+        body: JSON.stringify({
+          message: !match
+            ? 'Match not found'
+            : filledSlots.length >= 4
+              ? 'Match has no free slots'
+              : participants.includes(testUser.id)
+                ? 'User is already a participant'
+                : 'INVITATION_PENDING',
+        }),
       });
       return;
     }
@@ -541,7 +564,9 @@ async function mockSupabase(page, options = {}) {
 
   await page.route(`${SUPABASE_URL}/rest/v1/rpc/create_booking`, async (route) => {
     state.bookingRequests += 1;
-    const booking = route.request().postDataJSON()?.p_booking;
+    const rpcBody = route.request().postDataJSON();
+    const booking = rpcBody?.p_booking;
+    state.bookingRpcBodies.push(structuredClone(rpcBody));
     state.bookingPayloads.push(booking);
 
     if (options.createBookingDelayMs) {
@@ -572,11 +597,15 @@ async function mockSupabase(page, options = {}) {
       return;
     }
 
+    // Mirror migration 011 instead of blindly echoing the request. PostgreSQL
+    // reads these exact, case-sensitive JSON keys and writes the quoted column.
+    const persistedPricePerPerson = booking.pricePerPerson ?? booking.price_per_person ?? null;
     const created = {
       id: `created-booking-${state.bookingRequests}`,
       owner_id: testUser.id,
       created_at: new Date().toISOString(),
       ...booking,
+      pricePerPerson: persistedPricePerPerson,
       status: booking.isPrivate ? 'upcoming' : 'open',
       filledSlots: [{
         id: testUser.id,
@@ -589,6 +618,7 @@ async function mockSupabase(page, options = {}) {
       participants: [testUser.id],
     };
     state.matches.unshift(created);
+    state.bookingRpcResponses.push(structuredClone(created));
 
     await route.fulfill({
       status: 200,
@@ -601,6 +631,21 @@ async function mockSupabase(page, options = {}) {
     const request = route.request();
     const method = request.method();
     const url = new URL(request.url());
+
+    if (method === 'DELETE') {
+      const idParam = url.searchParams.get('id');
+      const targetId = idParam?.startsWith('eq.') ? idParam.slice(3) : null;
+      const deleted = state.matches.find(match => String(match.id) === String(targetId));
+      state.deleteMatchRequests.push(targetId);
+      state.matches = state.matches.filter(match => String(match.id) !== String(targetId));
+
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(deleted ? [{ id: deleted.id }] : []),
+      });
+      return;
+    }
 
     if (method === 'PATCH') {
       const body = request.postDataJSON();
@@ -617,6 +662,7 @@ async function mockSupabase(page, options = {}) {
         state.matches.unshift(updated);
       }
 
+      state.matchWriteRequests.push({ method, id: updated.id, body: structuredClone(body) });
       state.matchUpdates.push({ id: updated.id, body, match: updated });
 
       await route.fulfill({
@@ -630,6 +676,7 @@ async function mockSupabase(page, options = {}) {
     if (method === 'POST') {
       state.directMatchInserts += 1;
       const body = request.postDataJSON();
+      state.matchWriteRequests.push({ method, id: null, body: structuredClone(body) });
       const inserted = Array.isArray(body) ? body : [body];
       const rows = inserted.map((match, index) => ({
         id: match.id || `created-match-${state.matches.length + index + 1}`,
@@ -660,6 +707,7 @@ async function mockSupabase(page, options = {}) {
       return;
     }
 
+    state.matchesReadSnapshots.push(structuredClone(state.matches));
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -928,6 +976,13 @@ test('BOOKING creates a public booking through create_booking', async ({ page })
 
   await selectTomorrowCourtOneAtSeven(page);
   await page.getByRole('button', { name: 'Бронь + сбор игроков' }).click();
+  const calculatedTotalPrice = Number(
+    (await page.getByTestId('booking-total-price').textContent()).replace(/[^\d]/g, '')
+  );
+  const calculatedPricePerPerson = Number(
+    (await page.getByTestId('booking-per-player-price').textContent()).replace(/[^\d]/g, '')
+  );
+  expect(calculatedPricePerPerson).toBe(Math.round(calculatedTotalPrice / 4));
   await page.getByRole('button', { name: 'Создать матч' }).click();
 
   await expect.poll(() => supabaseState.bookingRequests).toBe(1);
@@ -946,12 +1001,37 @@ test('BOOKING creates a public booking through create_booking', async ({ page })
     isPrivate: false,
     paymentStatus: 'partial',
   });
+  expect(supabaseState.bookingRpcBodies[0]).toEqual({
+    p_booking: expect.objectContaining({
+      pricePerPerson: calculatedPricePerPerson,
+    }),
+  });
+  expect(supabaseState.bookingPayloads[0].pricePerPerson).toBe(calculatedPricePerPerson);
+  expect(supabaseState.bookingPayloads[0]).not.toHaveProperty('priceperperson');
+  expect(supabaseState.bookingPayloads[0]).not.toHaveProperty('price_per_person');
+  expect(calculatedPricePerPerson).toBeGreaterThan(0);
+  expect(supabaseState.bookingPayloads[0].pricePerPerson).not.toBe(calculatedTotalPrice);
   expect(supabaseState.bookingPayloads[0]).not.toHaveProperty('owner_id');
   expect(supabaseState.matches[0]).toMatchObject({
     owner_id: testUser.id,
     participants: [testUser.id],
     status: 'open',
+    pricePerPerson: supabaseState.bookingPayloads[0].pricePerPerson,
   });
+  expect(supabaseState.bookingRpcResponses[0]?.pricePerPerson).toBe(calculatedPricePerPerson);
+  const createdMatchId = supabaseState.bookingRpcResponses[0]?.id;
+  await expect.poll(() => supabaseState.matchesReadSnapshots.at(-1)
+    ?.find(match => match.id === createdMatchId)?.pricePerPerson).toBe(calculatedPricePerPerson);
+  expect(supabaseState.matchWriteRequests.filter(request => request.id === createdMatchId)).toEqual([]);
+  expect(supabaseState.matchWriteRequests.some(request => {
+    const body = Array.isArray(request.body) ? request.body : [request.body];
+    return body.some(row => row?.id === createdMatchId && row?.pricePerPerson === null);
+  })).toBe(false);
+
+  const savedPriceLabel = `${supabaseState.bookingPayloads[0].pricePerPerson.toLocaleString('ru-RU')} ₽`;
+  await expect(page.getByText(savedPriceLabel, { exact: true })).toBeVisible();
+  await page.getByText('Открытый матч', { exact: true }).click();
+  await expect(page.getByTestId('match-participation-price')).toHaveText(savedPriceLabel);
 });
 
 base('BOOKING refreshes availability when create_booking returns BOOKING_SLOT_TAKEN', async ({ page }) => {
@@ -979,6 +1059,9 @@ test('BOOKING ignores a rapid repeated confirmation click', async ({ page }) => 
   await expect(page.locator('.bottom-nav')).toBeVisible();
 
   await selectTomorrowCourtOneAtSeven(page);
+  const calculatedPricePerPerson = Number(
+    (await page.getByTestId('booking-per-player-price').textContent()).replace(/[^\d]/g, '')
+  );
   const confirmButton = page.getByRole('button', { name: 'Создать бронь' });
   await confirmButton.evaluate(button => {
     button.click();
@@ -996,7 +1079,117 @@ test('BOOKING ignores a rapid repeated confirmation click', async ({ page }) => 
     isPrivate: true,
     paymentStatus: 'full',
   });
+  expect(supabaseState.bookingRpcBodies[0]?.p_booking?.pricePerPerson).toBe(calculatedPricePerPerson);
+  expect(calculatedPricePerPerson).toBeGreaterThan(0);
+  expect(supabaseState.matches[0].pricePerPerson).toBe(supabaseState.bookingPayloads[0].pricePerPerson);
+  expect(supabaseState.bookingRpcResponses[0]?.pricePerPerson).toBe(calculatedPricePerPerson);
+  const createdMatchId = supabaseState.bookingRpcResponses[0]?.id;
+  await expect.poll(() => supabaseState.matchesReadSnapshots.at(-1)
+    ?.find(match => match.id === createdMatchId)?.pricePerPerson).toBe(calculatedPricePerPerson);
+  expect(supabaseState.matchWriteRequests.filter(request => request.id === createdMatchId)).toEqual([]);
   expect(supabaseState.directMatchInserts).toBe(0);
+});
+
+test('BOOKING saved per-player snapshot is not recalculated from the current tariff', async ({ page }) => {
+  const match = createOpenJoinableMatch({
+    id: 'booking-price-snapshot',
+    title: 'Матч с сохранённой ценой',
+    time: '19:00',
+    duration: 2.5,
+    pricePerPerson: 913,
+  });
+  await mockSupabase(page, { matches: [match] });
+  await mockTelegram(page);
+  await setAuthenticatedSession(page);
+  await page.goto('/');
+  await openMatchesTab(page);
+
+  await expect(page.getByText('913 ₽', { exact: true })).toBeVisible();
+  await page.getByText(match.title, { exact: true }).click();
+  await expect(page.getByTestId('match-participation-price')).toHaveText('913 ₽');
+});
+
+test('MATCH without a stored price uses the same calculated fallback in feed and details', async ({ page }) => {
+  const match = createOpenJoinableMatch({
+    id: 'booking-price-missing',
+    title: 'Матч без сохранённой цены',
+    date: '20 июля',
+    dateISO: '2099-07-20',
+    time: '16:00',
+    duration: 2,
+    pricePerPerson: null,
+  });
+  const calculatedPriceLabel = `${(2000).toLocaleString('ru-RU')} ₽`;
+  await mockSupabase(page, { matches: [match] });
+  await mockTelegram(page);
+  await setAuthenticatedSession(page);
+  await page.goto('/');
+  await openMatchesTab(page);
+
+  await expect(page.getByText(calculatedPriceLabel, { exact: true })).toBeVisible();
+  await expect(page.getByText('Стоимость уточняется', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('0 ₽', { exact: true })).toHaveCount(0);
+  await page.getByText(match.title, { exact: true }).click();
+  await expect(page.getByTestId('match-participation-price')).toHaveText(calculatedPriceLabel);
+  await expect(page.getByTestId('match-participation-price')).not.toHaveText('0 ₽');
+});
+
+test('MATCH invalid pricing data shows clarification and never becomes 0 ₽', async ({ page }) => {
+  const match = createOpenJoinableMatch({
+    id: 'match-invalid-price-data',
+    title: 'Матч с некорректной длительностью',
+    date: '20 июля',
+    dateISO: '2099-07-20',
+    duration: 0,
+    pricePerPerson: null,
+  });
+  await mockSupabase(page, { matches: [match] });
+  await mockTelegram(page);
+  await setAuthenticatedSession(page);
+  await page.goto('/');
+  await openMatchesTab(page);
+
+  await expect(page.getByText('Стоимость уточняется', { exact: true })).toBeVisible();
+  await expect(page.getByText('0 ₽', { exact: true })).toHaveCount(0);
+  await page.getByText(match.title, { exact: true }).click();
+  await expect(page.getByTestId('match-participation-price')).toHaveText('Стоимость уточняется');
+  await expect(page.getByTestId('match-participation-price')).not.toHaveText('0 ₽');
+});
+
+test('MATCH cancellation still works when the displayed price uses fallback', async ({ page }) => {
+  const match = createOpenJoinableMatch({
+    id: 'match-fallback-cancellation',
+    owner_id: testUser.id,
+    ownerId: testUser.id,
+    title: 'Матч для проверки отмены',
+    date: '20 июля',
+    dateISO: '2099-07-20',
+    pricePerPerson: null,
+    filledSlots: [{
+      id: testUser.id,
+      firstName: 'QA',
+      lastName: 'Player',
+      ratingIdx: 3,
+      numericRating: 3.4,
+      isVerified: true,
+      isOrganizer: true,
+    }],
+    participants: [testUser.id],
+  });
+  const state = await mockSupabase(page, { matches: [match] });
+  await mockTelegram(page);
+  await setAuthenticatedSession(page);
+  await page.goto('/');
+  await openMatchesTab(page);
+  await page.getByText(match.title, { exact: true }).click();
+
+  await page.getByRole('button', { name: 'Отменить игру' }).click();
+  await page.getByRole('button', { name: 'Да, отменить игру' }).click();
+
+  await expect.poll(() => state.deleteMatchRequests).toEqual([match.id]);
+  await expect(page.getByText(match.title, { exact: true })).toHaveCount(0);
+  await expect(page.getByText('Пока нет открытых матчей', { exact: true })).toBeVisible();
+  expect(state.matches.some(item => item.id === match.id)).toBe(false);
 });
 
 base('OPEN-MATCH shows loading, retryable load error and empty state', async ({ page }) => {
@@ -1656,7 +1849,7 @@ test.describe('INVITATION frontend flow', () => {
     const notification = {
       notification_id: 'notification-invitation-1', notification_type: 'match_invitation',
       match_id: match.id, invitation_id: invitation.id, title: 'Новое приглашение',
-      body: 'Олег приглашает вас в матч', data: {}, created_at: new Date().toISOString(), read_at: null,
+      body: 'Олег приглашает вас в матч', data: { pricePerPerson: 9999 }, created_at: new Date().toISOString(), read_at: null,
     };
     return { match, invitation, notification };
   };
@@ -1721,6 +1914,84 @@ test.describe('INVITATION frontend flow', () => {
     expect(secondBox.x).toBeGreaterThan(firstBox.x);
   });
 
+  test('INVITATION null and missing prices show clarification instead of 0 ₽', async ({ page }) => {
+    const publicMatch = createOpenJoinableMatch({
+      id: 'invitation-price-missing', title: 'Приглашение без цены',
+    });
+    const privateMatch = createOpenJoinableMatch({
+      id: 'invitation-price-null', title: 'Приватное приглашение без цены',
+      type: 'private', scenario: 'private', isPrivate: true, pricePerPerson: null,
+    });
+    const invitations = [publicMatch, privateMatch].map((match, index) => ({
+      id: `invitation-missing-price-${index + 1}`,
+      match_id: match.id,
+      invited_by: match.owner_id,
+      invited_user_id: testUser.id,
+      slot_index: index + 1,
+      status: 'pending',
+      created_at: new Date(Date.now() - index * 1000).toISOString(),
+    }));
+    const notifications = invitations.map((invitation, index) => ({
+      notification_id: `notification-missing-price-${index + 1}`,
+      notification_type: 'match_invitation',
+      match_id: invitation.match_id,
+      invitation_id: invitation.id,
+      title: 'Новое приглашение', body: 'Проверьте стоимость', data: {},
+      created_at: invitation.created_at, read_at: null,
+    }));
+    await mockSupabase(page, {
+      matches: [publicMatch, privateMatch], invitationRows: invitations, notifications,
+      publicProfiles: [profile, ownerProfile],
+    });
+    await mockTelegram(page);
+    await setAuthenticatedSession(page);
+    await page.goto('/');
+    await openProfileTab(page);
+
+    for (const invitation of invitations) {
+      const price = page.getByTestId(`invitation-price-${invitation.id}`);
+      await expect(price).toHaveText('Стоимость уточняется');
+      await expect(price).not.toContainText('0 ₽');
+    }
+  });
+
+  test('INVITATION public and private matches keep their saved price snapshots', async ({ page }) => {
+    const publicMatch = createOpenJoinableMatch({
+      id: 'invitation-public-snapshot', title: 'Публичная цена-снимок', pricePerPerson: 1111,
+    });
+    const privateMatch = createOpenJoinableMatch({
+      id: 'invitation-private-snapshot', title: 'Приватная цена-снимок',
+      type: 'private', scenario: 'private', isPrivate: true, pricePerPerson: 2222,
+    });
+    const invitations = [publicMatch, privateMatch].map((match, index) => ({
+      id: `invitation-snapshot-${index + 1}`,
+      match_id: match.id,
+      invited_by: match.owner_id,
+      invited_user_id: testUser.id,
+      slot_index: index + 1,
+      status: 'pending',
+      created_at: new Date(Date.now() - index * 1000).toISOString(),
+    }));
+    const notifications = invitations.map((invitation) => ({
+      notification_id: `notification-${invitation.id}`,
+      notification_type: 'match_invitation', match_id: invitation.match_id,
+      invitation_id: invitation.id, title: 'Новое приглашение', body: 'Цена сохранена',
+      data: { pricePerPerson: 9999 }, created_at: invitation.created_at, read_at: null,
+    }));
+    await mockSupabase(page, {
+      matches: [publicMatch, privateMatch], invitationRows: invitations, notifications,
+      publicProfiles: [profile, ownerProfile],
+    });
+    await mockTelegram(page);
+    await setAuthenticatedSession(page);
+    await page.goto('/');
+    await openProfileTab(page);
+
+    await expect(page.getByTestId(`invitation-price-${invitations[0].id}`)).toHaveText('1 111 ₽');
+    await expect(page.getByTestId(`invitation-price-${invitations[1].id}`)).toHaveText('2 222 ₽');
+    await expect(page.getByText('9 999 ₽', { exact: true })).toHaveCount(0);
+  });
+
   test('INVITATION match screen replaces regular join and accepts into confirmed roster', async ({ page }) => {
     const { match, invitation, notification } = incomingFixture();
     const state = await mockSupabase(page, {
@@ -1738,6 +2009,8 @@ test.describe('INVITATION frontend flow', () => {
     await expect(page.getByTestId('match-invitation-accept-button')).toHaveText('Принять приглашение');
     await expect(page.getByTestId('match-invitation-decline-button')).toBeVisible();
     await expect(page.getByTestId('match-self-join-button')).toHaveCount(0);
+    await expect(page.getByTestId('match-waitlist-join-button')).toHaveCount(0);
+    expect(state.joinRequests).toBe(0);
 
     await page.getByTestId('match-invitation-accept-button').click();
     await expect(page.getByTestId('match-joined-state')).toBeVisible();
@@ -1771,7 +2044,7 @@ test.describe('INVITATION frontend flow', () => {
     const { match, invitation, notification } = incomingFixture();
     const state = await mockSupabase(page, {
       matches: [match], invitationRows: [invitation], notifications: [notification],
-      publicProfiles: [profile, ownerProfile],
+      publicProfiles: [profile, ownerProfile], incomingInvitationDelays: [0, 350, 0],
     });
     await mockTelegram(page);
     await setAuthenticatedSession(page);
@@ -1783,9 +2056,49 @@ test.describe('INVITATION frontend flow', () => {
     await expect(page.getByTestId('match-invitation-panel')).toHaveCount(0);
     await expect(page.getByTestId('match-self-join-button')).toHaveText('Присоединиться к игре');
     await expect.poll(() => state.declineInvitationRequests).toBe(1);
+    await page.waitForTimeout(450);
+    await expect(page.getByTestId('match-invitation-panel')).toHaveCount(0);
+    await page.getByTestId('match-self-join-button').click();
+    await expect.poll(() => state.joinRequests).toBe(1);
+    await expect(page.getByTestId('match-joined-state')).toBeVisible();
     expect(state.invitationRows[0].status).toBe('declined');
-    expect(state.matches[0].participants).not.toContain(testUser.id);
-    expect(state.matches[0].filledSlots).toHaveLength(1);
+    expect(state.matches[0].participants).toContain(testUser.id);
+    expect(state.matches[0].filledSlots.some((slot) => slot?.id === testUser.id)).toBe(true);
+  });
+
+  test('INVITATION decline on a filled match exposes waitlist after FIFO promotion', async ({ page }) => {
+    const { match, invitation, notification } = incomingFixture();
+    const filledSlots = [
+      { ...match.filledSlots[0], slotIndex: 0 },
+      { id: 'confirmed-player-2', firstName: 'Ирина', lastName: 'Вторая', numericRating: 3.2, isVerified: true, slotIndex: 1 },
+      { id: 'confirmed-player-3', firstName: 'Максим', lastName: 'Третий', numericRating: 3.5, isVerified: true, slotIndex: 2 },
+    ];
+    const filledMatch = {
+      ...match,
+      filledSlots,
+      participants: filledSlots.map((player) => player.id),
+    };
+    const firstWaiting = {
+      id: 'decline-filled-first-waiting', match_id: match.id, user_id: 'promoted-after-decline',
+      status: 'waiting', joined_at: '2026-01-01T10:00:00.000Z', first_name: 'Павел', last_name: 'П.', rating: 3.3,
+    };
+    const state = await mockSupabase(page, {
+      matches: [filledMatch], invitationRows: [invitation], notifications: [notification],
+      waitlistRows: [firstWaiting], publicProfiles: [profile, ownerProfile],
+    });
+    await mockTelegram(page);
+    await setAuthenticatedSession(page);
+    await page.goto('/');
+    await openMatchesTab(page);
+    await page.getByText(match.title, { exact: true }).click();
+
+    await page.getByTestId('match-invitation-decline-button').click();
+    await expect(page.getByTestId('match-invitation-panel')).toHaveCount(0);
+    await expect(page.getByTestId('match-self-join-button')).toHaveCount(0);
+    await expect(page.getByTestId('match-waitlist-join-button')).toHaveText('Встать в лист ожидания');
+    expect(state.invitationRows[0].status).toBe('declined');
+    expect(state.waitlistRows[0].status).toBe('promoted');
+    expect(state.matches[0].participants).toContain(firstWaiting.user_id);
   });
 
   test('INVITATION handled on another device refreshes match screen to current action', async ({ page }) => {
@@ -1822,22 +2135,30 @@ test.describe('INVITATION frontend flow', () => {
     await setAuthenticatedSession(page);
     await page.goto('/');
 
+    await openMatchesTab(page);
+    await expect(page.getByText('990 ₽', { exact: true })).toBeVisible();
     await openProfileTab(page);
+    await expect(page.getByTestId(`invitation-price-${invitation.id}`)).toHaveText('990 ₽');
     await page.getByTestId(`invitation-accept-${invitation.id}`).click();
     await expect(page.getByTestId(`invitation-card-${invitation.id}`)).toHaveCount(0);
     await expect.poll(() => state.acceptInvitationRequests).toBe(1);
     await expect.poll(() => state.markNotificationReadRequests).toBe(1);
     await expect(page.getByRole('button', { name: '←' })).toBeVisible();
     await expect(page.getByText(match.title, { exact: true }).first()).toBeVisible();
+    await expect(page.getByTestId('match-participation-price')).toHaveText('990 ₽');
     expect(state.matches[0].participants).toContain(testUser.id);
     expect(state.matches[0].filledSlots.some((slot) => slot?.id === testUser.id)).toBe(true);
 
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(400);
     await page.reload();
     await expect(page.locator('.bottom-nav')).toBeVisible();
     await openProfileTab(page);
     await expect(page.getByTestId(`invitation-card-${invitation.id}`)).toHaveCount(0);
     await expect(page.getByTestId(`notification-card-${notification.notification_id}`)).toHaveCount(0);
     await expect(page.getByText(match.title, { exact: true }).first()).toBeVisible();
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(200);
   });
 
   test('INVITATION decline removes card immediately and releases reservation', async ({ page }) => {

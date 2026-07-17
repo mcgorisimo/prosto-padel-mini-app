@@ -1,14 +1,24 @@
 import { supabase } from './supabaseClient';
 import { getPublicPlayerProfiles } from './profileApi';
+import { normalizeStoredPrice } from './pricing';
 
 function firstRow(data) {
   return Array.isArray(data) ? data[0] ?? null : data ?? null;
 }
 
+export function normalizeIncomingInvitation(row) {
+  if (!row) return row;
+  return {
+    ...row,
+    price_per_person: normalizeStoredPrice(row.price_per_person ?? row.pricePerPerson),
+  };
+}
+
 export async function getIncomingMatchInvitations() {
   const { data, error } = await supabase.rpc('get_incoming_match_invitations');
   if (error) throw error;
-  return data ?? [];
+  const rows = Array.isArray(data) ? data : data ? [data] : [];
+  return rows.map(normalizeIncomingInvitation);
 }
 
 export async function getOutgoingMatchInvitations(invitedBy) {

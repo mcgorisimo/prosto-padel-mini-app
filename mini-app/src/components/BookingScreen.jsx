@@ -205,6 +205,7 @@ export default function BookingScreen({ allMatches = [], onBookSlot, showToast, 
           ? 'Бронь корта с открытым сбором игроков'
           : 'Частная бронь корта',
         total: totalPrice,
+        pricePerPerson: perPlayerPrice,
       });
 
       const message = 'Бронь создана. Оплата сейчас подтверждается через администратора клуба.';
@@ -397,11 +398,11 @@ export default function BookingScreen({ allMatches = [], onBookSlot, showToast, 
               <div className="mb-4 grid grid-cols-2 gap-2">
                 <div className="booking-price-tile p-3">
                   <div className="text-xs text-warm-white/46">Цена за корт</div>
-                  <div className="mt-1 text-lg font-black">{fmtPrice(totalPrice)}</div>
+                  <div data-testid="booking-total-price" className="mt-1 text-lg font-black">{fmtPrice(totalPrice)}</div>
                 </div>
                 <div className="booking-price-tile p-3">
                   <div className="text-xs text-warm-white/46">На игрока при 4</div>
-                  <div className="mt-1 text-lg font-black">{fmtPrice(perPlayerPrice)}</div>
+                  <div data-testid="booking-per-player-price" className="mt-1 text-lg font-black">{fmtPrice(perPlayerPrice)}</div>
                 </div>
               </div>
 

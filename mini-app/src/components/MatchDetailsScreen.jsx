@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { getAvailableBots, getTestBots } from '../lib/testSeed';
-import { getCourtCapacity, getPerPlayerPrice, fmtPrice as fmtPriceLib, isPrimeTime } from '../lib/pricing';
+import { formatParticipationPrice, getCourtCapacity, getParticipationPrice, getPerPlayerPrice, fmtPrice as fmtPriceLib, isPrimeTime } from '../lib/pricing';
 import { HOURS, WORKING_HOURS, BOOKING_DURATIONS } from '../lib/booking';
 import FinishMatchModal from './FinishMatchModal';
 import PadelCard from './ui/PadelCard';
@@ -1195,7 +1195,15 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
   const isActuallyPrime = isPrimeTime(time, dateISO);
   const isPanoramic     = courtType === 'panoramic';
   const maxSlots        = getCourtCapacity(courtType);
-  const pricePerPl      = match.pricePerPerson ?? match.price_per_person ?? calcPerPlayer(time, duration, courtType, dateISO);
+  const pricePerPl = getParticipationPrice({
+    ...match,
+    dateISO,
+    time,
+    duration,
+    courtType,
+  }, { allowFallback: true });
+  const isExplicitlyFree = match.isFree === true || match.is_free === true;
+  const priceLabel = formatParticipationPrice(pricePerPl, { isFree: isExplicitlyFree });
 
   // Owner's real profile for the first slot
   const ownerSlot = {
@@ -1417,7 +1425,8 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
     if (!pendingInvitation || acceptingInvitation || decliningInvitation || !onDeclineInvitation) return false;
     try {
       const result = await onDeclineInvitation(pendingInvitation);
-      await refreshMatchAndWaitlist();
+      if (result?.filledSlots) setLocalSlots(result.filledSlots);
+      await refreshWaitlist();
       return result;
     } catch {
       return false;
@@ -2032,8 +2041,10 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
         {/* ── Price ────────────────────────────────────────────────────────── */}
         <div style={{ background: 'rgba(216,243,74,0.06)', borderRadius: '12px', padding: '12px 16px', marginBottom: '20px', border: '1px solid rgba(216,243,74,0.18)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
-            <div style={{ color: C.gold, fontSize: '22px', fontWeight: 800, lineHeight: 1 }}>{fmtPrice(pricePerPl)}</div>
-            <div style={{ color: C.muted, fontSize: '11px', marginTop: '3px' }}>с человека · тариф по времени ÷ {maxSlots}</div>
+            <div data-testid="match-participation-price" style={{ color: C.gold, fontSize: pricePerPl == null ? '15px' : '22px', fontWeight: 800, lineHeight: 1 }}>{priceLabel}</div>
+            {pricePerPl != null && (pricePerPl > 0 || isExplicitlyFree) && (
+              <div style={{ color: C.muted, fontSize: '11px', marginTop: '3px' }}>с человека</div>
+            )}
           </div>
           {isActuallyPrime && <div style={{ color: C.gold, fontSize: '12px', fontWeight: 600 }}>✦ Вечерний тариф</div>}
         </div>

@@ -11,7 +11,7 @@ import AdminScreen from './components/AdminScreen';
 import BallLoader from './components/BallLoader';
 import { supabase } from './lib/supabaseClient';
 import { useTelegram } from './hooks/useTelegram';
-import { isPrimeTime } from './lib/pricing';
+import { isPrimeTime, normalizeStoredPrice } from './lib/pricing';
 import { calculateRatingChange, getLevelForRating, MIN_RATING, MAX_RATING } from './lib/ratingEngine';
 import { isRatingMatch } from './lib/matchRating';
 import { getMyProfile, getPublicPlayerProfiles } from './lib/profileApi';
@@ -32,6 +32,73 @@ import {
 
 const SEED_MATCHES = [];
 
+const devCreatedBookingMatchIds = new Set();
+
+function getRawMatchPrice(row) {
+  return row?.pricePerPerson ?? row?.price_per_person ?? null;
+}
+
+function logDevBookingRequest(bookingPayload) {
+  if (!import.meta.env.DEV) return;
+
+  console.info('[booking:create_booking] request', {
+    p_booking: {
+      dateISO: bookingPayload.dateISO,
+      time: bookingPayload.time,
+      duration: bookingPayload.duration,
+      courtId: bookingPayload.courtId,
+      type: bookingPayload.type,
+      isPrivate: bookingPayload.isPrivate,
+      pricePerPerson: bookingPayload.pricePerPerson,
+      priceValueType: typeof bookingPayload.pricePerPerson,
+    },
+  });
+}
+
+function rememberDevBookingResponse(row) {
+  if (!import.meta.env.DEV || !row?.id) return;
+
+  devCreatedBookingMatchIds.add(String(row.id));
+  const rawPrice = getRawMatchPrice(row);
+  console.info('[booking:create_booking] response', {
+    matchId: String(row.id),
+    pricePerPerson: rawPrice,
+    priceValueType: typeof rawPrice,
+  });
+}
+
+function logDevBookingReload(rows) {
+  if (!import.meta.env.DEV || devCreatedBookingMatchIds.size === 0) return;
+
+  for (const row of rows ?? []) {
+    if (!devCreatedBookingMatchIds.has(String(row?.id))) continue;
+    const rawPrice = getRawMatchPrice(row);
+    console.info('[booking:matches-reload] observed', {
+      matchId: String(row.id),
+      pricePerPerson: rawPrice,
+      priceValueType: typeof rawPrice,
+    });
+  }
+}
+
+function logDevBookingMatchUpdate(matchId, operation, payload) {
+  if (!import.meta.env.DEV || !devCreatedBookingMatchIds.has(String(matchId))) return;
+
+  const hasCamelPrice = Object.prototype.hasOwnProperty.call(payload ?? {}, 'pricePerPerson');
+  const hasSnakePrice = Object.prototype.hasOwnProperty.call(payload ?? {}, 'price_per_person');
+  console.info('[booking:matches-write] request', {
+    matchId: String(matchId),
+    operation,
+    fields: Object.keys(payload ?? {}).sort(),
+    includesPrice: hasCamelPrice || hasSnakePrice,
+    pricePerPerson: hasCamelPrice
+      ? payload.pricePerPerson
+      : hasSnakePrice
+        ? payload.price_per_person
+        : '(not included)',
+  });
+}
+
 // ─── Selectors over allMatches (single source of truth) ──────────────────────
 
 function normalizeMatch(row) {
@@ -47,6 +114,7 @@ function normalizeMatch(row) {
     courtName: row.courtName ?? row.court_name,
     courtType: row.courtType ?? row.court_type,
     dateISO: row.dateISO ?? row.date_iso,
+    pricePerPerson: normalizeStoredPrice(row.pricePerPerson ?? row.price_per_person),
     paymentStatus: row.paymentStatus ?? row.payment_status,
     ownerPaid: row.ownerPaid ?? row.owner_paid,
     holdAmount: row.holdAmount ?? row.hold_amount,
@@ -191,6 +259,15 @@ export default function App({ session, showToast }) { // Accept showToast as a p
   const [notificationsLoadError, setNotificationsLoadError] = useState('');
   const [invitationActions, setInvitationActions] = useState(() => new Set());
   const invitationActionRef = useRef(new Set());
+  const handledIncomingInvitationIdsRef = useRef(new Set());
+
+  const hideHandledIncomingInvitation = useCallback((invitationId) => {
+    if (!invitationId) return;
+    handledIncomingInvitationIdsRef.current.add(String(invitationId));
+    setIncomingInvitations((prev) => prev.filter(
+      (item) => String(item.invitation_id) !== String(invitationId)
+    ));
+  }, []);
 
   const fetchProfile = useCallback(async () => {
     if (!ME_ID) return null;
@@ -216,6 +293,7 @@ export default function App({ session, showToast }) { // Accept showToast as a p
         .order('created_at', { ascending: false });
 
       if (error) throw error;
+      logDevBookingReload(data ?? []);
       setAllMatches((data ?? []).map(normalizeMatch));
       return data ?? [];
     } catch (error) {
@@ -259,9 +337,16 @@ export default function App({ session, showToast }) { // Accept showToast as a p
         getIncomingMatchInvitations(),
         getOutgoingMatchInvitations(ME_ID),
       ]);
-      setIncomingInvitations(incoming);
+      const handledIds = handledIncomingInvitationIdsRef.current;
+      const visibleIncoming = incoming.filter(
+        (item) => !handledIds.has(String(item.invitation_id))
+      );
+
+      // Invitation ids are immutable. Keep handled ids for this app session so
+      // an older in-flight RPC response cannot re-add an already handled row.
+      setIncomingInvitations(visibleIncoming);
       setOutgoingInvitations(outgoing);
-      return incoming;
+      return visibleIncoming;
     } catch (error) {
       console.error(`Ошибка при получении приглашений: ${error.message}`);
       setInvitationsLoadError('Не удалось загрузить приглашения. Проверьте подключение и попробуйте ещё раз.');
@@ -413,6 +498,7 @@ export default function App({ session, showToast }) { // Accept showToast as a p
 
   // ── Delete match: remove from allMatches (persisted via useLocalStorage) ──
   const handleDeleteMatch = async (matchId) => {
+    logDevBookingMatchUpdate(matchId, 'delete', {});
     const { data, error } = await supabase
       .from('matches')
       .delete()
@@ -526,6 +612,7 @@ export default function App({ session, showToast }) { // Accept showToast as a p
       score_disputed_by: null,
     };
 
+    logDevBookingMatchUpdate(matchId, 'update:complete', updatePayload);
     const { data, error } = await supabase
       .from('matches')
       .update(updatePayload)
@@ -587,13 +674,15 @@ export default function App({ session, showToast }) { // Accept showToast as a p
   };
 
   const handleDisputeScore = async (matchId) => {
+    const disputePayload = {
+      status: 'disputed',
+      score_status: 'disputed',
+      score_disputed_by: currentUser.id,
+    };
+    logDevBookingMatchUpdate(matchId, 'update:dispute-score', disputePayload);
     const { data, error } = await supabase
       .from('matches')
-      .update({
-        status: 'disputed',
-        score_status: 'disputed',
-        score_disputed_by: currentUser.id,
-      })
+      .update(disputePayload)
       .eq('id', matchId)
       .select();
 
@@ -631,6 +720,16 @@ const handleBookSlot = async (booking) => {
     const target = new Date(booking.dateISO);
     const dateStr = target.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }).replace(' г.', '');
     const isRated = !booking.isPrivate && (booking.isRatingMatch === true || booking.is_rating_match === true);
+    const pricePerPerson = normalizeStoredPrice(
+      booking.pricePerPerson ?? booking.price_per_person
+    );
+
+    if (pricePerPerson === null || pricePerPerson <= 0) {
+      const priceError = new Error('Booking requires a positive per-player price snapshot');
+      console.error(priceError);
+      showToast?.('Не удалось рассчитать стоимость. Выберите слот ещё раз.', 'error');
+      throw priceError;
+    }
 
     const bookingPayload = {
       date:          dateStr,
@@ -650,8 +749,11 @@ const handleBookSlot = async (booking) => {
       isRatingMatch: isRated,
       is_rating_match: isRated,
       paymentStatus: booking.paymentStatus || 'partial',
+      // Exact migration 011 JSON contract. JSON keys are case-sensitive.
+      pricePerPerson,
     };
 
+    logDevBookingRequest(bookingPayload);
     const { data, error } = await supabase.rpc('create_booking', {
       p_booking: bookingPayload,
     });
@@ -678,10 +780,14 @@ const handleBookSlot = async (booking) => {
       throw emptyInsertError;
     }
 
+    rememberDevBookingResponse(insertedRow);
     const createdMatch = normalizeMatch(insertedRow);
     setAllMatches(prev => prev.some(match => match.id === createdMatch.id)
       ? prev.map(match => match.id === createdMatch.id ? createdMatch : match)
       : [createdMatch, ...prev]);
+    // Re-read the canonical row instead of relying only on the RPC response.
+    // This also makes any DEV price diagnostic reflect what was persisted.
+    await loadMatches();
     // Если это публичный матч — идем в ленту, если приват — остаемся в календаре
     if (!booking.isPrivate) {
       setActiveTab('matches');
@@ -692,31 +798,33 @@ const handleBookSlot = async (booking) => {
 
   // ─── 2. Исправленный handleRevertToPrivate ───
   const handleRevertToPrivate = async (matchId) => {
+    const revertPayload = {
+      type: 'private',
+      status: 'upcoming',
+      scenario: 'private',
+      isPrivate: true,
+      ratingMin: null,
+      ratingMax: null,
+      description: null,
+      isTraining: false,
+      trainingDetails: null,
+      trainingStatus: null,
+      // Сбрасываем слоты до только владельца
+      filledSlots: [{
+        id: ME_ID,
+        firstName: currentUser?.firstName || 'Игрок',
+        lastName: currentUser?.lastName || '',
+        ratingIdx: currentUser?.ratingIdx || 0,
+        numericRating: currentUser?.numericRating || 3.0,
+        isVerified: currentUser?.isVerified || false,
+        isOrganizer: true
+      }],
+      participants: [ME_ID],
+    };
+    logDevBookingMatchUpdate(matchId, 'update:revert-private', revertPayload);
     const { data, error } = await supabase
       .from('matches')
-      .update({
-        type: 'private',
-        status: 'upcoming',
-        scenario: 'private',
-        isPrivate: true,
-        ratingMin: null,
-        ratingMax: null,
-        description: null,
-        isTraining: false,
-        trainingDetails: null,
-        trainingStatus: null,
-        // Сбрасываем слоты до только владельца
-        filledSlots: [{ 
-          id: ME_ID, 
-          firstName: currentUser?.firstName || 'Игрок', 
-          lastName: currentUser?.lastName || '', 
-          ratingIdx: currentUser?.ratingIdx || 0, 
-          numericRating: currentUser?.numericRating || 3.0, 
-          isVerified: currentUser?.isVerified || false, 
-          isOrganizer: true 
-        }],
-        participants: [ME_ID],
-      })
+      .update(revertPayload)
       .eq('id', matchId)
       .select();
 
@@ -757,6 +865,7 @@ const handleBookSlot = async (booking) => {
       isPrime: isPrimeTime(updates?.time || '00:00', dateISO),
     };
 
+    logDevBookingMatchUpdate(matchId, 'update:edit', payload);
     const { data, error } = await supabase
       .from('matches')
       .update(payload)
@@ -812,21 +921,23 @@ const handleBookSlot = async (booking) => {
   };
 
   const handleSetupTraining = async (trainingData) => {
+    const trainingPayload = {
+      isTraining: true,
+      trainingDetails: {
+        format: trainingData.format,
+        withCoach: trainingData.withCoach,
+        duration: trainingData.duration,
+        guests: trainingData.guests,
+        coachName: trainingData.coachName,
+        coachId: trainingData.coachId,
+        coachStatus: trainingData.coachStatus,
+      },
+      trainingStatus: 'pending_coach',
+    };
+    logDevBookingMatchUpdate(trainingData.matchId, 'update:setup-training', trainingPayload);
     const { data, error } = await supabase
       .from('matches')
-      .update({
-        isTraining: true,
-        trainingDetails: {
-          format: trainingData.format,
-          withCoach: trainingData.withCoach,
-          duration: trainingData.duration,
-          guests: trainingData.guests,
-          coachName: trainingData.coachName,
-          coachId: trainingData.coachId,
-          coachStatus: trainingData.coachStatus,
-        },
-        trainingStatus: 'pending_coach',
-      })
+      .update(trainingPayload)
       .eq('id', trainingData.matchId)
       .select();
 
@@ -849,18 +960,20 @@ const handleBookSlot = async (booking) => {
   };
 
   const handleConvertToPublic = async (matchId, isRatingMatch = false) => {
+    const convertPayload = {
+      type: 'match',
+      isPrivate: false,
+      scenario: 'social',
+      status: 'open',
+      is_rating_match: isRatingMatch === true,
+      isTraining: false,
+      trainingDetails: null,
+      trainingStatus: null,
+    };
+    logDevBookingMatchUpdate(matchId, 'update:convert-public', convertPayload);
     const { data, error } = await supabase
       .from('matches')
-      .update({
-        type: 'match',
-        isPrivate: false,
-        scenario: 'social',
-        status: 'open',
-        is_rating_match: isRatingMatch === true,
-        isTraining: false,
-        trainingDetails: null,
-        trainingStatus: null,
-      })
+      .update(convertPayload)
       .eq('id', matchId)
       .select();
 
@@ -886,9 +999,11 @@ const handleBookSlot = async (booking) => {
     const currentMatch = allMatches.find(m => m.id === matchId);
     const { participants, status: derivedStatus } = deriveParticipantsAndStatus(newFilledSlots, currentMatch?.status);
     const status = currentMatch?.isPrivate === true ? currentMatch.status : derivedStatus;
+    const slotsPayload = { filledSlots: newFilledSlots, participants, status };
+    logDevBookingMatchUpdate(matchId, 'update:slots', slotsPayload);
     const { data, error } = await supabase
       .from('matches')
-      .update({ filledSlots: newFilledSlots, participants, status })
+      .update(slotsPayload)
       .eq('id', matchId)
       .select();
 
@@ -1063,6 +1178,7 @@ const handleBookSlot = async (booking) => {
     tg?.HapticFeedback?.impactOccurred('light');
     setSelected(match);
     setScreen('match-details');
+    void Promise.allSettled([loadInvitations(), loadMatches()]);
   };
 
   const beginInvitationAction = (key) => {
@@ -1205,7 +1321,7 @@ const handleBookSlot = async (booking) => {
 
     try {
       const updatedMatch = storeUpdatedMatch(await acceptMatchInvitation(invitationId));
-      setIncomingInvitations(prev => prev.filter((item) => item.invitation_id !== invitationId));
+      hideHandledIncomingInvitation(invitationId);
       await markInvitationHandled(invitationId);
       await Promise.all([loadInvitations(), loadMatches(), loadNotifications()]);
       showToast?.('Приглашение принято. Вы добавлены в состав.', 'success');
@@ -1213,7 +1329,7 @@ const handleBookSlot = async (booking) => {
       return updatedMatch;
     } catch (error) {
       if (isStaleInvitationError(error)) {
-        setIncomingInvitations(prev => prev.filter((item) => item.invitation_id !== invitationId));
+        hideHandledIncomingInvitation(invitationId);
         showToast?.('Приглашение уже обработано или устарело.', 'info');
         await Promise.all([loadInvitations(), loadMatches(), loadNotifications()]);
         return null;
@@ -1233,17 +1349,25 @@ const handleBookSlot = async (booking) => {
 
     try {
       await declineMatchInvitation(invitationId);
-      setIncomingInvitations(prev => prev.filter((item) => item.invitation_id !== invitationId));
+      hideHandledIncomingInvitation(invitationId);
       await markInvitationHandled(invitationId);
-      await Promise.all([loadInvitations(), loadMatches(), loadNotifications()]);
+      const [, updatedMatch] = await Promise.all([
+        loadInvitations(),
+        handleRefreshMatch(invitation.match_id),
+        loadNotifications(),
+      ]);
       showToast?.('Вы отказались от приглашения. Слот освобождён.', 'info');
-      return true;
+      return updatedMatch ?? true;
     } catch (error) {
       if (isStaleInvitationError(error)) {
-        setIncomingInvitations(prev => prev.filter((item) => item.invitation_id !== invitationId));
+        hideHandledIncomingInvitation(invitationId);
         showToast?.('Приглашение уже обработано на другом устройстве.', 'info');
-        await Promise.all([loadInvitations(), loadMatches(), loadNotifications()]);
-        return false;
+        const [, updatedMatch] = await Promise.all([
+          loadInvitations(),
+          handleRefreshMatch(invitation.match_id),
+          loadNotifications(),
+        ]);
+        return updatedMatch ?? false;
       }
       console.error(`Ошибка decline_match_invitation: ${error.message}`);
       showToast?.('Не удалось отказаться от приглашения. Попробуйте ещё раз.', 'error');
