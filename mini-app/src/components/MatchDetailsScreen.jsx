@@ -12,6 +12,7 @@ import { isRatingMatch, requiresVerifiedRating as getRequiresVerifiedRating } fr
 import { getPublicPlayerProfiles } from '../lib/profileApi';
 import { getLevelForRating } from '../lib/ratingEngine';
 import {
+  getMatchWaitlist,
   getMatchWaitlistState,
   getWaitlistErrorCode,
   joinMatchWaitlist,
@@ -879,25 +880,121 @@ function RatingTypeBadge({ match }) {
   );
 }
 
-function WaitlistPanel({ position, count, loading, loadError, action, onJoin, onLeave, onRetry }) {
+function WaitlistPlayerAvatar({ player }) {
+  const [imageFailed, setImageFailed] = useState(false);
+  const initials = [player.first_name, player.last_name]
+    .filter(Boolean)
+    .map((part) => part.replace('.', '').trim().charAt(0))
+    .join('')
+    .slice(0, 2)
+    .toUpperCase() || 'И';
+
+  if (player.photo_url && !imageFailed) {
+    return (
+      <img
+        src={player.photo_url}
+        alt=""
+        onError={() => setImageFailed(true)}
+        style={{ width: '38px', height: '38px', borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }}
+      />
+    );
+  }
+
+  return (
+    <div style={{ width: '38px', height: '38px', borderRadius: '50%', display: 'grid', placeItems: 'center', flexShrink: 0, background: 'rgba(216,243,74,0.12)', border: '1px solid rgba(216,243,74,0.22)', color: C.gold, fontSize: '12px', fontWeight: 900 }}>
+      {initials}
+    </div>
+  );
+}
+
+function MatchWaitlistList({ players, loading, loadError, showEmptyMessage, onRetry }) {
+  if (!loading && !loadError && players.length === 0 && !showEmptyMessage) return null;
+
+  return (
+    <section
+      data-testid="match-waitlist-list"
+      aria-live="polite"
+      style={{ marginBottom: '20px', maxWidth: '100%', minWidth: 0, overflow: 'hidden' }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px', minWidth: 0 }}>
+        <div style={{ color: C.text, fontSize: '14px', fontWeight: 900 }}>Лист ожидания</div>
+        <div data-testid="match-waitlist-list-count" style={{ minWidth: '24px', padding: '2px 7px', borderRadius: '999px', textAlign: 'center', background: 'rgba(216,243,74,0.12)', color: C.gold, fontSize: '11px', fontWeight: 900 }}>
+          {players.length}
+        </div>
+      </div>
+
+      {loadError && (
+        <div data-testid="match-waitlist-list-error" style={{ padding: '12px', borderRadius: '12px', background: 'rgba(255,111,97,0.06)', border: '1px solid rgba(255,111,97,0.2)' }}>
+          <div style={{ color: C.text, fontSize: '12px', fontWeight: 800 }}>Не удалось загрузить лист ожидания</div>
+          <button
+            type="button"
+            data-testid="match-waitlist-list-retry"
+            onClick={onRetry}
+            disabled={loading}
+            style={{ minHeight: '44px', marginTop: '6px', padding: '0 12px', borderRadius: '10px', border: '1px solid rgba(216,243,74,0.28)', background: 'transparent', color: C.gold, fontSize: '12px', fontWeight: 850, cursor: loading ? 'wait' : 'pointer' }}
+          >
+            Повторить
+          </button>
+        </div>
+      )}
+
+      {!loadError && loading && players.length === 0 && (
+        <div data-testid="match-waitlist-list-loading" style={{ color: C.muted, fontSize: '12px', padding: '8px 0' }}>
+          Загружаем очередь…
+        </div>
+      )}
+
+      {!loadError && !loading && players.length === 0 && showEmptyMessage && (
+        <div style={{ color: C.muted, fontSize: '12px', lineHeight: 1.45 }}>Лист ожидания пока пуст</div>
+      )}
+
+      {players.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '7px', minWidth: 0 }}>
+          {players.map((player) => {
+            const name = [player.first_name, player.last_name].filter(Boolean).join(' ') || 'Игрок';
+            return (
+              <div
+                key={player.waitlist_id}
+                data-testid={`match-waitlist-player-${player.user_id}`}
+                style={{ display: 'flex', alignItems: 'center', gap: '9px', minWidth: 0, padding: '8px 10px', borderRadius: '12px', border: player.is_current_user ? '1px solid rgba(216,243,74,0.34)' : `1px solid ${C.border}`, background: player.is_current_user ? 'rgba(216,243,74,0.075)' : C.card }}
+              >
+                <div data-testid="match-waitlist-player-position" style={{ width: '24px', flexShrink: 0, color: C.gold, fontSize: '13px', fontWeight: 900, textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>
+                  {player.queue_position}
+                </div>
+                <WaitlistPlayerAvatar player={player} />
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div title={name} style={{ color: C.text, fontSize: '13px', fontWeight: 850, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {name}
+                  </div>
+                  <div style={{ color: C.muted, fontSize: '10px', marginTop: '2px' }}>
+                    Рейтинг: {player.rating == null ? '—' : player.rating}
+                  </div>
+                </div>
+                {player.is_current_user && (
+                  <span data-testid="match-waitlist-current-user" style={{ flexShrink: 0, padding: '4px 7px', borderRadius: '999px', background: C.gold, color: C.bg, fontSize: '9px', fontWeight: 950 }}>
+                    Это вы
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function WaitlistPanel({ position, count, loading, action, onJoin, onLeave }) {
   const queuePosition = Number(position?.queue_position);
   const isWaiting = Number.isFinite(queuePosition) && queuePosition > 0;
 
   return (
     <section
-      data-testid="match-waitlist"
+      data-testid="match-waitlist-action"
       style={{ padding: '16px', borderRadius: '16px', border: '1px solid rgba(216,243,74,0.22)', background: 'rgba(216,243,74,0.055)' }}
       aria-live="polite"
     >
-      {loadError ? (
-        <>
-          <div style={{ color: C.text, fontSize: '14px', fontWeight: 800 }}>Не удалось обновить лист ожидания</div>
-          <div style={{ color: C.muted, fontSize: '11px', lineHeight: 1.45, marginTop: '5px' }}>Проверьте подключение и попробуйте ещё раз.</div>
-          <PadelButton data-testid="match-waitlist-retry" variant="ghost" size="lg" fullWidth className="mt-3" onClick={onRetry} disabled={loading}>
-            Повторить
-          </PadelButton>
-        </>
-      ) : isWaiting ? (
+      {isWaiting ? (
         <>
           <div style={{ color: C.gold, fontSize: '10px', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Вы в листе ожидания</div>
           <div data-testid="match-waitlist-position" style={{ color: C.text, fontSize: '19px', fontWeight: 900, marginTop: '5px', fontVariantNumeric: 'tabular-nums' }}>
@@ -998,27 +1095,56 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
   const joinInFlightRef = useRef(false);
   const joinSuccessTimerRef = useRef(null);
   const waitlistActionRef = useRef(false);
+  const waitlistLoadRef = useRef(0);
   const [waitlistPosition, setWaitlistPosition] = useState(null);
   const [waitlistCount, setWaitlistCount] = useState(0);
   const [waitlistLoading, setWaitlistLoading] = useState(false);
-  const [waitlistLoadError, setWaitlistLoadError] = useState('');
+  const [waitlistPlayers, setWaitlistPlayers] = useState([]);
+  const [waitlistListLoading, setWaitlistListLoading] = useState(false);
+  const [waitlistListError, setWaitlistListError] = useState('');
   const [waitlistAction, setWaitlistAction] = useState(null);
   const [capacityUnavailable, setCapacityUnavailable] = useState(false);
 
   const refreshWaitlist = useCallback(async () => {
+    const requestId = ++waitlistLoadRef.current;
     setWaitlistLoading(true);
-    setWaitlistLoadError('');
-    try {
-      const state = await getMatchWaitlistState(match.id);
+    setWaitlistListLoading(true);
+    setWaitlistListError('');
+
+    const [stateResult, listResult] = await Promise.allSettled([
+      getMatchWaitlistState(match.id),
+      getMatchWaitlist(match.id),
+    ]);
+
+    if (requestId !== waitlistLoadRef.current) return null;
+
+    let state = null;
+    if (stateResult.status === 'fulfilled') {
+      state = stateResult.value;
       setWaitlistPosition(state.position);
       setWaitlistCount(state.count);
-      return state;
-    } catch {
-      setWaitlistLoadError('Не удалось загрузить лист ожидания.');
-      return null;
-    } finally {
-      setWaitlistLoading(false);
     }
+
+    if (listResult.status === 'fulfilled') {
+      const players = listResult.value;
+      setWaitlistPlayers(players);
+      if (!state) {
+        const currentPlayer = players.find((player) => player.is_current_user);
+        setWaitlistPosition(currentPlayer ? {
+          waitlist_id: currentPlayer.waitlist_id,
+          status: 'waiting',
+          queue_position: currentPlayer.queue_position,
+          joined_at: currentPlayer.joined_at,
+        } : null);
+        setWaitlistCount(players.length);
+      }
+    } else {
+      setWaitlistListError('Не удалось загрузить лист ожидания.');
+    }
+
+    setWaitlistLoading(false);
+    setWaitlistListLoading(false);
+    return state;
   }, [match.id]);
 
   useEffect(() => () => {
@@ -1194,16 +1320,24 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
     ? invitationActions.has(`decline:${pendingInvitationId}`)
     : false;
   const isActiveWaitlistStatus = ['open', 'searching', 'upcoming', 'confirmed'].includes(status);
-  const canUseWaitlist = match.type === 'match'
+  const canViewWaitlist = match.type === 'match'
     && match.isPrivate !== true
-    && !isOwner
-    && !isParticipant
-    && !pendingInvitation
     && isActiveWaitlistStatus
     && matchHasNotStarted
     && !isCompletedMatch;
+  const canUseWaitlist = canViewWaitlist
+    && !isOwner
+    && !isParticipant
+    && !pendingInvitation;
   const showWaitlist = canUseWaitlist
     && (isCapacityReserved || capacityUnavailable || waitlistPosition?.status === 'waiting');
+  const waitlistRefreshKey = [
+    status,
+    match.updated_at ?? match.updatedAt ?? '',
+    (match.participants ?? []).join(','),
+    (origFilledSlots ?? []).map((player) => player?.id ?? '').join(','),
+    pendingInvitations.map((invitation) => `${invitation.id}:${invitation.status}`).join(','),
+  ].join('|');
   const levelOk    = currentUser.ratingIdx >= ratingMin && currentUser.ratingIdx <= ratingMax;
   const privateJoinBlocked = match.isPrivate === true;
   const verifiedOk = !requiresVerifiedRating || currentUser.isVerified === true;
@@ -1235,23 +1369,44 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
     return 'Участие в матче сейчас недоступно.';
   };
 
+  const refreshMatchAndWaitlist = async () => {
+    const [updatedMatch] = await Promise.all([
+      onRefreshMatch?.(match.id),
+      refreshWaitlist(),
+    ]);
+    return updatedMatch ?? null;
+  };
+
   useEffect(() => {
-    if (!canUseWaitlist) {
+    waitlistLoadRef.current += 1;
+    setWaitlistPosition(null);
+    setWaitlistCount(0);
+    setWaitlistPlayers([]);
+    setWaitlistListError('');
+    setWaitlistLoading(false);
+    setWaitlistListLoading(false);
+  }, [match.id]);
+
+  useEffect(() => {
+    if (!canViewWaitlist) {
       setWaitlistPosition(null);
       setWaitlistCount(0);
-      setWaitlistLoadError('');
+      setWaitlistPlayers([]);
+      setWaitlistListError('');
       setWaitlistLoading(false);
+      setWaitlistListLoading(false);
       if (isParticipant) setCapacityUnavailable(false);
       return;
     }
     refreshWaitlist();
-  }, [canUseWaitlist, isParticipant, refreshWaitlist]);
+  }, [canViewWaitlist, isParticipant, refreshWaitlist, waitlistRefreshKey]);
 
   const handleAcceptPendingInvitation = async () => {
     if (!pendingInvitation || acceptingInvitation || decliningInvitation || !onAcceptInvitation) return false;
     try {
       const updatedMatch = await onAcceptInvitation(pendingInvitation);
       if (updatedMatch?.filledSlots) setLocalSlots(updatedMatch.filledSlots);
+      await refreshWaitlist();
       return Boolean(updatedMatch);
     } catch {
       return false;
@@ -1261,7 +1416,9 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
   const handleDeclinePendingInvitation = async () => {
     if (!pendingInvitation || acceptingInvitation || decliningInvitation || !onDeclineInvitation) return false;
     try {
-      return await onDeclineInvitation(pendingInvitation);
+      const result = await onDeclineInvitation(pendingInvitation);
+      await refreshMatchAndWaitlist();
+      return result;
     } catch {
       return false;
     }
@@ -1285,14 +1442,6 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
     }
 
     await handleTakeSlot(firstFreeSlotIndex);
-  };
-
-  const refreshMatchAndWaitlist = async () => {
-    const [updatedMatch] = await Promise.all([
-      onRefreshMatch?.(match.id),
-      refreshWaitlist(),
-    ]);
-    return updatedMatch ?? null;
   };
 
   const handleJoinWaitlist = async () => {
@@ -1378,6 +1527,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
       setLocalTitle(updatedMatch?.title ?? newTitle);
       setLocalDesc(updatedMatch?.description ?? newDesc);
       setEditSheet(false);
+      await refreshWaitlist();
     } catch {
       showToast?.('Изменения не сохранены. Попробуйте еще раз.', 'error');
     }
@@ -1387,6 +1537,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
   const commitSlots = async (nextFilled) => {
     const updatedMatch = await onSlotsChange?.(match.id, nextFilled);
     setLocalSlots(updatedMatch?.filledSlots ?? nextFilled);
+    await refreshWaitlist();
     return updatedMatch;
   };
 
@@ -1398,6 +1549,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
       const updatedMatch = await onRemoveParticipant(match.id, kickTarget.id);
       setLocalSlots(updatedMatch?.filledSlots ?? allFilled);
       setKickTarget(null);
+      await refreshWaitlist();
     } catch {
       // Parent shows the concrete RPC error.
     }
@@ -1440,6 +1592,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
       setLocalSlots(updatedMatch?.filledSlots ?? allFilled);
       setJoined(false);
       setLeaveTarget(null);
+      await refreshWaitlist();
     } catch {
       // The parent handler shows the concrete RPC error without duplicating the message.
     }
@@ -1597,6 +1750,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
       setLocalSlots(updatedMatch?.filledSlots ?? slots);
       setTargetSlot(null);
       setJoined(true);
+      await refreshWaitlist();
       joinSuccessTimerRef.current = setTimeout(() => onJoinSuccess?.(updatedMatch ?? match), 1500);
       return true;
     } catch (error) {
@@ -1629,6 +1783,17 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
     }
 
     handleTakeSlot(slotIndex);
+  };
+
+  const handleCancelPendingInvitation = async (invitationId) => {
+    if (!invitationId || !onCancelInvitation) return false;
+    try {
+      const result = await onCancelInvitation(invitationId);
+      await refreshMatchAndWaitlist();
+      return result;
+    } catch {
+      return false;
+    }
   };
 
   const handleCancelConfirm = async () => {
@@ -1830,8 +1995,8 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
                       type="button"
                       data-testid={`cancel-invitation-${player.invitationId}`}
                       disabled={cancelling}
-                      onClick={() => onCancelInvitation?.(player.invitationId).catch(() => {})}
-                      style={{ flexShrink: 0, padding: '7px 9px', borderRadius: '9px', border: '1px solid rgba(255,111,97,0.28)', background: 'transparent', color: C.loss, fontSize: '10px', fontWeight: 800, opacity: cancelling ? 0.55 : 1, cursor: cancelling ? 'not-allowed' : 'pointer' }}
+                      onClick={() => handleCancelPendingInvitation(player.invitationId)}
+                      style={{ flexShrink: 0, minHeight: '44px', padding: '7px 9px', borderRadius: '9px', border: '1px solid rgba(255,111,97,0.28)', background: 'transparent', color: C.loss, fontSize: '10px', fontWeight: 800, opacity: cancelling ? 0.55 : 1, cursor: cancelling ? 'not-allowed' : 'pointer' }}
                     >
                       {cancelling ? 'Отменяем…' : 'Отменить приглашение'}
                     </button>
@@ -1841,6 +2006,16 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
             </div>
           )}
         </div>
+
+        {canViewWaitlist && (
+          <MatchWaitlistList
+            players={waitlistPlayers}
+            loading={waitlistListLoading}
+            loadError={waitlistListError}
+            showEmptyMessage={isOwner || isParticipant}
+            onRetry={refreshWaitlist}
+          />
+        )}
         
         {isParticipant && (
           <div className="mb-4">
@@ -1935,11 +2110,9 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
             position={waitlistPosition}
             count={waitlistCount}
             loading={waitlistLoading}
-            loadError={waitlistLoadError}
             action={waitlistAction}
             onJoin={handleJoinWaitlist}
             onLeave={handleLeaveWaitlist}
-            onRetry={refreshWaitlist}
           />
         ) : (
           <>

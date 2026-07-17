@@ -156,9 +156,61 @@ async function mockSupabase(page, options = {}) {
     leaveWaitlistRequests: 0,
     waitlistPositionRequests: 0,
     waitlistCountRequests: 0,
+    waitlistListRequests: 0,
+    waitlistListShouldFail: options.waitlistListShouldFail === true,
   };
   let matchesGetFailures = options.matchesGetFailures || 0;
   let messagesGetFailures = options.messagesGetFailures || 0;
+  let waitlistListFailures = options.waitlistListFailures || 0;
+
+  const waitingRowsFor = (matchId) => state.waitlistRows
+    .filter((row) => String(row.match_id) === String(matchId) && row.status === 'waiting')
+    .sort((left, right) => String(left.joined_at).localeCompare(String(right.joined_at)) || String(left.id).localeCompare(String(right.id)));
+
+  const waitlistProfileFor = (row) => {
+    const publicProfile = state.publicProfiles.find((item) => item.id === row.user_id) || {};
+    const hasOwn = (key) => Object.prototype.hasOwnProperty.call(row, key);
+    return {
+      firstName: hasOwn('first_name') ? row.first_name : publicProfile.first_name ?? 'Игрок',
+      lastName: hasOwn('last_name') ? row.last_name : publicProfile.last_name ?? '',
+      photoUrl: hasOwn('photo_url') ? row.photo_url : publicProfile.photo_url ?? null,
+      rating: hasOwn('rating') ? row.rating : publicProfile.rating ?? null,
+      isVerified: publicProfile.is_verified ?? true,
+    };
+  };
+
+  const promoteFirstWaiting = (matchId) => {
+    const match = state.matches.find((row) => String(row.id) === String(matchId));
+    if (!match) return null;
+    const filledSlots = (match.filledSlots || []).filter(Boolean);
+    const pendingInvitations = state.invitationRows.filter((row) => String(row.match_id) === String(matchId) && row.status === 'pending');
+    const occupiedIndexes = new Set([
+      ...filledSlots.map((slot, index) => Number.isInteger(Number(slot.slotIndex)) ? Number(slot.slotIndex) : index),
+      ...pendingInvitations.map((invitation) => Number(invitation.slot_index)),
+    ]);
+    const slotIndex = [0, 1, 2, 3].find((index) => !occupiedIndexes.has(index));
+    const waiting = waitingRowsFor(matchId)[0];
+    if (slotIndex == null || !waiting) return null;
+
+    waiting.status = 'promoted';
+    const player = waitlistProfileFor(waiting);
+    const updated = {
+      ...match,
+      status: filledSlots.length + 1 >= 4 ? 'upcoming' : 'open',
+      filledSlots: [...filledSlots, {
+        id: waiting.user_id,
+        firstName: player.firstName,
+        lastName: player.lastName,
+        numericRating: player.rating,
+        isVerified: player.isVerified,
+        isOrganizer: false,
+        slotIndex,
+      }],
+      participants: [...new Set([...(match.participants || []), waiting.user_id])],
+    };
+    state.matches = state.matches.map((row) => row.id === updated.id ? updated : row);
+    return updated;
+  };
 
   await page.route(`${SUPABASE_URL}/auth/v1/**`, async (route) => {
     await route.fulfill({
@@ -280,6 +332,7 @@ async function mockSupabase(page, options = {}) {
     state.declineInvitationRequests += 1;
     const invitation = state.invitationRows.find((row) => row.id === route.request().postDataJSON()?.p_invitation_id);
     invitation.status = 'declined';
+    promoteFirstWaiting(invitation.match_id);
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(invitation) });
   });
 
@@ -287,6 +340,7 @@ async function mockSupabase(page, options = {}) {
     state.cancelInvitationRequests += 1;
     const invitation = state.invitationRows.find((row) => row.id === route.request().postDataJSON()?.p_invitation_id);
     invitation.status = 'cancelled';
+    promoteFirstWaiting(invitation.match_id);
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(invitation) });
   });
 
@@ -307,10 +361,6 @@ async function mockSupabase(page, options = {}) {
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(notification || null) });
   });
 
-  const waitingRowsFor = (matchId) => state.waitlistRows
-    .filter((row) => String(row.match_id) === String(matchId) && row.status === 'waiting')
-    .sort((left, right) => String(left.joined_at).localeCompare(String(right.joined_at)) || String(left.id).localeCompare(String(right.id)));
-
   await page.route(`${SUPABASE_URL}/rest/v1/rpc/get_my_match_waitlist_position`, async (route) => {
     state.waitlistPositionRequests += 1;
     const matchId = route.request().postDataJSON()?.p_match_id;
@@ -329,6 +379,35 @@ async function mockSupabase(page, options = {}) {
     state.waitlistCountRequests += 1;
     const matchId = route.request().postDataJSON()?.p_match_id;
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(waitingRowsFor(matchId).length) });
+  });
+
+  await page.route(`${SUPABASE_URL}/rest/v1/rpc/get_match_waitlist`, async (route) => {
+    state.waitlistListRequests += 1;
+    if (state.waitlistListShouldFail || waitlistListFailures > 0) {
+      waitlistListFailures -= 1;
+      await route.fulfill({
+        status: 500,
+        contentType: 'application/json',
+        body: JSON.stringify({ code: 'XX000', message: 'technical get_match_waitlist failure' }),
+      });
+      return;
+    }
+    const matchId = route.request().postDataJSON()?.p_match_id;
+    const payload = waitingRowsFor(matchId).map((row, index) => {
+      const player = waitlistProfileFor(row);
+      return {
+        waitlist_id: row.id,
+        user_id: row.user_id,
+        queue_position: index + 1,
+        first_name: player.firstName,
+        last_name: player.lastName,
+        photo_url: player.photoUrl,
+        rating: player.rating,
+        joined_at: row.joined_at,
+        is_current_user: row.user_id === testUser.id,
+      };
+    });
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(payload) });
   });
 
   await page.route(`${SUPABASE_URL}/rest/v1/rpc/join_match_waitlist`, async (route) => {
@@ -356,6 +435,10 @@ async function mockSupabase(page, options = {}) {
       user_id: testUser.id,
       status: 'waiting',
       joined_at: new Date().toISOString(),
+      first_name: profile.first_name,
+      last_name: `${profile.last_name.charAt(0)}.`,
+      photo_url: profile.photo_url ?? null,
+      rating: profile.rating,
     };
     state.waitlistRows.push(created);
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(created) });
@@ -433,11 +516,12 @@ async function mockSupabase(page, options = {}) {
       participants: (match.participants || []).filter(id => id !== testUser.id),
     };
     state.matches = state.matches.map(row => row.id === updated.id ? updated : row);
+    const promoted = promoteFirstWaiting(matchId);
 
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify(updated),
+      body: JSON.stringify(promoted || updated),
     });
   });
 
@@ -451,7 +535,8 @@ async function mockSupabase(page, options = {}) {
       participants: (match.participants || []).filter(id => id !== body.p_user_id),
     };
     state.matches = state.matches.map(row => row.id === updated.id ? updated : row);
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(updated) });
+    const promoted = promoteFirstWaiting(body.p_match_id);
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(promoted || updated) });
   });
 
   await page.route(`${SUPABASE_URL}/rest/v1/rpc/create_booking`, async (route) => {
@@ -1286,6 +1371,102 @@ test.describe('WAITLIST frontend flow', () => {
     });
   };
 
+  test('WAITLIST organizer, participant and ordinary user see the same safe list without extra actions', async ({ page }) => {
+    const ownerMatch = createOpenJoinableMatch({
+      id: 'waitlist-owner-view',
+      title: 'Очередь для организатора',
+      owner_id: testUser.id,
+      ownerId: testUser.id,
+      filledSlots: [{
+        id: testUser.id, firstName: 'QA', lastName: 'Player', ratingIdx: 3,
+        numericRating: 3.4, isVerified: true, isOrganizer: true, slotIndex: 0,
+      }],
+      participants: [testUser.id],
+    });
+    const participantMatch = createOpenJoinableMatch({
+      id: 'waitlist-participant-view',
+      title: 'Очередь для участника',
+      filledSlots: [
+        { ...createOpenJoinableMatch().filledSlots[0], slotIndex: 0 },
+        { id: testUser.id, firstName: 'QA', lastName: 'Player', ratingIdx: 3, numericRating: 3.4, isVerified: true, isOrganizer: false, slotIndex: 1 },
+      ],
+      participants: ['user-owner-1', testUser.id],
+    });
+    const ordinaryMatch = fullMatch({ id: 'waitlist-ordinary-view', title: 'Очередь для зрителя' });
+    const waitlistRows = [
+      { id: 'owner-view-row', match_id: ownerMatch.id, user_id: 'owner-waiting-player', status: 'waiting', joined_at: '2026-01-01T10:00:00.000Z', first_name: 'Ольга', last_name: 'С.', rating: 3.2 },
+      { id: 'participant-view-row', match_id: participantMatch.id, user_id: 'participant-waiting-player', status: 'waiting', joined_at: '2026-01-01T10:00:00.000Z', first_name: 'Павел', last_name: 'К.', rating: 3.3 },
+      { id: 'ordinary-view-row', match_id: ordinaryMatch.id, user_id: 'ordinary-waiting-player', status: 'waiting', joined_at: '2026-01-01T10:00:00.000Z', first_name: 'Анна', last_name: 'Л.', rating: 3.1 },
+    ];
+    await mockSupabase(page, { matches: [ownerMatch, participantMatch, ordinaryMatch], waitlistRows });
+    await mockTelegram(page);
+    await setAuthenticatedSession(page);
+    await page.goto('/');
+    await openMatchesTab(page);
+
+    await page.getByText(ownerMatch.title, { exact: true }).click();
+    await expect(page.getByTestId('match-waitlist-list')).toContainText('Ольга С.');
+    await expect(page.getByTestId('match-waitlist-join-button')).toHaveCount(0);
+    await page.getByRole('button', { name: '←' }).click();
+
+    await page.getByText(participantMatch.title, { exact: true }).click();
+    await expect(page.getByTestId('match-waitlist-list')).toContainText('Павел К.');
+    await expect(page.getByTestId('match-waitlist-join-button')).toHaveCount(0);
+    await page.getByRole('button', { name: '←' }).click();
+
+    await page.getByText(ordinaryMatch.title, { exact: true }).click();
+    await expect(page.getByTestId('match-waitlist-list')).toContainText('Анна Л.');
+    await expect(page.getByTestId('match-waitlist-join-button')).toBeVisible();
+  });
+
+  test('WAITLIST uses queue_position order and highlights only the current waiting user', async ({ page }) => {
+    const match = fullMatch({ id: 'waitlist-safe-order', title: 'Безопасный порядок очереди' });
+    await mockSupabase(page, {
+      matches: [match],
+      waitlistRows: [
+        { id: 'waitlist-order-2', match_id: match.id, user_id: testUser.id, status: 'waiting', joined_at: '2026-01-02T10:00:00.000Z', first_name: 'Очень Длинное Имя Игрока', last_name: 'П.', photo_url: null, rating: null },
+        { id: 'waitlist-order-1', match_id: match.id, user_id: 'waiting-first', status: 'waiting', joined_at: '2026-01-01T10:00:00.000Z', first_name: 'Ирина', last_name: 'С.', photo_url: null, rating: 3.7 },
+      ],
+    });
+    await mockTelegram(page);
+    await setAuthenticatedSession(page);
+    await page.goto('/');
+    await openMatchesTab(page);
+    await page.getByText(match.title, { exact: true }).click();
+
+    await expect(page.getByTestId('match-waitlist-player-position')).toHaveText(['1', '2']);
+    const currentRow = page.getByTestId(`match-waitlist-player-${testUser.id}`);
+    await expect(currentRow).toContainText('Очень Длинное Имя Игрока П.');
+    await expect(currentRow).toContainText('Рейтинг: —');
+    await expect(currentRow.getByTestId('match-waitlist-current-user')).toHaveText('Это вы');
+    await expect(page.getByTestId('match-waitlist-current-user')).toHaveCount(1);
+  });
+
+  base('WAITLIST list error stays local and retry restores the list', async ({ page }) => {
+    const match = fullMatch({ id: 'waitlist-list-error', title: 'Ошибка списка ожидания' });
+    const state = await mockSupabase(page, {
+      matches: [match],
+      waitlistListShouldFail: true,
+      waitlistRows: [{
+        id: 'waitlist-after-retry', match_id: match.id, user_id: 'retry-player',
+        status: 'waiting', joined_at: '2026-01-01T10:00:00.000Z', first_name: 'Роман', last_name: 'П.', rating: 3.4,
+      }],
+    });
+    await mockTelegram(page);
+    await setAuthenticatedSession(page);
+    await page.goto('/');
+    await openMatchesTab(page);
+    await page.getByText(match.title, { exact: true }).click();
+
+    await expect(page.getByTestId('match-waitlist-list-error')).toBeVisible();
+    await expect(page.getByText('technical get_match_waitlist failure')).toHaveCount(0);
+    await expect(page.getByTestId('match-filled-slot-0')).toBeVisible();
+    await expect(page.getByTestId('match-waitlist-join-button')).toBeVisible();
+    state.waitlistListShouldFail = false;
+    await page.getByTestId('match-waitlist-list-retry').click();
+    await expect(page.getByTestId('match-waitlist-list')).toContainText('Роман П.');
+  });
+
   test('WAITLIST full public match shows queue action while private match does not', async ({ page }) => {
     const publicMatch = fullMatch();
     const privateMatch = fullMatch({
@@ -1314,7 +1495,8 @@ test.describe('WAITLIST frontend flow', () => {
     await page.getByRole('button', { name: '←' }).click();
     await openProfileTab(page);
     await page.getByText(privateMatch.title, { exact: true }).click();
-    await expect(page.getByTestId('match-waitlist')).toHaveCount(0);
+    await expect(page.getByTestId('match-waitlist-list')).toHaveCount(0);
+    await expect(page.getByTestId('match-waitlist-action')).toHaveCount(0);
   });
 
   test('WAITLIST join shows position, blocks double request and leave removes position', async ({ page }) => {
@@ -1335,17 +1517,54 @@ test.describe('WAITLIST frontend flow', () => {
 
     const joinButton = page.getByTestId('match-waitlist-join-button');
     await expect(joinButton).toBeVisible();
+    await expect(joinButton).toBeEnabled();
     await joinButton.evaluate((button) => { button.click(); button.click(); });
     await expect(page.getByTestId('match-waitlist-position')).toHaveText('Вы 2-й в очереди');
     await expect(page.getByTestId('match-waitlist-count')).toHaveText('Всего ожидают: 2');
+    await expect(page.getByTestId(`match-waitlist-player-${testUser.id}`)).toContainText('Это вы');
     await expect.poll(() => state.joinWaitlistRequests).toBe(1);
 
     await page.getByTestId('match-waitlist-leave-button').click();
     await expect(page.getByTestId('match-waitlist-position')).toHaveCount(0);
     await expect(page.getByTestId('match-waitlist-join-button')).toBeVisible();
     await expect(page.getByTestId('match-waitlist-count')).toHaveText('В очереди: 1');
+    await expect(page.getByTestId(`match-waitlist-player-${testUser.id}`)).toHaveCount(0);
     await expect.poll(() => state.leaveWaitlistRequests).toBe(1);
     expect(state.waitlistRows.find((row) => row.user_id === testUser.id)?.status).toBe('left');
+  });
+
+  test('WAITLIST released invitation slot promotes FIFO player into roster and removes the row', async ({ page }) => {
+    const base = fullMatch();
+    const match = fullMatch({
+      id: 'waitlist-decline-promotion',
+      title: 'Продвижение после отказа',
+      status: 'open',
+      filledSlots: base.filledSlots.slice(0, 3),
+      participants: base.filledSlots.slice(0, 3).map((player) => player.id),
+    });
+    const invitation = {
+      id: 'waitlist-reserved-invitation', match_id: match.id, invited_by: match.owner_id,
+      invited_user_id: testUser.id, slot_index: 3, status: 'pending', created_at: new Date().toISOString(),
+    };
+    const firstWaiting = {
+      id: 'waitlist-promoted-first', match_id: match.id, user_id: 'promoted-player-1',
+      status: 'waiting', joined_at: '2026-01-01T10:00:00.000Z', first_name: 'Антон', last_name: 'П.', rating: 3.5,
+    };
+    const state = await mockSupabase(page, {
+      matches: [match], invitationRows: [invitation], waitlistRows: [firstWaiting],
+    });
+    await mockTelegram(page);
+    await setAuthenticatedSession(page);
+    await page.goto('/');
+    await openMatchesTab(page);
+    await page.getByText(match.title, { exact: true }).click();
+
+    await expect(page.getByTestId(`match-waitlist-player-${firstWaiting.user_id}`)).toBeVisible();
+    await page.getByTestId('match-invitation-decline-button').click();
+    await expect(page.getByTestId(`match-waitlist-player-${firstWaiting.user_id}`)).toHaveCount(0);
+    await expect(page.getByTestId('match-filled-slot-3')).toContainText('АП');
+    expect(state.waitlistRows[0].status).toBe('promoted');
+    expect(state.matches[0].participants).toContain(firstWaiting.user_id);
   });
 
   test('WAITLIST server promotion refreshes confirmed roster and notification opens match', async ({ page }) => {
@@ -1361,6 +1580,7 @@ test.describe('WAITLIST frontend flow', () => {
     await openMatchesTab(page);
     await page.getByText(match.title, { exact: true }).click();
     await expect(page.getByTestId('match-waitlist-position')).toHaveText('Вы 1-й в очереди');
+    await page.waitForTimeout(300);
 
     currentWaitlist.status = 'promoted';
     state.waitlistRows[0].status = 'promoted';
@@ -1391,7 +1611,7 @@ test.describe('WAITLIST frontend flow', () => {
     await openMatchesTab(page);
     await page.getByText(match.title, { exact: true }).click();
     await expect(page.getByTestId('match-joined-state')).toBeVisible();
-    await expect(page.getByTestId('match-waitlist')).toHaveCount(0);
+    await expect(page.getByTestId('match-waitlist-list')).toContainText('Лист ожидания пока пуст');
     await expect(page.getByTestId('match-filled-slot-3')).toContainText('QP');
     expect(state.matches[0].participants).toContain(testUser.id);
 
@@ -1580,6 +1800,7 @@ test.describe('INVITATION frontend flow', () => {
     await openMatchesTab(page);
     await page.getByText(match.title, { exact: true }).click();
     await expect(page.getByTestId('match-invitation-panel')).toBeVisible();
+    await page.waitForTimeout(300);
 
     state.invitationRows[0].status = 'cancelled';
     await page.reload();
