@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import BookingModal from './BookingModal';
 import { COURTS, HOURS, toMin, fromMin, generateDates } from '../lib/booking';
+import { hasMoscowSlotStarted } from '../lib/moscowDateTime';
 import { isPrimeTime } from '../lib/pricing';
 
 const isPublicMatch = (match) =>
@@ -21,17 +22,11 @@ function getSlotStatus(match, userId) {
 
 function buildSchedule(allMatches, dateISO, userId) {
   const slots = {};
-  const isToday = dateISO === new Date().toISOString().slice(0, 10);
-  const validationTime = isToday ? new Date(Date.now() + 15 * 60 * 1000) : null;
 
   HOURS.forEach((time) => {
     slots[time] = {};
     COURTS.forEach((court) => {
-      let initialStatus = 'available';
-      if (validationTime) {
-        const slotDateTime = new Date(`${dateISO}T${time}:00`);
-        if (slotDateTime < validationTime) initialStatus = 'booked';
-      }
+      const initialStatus = hasMoscowSlotStarted(dateISO, time) ? 'booked' : 'available';
       slots[time][court.id] = { status: initialStatus, matchId: null };
     });
   });

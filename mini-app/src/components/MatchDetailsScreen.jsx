@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import { getAvailableBots, getTestBots } from '../lib/testSeed';
 import { formatParticipationPrice, getCourtCapacity, getParticipationPrice, getPerPlayerPrice, fmtPrice as fmtPriceLib, isPrimeTime } from '../lib/pricing';
 import { HOURS, WORKING_HOURS, BOOKING_DURATIONS } from '../lib/booking';
+import { getMoscowDateISO, hasMoscowSlotStarted } from '../lib/moscowDateTime';
 import FinishMatchModal from './FinishMatchModal';
 import PadelCard from './ui/PadelCard';
 import MatchChat from './MatchChat';
@@ -374,15 +375,7 @@ function EditPanel({ initDate, initTime, initCourt, initDuration, initTitle, ini
   const [timeError, setTimeError] = useState('');
 
   useEffect(() => {
-    const isToday = editDate === new Date().toISOString().slice(0, 10);
-    if (!isToday) {
-      setTimeError('');
-      return;
-    }
-    const now = new Date();
-    const validationTime = new Date(now.getTime() + 15 * 60 * 1000);
-    const selectedDateTime = new Date(`${editDate}T${editTime}:00`);
-    if (selectedDateTime < validationTime) {
+    if (hasMoscowSlotStarted(editDate, editTime)) {
       setTimeError('Нельзя забронировать время в прошлом');
     } else {
       setTimeError('');
@@ -395,10 +388,6 @@ function EditPanel({ initDate, initTime, initCourt, initDuration, initTitle, ini
   const newPPl = calcPerPlayer(editTime, safeDur, editCourt, editDate);
   // Минимальная аренда — 1 час
   const DURATION_OPTS = BOOKING_DURATIONS.filter(d => d <= maxD);
-
-  const isToday = editDate === new Date().toISOString().slice(0, 10);
-  const now = new Date();
-  const validationTime = isToday ? now.getTime() + 15 * 60 * 1000 : 0;
 
   return (
     <BottomSheet onClose={onClose} variant="edit">
@@ -425,15 +414,14 @@ function EditPanel({ initDate, initTime, initCourt, initDuration, initTitle, ini
 
         <div style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(245,241,232,0.14)', borderRadius: '20px', padding: '14px' }}>
           <div style={{ fontSize: '10px', fontWeight: 800, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: '10px' }}>Дата и время</div>
-          <input type="date" value={editDate} min={new Date().toISOString().slice(0, 10)} onChange={e => setEditDate(e.target.value)} style={{
+          <input type="date" value={editDate} min={getMoscowDateISO()} onChange={e => setEditDate(e.target.value)} style={{
             width: '100%', padding: '13px 14px', borderRadius: '14px', background: '#0B2117', color: C.text, border: '1px solid rgba(245,241,232,0.18)', fontSize: '15px', marginBottom: '12px', boxSizing: 'border-box', outline: 'none'
           }} />
           <div className="flex gap-[8px] overflow-x-auto pb-2 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]" style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-x' }}>
             {TIME_SLOTS.map(slot => {
               const active = slot === editTime;
               const slotP  = isPrimeTime(slot, editDate);
-              const slotDateTime = new Date(`${editDate}T${slot}:00`);
-              const isPast = isToday && slotDateTime.getTime() < validationTime;
+              const isPast = hasMoscowSlotStarted(editDate, slot);
               return (
                 <button key={slot} onClick={() => !isPast && setEditTime(slot)} disabled={isPast} style={{
                   flexShrink: 0, padding: '9px 12px', borderRadius: '14px',

@@ -935,6 +935,76 @@ const test = base.extend({
   },
 });
 
+test.describe('BOOKING Moscow calendar before midnight', () => {
+  test.use({ timezoneId: 'Asia/Tokyo' });
+
+  test('BOOKING keeps the Moscow current day until Moscow midnight', async ({ page }) => {
+    await page.clock.install({ time: new Date('2026-07-17T20:50:00.000Z') });
+    await openAuthenticatedApp(page);
+    await openBookingTab(page);
+
+    const dateCards = page.locator('.booking-date-card');
+    await expect(dateCards.nth(0)).toContainText('Сегодня');
+    await expect(dateCards.nth(0)).toContainText('17 июл');
+    await expect(dateCards.nth(1)).toContainText('Завтра');
+    await expect(dateCards.nth(1)).toContainText('18 июл');
+  });
+});
+
+test.describe('BOOKING Moscow calendar after midnight', () => {
+  test.use({ timezoneId: 'America/Los_Angeles' });
+
+  test('BOOKING switches to the next Moscow day after Moscow midnight', async ({ page }) => {
+    await page.clock.install({ time: new Date('2026-07-17T21:05:00.000Z') });
+    await openAuthenticatedApp(page);
+    await openBookingTab(page);
+
+    const dateCards = page.locator('.booking-date-card');
+    await expect(dateCards.nth(0)).toContainText('Сегодня');
+    await expect(dateCards.nth(0)).toContainText('18 июл');
+    await expect(dateCards.filter({ hasText: '17 июл' })).toHaveCount(0);
+
+    const morningSlot = page.locator('.booking-time-slot').filter({
+      has: page.getByText('07:00', { exact: true }),
+    });
+    await expect(morningSlot).toBeEnabled();
+  });
+
+  test('BOOKING blocks a started Moscow slot but keeps the next slot available', async ({ page }) => {
+    await page.clock.install({ time: new Date('2026-07-17T16:50:00.000Z') });
+    await openAuthenticatedApp(page);
+    await openBookingTab(page);
+
+    const startedSlot = page.locator('.booking-time-slot').filter({
+      has: page.getByText('19:30', { exact: true }),
+    });
+    const futureSlot = page.locator('.booking-time-slot').filter({
+      has: page.getByText('20:00', { exact: true }),
+    });
+
+    await expect(startedSlot).toBeDisabled();
+    await expect(startedSlot).toContainText('Прошло');
+    await expect(futureSlot).toBeEnabled();
+    await expect(futureSlot).toContainText('Свободно');
+  });
+
+  test('BOOKING blocks a Moscow slot at its exact start time', async ({ page }) => {
+    await page.clock.install({ time: new Date('2026-07-17T17:00:00.000Z') });
+    await openAuthenticatedApp(page);
+    await openBookingTab(page);
+
+    const startedSlot = page.locator('.booking-time-slot').filter({
+      has: page.getByText('20:00', { exact: true }),
+    });
+    const futureSlot = page.locator('.booking-time-slot').filter({
+      has: page.getByText('20:30', { exact: true }),
+    });
+
+    await expect(startedSlot).toBeDisabled();
+    await expect(futureSlot).toBeEnabled();
+  });
+});
+
 test('opens authorized home on iPhone viewport', async ({ page }) => {
   await openAuthenticatedApp(page);
 
