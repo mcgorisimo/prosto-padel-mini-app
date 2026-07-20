@@ -86,7 +86,7 @@ const handleSignUp = async ({ email, password, options }) => {
     // Если сессия не создалась (нужно подтверждение почты), 
     // supabase может не залогинить сразу. Но обычно на dev-режиме логинит.
   } catch (error) {
-    setError(error.message);
+    setError('Не удалось создать профиль. Проверьте данные и попробуйте еще раз.');
   } finally {
     setLoading(false);
   }
@@ -100,7 +100,7 @@ const handleSignUp = async ({ email, password, options }) => {
       if (error) throw error;
       showToast("С возвращением!", "success");
     } catch (error) {
-      setError(error.message);
+      setError('Не удалось войти. Проверьте email и пароль.');
     } finally {
       setLoading(false);
     }

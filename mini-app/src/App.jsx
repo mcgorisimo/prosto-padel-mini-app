@@ -1080,7 +1080,6 @@ const handleBookSlot = async (booking) => {
         await Promise.all([loadInvitations(), loadMatches(), loadNotifications()]);
         throw error;
       }
-      console.error(`Ошибка при присоединении к матчу: ${error.message}`);
       showToast?.(getJoinMatchErrorMessage(error), 'error');
       throw error;
     }
@@ -1113,7 +1112,6 @@ const handleBookSlot = async (booking) => {
     const { data, error } = await supabase.rpc('leave_match', { p_match_id: matchId });
 
     if (error) {
-      console.error(`Ошибка при выходе из матча: ${error.message}`);
       showToast?.('Не удалось выйти из матча. Попробуйте еще раз.', 'error');
       throw error;
     }
