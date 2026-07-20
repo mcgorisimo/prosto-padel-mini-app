@@ -1,4 +1,5 @@
 import { COURTS, WORKING_HOURS, BOOKING_DURATIONS } from './clubConfig';
+import { formatMoscowDateISO, getMoscowDateRange } from './moscowDateTime';
 
 export { COURTS, WORKING_HOURS, BOOKING_DURATIONS };
 
@@ -48,19 +49,10 @@ export function checkAvailability(allMatches, courtId, dateISO, startTime, durat
 }
 
 export const generateDates = () => {
-  const dates = [];
-  const today = new Date();
-
-  for (let i = 0; i < 14; i++) {
-    const date = new Date(today);
-    date.setDate(today.getDate() + i);
-    dates.push({
-      dateObj: date,
-      dayOfWeek: date.toLocaleDateString('ru-RU', { weekday: 'short' }),
-      dayOfMonth: date.getDate(),
-      dateISO: date.toISOString().slice(0, 10),
-    });
-  }
-
-  return dates;
+  return getMoscowDateRange(14).map((dateISO) => ({
+    dateObj: new Date(`${dateISO}T12:00:00Z`),
+    dayOfWeek: formatMoscowDateISO(dateISO, { weekday: 'short' }),
+    dayOfMonth: Number(dateISO.slice(-2)),
+    dateISO,
+  }));
 };

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { COURTS, HOURS, WORKING_HOURS, checkAvailability } from '../lib/booking';
+import { COURTS, HOURS, WORKING_HOURS, checkAvailability, generateDates } from '../lib/booking';
+import { formatMoscowDateISO, getMoscowDateISO, hasMoscowSlotStarted } from '../lib/moscowDateTime';
 import { getTotalPrice, isPrimeTime, fmtPrice as fmtPriceLib } from '../lib/pricing';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -27,22 +28,6 @@ const maxDuration = (time) => {
   if (h < START_HOUR) h += 24;
   const remaining = (END_HOUR * 60 - (h * 60 + m)) / 60;
   return Math.max(0.5, Math.floor(remaining * 2) / 2);
-};
-
-const generateDates = () => {
-  const dates = [];
-  const today = new Date();
-  for (let i = 0; i < 14; i++) {
-    const date = new Date(today);
-    date.setDate(today.getDate() + i);
-    dates.push({
-      dateObj: date,
-      dayOfWeek: date.toLocaleDateString('ru-RU', { weekday: 'short' }),
-      dayOfMonth: date.getDate(),
-      dateISO: date.toISOString().slice(0, 10), // For internal use
-    });
-  }
-  return dates;
 };
 
 const fmtPrice = fmtPriceLib;
@@ -157,7 +142,7 @@ function TimePicker({ time, onTime, duration, onDuration, maxDur, selectedDate }
   const scrollContainerRef = useRef(null);
   const firstAvailableNodeRef = useRef(null);
 
-  const isToday = selectedDate.dateISO === new Date().toISOString().slice(0, 10);
+  const isToday = selectedDate.dateISO === getMoscowDateISO();
 
   useEffect(() => {
     // This effect runs when the component mounts and when the date changes.
@@ -172,9 +157,6 @@ function TimePicker({ time, onTime, duration, onDuration, maxDur, selectedDate }
   }, [isToday, selectedDate.dateISO]);
 
   let firstAvailableFound = false;
-  const now = new Date();
-  const validationTime = isToday ? now.getTime() + 15 * 60 * 1000 : 0;
-
   return (
     <Section title="Время и продолжительность">
       <div style={{ ...card, display: 'flex', alignItems: 'center', marginBottom: '12px' }}>
@@ -194,8 +176,7 @@ function TimePicker({ time, onTime, duration, onDuration, maxDur, selectedDate }
         {TIME_SLOTS.map((slot) => {
           const prime  = isPrime(slot, selectedDate.dateISO);
           const active = time === slot;
-          const slotDateTime = new Date(`${selectedDate.dateISO}T${slot}:00`);
-          const isPast = isToday && slotDateTime.getTime() < validationTime;
+          const isPast = hasMoscowSlotStarted(selectedDate.dateISO, slot);
 
           const setFirstAvailableRef = (node) => {
             if (node && !isPast && !firstAvailableFound) {
@@ -491,16 +472,7 @@ export default function MatchCreationScreen({ onBack, onSuccess, user, allMatche
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    const isToday = selectedDate.dateISO === new Date().toISOString().slice(0, 10);
-    if (!isToday) {
-      setTimeError('');
-      return;
-    }
-    const now = new Date();
-    const validationTime = new Date(now.getTime() + 15 * 60 * 1000);
-    const selectedDateTime = new Date(`${selectedDate.dateISO}T${time}:00`);
-
-    if (selectedDateTime < validationTime) {
+    if (hasMoscowSlotStarted(selectedDate.dateISO, time)) {
       setTimeError('Нельзя забронировать время в прошлом');
     } else {
       setTimeError('');
@@ -551,7 +523,7 @@ export default function MatchCreationScreen({ onBack, onSuccess, user, allMatche
       isPrivate: isPrivate,
       isRatingMatch,
       dateISO: selectedDate.dateISO,
-      date: selectedDate.dateObj.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }).replace(' г.', ''),
+      date: formatMoscowDateISO(selectedDate.dateISO, { day: 'numeric', month: 'long' }).replace(' г.', ''),
       title,
       description,
       });
@@ -588,7 +560,7 @@ export default function MatchCreationScreen({ onBack, onSuccess, user, allMatche
       courtId: selectedCourt.id,
       courtName: selectedCourt.name,
   dateISO: selectedDate.dateISO,
-  date: selectedDate.dateObj.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }).replace(' г.', ''),
+  date: formatMoscowDateISO(selectedDate.dateISO, { day: 'numeric', month: 'long' }).replace(' г.', ''),
       title,
       description,
       });

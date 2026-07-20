@@ -1,6 +1,7 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { CalendarDays, Clock3, LockKeyhole, UsersRound, X } from 'lucide-react';
 import { BOOKING_DURATIONS, COURTS, WORKING_HOURS, checkAvailability, fromMin } from '../lib/booking';
+import { getMoscowDateRange, hasMoscowSlotStarted } from '../lib/moscowDateTime';
 import { fmtPrice, getPerPlayerPrice, getTotalPrice } from '../lib/pricing';
 
 const ANY_COURT = 'any';
@@ -33,23 +34,18 @@ const TIME_SECTIONS = [
 const MONTHS_SHORT = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
 const WEEKDAYS_SHORT = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
 
-function toLocalISO(date) {
-  const shifted = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
-  return shifted.toISOString().slice(0, 10);
-}
-
 function buildDates(days = 14) {
-  const today = new Date();
-
-  return Array.from({ length: days }, (_, index) => {
-    const date = new Date(today);
-    date.setDate(today.getDate() + index);
+  return getMoscowDateRange(days).map((dateISO, index) => {
+    const [, month, day] = dateISO.split('-').map(Number);
 
     return {
-      date,
-      dateISO: toLocalISO(date),
-      eyebrow: index === 0 ? 'Сегодня' : index === 1 ? 'Завтра' : WEEKDAYS_SHORT[date.getDay()],
-      label: `${date.getDate()} ${MONTHS_SHORT[date.getMonth()]}`,
+      dateISO,
+      eyebrow: index === 0
+        ? 'Сегодня'
+        : index === 1
+          ? 'Завтра'
+          : WEEKDAYS_SHORT[new Date(`${dateISO}T12:00:00Z`).getUTCDay()],
+      label: `${day} ${MONTHS_SHORT[month - 1]}`,
     };
   });
 }
@@ -67,9 +63,7 @@ function buildTimes() {
 }
 
 function isPastSlot(dateISO, time) {
-  const now = new Date();
-  const slotDate = new Date(`${dateISO}T${time}:00`);
-  return slotDate < new Date(now.getTime() + 15 * 60 * 1000);
+  return hasMoscowSlotStarted(dateISO, time);
 }
 
 function formatDuration(duration) {
@@ -95,6 +89,7 @@ export default function BookingScreen({ allMatches = [], onBookSlot, showToast, 
   const [matchType, setMatchType] = useState('casual');
   const [isSaving, setIsSaving] = useState(false);
   const [successText, setSuccessText] = useState('');
+  const isSavingRef = useRef(false);
 
   const selectedDate = dates.find((item) => item.dateISO === selectedDateISO) ?? dates[0];
   const selectedCourt = selectedSlot?.court ?? COURTS.find((court) => court.id === courtId);
@@ -175,15 +170,16 @@ export default function BookingScreen({ allMatches = [], onBookSlot, showToast, 
   };
 
   const handleCloseConfirm = () => {
-    if (isSaving) return;
+    if (isSavingRef.current) return;
     setSelectedSlot(null);
   };
 
   const handleConfirm = async () => {
-    if (!selectedSlot || isSaving || isRatingMatchBlocked) return;
+    if (!selectedSlot || isSavingRef.current || isRatingMatchBlocked) return;
 
     const isRatingBookingMatch = isPublicFormat && matchType === 'rating';
 
+    isSavingRef.current = true;
     setIsSaving(true);
     try {
       await onBookSlot?.({
@@ -203,6 +199,7 @@ export default function BookingScreen({ allMatches = [], onBookSlot, showToast, 
           ? 'Бронь корта с открытым сбором игроков'
           : 'Частная бронь корта',
         total: totalPrice,
+        pricePerPerson: perPlayerPrice,
       });
 
       const message = 'Бронь создана. Оплата сейчас подтверждается через администратора клуба.';
@@ -212,6 +209,7 @@ export default function BookingScreen({ allMatches = [], onBookSlot, showToast, 
     } catch (error) {
       console.error(error);
     } finally {
+      isSavingRef.current = false;
       setIsSaving(false);
     }
   };
@@ -394,11 +392,11 @@ export default function BookingScreen({ allMatches = [], onBookSlot, showToast, 
               <div className="mb-4 grid grid-cols-2 gap-2">
                 <div className="booking-price-tile p-3">
                   <div className="text-xs text-warm-white/46">Цена за корт</div>
-                  <div className="mt-1 text-lg font-black">{fmtPrice(totalPrice)}</div>
+                  <div data-testid="booking-total-price" className="mt-1 text-lg font-black">{fmtPrice(totalPrice)}</div>
                 </div>
                 <div className="booking-price-tile p-3">
                   <div className="text-xs text-warm-white/46">На игрока при 4</div>
-                  <div className="mt-1 text-lg font-black">{fmtPrice(perPlayerPrice)}</div>
+                  <div data-testid="booking-per-player-price" className="mt-1 text-lg font-black">{fmtPrice(perPlayerPrice)}</div>
                 </div>
               </div>
 

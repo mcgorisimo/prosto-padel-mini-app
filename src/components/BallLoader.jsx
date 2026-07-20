@@ -2,10 +2,15 @@ import React from 'react';
 
 const BallLoader = () => {
   return (
-    <div style={{
-      position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
-      background: '#020617', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 9999
-    }}>
+    <div
+      role="status"
+      aria-label="Загрузка приложения"
+      data-testid="app-loader"
+      style={{
+        position: 'fixed', inset: 0, width: '100%', height: '100dvh',
+        background: '#020617', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 9999
+      }}
+    >
       <div className="padel-ball">
         <div className="line"></div>
       </div>

@@ -11,7 +11,7 @@ const C = {
   muted:   'rgba(245,241,232,0.62)',
 };
 
-export default function MatchChat({ match, currentUser, messages = [], onSendMessage, onClose, showToast }) {
+export default function MatchChat({ match, currentUser, messages = [], loading = false, loadError = '', onRetry, onSendMessage, onClose }) {
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const messagesEndRef = useRef(null);
@@ -89,7 +89,18 @@ export default function MatchChat({ match, currentUser, messages = [], onSendMes
 
         {/* Messages Area */}
 <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3 no-scrollbar">
-  {safeMessages.length > 0 ? (
+  {loading ? (
+    <div data-testid="chat-loading" role="status" className="flex items-center justify-center h-full text-slate-400 text-sm">
+      <p>Загружаем сообщения…</p>
+    </div>
+  ) : loadError ? (
+    <div data-testid="chat-load-error" role="alert" className="flex flex-col items-center justify-center h-full text-center px-5">
+      <p className="text-slate-300 text-sm mb-3">{loadError}</p>
+      <button type="button" onClick={onRetry} className="px-4 py-2 rounded-xl border border-accent-light/35 text-accent-light text-sm font-semibold">
+        Повторить
+      </button>
+    </div>
+  ) : safeMessages.length > 0 ? (
     safeMessages.map((msg, index) => {
       const senderId = msg.senderId ?? msg.sender_id;
       const previousSenderId = safeMessages[index - 1]?.senderId ?? safeMessages[index - 1]?.sender_id;
@@ -126,7 +137,7 @@ export default function MatchChat({ match, currentUser, messages = [], onSendMes
         
 
         {/* Input */}
-        <footer className="p-4 border-t border-warm-white/10 bg-app-bg shrink-0">
+        <footer className="p-4 border-t border-warm-white/10 bg-app-bg shrink-0" style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom, 0px))' }}>
           <div className="flex items-start gap-2">
             <textarea
               value={text}

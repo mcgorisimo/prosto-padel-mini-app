@@ -1,17 +1,24 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { getAvailableBots, getTestBots } from '../lib/testSeed';
-import { getCourtCapacity, getPerPlayerPrice, fmtPrice as fmtPriceLib, isPrimeTime } from '../lib/pricing';
+import { formatParticipationPrice, getCourtCapacity, getParticipationPrice, getPerPlayerPrice, fmtPrice as fmtPriceLib, isPrimeTime } from '../lib/pricing';
 import { HOURS, WORKING_HOURS, BOOKING_DURATIONS } from '../lib/booking';
+import { getMoscowDateISO, hasMoscowSlotStarted } from '../lib/moscowDateTime';
 import FinishMatchModal from './FinishMatchModal';
 import PadelCard from './ui/PadelCard';
 import MatchChat from './MatchChat';
 import PadelButton from './ui/PadelButton';
-import { supabase } from '../lib/supabaseClient';
 import { getMatchLevelBadges, getMatchLevelRequirement } from '../lib/matchLevelRequirement';
 import { getMatchBookingStatus } from '../lib/matchBookingStatus';
 import { isRatingMatch, requiresVerifiedRating as getRequiresVerifiedRating } from '../lib/matchRating';
 import { getPublicPlayerProfiles } from '../lib/profileApi';
 import { getLevelForRating } from '../lib/ratingEngine';
+import {
+  getMatchWaitlist,
+  getMatchWaitlistState,
+  getWaitlistErrorCode,
+  joinMatchWaitlist,
+  leaveMatchWaitlist,
+} from '../lib/waitlistApi';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -224,6 +231,7 @@ function PlayerSlot({ player, onTap, slotIndex = 0, onSlotClick, ratingChange })
     : null;
   const isPlaceholder = player?.firstName === '—';
   const isOrganizer   = !!player?.isOrganizer;
+  const isPendingInvitation = player?.isPendingInvitation === true;
   const hasRealData   = player && !isPlaceholder;
   const isEmpty       = !player; // truly empty — clickable
 
@@ -234,7 +242,7 @@ function PlayerSlot({ player, onTap, slotIndex = 0, onSlotClick, ratingChange })
       : null;
   const deltaStr = fmtDelta(ratingChange?.delta);
   const slotColor   = PLAYER_COLORS[slotIndex % PLAYER_COLORS.length];
-  const borderColor = hasRealData ? slotColor : C.border;
+  const borderColor = isPendingInvitation ? C.loss : hasRealData ? slotColor : C.border;
 
   const avatarBg = !hasRealData
     ? C.surface
@@ -248,7 +256,7 @@ function PlayerSlot({ player, onTap, slotIndex = 0, onSlotClick, ratingChange })
   else                    label = player.firstName || 'Занято';
 
   const handleClick = () => {
-    if (hasRealData) onTap(player);
+    if (hasRealData && !isPendingInvitation) onTap(player);
     else if (isEmpty) onSlotClick?.();
   };
 
@@ -265,7 +273,7 @@ function PlayerSlot({ player, onTap, slotIndex = 0, onSlotClick, ratingChange })
           position: 'relative',
           width: '58px',
           height: '56px',
-          cursor: (hasRealData || isEmpty) ? 'pointer' : 'default',
+          cursor: (hasRealData && !isPendingInvitation) || isEmpty ? 'pointer' : 'default',
           overflow: 'visible',
         }}
       >
@@ -329,12 +337,17 @@ function PlayerSlot({ player, onTap, slotIndex = 0, onSlotClick, ratingChange })
       </div>
 
       <div style={{
-        color: hasRealData ? slotColor : C.muted,
+        color: isPendingInvitation ? C.text : hasRealData ? slotColor : C.muted,
         fontSize: '11px', fontWeight: player ? 600 : 400,
         textAlign: 'center', maxWidth: '56px', lineHeight: 1.2,
       }}>
         {label}
       </div>
+      {isPendingInvitation && (
+        <div style={{ color: C.loss, fontSize: '8px', fontWeight: 800, lineHeight: 1.15, textAlign: 'center', maxWidth: '64px' }}>
+          Ожидает ответа
+        </div>
+      )}
       {hasRealData && deltaStr && (
         <div style={{
           color: ratingChange.delta >= 0 ? C.win : C.loss,
@@ -362,15 +375,7 @@ function EditPanel({ initDate, initTime, initCourt, initDuration, initTitle, ini
   const [timeError, setTimeError] = useState('');
 
   useEffect(() => {
-    const isToday = editDate === new Date().toISOString().slice(0, 10);
-    if (!isToday) {
-      setTimeError('');
-      return;
-    }
-    const now = new Date();
-    const validationTime = new Date(now.getTime() + 15 * 60 * 1000);
-    const selectedDateTime = new Date(`${editDate}T${editTime}:00`);
-    if (selectedDateTime < validationTime) {
+    if (hasMoscowSlotStarted(editDate, editTime)) {
       setTimeError('Нельзя забронировать время в прошлом');
     } else {
       setTimeError('');
@@ -383,10 +388,6 @@ function EditPanel({ initDate, initTime, initCourt, initDuration, initTitle, ini
   const newPPl = calcPerPlayer(editTime, safeDur, editCourt, editDate);
   // Минимальная аренда — 1 час
   const DURATION_OPTS = BOOKING_DURATIONS.filter(d => d <= maxD);
-
-  const isToday = editDate === new Date().toISOString().slice(0, 10);
-  const now = new Date();
-  const validationTime = isToday ? now.getTime() + 15 * 60 * 1000 : 0;
 
   return (
     <BottomSheet onClose={onClose} variant="edit">
@@ -413,15 +414,14 @@ function EditPanel({ initDate, initTime, initCourt, initDuration, initTitle, ini
 
         <div style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(245,241,232,0.14)', borderRadius: '20px', padding: '14px' }}>
           <div style={{ fontSize: '10px', fontWeight: 800, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: '10px' }}>Дата и время</div>
-          <input type="date" value={editDate} min={new Date().toISOString().slice(0, 10)} onChange={e => setEditDate(e.target.value)} style={{
+          <input type="date" value={editDate} min={getMoscowDateISO()} onChange={e => setEditDate(e.target.value)} style={{
             width: '100%', padding: '13px 14px', borderRadius: '14px', background: '#0B2117', color: C.text, border: '1px solid rgba(245,241,232,0.18)', fontSize: '15px', marginBottom: '12px', boxSizing: 'border-box', outline: 'none'
           }} />
           <div className="flex gap-[8px] overflow-x-auto pb-2 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]" style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-x' }}>
             {TIME_SLOTS.map(slot => {
               const active = slot === editTime;
               const slotP  = isPrimeTime(slot, editDate);
-              const slotDateTime = new Date(`${editDate}T${slot}:00`);
-              const isPast = isToday && slotDateTime.getTime() < validationTime;
+              const isPast = hasMoscowSlotStarted(editDate, slot);
               return (
                 <button key={slot} onClick={() => !isPast && setEditTime(slot)} disabled={isPast} style={{
                   flexShrink: 0, padding: '9px 12px', borderRadius: '14px',
@@ -618,13 +618,13 @@ function LevelOverrideConfirm({ message, onConfirm, onCancel }) {
     <div data-testid="level-override-modal" className="app-modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.92)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '20px' }}>
       <div className="app-modal-panel" style={{ background: '#07160F', borderRadius: '16px', padding: '24px', width: '100%', maxWidth: '320px', border: '1px solid rgba(245,241,232,0.16)', textAlign: 'center' }}>
         <div style={{ color: C.gold, fontSize: '13px', fontWeight: 900, letterSpacing: '0.12em', marginBottom: '12px' }}>LEVEL</div>
-        <div style={{ color: C.text, fontWeight: 700, fontSize: '16px', marginBottom: '8px' }}>Добавить игрока вне диапазона?</div>
+        <div style={{ color: C.text, fontWeight: 700, fontSize: '16px', marginBottom: '8px' }}>Пригласить игрока вне диапазона?</div>
         <div style={{ color: C.muted, fontSize: '13px', marginBottom: '24px', lineHeight: 1.5 }}>
           {message}
         </div>
         <div style={{ display: 'flex', gap: '8px' }}>
           <button onClick={onCancel} style={{ flex: 1, padding: '12px', background: 'transparent', color: C.muted, border: `1px solid ${C.border}`, borderRadius: '10px', fontSize: '14px', cursor: 'pointer' }}>Отмена</button>
-          <button data-testid="level-override-confirm" onClick={onConfirm} style={{ flex: 1, padding: '12px', background: C.accent, color: '#07160F', border: 'none', borderRadius: '10px', fontSize: '14px', fontWeight: 800, cursor: 'pointer' }}>Добавить</button>
+          <button data-testid="level-override-confirm" onClick={onConfirm} style={{ flex: 1, padding: '12px', background: C.accent, color: '#07160F', border: 'none', borderRadius: '10px', fontSize: '14px', fontWeight: 800, cursor: 'pointer' }}>Пригласить</button>
         </div>
       </div>
     </div>
@@ -636,6 +636,8 @@ function SlotActionSheet({ slotIndex, isOwner, currentUser, matchId, onAddGuest,
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [invitingPlayerId, setInvitingPlayerId] = useState(null);
+  const invitationInFlightRef = useRef(false);
 
   // Проверяем, играет ли уже юзер в матче
   const isParticipant = slots?.some(player => player?.id === currentUser?.id);
@@ -672,17 +674,25 @@ function SlotActionSheet({ slotIndex, isOwner, currentUser, matchId, onAddGuest,
   }, [searchTerm, isOwner, currentUser?.id]);
 
   const handleSelectPlayer = async (player) => {
-    const result = await onAddGuest(slotIndex, {
-      id: player.id,
-      firstName: player.first_name,
-      lastName: player.last_name,
-      username: player.username,
-      numericRating: player.rating,
-      isVerified: player.is_verified,
-      sidePreference: player.side_preference || 'LR',
-      isOrganizer: false,
-    });
-    if (result !== false) onClose();
+    if (invitationInFlightRef.current) return;
+    invitationInFlightRef.current = true;
+    setInvitingPlayerId(player.id);
+    try {
+      const result = await onAddGuest(slotIndex, {
+        id: player.id,
+        firstName: player.first_name,
+        lastName: player.last_name,
+        username: player.username,
+        numericRating: player.rating,
+        isVerified: player.is_verified,
+        sidePreference: player.side_preference || 'LR',
+        isOrganizer: false,
+      });
+      if (result !== false) onClose();
+    } finally {
+      invitationInFlightRef.current = false;
+      setInvitingPlayerId(null);
+    }
   };
 
   // 1. ИНТЕРФЕЙС ОРГАНИЗАТОРА ИЛИ УЧАСТНИКА (Поиск)
@@ -710,10 +720,13 @@ function SlotActionSheet({ slotIndex, isOwner, currentUser, matchId, onAddGuest,
                 key={player.id}
                 data-testid={`player-search-result-${player.id}`}
                 onClick={() => handleSelectPlayer(player)}
+                disabled={invitingPlayerId !== null}
                 style={{ width: '100%', padding: '12px', background: 'transparent', border: 'none', borderBottom: `1px solid ${C.border}`, color: C.text, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
               >
                 <span>{player.first_name} {player.last_name}{player.username ? ` · @${player.username}` : ''}</span>
-                <span style={{ color: C.gold, fontSize: '11px', fontWeight: 700 }}>★ {player.rating?.toFixed(1) || '3.0'}</span>
+                <span style={{ color: C.gold, fontSize: '11px', fontWeight: 700 }}>
+                  {invitingPlayerId === player.id ? 'Отправляем…' : 'Пригласить'}
+                </span>
               </button>
             ))}
           </div>
@@ -855,9 +868,193 @@ function RatingTypeBadge({ match }) {
   );
 }
 
+function WaitlistPlayerAvatar({ player }) {
+  const [imageFailed, setImageFailed] = useState(false);
+  const initials = [player.first_name, player.last_name]
+    .filter(Boolean)
+    .map((part) => part.replace('.', '').trim().charAt(0))
+    .join('')
+    .slice(0, 2)
+    .toUpperCase() || 'И';
+
+  if (player.photo_url && !imageFailed) {
+    return (
+      <img
+        src={player.photo_url}
+        alt=""
+        onError={() => setImageFailed(true)}
+        style={{ width: '38px', height: '38px', borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }}
+      />
+    );
+  }
+
+  return (
+    <div style={{ width: '38px', height: '38px', borderRadius: '50%', display: 'grid', placeItems: 'center', flexShrink: 0, background: 'rgba(216,243,74,0.12)', border: '1px solid rgba(216,243,74,0.22)', color: C.gold, fontSize: '12px', fontWeight: 900 }}>
+      {initials}
+    </div>
+  );
+}
+
+function MatchWaitlistList({ players, loading, loadError, showEmptyMessage, onRetry }) {
+  if (!loading && !loadError && players.length === 0 && !showEmptyMessage) return null;
+
+  return (
+    <section
+      data-testid="match-waitlist-list"
+      aria-live="polite"
+      style={{ marginBottom: '20px', maxWidth: '100%', minWidth: 0, overflow: 'hidden' }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px', minWidth: 0 }}>
+        <div style={{ color: C.text, fontSize: '14px', fontWeight: 900 }}>Лист ожидания</div>
+        <div data-testid="match-waitlist-list-count" style={{ minWidth: '24px', padding: '2px 7px', borderRadius: '999px', textAlign: 'center', background: 'rgba(216,243,74,0.12)', color: C.gold, fontSize: '11px', fontWeight: 900 }}>
+          {players.length}
+        </div>
+      </div>
+
+      {loadError && (
+        <div data-testid="match-waitlist-list-error" style={{ padding: '12px', borderRadius: '12px', background: 'rgba(255,111,97,0.06)', border: '1px solid rgba(255,111,97,0.2)' }}>
+          <div style={{ color: C.text, fontSize: '12px', fontWeight: 800 }}>Не удалось загрузить лист ожидания</div>
+          <button
+            type="button"
+            data-testid="match-waitlist-list-retry"
+            onClick={onRetry}
+            disabled={loading}
+            style={{ minHeight: '44px', marginTop: '6px', padding: '0 12px', borderRadius: '10px', border: '1px solid rgba(216,243,74,0.28)', background: 'transparent', color: C.gold, fontSize: '12px', fontWeight: 850, cursor: loading ? 'wait' : 'pointer' }}
+          >
+            Повторить
+          </button>
+        </div>
+      )}
+
+      {!loadError && loading && players.length === 0 && (
+        <div data-testid="match-waitlist-list-loading" style={{ color: C.muted, fontSize: '12px', padding: '8px 0' }}>
+          Загружаем очередь…
+        </div>
+      )}
+
+      {!loadError && !loading && players.length === 0 && showEmptyMessage && (
+        <div style={{ color: C.muted, fontSize: '12px', lineHeight: 1.45 }}>Лист ожидания пока пуст</div>
+      )}
+
+      {players.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '7px', minWidth: 0 }}>
+          {players.map((player) => {
+            const name = [player.first_name, player.last_name].filter(Boolean).join(' ') || 'Игрок';
+            return (
+              <div
+                key={player.waitlist_id}
+                data-testid={`match-waitlist-player-${player.user_id}`}
+                style={{ display: 'flex', alignItems: 'center', gap: '9px', minWidth: 0, padding: '8px 10px', borderRadius: '12px', border: player.is_current_user ? '1px solid rgba(216,243,74,0.34)' : `1px solid ${C.border}`, background: player.is_current_user ? 'rgba(216,243,74,0.075)' : C.card }}
+              >
+                <div data-testid="match-waitlist-player-position" style={{ width: '24px', flexShrink: 0, color: C.gold, fontSize: '13px', fontWeight: 900, textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>
+                  {player.queue_position}
+                </div>
+                <WaitlistPlayerAvatar player={player} />
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div title={name} style={{ color: C.text, fontSize: '13px', fontWeight: 850, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {name}
+                  </div>
+                  <div style={{ color: C.muted, fontSize: '10px', marginTop: '2px' }}>
+                    Рейтинг: {player.rating == null ? '—' : player.rating}
+                  </div>
+                </div>
+                {player.is_current_user && (
+                  <span data-testid="match-waitlist-current-user" style={{ flexShrink: 0, padding: '4px 7px', borderRadius: '999px', background: C.gold, color: C.bg, fontSize: '9px', fontWeight: 950 }}>
+                    Это вы
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function WaitlistPanel({ position, count, loading, action, onJoin, onLeave }) {
+  const queuePosition = Number(position?.queue_position);
+  const isWaiting = Number.isFinite(queuePosition) && queuePosition > 0;
+
+  return (
+    <section
+      data-testid="match-waitlist-action"
+      style={{ padding: '16px', borderRadius: '16px', border: '1px solid rgba(216,243,74,0.22)', background: 'rgba(216,243,74,0.055)' }}
+      aria-live="polite"
+    >
+      {isWaiting ? (
+        <>
+          <div style={{ color: C.gold, fontSize: '10px', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Вы в листе ожидания</div>
+          <div data-testid="match-waitlist-position" style={{ color: C.text, fontSize: '19px', fontWeight: 900, marginTop: '5px', fontVariantNumeric: 'tabular-nums' }}>
+            Вы {queuePosition}-й в очереди
+          </div>
+          <div data-testid="match-waitlist-count" style={{ color: C.muted, fontSize: '11px', marginTop: '5px' }}>
+            Всего ожидают: {count}
+          </div>
+          <PadelButton data-testid="match-waitlist-leave-button" variant="danger" size="lg" fullWidth className="mt-3" onClick={onLeave} disabled={loading || action !== null}>
+            {action === 'leave' ? 'Выходим…' : 'Выйти из листа ожидания'}
+          </PadelButton>
+        </>
+      ) : (
+        <>
+          <div style={{ color: C.text, fontSize: '15px', fontWeight: 850 }}>Все места заняты</div>
+          <div style={{ color: C.muted, fontSize: '11px', lineHeight: 1.45, marginTop: '5px' }}>
+            Встаньте в очередь — если место освободится, сервер автоматически добавит первого игрока в состав.
+          </div>
+          <div data-testid="match-waitlist-count" style={{ color: C.muted, fontSize: '11px', marginTop: '7px' }}>
+            В очереди: {loading ? '…' : count}
+          </div>
+          <PadelButton data-testid="match-waitlist-join-button" variant="info" size="lg" fullWidth className="mt-3" onClick={onJoin} disabled={loading || action !== null}>
+            {action === 'join' ? 'Добавляем…' : 'Встать в лист ожидания'}
+          </PadelButton>
+        </>
+      )}
+    </section>
+  );
+}
+
+function MatchInvitationPanel({ accepting, declining, onAccept, onDecline }) {
+  const processing = accepting || declining;
+  return (
+    <section
+      data-testid="match-invitation-panel"
+      style={{ padding: '16px', borderRadius: '16px', border: '1px solid rgba(216,243,74,0.28)', background: 'rgba(216,243,74,0.07)' }}
+      aria-live="polite"
+    >
+      <div style={{ color: C.gold, fontSize: '10px', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Приглашение</div>
+      <div style={{ color: C.text, fontSize: '18px', fontWeight: 900, marginTop: '5px' }}>Вас пригласили в эту игру</div>
+      <div style={{ color: C.muted, fontSize: '11px', lineHeight: 1.45, marginTop: '5px' }}>
+        Для вас зарезервировано место. Подтвердите участие или освободите слот для другого игрока.
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginTop: '13px' }}>
+        <PadelButton
+          data-testid="match-invitation-decline-button"
+          variant="danger"
+          size="lg"
+          fullWidth
+          disabled={processing}
+          onClick={onDecline}
+        >
+          {declining ? 'Отказываемся…' : 'Отказаться'}
+        </PadelButton>
+        <PadelButton
+          data-testid="match-invitation-accept-button"
+          variant="success"
+          size="lg"
+          fullWidth
+          disabled={processing}
+          onClick={onAccept}
+        >
+          {accepting ? 'Принимаем…' : 'Принять приглашение'}
+        </PadelButton>
+      </div>
+    </section>
+  );
+}
+
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
-export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinSuccess, onDelete, onComplete, onConfirmScore, onDisputeScore, onUpdate, onSlotsChange, onJoinMatch, onLeaveMatch, allMessages, onSendMessage, onRevertToPrivate, showToast }) {
+export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinSuccess, onDelete, onComplete, onConfirmScore, onDisputeScore, onUpdate, onSlotsChange, onJoinMatch, onLeaveMatch, onRefreshMatch, incomingInvitation = null, pendingInvitations = [], invitationActions = new Set(), onAcceptInvitation, onDeclineInvitation, onCreateInvitation, onCancelInvitation, onRemoveParticipant, allMessages, messagesLoading, messagesLoadError, onRetryMessages, onSendMessage, onRevertToPrivate, showToast }) {
   const isOwner = canManageMatch(currentUser, match);
 
   const allBots = useMemo(() => getTestBots(), []);
@@ -874,7 +1071,6 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
   const [cancelled,   setCancelled]   = useState(false);
   const [editSheet,   setEditSheet]   = useState(false);
   const [cancelSheet, setCancelSheet] = useState(false);
-  const [inviteSheet, setInviteSheet] = useState(false);
   const [kickTarget,  setKickTarget]  = useState(null);
   const [leaveTarget, setLeaveTarget] = useState(null);
   const [pinnedMsg,   setPinnedMsg]   = useState('');
@@ -884,6 +1080,64 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
   const [finishModal, setFinishModal] = useState(false);
   const [chatOpen,    setChatOpen]    = useState(false);
   const [levelOverride, setLevelOverride] = useState(null);
+  const joinInFlightRef = useRef(false);
+  const joinSuccessTimerRef = useRef(null);
+  const waitlistActionRef = useRef(false);
+  const waitlistLoadRef = useRef(0);
+  const [waitlistPosition, setWaitlistPosition] = useState(null);
+  const [waitlistCount, setWaitlistCount] = useState(0);
+  const [waitlistLoading, setWaitlistLoading] = useState(false);
+  const [waitlistPlayers, setWaitlistPlayers] = useState([]);
+  const [waitlistListLoading, setWaitlistListLoading] = useState(false);
+  const [waitlistListError, setWaitlistListError] = useState('');
+  const [waitlistAction, setWaitlistAction] = useState(null);
+  const [capacityUnavailable, setCapacityUnavailable] = useState(false);
+
+  const refreshWaitlist = useCallback(async () => {
+    const requestId = ++waitlistLoadRef.current;
+    setWaitlistLoading(true);
+    setWaitlistListLoading(true);
+    setWaitlistListError('');
+
+    const [stateResult, listResult] = await Promise.allSettled([
+      getMatchWaitlistState(match.id),
+      getMatchWaitlist(match.id),
+    ]);
+
+    if (requestId !== waitlistLoadRef.current) return null;
+
+    let state = null;
+    if (stateResult.status === 'fulfilled') {
+      state = stateResult.value;
+      setWaitlistPosition(state.position);
+      setWaitlistCount(state.count);
+    }
+
+    if (listResult.status === 'fulfilled') {
+      const players = listResult.value;
+      setWaitlistPlayers(players);
+      if (!state) {
+        const currentPlayer = players.find((player) => player.is_current_user);
+        setWaitlistPosition(currentPlayer ? {
+          waitlist_id: currentPlayer.waitlist_id,
+          status: 'waiting',
+          queue_position: currentPlayer.queue_position,
+          joined_at: currentPlayer.joined_at,
+        } : null);
+        setWaitlistCount(players.length);
+      }
+    } else {
+      setWaitlistListError('Не удалось загрузить лист ожидания.');
+    }
+
+    setWaitlistLoading(false);
+    setWaitlistListLoading(false);
+    return state;
+  }, [match.id]);
+
+  useEffect(() => () => {
+    if (joinSuccessTimerRef.current) clearTimeout(joinSuccessTimerRef.current);
+  }, []);
 
   // Owner-editable fields (null = use original from match prop)
   const [localDate, setLocalDate] = useState(null);
@@ -929,7 +1183,15 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
   const isActuallyPrime = isPrimeTime(time, dateISO);
   const isPanoramic     = courtType === 'panoramic';
   const maxSlots        = getCourtCapacity(courtType);
-  const pricePerPl      = calcPerPlayer(time, duration, courtType, dateISO);
+  const pricePerPl = getParticipationPrice({
+    ...match,
+    dateISO,
+    time,
+    duration,
+    courtType,
+  }, { allowFallback: true });
+  const isExplicitlyFree = match.isFree === true || match.is_free === true;
+  const priceLabel = formatParticipationPrice(pricePerPl, { isFree: isExplicitlyFree });
 
   // Owner's real profile for the first slot
   const ownerSlot = {
@@ -968,9 +1230,41 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
   } else {
     baseSlots = [];
   }
-  const allFilled = baseSlots.slice(0, maxSlots);
-  const slots     = [...allFilled, ...Array(Math.max(0, maxSlots - allFilled.length)).fill(null)];
-  const isFull    = allFilled.length >= maxSlots;
+  const confirmedPlayers = baseSlots.slice(0, maxSlots);
+  const slots = Array(maxSlots).fill(null);
+
+  confirmedPlayers.forEach((player) => {
+    const explicitIndex = Number(player?.slotIndex);
+    const slotIndex = Number.isInteger(explicitIndex)
+      && explicitIndex >= 0
+      && explicitIndex < maxSlots
+      && !slots[explicitIndex]
+      ? explicitIndex
+      : slots.findIndex((slot) => !slot);
+    if (slotIndex >= 0) slots[slotIndex] = player;
+  });
+
+  pendingInvitations.forEach((invitation) => {
+    const slotIndex = Number(invitation.slot_index);
+    if (!Number.isInteger(slotIndex) || slotIndex < 0 || slotIndex >= maxSlots || slots[slotIndex]) return;
+    const player = invitation.player ?? {};
+    slots[slotIndex] = {
+      id: invitation.invited_user_id,
+      firstName: player.firstName ?? player.first_name ?? 'Игрок',
+      lastName: player.lastName ?? player.last_name ?? '',
+      numericRating: player.numericRating ?? player.rating,
+      isVerified: player.isVerified ?? player.is_verified,
+      isOrganizer: false,
+      isPendingInvitation: true,
+      invitationId: invitation.id,
+      slotIndex,
+    };
+  });
+
+  const allFilled = slots.filter((player) => player && !player.isPendingInvitation);
+  const visiblePendingInvitations = slots.filter((player) => player?.isPendingInvitation);
+  const isFull = allFilled.length >= maxSlots;
+  const isCapacityReserved = slots.every(Boolean);
   const savedScore = match.finalScore ?? match.score;
   const hasFinalScore = Array.isArray(savedScore) && savedScore.some(s => (s?.t1 ?? 0) + (s?.t2 ?? 0) > 0);
   const isCompletedMatch = finished || status === 'completed' || status === 'finished' || (hasFinalScore && !isScorePending && !isScoreDisputed && !isRatedMatch);
@@ -1011,8 +1305,35 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
     currentUserTeam !== submittedTeam;
 
   // Join guard
-  const isParticipant = (match.participants ?? []).includes(currentUser.id)
+  const isParticipant = isOwner || (match.participants ?? []).includes(currentUser.id)
     || allFilled.some(player => player?.id === currentUser.id);
+  const pendingInvitation = incomingInvitation?.match_id === match.id ? incomingInvitation : null;
+  const pendingInvitationId = pendingInvitation?.invitation_id;
+  const acceptingInvitation = pendingInvitationId
+    ? invitationActions.has(`accept:${pendingInvitationId}`)
+    : false;
+  const decliningInvitation = pendingInvitationId
+    ? invitationActions.has(`decline:${pendingInvitationId}`)
+    : false;
+  const isActiveWaitlistStatus = ['open', 'searching', 'upcoming', 'confirmed'].includes(status);
+  const canViewWaitlist = match.type === 'match'
+    && match.isPrivate !== true
+    && isActiveWaitlistStatus
+    && matchHasNotStarted
+    && !isCompletedMatch;
+  const canUseWaitlist = canViewWaitlist
+    && !isOwner
+    && !isParticipant
+    && !pendingInvitation;
+  const showWaitlist = canUseWaitlist
+    && (isCapacityReserved || capacityUnavailable || waitlistPosition?.status === 'waiting');
+  const waitlistRefreshKey = [
+    status,
+    match.updated_at ?? match.updatedAt ?? '',
+    (match.participants ?? []).join(','),
+    (origFilledSlots ?? []).map((player) => player?.id ?? '').join(','),
+    pendingInvitations.map((invitation) => `${invitation.id}:${invitation.status}`).join(','),
+  ].join('|');
   const levelOk    = currentUser.ratingIdx >= ratingMin && currentUser.ratingIdx <= ratingMax;
   const privateJoinBlocked = match.isPrivate === true;
   const verifiedOk = !requiresVerifiedRating || currentUser.isVerified === true;
@@ -1020,7 +1341,9 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
     if (isCompletedMatch) return 'completed';
     if (isOwner) return 'owner';
     if (isParticipant) return 'participant';
-    if (isFull) return 'full';
+    if (pendingInvitation) return 'invited';
+    if (!isActiveWaitlistStatus || !matchHasNotStarted) return 'inactive';
+    if (isCapacityReserved) return 'full';
     if (privateJoinBlocked) return 'private';
     if (!verifiedOk) return 'unverified';
     if (!levelOk) return 'level';
@@ -1029,10 +1352,12 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
   const joinBlockReason = getJoinBlockReason();
   const canJoin = joinBlockReason === null;
   const guardReason = joinBlockReason === 'unverified' || joinBlockReason === 'level' ? joinBlockReason : null;
-  const showRatingGuard = !isOwner && !isParticipant && !isFull && guardReason;
+  const showRatingGuard = !isOwner && !isParticipant && !isCapacityReserved && guardReason;
   const getJoinBlockedText = (reason = joinBlockReason) => {
     if (reason === 'completed') return 'Матч уже завершён.';
     if (reason === 'participant') return 'Вы уже участвуете в этом матче.';
+    if (reason === 'invited') return 'В эту игру вас пригласили. Примите или отклоните приглашение';
+    if (reason === 'inactive') return 'Участие в этом матче уже недоступно.';
     if (reason === 'full') return 'В матче больше нет свободных мест.';
     if (reason === 'private') return 'Это приватный матч. Присоединиться можно только по приглашению организатора.';
     if (reason === 'unverified') return 'Для участия нужен подтверждённый рейтинг. Обратитесь к администратору клуба.';
@@ -1040,8 +1365,68 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
     return 'Участие в матче сейчас недоступно.';
   };
 
+  const refreshMatchAndWaitlist = async () => {
+    const [updatedMatch] = await Promise.all([
+      onRefreshMatch?.(match.id),
+      refreshWaitlist(),
+    ]);
+    return updatedMatch ?? null;
+  };
+
+  useEffect(() => {
+    waitlistLoadRef.current += 1;
+    setWaitlistPosition(null);
+    setWaitlistCount(0);
+    setWaitlistPlayers([]);
+    setWaitlistListError('');
+    setWaitlistLoading(false);
+    setWaitlistListLoading(false);
+  }, [match.id]);
+
+  useEffect(() => {
+    if (!canViewWaitlist) {
+      setWaitlistPosition(null);
+      setWaitlistCount(0);
+      setWaitlistPlayers([]);
+      setWaitlistListError('');
+      setWaitlistLoading(false);
+      setWaitlistListLoading(false);
+      if (isParticipant) setCapacityUnavailable(false);
+      return;
+    }
+    refreshWaitlist();
+  }, [canViewWaitlist, isParticipant, refreshWaitlist, waitlistRefreshKey]);
+
+  const handleAcceptPendingInvitation = async () => {
+    if (!pendingInvitation || acceptingInvitation || decliningInvitation || !onAcceptInvitation) return false;
+    try {
+      const updatedMatch = await onAcceptInvitation(pendingInvitation);
+      if (updatedMatch?.filledSlots) setLocalSlots(updatedMatch.filledSlots);
+      await refreshWaitlist();
+      return Boolean(updatedMatch);
+    } catch {
+      return false;
+    }
+  };
+
+  const handleDeclinePendingInvitation = async () => {
+    if (!pendingInvitation || acceptingInvitation || decliningInvitation || !onDeclineInvitation) return false;
+    try {
+      const result = await onDeclineInvitation(pendingInvitation);
+      if (result?.filledSlots) setLocalSlots(result.filledSlots);
+      await refreshWaitlist();
+      return result;
+    } catch {
+      return false;
+    }
+  };
+
   const handleJoin = async () => {
-    if (joining) return;
+    if (joinInFlightRef.current) return;
+    if (pendingInvitation) {
+      await handleAcceptPendingInvitation();
+      return;
+    }
     if (!canJoin) {
       showToast?.(getJoinBlockedText(), guardReason ? 'error' : 'info');
       return;
@@ -1053,11 +1438,72 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
       return;
     }
 
-    setJoining(true);
+    await handleTakeSlot(firstFreeSlotIndex);
+  };
+
+  const handleJoinWaitlist = async () => {
+    if (waitlistActionRef.current || !canUseWaitlist) return;
+    waitlistActionRef.current = true;
+    setWaitlistAction('join');
+
     try {
-      await handleTakeSlot(firstFreeSlotIndex);
+      await joinMatchWaitlist(match.id);
+      setCapacityUnavailable(true);
+      await refreshWaitlist();
+      showToast?.('Вы добавлены в лист ожидания', 'success');
+    } catch (error) {
+      const code = getWaitlistErrorCode(error);
+      if (code.includes('WAITLIST_MATCH_HAS_FREE_SLOT')) {
+        setCapacityUnavailable(false);
+        await refreshMatchAndWaitlist();
+        showToast?.('Место уже освободилось. Обновите матч и вступите в игру', 'info');
+      } else if (code.includes('WAITLIST_ALREADY_PARTICIPANT')) {
+        setWaitlistPosition(null);
+        await onRefreshMatch?.(match.id);
+        showToast?.('Вы уже добавлены в состав', 'info');
+      } else if (code.includes('WAITLIST_ALREADY_WAITING')) {
+        setCapacityUnavailable(true);
+        await refreshWaitlist();
+        showToast?.('Вы уже в листе ожидания', 'info');
+      } else if (code.includes('WAITLIST_PENDING_INVITATION')) {
+        showToast?.('У вас уже есть активное приглашение в этот матч', 'info');
+      } else if (code.includes('WAITLIST_RATING_OUTSIDE_RANGE')) {
+        showToast?.('Ваш уровень не входит в диапазон этого матча', 'error');
+      } else {
+        await refreshMatchAndWaitlist();
+        showToast?.('Не удалось встать в лист ожидания. Попробуйте ещё раз.', 'error');
+      }
     } finally {
-      setJoining(false);
+      waitlistActionRef.current = false;
+      setWaitlistAction(null);
+    }
+  };
+
+  const handleLeaveWaitlist = async () => {
+    if (waitlistActionRef.current) return;
+    waitlistActionRef.current = true;
+    setWaitlistAction('leave');
+
+    try {
+      await leaveMatchWaitlist(match.id);
+      await refreshWaitlist();
+      showToast?.('Вы вышли из листа ожидания', 'info');
+    } catch (error) {
+      const code = getWaitlistErrorCode(error);
+      if (code.includes('WAITLIST_NOT_WAITING') || code.includes('WAITLIST_ALREADY_PARTICIPANT')) {
+        const updatedMatch = await refreshMatchAndWaitlist();
+        const updatedParticipants = updatedMatch?.participants ?? [];
+        const updatedSlots = updatedMatch?.filledSlots ?? updatedMatch?.filled_slots ?? [];
+        const wasPromoted = updatedParticipants.includes(currentUser.id)
+          || updatedSlots.some((player) => player?.id === currentUser.id);
+        showToast?.(wasPromoted ? 'Вы уже добавлены в состав' : 'Вы больше не в листе ожидания', 'info');
+      } else {
+        await refreshWaitlist();
+        showToast?.('Не удалось выйти из листа ожидания. Попробуйте ещё раз.', 'error');
+      }
+    } finally {
+      waitlistActionRef.current = false;
+      setWaitlistAction(null);
     }
   };
   
@@ -1078,6 +1524,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
       setLocalTitle(updatedMatch?.title ?? newTitle);
       setLocalDesc(updatedMatch?.description ?? newDesc);
       setEditSheet(false);
+      await refreshWaitlist();
     } catch {
       showToast?.('Изменения не сохранены. Попробуйте еще раз.', 'error');
     }
@@ -1087,18 +1534,21 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
   const commitSlots = async (nextFilled) => {
     const updatedMatch = await onSlotsChange?.(match.id, nextFilled);
     setLocalSlots(updatedMatch?.filledSlots ?? nextFilled);
+    await refreshWaitlist();
     return updatedMatch;
   };
 
   const handleKickConfirm = async () => {
     try {
-      await commitSlots(allFilled.filter(p => {
-        if (!kickTarget?.id) return p !== kickTarget;
-        return p?.id !== kickTarget.id;
-      }));
+      if (!kickTarget?.id || !onRemoveParticipant) {
+        throw new Error('remove_match_participant RPC handler is not available');
+      }
+      const updatedMatch = await onRemoveParticipant(match.id, kickTarget.id);
+      setLocalSlots(updatedMatch?.filledSlots ?? allFilled);
       setKickTarget(null);
+      await refreshWaitlist();
     } catch {
-      showToast?.('Слот не обновлен. Попробуйте еще раз.', 'error');
+      // Parent shows the concrete RPC error.
     }
   };
 
@@ -1132,14 +1582,20 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
       }
 
       const updatedMatch = await onLeaveMatch(match.id);
+      if (joinSuccessTimerRef.current) {
+        clearTimeout(joinSuccessTimerRef.current);
+        joinSuccessTimerRef.current = null;
+      }
       setLocalSlots(updatedMatch?.filledSlots ?? allFilled);
+      setJoined(false);
       setLeaveTarget(null);
+      await refreshWaitlist();
     } catch {
-      showToast?.('Не удалось выйти из матча. Попробуйте еще раз.', 'error');
+      // The parent handler shows the concrete RPC error without duplicating the message.
     }
   };
 
-  // Owner adds a named guest into a specific empty slot
+  // The organizer reserves a slot by invitation; the player is added only after accepting it.
   const handleAddGuest = async (slotIndex, playerData, options = {}) => {
     if (slots[slotIndex]) {
       showToast?.('Этот слот уже занят.', 'info');
@@ -1147,7 +1603,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
     }
 
     if (playerData?.id && slots.some((player, index) => index !== slotIndex && player?.id === playerData.id)) {
-      showToast?.('Этот игрок уже добавлен в матч.', 'info');
+      showToast?.('Этот игрок уже участвует в матче или ожидает ответа.', 'info');
       return false;
     }
 
@@ -1162,25 +1618,17 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
       setLevelOverride({
         slotIndex,
         playerData,
-        message: `Уровень игрока ${formatPlayerRating(playerData)} ${direction} диапазона матча ${levelRequirement.numericRangeLabel}. Всё равно добавить?`,
+        message: `Уровень игрока ${formatPlayerRating(playerData)} ${direction} диапазона матча ${levelRequirement.numericRangeLabel}. Всё равно пригласить?`,
       });
       return true;
     }
 
-    const next = [...slots];
-    if (typeof playerData === 'string') {
-      // Old behavior: just a name string
-      next[slotIndex] = { firstName: playerData, isOrganizer: false, isVerified: false };
-    } else {
-      // New behavior: full player object from database
-      next[slotIndex] = playerData;
-    }
+    if (!playerData?.id || !onCreateInvitation) return false;
     try {
-      await commitSlots(next.filter(Boolean));
+      await onCreateInvitation(match.id, playerData, slotIndex);
       setTargetSlot(null);
       return true;
     } catch {
-      showToast?.('Игрок не добавлен. Попробуйте еще раз.', 'error');
       return false;
     }
   };
@@ -1207,7 +1655,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
     const next = [...slots];
     next[slotIndex] = bot;
     try {
-      await commitSlots(next.filter(Boolean));
+      await commitSlots(next.filter((player) => player && !player.isPendingInvitation));
       setTargetSlot(null);
     } catch {
       showToast?.('Слот не обновлен. Попробуйте еще раз.', 'error');
@@ -1270,6 +1718,12 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
 
   // Non-owner takes an empty slot with their own profile
   const handleTakeSlot = async (slotIndex) => {
+    if (joinInFlightRef.current) return false;
+
+    if (pendingInvitation) {
+      return handleAcceptPendingInvitation();
+    }
+
     if (!currentUser?.id) {
       showToast?.('Не удалось определить игрока. Попробуйте войти заново.', 'error');
       return false;
@@ -1285,15 +1739,27 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
       return false;
     }
 
+    joinInFlightRef.current = true;
+    setJoining(true);
+
     try {
       const updatedMatch = await onJoinMatch?.(match.id);
       setLocalSlots(updatedMatch?.filledSlots ?? slots);
       setTargetSlot(null);
       setJoined(true);
-      setTimeout(() => onJoinSuccess?.(updatedMatch ?? match), 1500);
+      await refreshWaitlist();
+      joinSuccessTimerRef.current = setTimeout(() => onJoinSuccess?.(updatedMatch ?? match), 1500);
       return true;
-    } catch {
+    } catch (error) {
+      const message = [error?.message, error?.details, error?.hint].filter(Boolean).join(' ').toLowerCase();
+      if (message.includes('no free slots') || message.includes('match full') || message.includes('slot unavailable')) {
+        setCapacityUnavailable(true);
+        await refreshWaitlist();
+      }
       return false;
+    } finally {
+      joinInFlightRef.current = false;
+      setJoining(false);
     }
   };
 
@@ -1303,12 +1769,28 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
       return;
     }
 
+    if (pendingInvitation) {
+      handleAcceptPendingInvitation();
+      return;
+    }
+
     if (!canJoin) {
       showToast?.(getJoinBlockedText(), guardReason ? 'error' : 'info');
       return;
     }
 
     handleTakeSlot(slotIndex);
+  };
+
+  const handleCancelPendingInvitation = async (invitationId) => {
+    if (!invitationId || !onCancelInvitation) return false;
+    try {
+      const result = await onCancelInvitation(invitationId);
+      await refreshMatchAndWaitlist();
+      return result;
+    } catch {
+      return false;
+    }
   };
 
   const handleCancelConfirm = async () => {
@@ -1464,8 +1946,8 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
             <div style={{ fontSize: '10px', fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.12em' }}>
               Игроки {allFilled.length}/{maxSlots}
             </div>
-            {canEditMatch && !isFull && (
-              <button onClick={() => setInviteSheet(true)} style={{ padding: '5px 12px', background: 'rgba(216,243,74,0.10)', border: '1px solid rgba(216,243,74,0.24)', borderRadius: '8px', color: C.gold, fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}>
+            {canEditMatch && !isCapacityReserved && (
+              <button onClick={() => setTargetSlot(slots.findIndex((slot) => !slot))} style={{ padding: '5px 12px', background: 'rgba(216,243,74,0.10)', border: '1px solid rgba(216,243,74,0.24)', borderRadius: '8px', color: C.gold, fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}>
                 + Пригласить
               </button>
             )}
@@ -1490,7 +1972,47 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
               );
             })}
           </PadelCard>
+          {visiblePendingInvitations.length > 0 && (
+            <div className="mt-3 space-y-2" data-testid="pending-invitations-list">
+              {visiblePendingInvitations.map((player) => {
+                const cancelling = invitationActions.has(`cancel:${player.invitationId}`);
+                return (
+                  <div
+                    key={player.invitationId}
+                    data-testid={`pending-invitation-${player.invitationId}`}
+                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', padding: '10px 12px', borderRadius: '12px', background: 'rgba(255,111,97,0.06)', border: '1px solid rgba(255,111,97,0.18)' }}
+                  >
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ color: C.text, fontSize: '12px', fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {player.firstName} {player.lastName}
+                      </div>
+                      <div style={{ color: C.loss, fontSize: '10px', fontWeight: 700, marginTop: '2px' }}>Ожидает ответа</div>
+                    </div>
+                    <button
+                      type="button"
+                      data-testid={`cancel-invitation-${player.invitationId}`}
+                      disabled={cancelling}
+                      onClick={() => handleCancelPendingInvitation(player.invitationId)}
+                      style={{ flexShrink: 0, minHeight: '44px', padding: '7px 9px', borderRadius: '9px', border: '1px solid rgba(255,111,97,0.28)', background: 'transparent', color: C.loss, fontSize: '10px', fontWeight: 800, opacity: cancelling ? 0.55 : 1, cursor: cancelling ? 'not-allowed' : 'pointer' }}
+                    >
+                      {cancelling ? 'Отменяем…' : 'Отменить приглашение'}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
+
+        {canViewWaitlist && (
+          <MatchWaitlistList
+            players={waitlistPlayers}
+            loading={waitlistListLoading}
+            loadError={waitlistListError}
+            showEmptyMessage={isOwner || isParticipant}
+            onRetry={refreshWaitlist}
+          />
+        )}
         
         {isParticipant && (
           <div className="mb-4">
@@ -1507,8 +2029,10 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
         {/* ── Price ────────────────────────────────────────────────────────── */}
         <div style={{ background: 'rgba(216,243,74,0.06)', borderRadius: '12px', padding: '12px 16px', marginBottom: '20px', border: '1px solid rgba(216,243,74,0.18)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
-            <div style={{ color: C.gold, fontSize: '22px', fontWeight: 800, lineHeight: 1 }}>{fmtPrice(pricePerPl)}</div>
-            <div style={{ color: C.muted, fontSize: '11px', marginTop: '3px' }}>с человека · тариф по времени ÷ {maxSlots}</div>
+            <div data-testid="match-participation-price" style={{ color: C.gold, fontSize: pricePerPl == null ? '15px' : '22px', fontWeight: 800, lineHeight: 1 }}>{priceLabel}</div>
+            {pricePerPl != null && (pricePerPl > 0 || isExplicitlyFree) && (
+              <div style={{ color: C.muted, fontSize: '11px', marginTop: '3px' }}>с человека</div>
+            )}
           </div>
           {isActuallyPrime && <div style={{ color: C.gold, fontSize: '12px', fontWeight: 600 }}>✦ Вечерний тариф</div>}
         </div>
@@ -1573,6 +2097,22 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
             <div style={{ color: C.win, fontWeight: 700, fontSize: '17px' }}>Вы присоединились к матчу!</div>
             <div style={{ color: C.muted, fontSize: '12px', marginTop: '4px' }}>Место сохранено в матче</div>
           </div>
+        ) : pendingInvitation ? (
+          <MatchInvitationPanel
+            accepting={acceptingInvitation}
+            declining={decliningInvitation}
+            onAccept={handleAcceptPendingInvitation}
+            onDecline={handleDeclinePendingInvitation}
+          />
+        ) : showWaitlist ? (
+          <WaitlistPanel
+            position={waitlistPosition}
+            count={waitlistCount}
+            loading={waitlistLoading}
+            action={waitlistAction}
+            onJoin={handleJoinWaitlist}
+            onLeave={handleLeaveWaitlist}
+          />
         ) : (
           <>
             {!canJoin && showRatingGuard && (
@@ -1586,7 +2126,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
               disabled={!canJoin || joining}
               onClick={handleJoin}
             >
-              {isFull ? 'Матч заполнен' : canJoin ? 'Присоединиться к игре' : 'Участие недоступно'}
+              {isFull ? 'Матч заполнен' : isCapacityReserved ? 'Свободных мест нет' : canJoin ? 'Присоединиться к игре' : 'Участие недоступно'}
             </PadelButton>
           </>
         )}
@@ -1609,7 +2149,6 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
       )}
       {editSheet   && canEditMatch && <EditPanel initDate={dateISO} initTime={time} initCourt={courtType} initDuration={duration} initTitle={title} initDescription={description} onSave={handleEditSave} onClose={() => setEditSheet(false)} />}
       {cancelSheet && canEditMatch && <CancelSheet onConfirm={handleCancelConfirm} onClose={() => setCancelSheet(false)} />}
-      {inviteSheet && canEditMatch && <InviteSheet matchId={match.id} onClose={() => setInviteSheet(false)} />}
       {kickTarget  && canEditMatch && <KickConfirm player={kickTarget} onConfirm={handleKickConfirm} onCancel={() => setKickTarget(null)} />}
       {leaveTarget && <LeaveConfirm onConfirm={handleLeaveConfirm} onCancel={() => setLeaveTarget(null)} />}
       {levelOverride && canEditMatch && (
@@ -1624,6 +2163,9 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
           match={match}
           currentUser={currentUser}
           messages={allMessages.filter(m => (m.matchId ?? m.match_id) === match.id)}
+          loading={messagesLoading}
+          loadError={messagesLoadError}
+          onRetry={onRetryMessages}
           onSendMessage={(text) => onSendMessage(match.id, currentUser, text)}
           onClose={() => setChatOpen(false)}
         />
