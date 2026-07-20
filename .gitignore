@@ -24,3 +24,6 @@ test-results/
 playwright-report/
 mini-app/test-results/
 mini-app/playwright-report/
+
+.vercel
+output/
