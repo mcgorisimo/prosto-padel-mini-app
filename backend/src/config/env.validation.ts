@@ -32,7 +32,12 @@ export const envValidationSchema = Joi.object({
   }),
   TELEGRAM_INIT_DATA_MAX_AGE_SECONDS: Joi.when('TELEGRAM_AUTH_ENABLED', {
     is: true,
-    then: Joi.number().integer().positive().required(),
-    otherwise: Joi.number().integer().positive().allow('').default(''),
+    then: Joi.number().integer().positive().max(86400).required(),
+    otherwise: Joi.number()
+      .integer()
+      .positive()
+      .max(86400)
+      .allow('')
+      .default(''),
   }),
 });

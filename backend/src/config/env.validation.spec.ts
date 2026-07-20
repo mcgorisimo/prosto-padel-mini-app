@@ -99,6 +99,27 @@ describe('envValidationSchema', () => {
     expect(value.TELEGRAM_INIT_DATA_MAX_AGE_SECONDS).toBe(300);
   });
 
+  it('accepts the maximum Telegram init data age', () => {
+    const { error, value } = validate({
+      TELEGRAM_AUTH_ENABLED: 'true',
+      TELEGRAM_BOT_TOKEN: 'obviously-fake-test-token',
+      TELEGRAM_INIT_DATA_MAX_AGE_SECONDS: '86400',
+    });
+
+    expect(error).toBeUndefined();
+    expect(value.TELEGRAM_INIT_DATA_MAX_AGE_SECONDS).toBe(86400);
+  });
+
+  it('rejects a Telegram init data age above the maximum', () => {
+    const { error } = validate({
+      TELEGRAM_AUTH_ENABLED: 'true',
+      TELEGRAM_BOT_TOKEN: 'obviously-fake-test-token',
+      TELEGRAM_INIT_DATA_MAX_AGE_SECONDS: '86401',
+    });
+
+    expect(error).toBeDefined();
+  });
+
   it.each(['0', '-1', '1.5', 'not-a-number'])(
     'rejects invalid max age %s',
     (maxAge) => {
