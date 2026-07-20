@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { MapPin, Plus, UsersRound } from 'lucide-react';
-import { getCourtCapacity, getPerPlayerPrice } from '../lib/pricing';
+import { formatParticipationPrice, getCourtCapacity, getParticipationPrice } from '../lib/pricing';
 import { getMatchLevelRequirement } from '../lib/matchLevelRequirement';
 import { getMatchBookingStatus } from '../lib/matchBookingStatus';
 import { isRatingMatch, requiresVerifiedRating } from '../lib/matchRating';
@@ -31,6 +31,17 @@ const calculateEndTime = (startTime, duration = 1.5) => {
   const endMins = Math.round(totalMinutes % 60);
   const f = (n) => String(n).padStart(2, '0');
   return `${f(endHours)}:${f(endMins)}`;
+};
+
+const getDisplayDate = (match) => {
+  if (match?.date) return match.date;
+  const dateISO = match?.dateISO ?? match?.date_iso;
+  if (!dateISO) return 'Дата не указана';
+
+  const parsed = new Date(`${dateISO}T12:00:00`);
+  return Number.isNaN(parsed.getTime())
+    ? dateISO
+    : parsed.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }).replace(' г.', '');
 };
 
 const FILTERS = [
@@ -142,7 +153,7 @@ function JoinButton({ onClick, disabled = false, label = 'Присоединит
 
 function PlayerSlot({ player }) {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '64px', overflow: 'visible' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', minWidth: 0, overflow: 'visible' }}>
       <div style={{
         position: 'relative',
         width: '52px',
@@ -231,18 +242,33 @@ function PlayerSlot({ player }) {
   );
 }
 
-function MatchCard({ match, onViewDetails }) {
+function MatchCard({ match, currentUser, onViewDetails }) {
   const filledSlots = Array.isArray(match.filledSlots) ? match.filledSlots.filter(Boolean) : [];
   const filledCount = filledSlots.length;
   const maxSlots = getCourtCapacity(match.courtType || match.court_type || 'standard');
   const isFull = filledCount >= maxSlots;
-  const pricePerPerson = match.pricePerPerson || getPerPlayerPrice(match.time, match.duration || 1.5, match.courtType, match.dateISO);
+  const freeCount = Math.max(0, maxSlots - filledCount);
+  const pricePerPerson = getParticipationPrice(match, { allowFallback: true });
+  const isExplicitlyFree = match.isFree === true || match.is_free === true;
+  const priceLabel = formatParticipationPrice(pricePerPerson, { isFree: isExplicitlyFree });
   const levelRequirement = getMatchLevelRequirement(match);
 
   const bookingStatus = getMatchBookingStatus(match);
   const statusText = bookingStatus.label;
   const statusColor = bookingStatus.isBooked ? C.lime : C.muted;
   const isRated = isRatingMatch(match);
+  const isOwner = currentUser?.id && currentUser.id === (match.ownerId ?? match.owner_id);
+  const isParticipant = isUserInMatch(match, currentUser?.id);
+  const joinAvailable = canCurrentUserJoin(match, currentUser);
+  const actionLabel = isFull
+    ? 'Матч заполнен'
+    : isOwner
+      ? 'Ваш матч'
+      : isParticipant
+        ? 'Вы участвуете'
+        : joinAvailable
+          ? 'Присоединиться'
+          : 'Посмотреть';
 
   return (
     <button
@@ -314,19 +340,26 @@ function MatchCard({ match, onViewDetails }) {
       </div>
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginBottom: '16px', color: C.text, fontSize: '13px', fontWeight: '700' }}>
-        <span>{match.date}</span>
+        <span>{getDisplayDate(match)}</span>
         <span style={{ color: C.muted }}>·</span>
         <span>{match.time} — {calculateEndTime(match.time, match.duration)}</span>
       </div>
 
-      <div style={{ display: 'flex', justifyContent: 'flex-start', gap: '10px', marginBottom: '16px', padding: '4px 0' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', marginBottom: '10px', color: C.muted, fontSize: '12px', fontWeight: 800 }}>
+        <span data-testid={`match-free-spots-${match.id}`}>Свободно: {freeCount}</span>
+        <span style={{ color: C.text, display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+          <UsersRound size={16} />
+          {filledCount}/{maxSlots}
+        </span>
+      </div>
+
+      <div
+        data-testid={`match-card-players-${match.id}`}
+        style={{ display: 'grid', gridTemplateColumns: `repeat(${maxSlots}, minmax(0, 1fr))`, gap: '4px', marginBottom: '16px', padding: '4px 0' }}
+      >
         {Array.from({ length: maxSlots }).map((_, slotIndex) => (
           <PlayerSlot key={slotIndex} player={filledSlots[slotIndex]} />
         ))}
-        <div style={{ alignSelf: 'center', marginLeft: 'auto', color: C.text, fontSize: '14px', fontWeight: '850', opacity: 0.72, display: 'flex', alignItems: 'center', gap: '5px' }}>
-          <UsersRound size={16} />
-          {filledCount}/{maxSlots}
-        </div>
       </div>
 
       <div style={{ height: '1px', background: 'rgba(245,241,232,0.08)', marginBottom: '16px' }} />
@@ -334,22 +367,24 @@ function MatchCard({ match, onViewDetails }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
         <div>
           <div style={{ fontSize: '20px', fontWeight: '900', color: C.text }}>
-            {pricePerPerson} ₽
+            {priceLabel}
           </div>
-          <div style={{ fontSize: '11px', color: C.muted }}>с человека</div>
+          {pricePerPerson != null && (pricePerPerson > 0 || isExplicitlyFree) && (
+            <div style={{ fontSize: '11px', color: C.muted }}>с человека</div>
+          )}
         </div>
 
         <JoinButton
           onClick={() => onViewDetails(match)}
           disabled={isFull}
-          label={isFull ? 'Матч заполнен' : 'Присоединиться'}
+          label={actionLabel}
         />
       </div>
     </button>
   );
 }
 
-export default function MatchFeed({ matches = [], currentUser, onViewDetails, onCreateMatch }) {
+export default function MatchFeed({ matches = [], currentUser, onViewDetails, onCreateMatch, loading = false, loadError = '', onRetry }) {
   const [activeFilter, setActiveFilter] = useState('all');
   const activeFilterDef = FILTERS.find(filter => filter.id === activeFilter) ?? FILTERS[0];
 
@@ -453,8 +488,19 @@ export default function MatchFeed({ matches = [], currentUser, onViewDetails, on
         })}
       </div>
 
-      {visibleMatches.length > 0 ? (
-        visibleMatches.map(m => <MatchCard key={m.id} match={m} onViewDetails={onViewDetails} />)
+      {loading ? (
+        <div data-testid="matches-loading" role="status" style={{ textAlign: 'center', color: C.muted, marginTop: '64px', fontSize: '14px' }}>
+          Загружаем матчи…
+        </div>
+      ) : loadError ? (
+        <div data-testid="matches-load-error" role="alert" style={{ textAlign: 'center', marginTop: '48px', padding: '20px', borderRadius: '18px', border: `1px solid ${C.border}`, background: C.card }}>
+          <div style={{ color: C.text, fontSize: '14px', lineHeight: 1.5, marginBottom: '14px' }}>{loadError}</div>
+          <button type="button" onClick={onRetry} style={{ border: '1px solid rgba(216,243,74,0.34)', background: 'rgba(216,243,74,0.10)', color: C.lime, borderRadius: '12px', padding: '10px 14px', fontWeight: 800 }}>
+            Повторить
+          </button>
+        </div>
+      ) : visibleMatches.length > 0 ? (
+        visibleMatches.map(m => <MatchCard key={m.id} match={m} currentUser={currentUser} onViewDetails={onViewDetails} />)
       ) : (
         <div style={{ textAlign: 'center', color: 'rgba(245,241,232,0.45)', marginTop: '64px', fontSize: '14px' }}>
           {activeFilterDef.empty}

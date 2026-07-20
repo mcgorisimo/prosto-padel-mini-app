@@ -12,6 +12,8 @@ const PROFILE_RPC_FIELDS = {
   language: 'p_language',
 };
 
+const PLAYER_SEARCH_FIELDS = ['first_name', 'last_name', 'username'];
+
 function firstRow(data) {
   if (Array.isArray(data)) return data[0] ?? null;
   return data ?? null;
@@ -34,11 +36,47 @@ function normalizeRpcPayload(payload = {}) {
 
 function sanitizeSearchTerm(value) {
   return String(value ?? '')
+    .normalize('NFKC')
     .trim()
     .replace(/^@+/, '')
     .replace(/[,()%]/g, ' ')
     .replace(/\s+/g, ' ')
-    .toLowerCase();
+    .toLocaleLowerCase('ru-RU');
+}
+
+function buildCaseInsensitivePatterns(searchTerm) {
+  if (!searchTerm) return [];
+
+  const titleCase = searchTerm.charAt(0).toLocaleUpperCase('ru-RU') + searchTerm.slice(1);
+  return [...new Set([
+    searchTerm,
+    titleCase,
+    searchTerm.toLocaleUpperCase('ru-RU'),
+  ])];
+}
+
+function getSearchRank(player, searchTerm) {
+  const values = PLAYER_SEARCH_FIELDS
+    .map((field) => sanitizeSearchTerm(player?.[field]))
+    .filter(Boolean);
+
+  if (values.some((value) => value === searchTerm)) return 0;
+  if (values.some((value) => value.startsWith(searchTerm))) return 1;
+  if (values.some((value) => value.includes(searchTerm))) return 2;
+  return 3;
+}
+
+function dedupeAndRankPlayers(rows, searchTerm) {
+  const uniqueRows = [...new Map(
+    (rows ?? []).filter((row) => row?.id).map((row) => [String(row.id), row])
+  ).values()];
+
+  if (!searchTerm) return uniqueRows;
+
+  return uniqueRows
+    .map((row, index) => ({ row, index, rank: getSearchRank(row, searchTerm) }))
+    .sort((left, right) => left.rank - right.rank || left.index - right.index)
+    .map(({ row }) => row);
 }
 
 export async function getMyProfile() {
@@ -72,7 +110,11 @@ export async function getPublicPlayerProfiles({
 
   const safeSearch = sanitizeSearchTerm(search);
   if (safeSearch) {
-    query = query.or(`first_name.ilike.%${safeSearch}%,last_name.ilike.%${safeSearch}%,username.ilike.%${safeSearch}%`);
+    const patterns = buildCaseInsensitivePatterns(safeSearch);
+    const filters = PLAYER_SEARCH_FIELDS.flatMap((field) =>
+      patterns.map((pattern) => `${field}.ilike.%${pattern}%`)
+    );
+    query = query.or(filters.join(','));
   }
 
   if (excludeId) {
@@ -85,7 +127,7 @@ export async function getPublicPlayerProfiles({
 
   const { data, error } = await query;
   if (error) throw error;
-  return data ?? [];
+  return dedupeAndRankPlayers(data, safeSearch);
 }
 
 export async function adminListProfiles({
