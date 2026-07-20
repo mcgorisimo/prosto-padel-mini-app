@@ -5,6 +5,8 @@ node_modules/
 dist/
 build/
 coverage/
+.vite/
+.cache/
 
 # Playwright artifacts
 test-results/
@@ -15,6 +17,8 @@ blob-report/
 .env
 .env.local
 .env.*
+!.env.example
+!.env.*.example
 !.env.e2e.example
 
 # Logs
@@ -27,3 +31,23 @@ pnpm-debug.log*
 
 # Vercel
 .vercel/
+
+# Legacy local workspace
+/mini-app/
+
+# Local generated output
+/output/
+
+# Local Telegram bot prototype
+/knowledge/
+/Procfile
+/src/admin-notify.js
+/src/claude.js
+/src/config.js
+/src/conversation.js
+/src/index.js
+/src/keyboards.js
+/src/knowledge.js
+/src/telegram.js
+/src/tools.js
+/src/yclients.js
