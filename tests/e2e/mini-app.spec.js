@@ -1016,25 +1016,33 @@ test('opens authorized home on iPhone viewport', async ({ page }) => {
   expect(viewport?.height).toBeGreaterThanOrEqual(600);
 });
 
-test('checks bottom navigation and match creation smoke', async ({ page }) => {
+test('checks bottom navigation and opens match creation smoke', async ({ page }) => {
   await openAuthenticatedApp(page);
 
-  const nav = page.locator('.bottom-nav');
-  const navButtons = nav.getByRole('button');
+  const nav = page.getByRole('navigation', { name: 'Основная навигация' });
+  const profileTab = nav.getByRole('button', { name: 'Профиль' });
+  await profileTab.click();
+  await expect(profileTab).toHaveAttribute('aria-current', 'page');
+  await expect(page.getByRole('heading', { name: 'QA Player' })).toBeVisible();
 
-  await navButtons.nth(4).click();
-  await expect(navButtons.nth(4)).toHaveAttribute('aria-current', 'page');
-
-  await navButtons.nth(3).click();
-  await expect(navButtons.nth(3)).toHaveAttribute('aria-current', 'page');
+  const ratingTab = nav.getByRole('button', { name: 'Рейтинг' });
+  await ratingTab.click();
+  await expect(ratingTab).toHaveAttribute('aria-current', 'page');
   await expect(page.getByRole('heading', { name: 'Рейтинг клуба' })).toBeVisible();
 
-  await navButtons.nth(2).click();
-  await expect(navButtons.nth(2)).toHaveAttribute('aria-current', 'page');
+  const bookingTab = nav.getByRole('button', { name: 'Бронь' });
+  await bookingTab.click();
+  await expect(bookingTab).toHaveAttribute('aria-current', 'page');
 
-  await navButtons.nth(1).click();
-  await expect(navButtons.nth(1)).toHaveAttribute('aria-current', 'page');
-  await expect(page.getByText('QA Player')).toBeVisible();
+  const matchesTab = nav.getByRole('button', { name: 'Матчи' });
+  await matchesTab.click();
+  await expect(matchesTab).toHaveAttribute('aria-current', 'page');
+  await expect(page.getByRole('heading', { name: 'Матчи' })).toBeVisible();
+
+  const createMatchButton = page.getByRole('button', { name: 'Создать матч' });
+  await expect(createMatchButton).toBeEnabled();
+  await createMatchButton.click();
+  await expect(page.getByRole('heading', { name: 'Создать матч' })).toBeVisible();
 });
 
 test('BOOKING creates a public booking through create_booking', async ({ page }) => {
