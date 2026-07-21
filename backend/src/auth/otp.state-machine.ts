@@ -1,6 +1,7 @@
 import { timingSafeEqual } from 'crypto';
 import { ExternalIdentityKey } from '../accounts/external-identity.types';
 import { isValidExternalIdentityKey } from './account-resolution.types';
+import { isAggregateCommandSequence } from './aggregate-command-sequence';
 import {
   isAuthenticationIntent,
   isAuthenticationOperationId,
@@ -17,12 +18,14 @@ import {
   CreateOtpChallengeBinding,
   ExpireOtpCommand,
   ExpiredOtpChallenge,
+  MAX_OTP_ATTEMPTS,
   OtpAppliedResult,
   OtpAttemptsExhaustedMetadata,
   OtpCancellationMetadata,
   OtpChallengeState,
   OtpChallengeStateBinding,
   OtpCommand,
+  OtpCommandPersistenceRecord,
   OtpExpirationMetadata,
   OtpVerificationMetadata,
   PendingOtpChallenge,
@@ -218,17 +221,79 @@ function isOtpAppliedResult(
   }
 }
 
-function isAppliedOtpCommand(
+function isOtpCommandPersistenceRecordForMaxAttempts(
   value: unknown,
-  challengeId: string,
-  verifierDigest: unknown,
-  createdAt: number,
-  expiresAt: number,
+  maxAttempts: number,
+): value is OtpCommandPersistenceRecord {
+  if (
+    !isRecord(value) ||
+    !isOtpChallengeId(value.challengeId) ||
+    !isOtpCommandId(value.commandId) ||
+    !isAggregateCommandSequence(value.commandSequence) ||
+    !isOtpRequestDigest(value.requestDigest) ||
+    !isUnixEpochSeconds(value.appliedAt) ||
+    !isOtpAppliedResult(value.result, maxAttempts)
+  ) {
+    return false;
+  }
+
+  switch (value.commandType) {
+    case 'submit_otp':
+      return (
+        hasExactlyKeys(value, [
+          'challengeId',
+          'commandId',
+          'commandSequence',
+          'requestDigest',
+          'appliedAt',
+          'result',
+          'commandType',
+          'presentedDigest',
+        ]) &&
+        isOtpVerifierDigest(value.presentedDigest) &&
+        (value.result.type === 'otp_verified' ||
+          value.result.type === 'incorrect_code' ||
+          value.result.type === 'otp_attempts_exhausted')
+      );
+    case 'expire_otp':
+      return (
+        hasExactlyKeys(value, [
+          'challengeId',
+          'commandId',
+          'commandSequence',
+          'requestDigest',
+          'appliedAt',
+          'result',
+          'commandType',
+        ]) && value.result.type === 'otp_expired'
+      );
+    case 'cancel_otp':
+      return (
+        hasExactlyKeys(value, [
+          'challengeId',
+          'commandId',
+          'commandSequence',
+          'requestDigest',
+          'appliedAt',
+          'result',
+          'commandType',
+          'reason',
+        ]) &&
+        isOtpCancelReason(value.reason) &&
+        value.result.type === 'otp_cancelled'
+      );
+    default:
+      return false;
+  }
+}
+
+function isAppliedOtpCommandShapeForMaxAttempts(
+  value: unknown,
   maxAttempts: number,
 ): value is AppliedOtpCommand {
   if (
     !isRecord(value) ||
-    value.challengeId !== challengeId ||
+    !isOtpChallengeId(value.challengeId) ||
     !isOtpCommandId(value.commandId) ||
     !isOtpRequestDigest(value.requestDigest) ||
     !isUnixEpochSeconds(value.appliedAt) ||
@@ -239,8 +304,8 @@ function isAppliedOtpCommand(
 
   switch (value.commandType) {
     case 'submit_otp':
-      if (
-        !hasExactlyKeys(value, [
+      return (
+        hasExactlyKeys(value, [
           'challengeId',
           'commandId',
           'requestDigest',
@@ -248,11 +313,144 @@ function isAppliedOtpCommand(
           'result',
           'commandType',
           'presentedDigest',
-        ]) ||
-        !isOtpVerifierDigest(value.presentedDigest)
-      ) {
-        return false;
-      }
+        ]) &&
+        isOtpVerifierDigest(value.presentedDigest) &&
+        (value.result.type === 'otp_verified' ||
+          value.result.type === 'incorrect_code' ||
+          value.result.type === 'otp_attempts_exhausted')
+      );
+    case 'expire_otp':
+      return (
+        hasExactlyKeys(value, [
+          'challengeId',
+          'commandId',
+          'requestDigest',
+          'appliedAt',
+          'result',
+          'commandType',
+        ]) && value.result.type === 'otp_expired'
+      );
+    case 'cancel_otp':
+      return (
+        hasExactlyKeys(value, [
+          'challengeId',
+          'commandId',
+          'requestDigest',
+          'appliedAt',
+          'result',
+          'commandType',
+          'reason',
+        ]) &&
+        isOtpCancelReason(value.reason) &&
+        value.result.type === 'otp_cancelled'
+      );
+    default:
+      return false;
+  }
+}
+
+export function isOtpCommandPersistenceRecord(
+  value: unknown,
+): value is OtpCommandPersistenceRecord {
+  return isOtpCommandPersistenceRecordForMaxAttempts(value, MAX_OTP_ATTEMPTS);
+}
+
+function appliedOtpCommandFromPersistenceRecord(
+  record: OtpCommandPersistenceRecord,
+): AppliedOtpCommand {
+  const base = {
+    challengeId: record.challengeId,
+    commandId: record.commandId,
+    requestDigest: record.requestDigest,
+    appliedAt: record.appliedAt,
+    result: record.result,
+  };
+
+  switch (record.commandType) {
+    case 'submit_otp':
+      return immutableAppliedCommand({
+        ...base,
+        commandType: record.commandType,
+        presentedDigest: record.presentedDigest,
+      });
+    case 'expire_otp':
+      return immutableAppliedCommand({
+        ...base,
+        commandType: record.commandType,
+      });
+    case 'cancel_otp':
+      return immutableAppliedCommand({
+        ...base,
+        commandType: record.commandType,
+        reason: record.reason,
+      });
+  }
+}
+
+export function hydrateAppliedOtpCommandHistory(
+  records: unknown,
+): readonly AppliedOtpCommand[] {
+  if (!Array.isArray(records)) {
+    throw new TypeError('OTP command persistence history is invalid');
+  }
+
+  const orderedRecords = records.map((record) => {
+    if (!isOtpCommandPersistenceRecord(record)) {
+      throw new TypeError('OTP command persistence record is invalid');
+    }
+    return record;
+  });
+  orderedRecords.sort(
+    (left, right) => left.commandSequence - right.commandSequence,
+  );
+
+  for (const [index, record] of orderedRecords.entries()) {
+    if (record.commandSequence !== index + 1) {
+      throw new TypeError('OTP command persistence sequence is invalid');
+    }
+  }
+
+  return Object.freeze(
+    orderedRecords.map(appliedOtpCommandFromPersistenceRecord),
+  );
+}
+
+export function hydrateOtpChallengeStateFromCommandPersistenceRecords(
+  value: unknown,
+): OtpChallengeState {
+  if (!isRecord(value) || !Array.isArray(value.appliedCommands)) {
+    throw new TypeError('OTP persistence state is invalid');
+  }
+
+  const candidate = Object.freeze({
+    ...value,
+    appliedCommands: hydrateAppliedOtpCommandHistory(value.appliedCommands),
+  });
+  if (!isOtpChallengeState(candidate)) {
+    throw new TypeError('OTP persistence state is invalid');
+  }
+
+  return candidate;
+}
+
+function isAppliedOtpCommand(
+  value: unknown,
+  challengeId: string,
+  verifierDigest: unknown,
+  createdAt: number,
+  expiresAt: number,
+  maxAttempts: number,
+): value is AppliedOtpCommand {
+  if (
+    !isAppliedOtpCommandShapeForMaxAttempts(value, maxAttempts) ||
+    value.challengeId !== challengeId ||
+    !isOtpAppliedResult(value.result, maxAttempts)
+  ) {
+    return false;
+  }
+
+  switch (value.commandType) {
+    case 'submit_otp':
       if (value.appliedAt < createdAt || value.appliedAt >= expiresAt) {
         return false;
       }
@@ -277,14 +475,6 @@ function isAppliedOtpCommand(
       return value.result.type === 'incorrect_code' && !digestMatches;
     case 'expire_otp':
       return (
-        hasExactlyKeys(value, [
-          'challengeId',
-          'commandId',
-          'requestDigest',
-          'appliedAt',
-          'result',
-          'commandType',
-        ]) &&
         value.appliedAt >= expiresAt &&
         value.result.type === 'otp_expired' &&
         value.result.expiration.commandId === value.commandId &&
@@ -292,18 +482,8 @@ function isAppliedOtpCommand(
       );
     case 'cancel_otp':
       return (
-        hasExactlyKeys(value, [
-          'challengeId',
-          'commandId',
-          'requestDigest',
-          'appliedAt',
-          'result',
-          'commandType',
-          'reason',
-        ]) &&
         value.appliedAt >= createdAt &&
         value.appliedAt < expiresAt &&
-        isOtpCancelReason(value.reason) &&
         value.result.type === 'otp_cancelled' &&
         value.result.cancellation.reason === value.reason &&
         value.result.cancellation.commandId === value.commandId &&

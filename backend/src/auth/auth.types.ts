@@ -9,6 +9,12 @@ import {
   ExternalIdentityProvider,
   ExternalIdentityReference,
 } from '../accounts/external-identity.types';
+import {
+  InternalUuid,
+  isInternalUuid,
+  newInternalUuid,
+} from '../common/internal-uuid';
+import type { OtpChallengeId } from './otp.types';
 
 export interface VerifiedExternalIdentityBase
   extends ExternalIdentityReference {
@@ -44,7 +50,7 @@ export type AuthenticationProofFingerprint = string & {
     'AuthenticationProofFingerprint';
 };
 
-export type AuthenticationOperationId = string & {
+export type AuthenticationOperationId = InternalUuid & {
   readonly [authenticationOperationIdBrand]: 'AuthenticationOperationId';
 };
 
@@ -62,7 +68,7 @@ export type AuthenticationRequestDigest = string & {
  * persistence adapter must atomically enforce uniqueness for the pair
  * (operationId, commandId); commandId alone is not globally unique.
  */
-export type AuthenticationCommandId = string & {
+export type AuthenticationCommandId = InternalUuid & {
   readonly [authenticationCommandIdBrand]: 'AuthenticationCommandId';
 };
 
@@ -99,7 +105,7 @@ function isAuthenticationOpaqueValue(value: unknown): value is string {
 export function isAuthenticationOperationId(
   value: unknown,
 ): value is AuthenticationOperationId {
-  return isAuthenticationOpaqueValue(value);
+  return isInternalUuid(value);
 }
 
 export function isAuthenticationIdempotencyKey(
@@ -117,13 +123,79 @@ export function isAuthenticationRequestDigest(
 export function isAuthenticationCommandId(
   value: unknown,
 ): value is AuthenticationCommandId {
-  return isAuthenticationOpaqueValue(value);
+  return isInternalUuid(value);
+}
+
+export function newAuthenticationOperationId(): AuthenticationOperationId {
+  return newInternalUuid() as AuthenticationOperationId;
+}
+
+export function newAuthenticationCommandId(): AuthenticationCommandId {
+  return newInternalUuid() as AuthenticationCommandId;
 }
 
 export function isAuthenticationProofFingerprint(
   value: unknown,
 ): value is AuthenticationProofFingerprint {
   return typeof value === 'string' && SHA_256_HEX_PATTERN.test(value);
+}
+
+export interface TelegramAuthenticationProofReference {
+  readonly type: 'telegram_proof';
+  readonly proofFingerprint: AuthenticationProofFingerprint;
+}
+
+export interface OtpAuthenticationProofReference {
+  readonly type: 'otp_challenge';
+  readonly challengeId: OtpChallengeId;
+}
+
+export type AuthenticationProofReference =
+  | TelegramAuthenticationProofReference
+  | OtpAuthenticationProofReference;
+
+export function telegramAuthenticationProofReference(
+  proofFingerprint: AuthenticationProofFingerprint,
+): TelegramAuthenticationProofReference {
+  if (!isAuthenticationProofFingerprint(proofFingerprint)) {
+    throw new TypeError('Telegram proof fingerprint is invalid');
+  }
+
+  return Object.freeze({ type: 'telegram_proof', proofFingerprint });
+}
+
+export function otpAuthenticationProofReference(
+  challengeId: OtpChallengeId,
+): OtpAuthenticationProofReference {
+  if (!isInternalUuid(challengeId)) {
+    throw new TypeError('OTP challenge reference is invalid');
+  }
+
+  return Object.freeze({ type: 'otp_challenge', challengeId });
+}
+
+export function isAuthenticationProofReference(
+  value: unknown,
+): value is AuthenticationProofReference {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  if (candidate.type === 'telegram_proof') {
+    return (
+      Object.keys(candidate).length === 2 &&
+      Object.prototype.hasOwnProperty.call(candidate, 'proofFingerprint') &&
+      isAuthenticationProofFingerprint(candidate.proofFingerprint)
+    );
+  }
+
+  return (
+    candidate.type === 'otp_challenge' &&
+    Object.keys(candidate).length === 2 &&
+    Object.prototype.hasOwnProperty.call(candidate, 'challengeId') &&
+    isInternalUuid(candidate.challengeId)
+  );
 }
 
 export const AUTHENTICATION_INTENTS = Object.freeze([

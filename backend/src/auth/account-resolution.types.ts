@@ -2,6 +2,7 @@ import {
   AccountId,
   AccountStatus,
   UserRole,
+  isAccountId,
 } from '../accounts/account.types';
 import {
   EXTERNAL_IDENTITY_PROVIDERS,
@@ -10,9 +11,6 @@ import {
   externalIdentityNamespace,
   trustProviderCanonicalizedExternalIdentitySubject,
 } from '../accounts/external-identity.types';
-
-const MAX_ACCOUNT_ID_LENGTH = 256;
-const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f-\u009f]/u;
 
 export interface ExistingAccountResolution {
   readonly type: 'existing_account';
@@ -100,16 +98,6 @@ function passesStringFactory(
   }
 }
 
-function isSafeAccountId(value: unknown): value is AccountId {
-  return (
-    typeof value === 'string' &&
-    value.length > 0 &&
-    value.length <= MAX_ACCOUNT_ID_LENGTH &&
-    value.trim() === value &&
-    !CONTROL_CHARACTER_PATTERN.test(value)
-  );
-}
-
 function isConflictReason(
   value: unknown,
 ): value is AccountResolutionConflictReason {
@@ -168,7 +156,7 @@ export function isValidAccountResolutionOutcome(
           'accountStatus',
           'identityKey',
         ]) &&
-        isSafeAccountId(value.accountId) &&
+        isAccountId(value.accountId) &&
         value.accountStatus === 'active' &&
         isValidExternalIdentityKey(value.identityKey)
       );
@@ -189,7 +177,7 @@ export function isValidAccountResolutionOutcome(
           'accountStatus',
           'identityKey',
         ]) &&
-        isSafeAccountId(value.accountId) &&
+        isAccountId(value.accountId) &&
         isValidExternalIdentityKey(value.identityKey) &&
         ((value.accountStatus === 'blocked' &&
           value.reason === 'account_blocked') ||
@@ -213,8 +201,8 @@ function assertValidIdentityKey(identityKey: unknown): asserts identityKey is Ex
   }
 }
 
-function assertSafeAccountId(accountId: unknown): asserts accountId is AccountId {
-  if (!isSafeAccountId(accountId)) {
+function assertAccountId(accountId: unknown): asserts accountId is AccountId {
+  if (!isAccountId(accountId)) {
     throw new TypeError('Account ID is invalid');
   }
 }
@@ -246,7 +234,7 @@ export function resolveExistingAccountStatus(
   accountStatus: AccountStatus,
 ): ExistingAccountResolution | BlockedAccountResolution | ConflictAccountResolution {
   assertValidIdentityKey(identityKey);
-  assertSafeAccountId(accountId);
+  assertAccountId(accountId);
   const immutableKey = immutableIdentityKey(identityKey);
 
   switch (accountStatus) {

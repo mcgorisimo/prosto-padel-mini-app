@@ -1,4 +1,8 @@
-import { isUnixEpochSeconds } from './auth.types';
+import {
+  isAuthenticationOperationId,
+  isUnixEpochSeconds,
+} from './auth.types';
+import { isAggregateCommandSequence } from './aggregate-command-sequence';
 import {
   ActiveSessionState,
   AppliedExpireSessionCommand,
@@ -13,6 +17,7 @@ import {
   RotateSessionCredentialCommand,
   SessionAppliedCommandResult,
   SessionCommand,
+  SessionCommandPersistenceRecord,
   SessionCredentialBinding,
   SessionCredentialReference,
   SessionCredentialReuseMetadata,
@@ -29,9 +34,10 @@ import {
 } from './session.types';
 
 export const SESSION_BINDING_REJECTION_REASONS = Object.freeze([
-  'invalid_binding_shape',
-  'invalid_session_id',
-  'invalid_account_id',
+    'invalid_binding_shape',
+    'invalid_session_id',
+    'invalid_authentication_operation_id',
+    'invalid_account_id',
   'invalid_created_at',
   'invalid_expires_at',
   'invalid_session_window',
@@ -178,6 +184,9 @@ function sessionBindingRejectionReason(
   }
   if (!isSessionId(binding.sessionId)) {
     return 'invalid_session_id';
+  }
+  if (!isAuthenticationOperationId(binding.authenticationOperationId)) {
+    return 'invalid_authentication_operation_id';
   }
   if (!isSessionAccountId(binding.accountId)) {
     return 'invalid_account_id';
@@ -390,6 +399,7 @@ function immutableStateBinding(
 ) {
   return {
     sessionId: state.sessionId,
+    authenticationOperationId: state.authenticationOperationId,
     accountId: state.accountId,
     createdAt: state.createdAt,
     expiresAt: state.expiresAt,
@@ -553,6 +563,153 @@ function isAppliedSessionCommandShape(
   }
 }
 
+export function isSessionCommandPersistenceRecord(
+  value: unknown,
+): value is SessionCommandPersistenceRecord {
+  if (
+    !isRecord(value) ||
+    !isSessionId(value.sessionId) ||
+    !isSessionCommandId(value.commandId) ||
+    !isAggregateCommandSequence(value.commandSequence) ||
+    !isSessionRequestDigest(value.requestDigest) ||
+    !isUnixEpochSeconds(value.appliedAt) ||
+    !isSessionAppliedResult(value.result)
+  ) {
+    return false;
+  }
+
+  switch (value.commandType) {
+    case 'rotate_credential':
+      return (
+        hasExactlyKeys(value, [
+          'sessionId',
+          'commandId',
+          'commandSequence',
+          'commandType',
+          'requestDigest',
+          'appliedAt',
+          'presentedCredential',
+          'nextCredential',
+          'result',
+        ]) &&
+        isCredentialReference(value.presentedCredential) &&
+        isCredentialReference(value.nextCredential) &&
+        (value.result.type === 'credential_rotated' ||
+          value.result.type === 'reuse_detected')
+      );
+    case 'revoke_session':
+      return (
+        hasExactlyKeys(value, [
+          'sessionId',
+          'commandId',
+          'commandSequence',
+          'commandType',
+          'requestDigest',
+          'appliedAt',
+          'reason',
+          'result',
+        ]) &&
+        isSessionRevokeReason(value.reason) &&
+        value.result.type === 'session_revoked'
+      );
+    case 'expire_session':
+      return (
+        hasExactlyKeys(value, [
+          'sessionId',
+          'commandId',
+          'commandSequence',
+          'commandType',
+          'requestDigest',
+          'appliedAt',
+          'result',
+        ]) && value.result.type === 'session_expired'
+      );
+    default:
+      return false;
+  }
+}
+
+function appliedSessionCommandFromPersistenceRecord(
+  record: SessionCommandPersistenceRecord,
+): AppliedSessionCommand {
+  const base = {
+    sessionId: record.sessionId,
+    commandId: record.commandId,
+    requestDigest: record.requestDigest,
+    appliedAt: record.appliedAt,
+    result: record.result,
+  };
+
+  switch (record.commandType) {
+    case 'rotate_credential':
+      return immutableAppliedCommand({
+        ...base,
+        commandType: record.commandType,
+        presentedCredential: record.presentedCredential,
+        nextCredential: record.nextCredential,
+      });
+    case 'revoke_session':
+      return immutableAppliedCommand({
+        ...base,
+        commandType: record.commandType,
+        reason: record.reason,
+      });
+    case 'expire_session':
+      return immutableAppliedCommand({
+        ...base,
+        commandType: record.commandType,
+      });
+  }
+}
+
+export function hydrateAppliedSessionCommandHistory(
+  records: unknown,
+): readonly AppliedSessionCommand[] {
+  if (!Array.isArray(records)) {
+    throw new TypeError('Session command persistence history is invalid');
+  }
+
+  const orderedRecords = records.map((record) => {
+    if (!isSessionCommandPersistenceRecord(record)) {
+      throw new TypeError('Session command persistence record is invalid');
+    }
+    return record;
+  });
+  orderedRecords.sort(
+    (left, right) => left.commandSequence - right.commandSequence,
+  );
+
+  for (const [index, record] of orderedRecords.entries()) {
+    if (record.commandSequence !== index + 1) {
+      throw new TypeError('Session command persistence sequence is invalid');
+    }
+  }
+
+  return Object.freeze(
+    orderedRecords.map(appliedSessionCommandFromPersistenceRecord),
+  );
+}
+
+export function hydrateSessionStateFromCommandPersistenceRecords(
+  value: unknown,
+): SessionState {
+  if (!isRecord(value) || !Array.isArray(value.appliedCommands)) {
+    throw new TypeError('Session persistence state is invalid');
+  }
+
+  const candidate = Object.freeze({
+    ...value,
+    appliedCommands: hydrateAppliedSessionCommandHistory(
+      value.appliedCommands,
+    ),
+  });
+  if (!isValidSessionState(candidate)) {
+    throw new TypeError('Session persistence state is invalid');
+  }
+
+  return candidate;
+}
+
 function revocationsEqual(
   left: SessionRevocationMetadata,
   right: SessionRevocationMetadata,
@@ -585,6 +742,7 @@ function reuseMetadataEqual(
 
 const SESSION_STATE_BINDING_KEYS = Object.freeze([
   'sessionId',
+  'authenticationOperationId',
   'accountId',
   'createdAt',
   'expiresAt',
@@ -607,6 +765,7 @@ function sessionStateRejectionReason(
   }
   if (
     !isSessionId(value.sessionId) ||
+    !isAuthenticationOperationId(value.authenticationOperationId) ||
     !isSessionAccountId(value.accountId) ||
     !isUnixEpochSeconds(value.createdAt) ||
     !isUnixEpochSeconds(value.expiresAt) ||
@@ -1090,6 +1249,7 @@ export function createActiveSession(
 
   const state: ActiveSessionState = Object.freeze({
     sessionId: binding.sessionId,
+    authenticationOperationId: binding.authenticationOperationId,
     accountId: binding.accountId,
     createdAt: binding.createdAt,
     expiresAt: binding.expiresAt,

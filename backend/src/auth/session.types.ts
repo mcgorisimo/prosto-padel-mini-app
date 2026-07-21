@@ -1,5 +1,14 @@
-import { AccountId } from '../accounts/account.types';
-import { UnixEpochSeconds } from './auth.types';
+import { AccountId, isAccountId } from '../accounts/account.types';
+import {
+  InternalUuid,
+  isInternalUuid,
+  newInternalUuid,
+} from '../common/internal-uuid';
+import {
+  AuthenticationOperationId,
+  UnixEpochSeconds,
+} from './auth.types';
+import { AggregateCommandSequence } from './aggregate-command-sequence';
 
 declare const sessionIdBrand: unique symbol;
 declare const sessionCommandIdBrand: unique symbol;
@@ -10,7 +19,12 @@ const MAX_SESSION_OPAQUE_VALUE_LENGTH = 256;
 const SESSION_CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f-\u009f]/u;
 const SHA_256_HEX_PATTERN = /^[0-9a-f]{64}$/u;
 
-export type SessionId = string & {
+/**
+ * Compatibility name for the existing session-family aggregate: one account
+ * authentication followed by one ordered chain of credential generations.
+ * It is not a leaf transport session ID.
+ */
+export type SessionId = InternalUuid & {
   readonly [sessionIdBrand]: 'SessionId';
 };
 
@@ -18,7 +32,7 @@ export type SessionId = string & {
  * A command ID is unique within one session. A future persistence adapter
  * must atomically enforce uniqueness for the pair (sessionId, commandId).
  */
-export type SessionCommandId = string & {
+export type SessionCommandId = InternalUuid & {
   readonly [sessionCommandIdBrand]: 'SessionCommandId';
 };
 
@@ -41,13 +55,21 @@ function isSessionOpaqueValue(value: unknown): value is string {
 }
 
 export function isSessionId(value: unknown): value is SessionId {
-  return isSessionOpaqueValue(value);
+  return isInternalUuid(value);
 }
 
 export function isSessionCommandId(
   value: unknown,
 ): value is SessionCommandId {
-  return isSessionOpaqueValue(value);
+  return isInternalUuid(value);
+}
+
+export function newSessionId(): SessionId {
+  return newInternalUuid() as SessionId;
+}
+
+export function newSessionCommandId(): SessionCommandId {
+  return newInternalUuid() as SessionCommandId;
 }
 
 export function isSessionRequestDigest(
@@ -67,7 +89,7 @@ export function isSessionCredentialGeneration(value: unknown): value is number {
 }
 
 export function isSessionAccountId(value: unknown): value is AccountId {
-  return isSessionOpaqueValue(value);
+  return isAccountId(value);
 }
 
 export interface SessionCredentialReference {
@@ -172,8 +194,49 @@ export type AppliedSessionCommand =
   | AppliedRevokeSessionCommand
   | AppliedExpireSessionCommand;
 
+interface SessionCommandPersistenceRecordBase {
+  readonly sessionId: SessionId;
+  readonly commandId: SessionCommandId;
+  readonly commandSequence: AggregateCommandSequence;
+  /** Must cryptographically bind every command input in canonical form. */
+  readonly requestDigest: SessionRequestDigest;
+  readonly appliedAt: UnixEpochSeconds;
+}
+
+/**
+ * Relational command history needed to hydrate the existing session-family
+ * reducer. Credential references contain only generation and digest, never the
+ * plaintext session credential.
+ */
+export type SessionCommandPersistenceRecord =
+  | (SessionCommandPersistenceRecordBase & {
+      readonly commandType: 'rotate_credential';
+      readonly presentedCredential: SessionCredentialReference;
+      readonly nextCredential: SessionCredentialReference;
+      readonly result: Extract<
+        SessionAppliedCommandResult,
+        { readonly type: 'credential_rotated' | 'reuse_detected' }
+      >;
+    })
+  | (SessionCommandPersistenceRecordBase & {
+      readonly commandType: 'revoke_session';
+      readonly reason: SessionRevokeReason;
+      readonly result: Extract<
+        SessionAppliedCommandResult,
+        { readonly type: 'session_revoked' }
+      >;
+    })
+  | (SessionCommandPersistenceRecordBase & {
+      readonly commandType: 'expire_session';
+      readonly result: Extract<
+        SessionAppliedCommandResult,
+        { readonly type: 'session_expired' }
+      >;
+    });
+
 export interface SessionStateBinding {
   readonly sessionId: SessionId;
+  readonly authenticationOperationId: AuthenticationOperationId;
   readonly accountId: AccountId;
   readonly createdAt: UnixEpochSeconds;
   readonly expiresAt: UnixEpochSeconds;
@@ -209,6 +272,7 @@ export type SessionState =
 
 export interface CreateActiveSessionBinding {
   readonly sessionId: SessionId;
+  readonly authenticationOperationId: AuthenticationOperationId;
   readonly accountId: AccountId;
   readonly createdAt: UnixEpochSeconds;
   readonly expiresAt: UnixEpochSeconds;

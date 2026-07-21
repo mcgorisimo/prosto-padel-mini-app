@@ -1,4 +1,5 @@
 import { AccountId } from '../accounts/account.types';
+import { deterministicUuid } from '../../test/deterministic-uuid';
 import { UnixEpochSeconds, unixEpochSeconds } from './auth.types';
 import {
   FRESH_AUTHENTICATION_VERIFICATION_METHODS,
@@ -11,8 +12,11 @@ import {
 } from './fresh-authentication.types';
 import { SessionId } from './session.types';
 
-const ACCOUNT_ID = 'account-1' as AccountId;
-const SESSION_ID = 'session-1' as SessionId;
+const ACCOUNT_ID = deterministicUuid('account-1') as AccountId;
+const SESSION_ID = deterministicUuid('session-1') as SessionId;
+const EVIDENCE_ID = deterministicUuid(
+  'evidence-1',
+) as FreshAuthenticationEvidenceId;
 const AUTHENTICATED_AT = unixEpochSeconds(1_784_635_200);
 const EXPIRES_AT = unixEpochSeconds(1_784_635_500);
 
@@ -20,7 +24,7 @@ function evidenceInput(
   overrides: Partial<FreshAuthenticationEvidenceInput> = {},
 ): FreshAuthenticationEvidenceInput {
   return {
-    evidenceId: 'evidence-1' as FreshAuthenticationEvidenceId,
+    evidenceId: EVIDENCE_ID,
     accountId: ACCOUNT_ID,
     sessionId: SESSION_ID,
     verificationMethod: 'external_identity',
@@ -41,9 +45,9 @@ describe('fresh authentication evidence', () => {
       expect(result).toEqual({
         outcome: 'created',
         evidence: {
-          evidenceId: 'evidence-1',
-          accountId: 'account-1',
-          sessionId: 'session-1',
+          evidenceId: EVIDENCE_ID,
+          accountId: ACCOUNT_ID,
+          sessionId: SESSION_ID,
           verificationMethod,
           authenticatedAt: AUTHENTICATED_AT,
           expiresAt: EXPIRES_AT,
@@ -182,8 +186,8 @@ describe('fresh authentication evidence', () => {
       throw new Error('Expected valid evidence');
     }
 
-    mutableInput.accountId = 'account-2' as AccountId;
-    mutableInput.sessionId = 'session-2' as SessionId;
+    mutableInput.accountId = deterministicUuid('account-2') as AccountId;
+    mutableInput.sessionId = deterministicUuid('session-2') as SessionId;
     mutableInput.personalData.name = 'Changed';
 
     expect(result.evidence.accountId).toBe(ACCOUNT_ID);

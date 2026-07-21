@@ -3,6 +3,7 @@ import {
   EXTERNAL_IDENTITY_PROVIDERS,
   ExternalIdentityReference,
 } from '../accounts/external-identity.types';
+import { deterministicUuid } from '../../test/deterministic-uuid';
 import {
   AUTHENTICATION_INTENTS,
   AdminStepUpState,
@@ -14,11 +15,15 @@ import {
   isAuthenticationIdempotencyKey,
   isAuthenticationIntent,
   isAuthenticationOperationId,
+  isAuthenticationProofReference,
   isAuthenticationProofFingerprint,
   isAuthenticationRequestDigest,
   isUnixEpochSeconds,
+  otpAuthenticationProofReference,
+  telegramAuthenticationProofReference,
   unixEpochSeconds,
 } from './auth.types';
+import { OtpChallengeId } from './otp.types';
 
 describe('authentication contracts', () => {
   const issuedAt = new Date('2026-01-01T10:00:00.000Z');
@@ -55,21 +60,44 @@ describe('authentication contracts', () => {
     expect(isAuthenticationIntent('telegram_login_button')).toBe(false);
   });
 
-  it('validates opaque authentication identifiers at runtime', () => {
-    const guards = [
-      isAuthenticationOperationId,
-      isAuthenticationCommandId,
-      isAuthenticationIdempotencyKey,
-      isAuthenticationRequestDigest,
-    ];
-
-    for (const guard of guards) {
-      expect(guard('safe-value')).toBe(true);
+  it('validates UUID authentication aggregate and command IDs at runtime', () => {
+    for (const guard of [isAuthenticationOperationId, isAuthenticationCommandId]) {
+      expect(guard(deterministicUuid('authentication-id'))).toBe(true);
+      expect(guard('safe-value')).toBe(false);
       expect(guard('')).toBe(false);
       expect(guard(' padded ')).toBe(false);
       expect(guard('control\nvalue')).toBe(false);
       expect(guard('x'.repeat(257))).toBe(false);
     }
+  });
+
+  it('keeps idempotency keys and request digests as bounded opaque values', () => {
+    for (const guard of [
+      isAuthenticationIdempotencyKey,
+      isAuthenticationRequestDigest,
+    ]) {
+      expect(guard('safe-value')).toBe(true);
+      expect(guard('')).toBe(false);
+      expect(guard(' padded ')).toBe(false);
+    }
+  });
+
+  it('creates closed Telegram and OTP proof references', () => {
+    const telegram = telegramAuthenticationProofReference(
+      'a'.repeat(64) as never,
+    );
+    const otp = otpAuthenticationProofReference(
+      deterministicUuid('otp-challenge') as OtpChallengeId,
+    );
+
+    expect(isAuthenticationProofReference(telegram)).toBe(true);
+    expect(isAuthenticationProofReference(otp)).toBe(true);
+    expect(
+      isAuthenticationProofReference({
+        type: 'otp_challenge',
+        challengeId: 'otp-challenge',
+      }),
+    ).toBe(false);
   });
 
   it('accepts only a lowercase SHA-256 proof fingerprint', () => {
@@ -146,8 +174,9 @@ describe('authentication contracts', () => {
   });
 
   it('identifies an authenticated principal by its internal account ID', () => {
+    const accountId = deterministicUuid('principal-account') as AccountId;
     const principal: AuthenticatedPrincipal = {
-      accountId: '00000000-0000-4000-8000-000000000001' as AccountId,
+      accountId,
       role: 'club_admin',
       accountStatus: 'active',
       session: {
@@ -160,8 +189,6 @@ describe('authentication contracts', () => {
       adminStepUp: { status: 'not_verified' },
     };
 
-    expect(principal.accountId).toBe(
-      '00000000-0000-4000-8000-000000000001',
-    );
+    expect(principal.accountId).toBe(accountId);
   });
 });

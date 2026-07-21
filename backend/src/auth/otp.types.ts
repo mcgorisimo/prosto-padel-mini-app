@@ -1,22 +1,26 @@
 import { ExternalIdentityKey } from '../accounts/external-identity.types';
 import {
+  InternalUuid,
+  isInternalUuid,
+  newInternalUuid,
+} from '../common/internal-uuid';
+import {
   AuthenticationIntent,
   AuthenticationOperationId,
   UnixEpochSeconds,
 } from './auth.types';
+import { AggregateCommandSequence } from './aggregate-command-sequence';
 
 declare const otpChallengeIdBrand: unique symbol;
 declare const otpCommandIdBrand: unique symbol;
 declare const otpVerifierDigestBrand: unique symbol;
 declare const otpRequestDigestBrand: unique symbol;
 
-const MAX_OTP_OPAQUE_VALUE_LENGTH = 256;
-const OTP_CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f-\u009f]/u;
 const SHA_256_HEX_PATTERN = /^[0-9a-f]{64}$/u;
 
 export const MAX_OTP_ATTEMPTS = 10;
 
-export type OtpChallengeId = string & {
+export type OtpChallengeId = InternalUuid & {
   readonly [otpChallengeIdBrand]: 'OtpChallengeId';
 };
 
@@ -24,7 +28,7 @@ export type OtpChallengeId = string & {
  * A command ID is unique within one challenge. A future persistence adapter
  * must atomically enforce uniqueness for (otpChallengeId, commandId).
  */
-export type OtpCommandId = string & {
+export type OtpCommandId = InternalUuid & {
   readonly [otpCommandIdBrand]: 'OtpCommandId';
 };
 
@@ -41,22 +45,20 @@ export type OtpRequestDigest = string & {
   readonly [otpRequestDigestBrand]: 'OtpRequestDigest';
 };
 
-function isOtpOpaqueValue(value: unknown): value is string {
-  return (
-    typeof value === 'string' &&
-    value.length > 0 &&
-    value.length <= MAX_OTP_OPAQUE_VALUE_LENGTH &&
-    value.trim() === value &&
-    !OTP_CONTROL_CHARACTER_PATTERN.test(value)
-  );
-}
-
 export function isOtpChallengeId(value: unknown): value is OtpChallengeId {
-  return isOtpOpaqueValue(value);
+  return isInternalUuid(value);
 }
 
 export function isOtpCommandId(value: unknown): value is OtpCommandId {
-  return isOtpOpaqueValue(value);
+  return isInternalUuid(value);
+}
+
+export function newOtpChallengeId(): OtpChallengeId {
+  return newInternalUuid() as OtpChallengeId;
+}
+
+export function newOtpCommandId(): OtpCommandId {
+  return newInternalUuid() as OtpCommandId;
 }
 
 export function isOtpVerifierDigest(
@@ -162,6 +164,50 @@ export type AppliedOtpCommand =
   | AppliedSubmitOtpCommand
   | AppliedExpireOtpCommand
   | AppliedCancelOtpCommand;
+
+interface OtpCommandPersistenceRecordBase {
+  readonly challengeId: OtpChallengeId;
+  readonly commandId: OtpCommandId;
+  readonly commandSequence: AggregateCommandSequence;
+  /** Must cryptographically bind every command input in canonical form. */
+  readonly requestDigest: OtpRequestDigest;
+  readonly appliedAt: UnixEpochSeconds;
+}
+
+/**
+ * Relational command history needed to hydrate the existing OTP reducer. A
+ * submit record retains only the protected verifier-compatible digest, never
+ * the plaintext OTP or its destination.
+ */
+export type OtpCommandPersistenceRecord =
+  | (OtpCommandPersistenceRecordBase & {
+      readonly commandType: 'submit_otp';
+      readonly presentedDigest: OtpVerifierDigest;
+      readonly result: Extract<
+        OtpAppliedResult,
+        {
+          readonly type:
+            | 'otp_verified'
+            | 'incorrect_code'
+            | 'otp_attempts_exhausted';
+        }
+      >;
+    })
+  | (OtpCommandPersistenceRecordBase & {
+      readonly commandType: 'expire_otp';
+      readonly result: Extract<
+        OtpAppliedResult,
+        { readonly type: 'otp_expired' }
+      >;
+    })
+  | (OtpCommandPersistenceRecordBase & {
+      readonly commandType: 'cancel_otp';
+      readonly reason: OtpCancelReason;
+      readonly result: Extract<
+        OtpAppliedResult,
+        { readonly type: 'otp_cancelled' }
+      >;
+    });
 
 export interface OtpChallengeStateBinding {
   readonly challengeId: OtpChallengeId;

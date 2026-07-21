@@ -1,4 +1,9 @@
 import { AccountId } from '../accounts/account.types';
+import {
+  InternalUuid,
+  isInternalUuid,
+  newInternalUuid,
+} from '../common/internal-uuid';
 import { UnixEpochSeconds, isUnixEpochSeconds } from './auth.types';
 import {
   SessionId,
@@ -8,10 +13,7 @@ import {
 
 declare const freshAuthenticationEvidenceIdBrand: unique symbol;
 
-const MAX_FRESH_AUTHENTICATION_ID_LENGTH = 256;
-const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f-\u009f]/u;
-
-export type FreshAuthenticationEvidenceId = string & {
+export type FreshAuthenticationEvidenceId = InternalUuid & {
   readonly [freshAuthenticationEvidenceIdBrand]:
     'FreshAuthenticationEvidenceId';
 };
@@ -82,13 +84,11 @@ function hasExactlyKeys(
 export function isFreshAuthenticationEvidenceId(
   value: unknown,
 ): value is FreshAuthenticationEvidenceId {
-  return (
-    typeof value === 'string' &&
-    value.length > 0 &&
-    value.length <= MAX_FRESH_AUTHENTICATION_ID_LENGTH &&
-    value.trim() === value &&
-    !CONTROL_CHARACTER_PATTERN.test(value)
-  );
+  return isInternalUuid(value);
+}
+
+export function newFreshAuthenticationEvidenceId(): FreshAuthenticationEvidenceId {
+  return newInternalUuid() as FreshAuthenticationEvidenceId;
 }
 
 export function isFreshAuthenticationVerificationMethod(

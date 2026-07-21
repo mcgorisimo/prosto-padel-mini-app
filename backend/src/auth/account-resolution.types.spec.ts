@@ -1,4 +1,5 @@
 import { AccountId } from '../accounts/account.types';
+import { deterministicUuid } from '../../test/deterministic-uuid';
 import {
   ExternalIdentityKey,
   externalIdentityNamespace,
@@ -13,7 +14,7 @@ import {
   resolveExistingAccountStatus,
 } from './account-resolution.types';
 
-const ACCOUNT_ID = '00000000-0000-4000-8000-000000000001' as AccountId;
+const ACCOUNT_ID = deterministicUuid('account-1') as AccountId;
 
 function identityKey(
   provider: ExternalIdentityKey['provider'] = 'telegram',

@@ -1,6 +1,14 @@
+import { deterministicUuid } from '../../test/deterministic-uuid';
+import { aggregateCommandSequence } from './aggregate-command-sequence';
+import { unixEpochSeconds } from './auth.types';
 import {
   MAX_OTP_ATTEMPTS,
   OTP_CANCEL_REASONS,
+  OtpChallengeId,
+  OtpCommandId,
+  OtpCommandPersistenceRecord,
+  OtpRequestDigest,
+  OtpVerifierDigest,
   isOtpAttemptCount,
   isOtpCancelReason,
   isOtpChallengeId,
@@ -11,16 +19,16 @@ import {
 
 describe('OTP primitive contracts', () => {
   it.each([isOtpChallengeId, isOtpCommandId])(
-    'accepts a bounded opaque ID',
+    'accepts a canonical UUID',
     (guard) => {
-      expect(guard('otp-value-1')).toBe(true);
+      expect(guard(deterministicUuid('otp-value-1'))).toBe(true);
     },
   );
 
   it.each([isOtpChallengeId, isOtpCommandId])(
-    'rejects unsafe opaque IDs',
+    'rejects non-UUID IDs',
     (guard) => {
-      for (const value of ['', ' ', ' padded', 'padded ', 'line\nbreak', 'x'.repeat(257)]) {
+      for (const value of ['', 'otp-value-1', ' padded', 'line\nbreak']) {
         expect(guard(value)).toBe(false);
       }
     },
@@ -50,5 +58,22 @@ describe('OTP primitive contracts', () => {
 
   it('rejects arbitrary cancel reasons', () => {
     expect(isOtpCancelReason('provider_failure')).toBe(false);
+  });
+
+  it('stores only a protected digest for a submitted OTP', () => {
+    const record: OtpCommandPersistenceRecord = {
+      challengeId: deterministicUuid('otp-challenge') as OtpChallengeId,
+      commandId: deterministicUuid('otp-command') as OtpCommandId,
+      commandSequence: aggregateCommandSequence(1),
+      commandType: 'submit_otp',
+      requestDigest: 'a'.repeat(64) as OtpRequestDigest,
+      appliedAt: unixEpochSeconds(1_784_635_200),
+      presentedDigest: 'b'.repeat(64) as OtpVerifierDigest,
+      result: { type: 'incorrect_code', attemptsRemaining: 2 },
+    };
+
+    expect(record.presentedDigest).toBe('b'.repeat(64));
+    expect(record).not.toHaveProperty('otp');
+    expect(record).not.toHaveProperty('destination');
   });
 });

@@ -1,3 +1,4 @@
+import { deterministicUuid } from '../../test/deterministic-uuid';
 import { unixEpochSeconds } from './auth.types';
 import {
   OtpSenderOutcome,
@@ -28,7 +29,7 @@ class FakeOtpSender implements OtpSenderPort {
 function senderRequest(): OtpSenderRequest {
   return {
     channel: 'sms',
-    challengeId: 'otp-challenge-1' as OtpChallengeId,
+    challengeId: deterministicUuid('otp-challenge-1') as OtpChallengeId,
     destination: '+79990000000',
     plaintextCode: '123456',
     expiresAt: unixEpochSeconds(1_784_700_300),

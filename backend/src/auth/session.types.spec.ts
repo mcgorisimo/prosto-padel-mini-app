@@ -1,5 +1,12 @@
+import { deterministicUuid } from '../../test/deterministic-uuid';
+import { aggregateCommandSequence } from './aggregate-command-sequence';
+import { unixEpochSeconds } from './auth.types';
 import {
   SESSION_REVOKE_REASONS,
+  SessionCommandId,
+  SessionCommandPersistenceRecord,
+  SessionId,
+  SessionRequestDigest,
   isSessionAccountId,
   isSessionCommandId,
   isSessionCredentialDigest,
@@ -23,21 +30,20 @@ describe('session contracts', () => {
     expect(isSessionRevokeReason('database_error')).toBe(false);
   });
 
-  it('validates opaque session identifiers at runtime', () => {
-    const guards = [
-      isSessionId,
-      isSessionCommandId,
-      isSessionRequestDigest,
-      isSessionAccountId,
-    ];
-
-    for (const guard of guards) {
-      expect(guard('safe-value')).toBe(true);
+  it('validates UUID session-family, command and account IDs at runtime', () => {
+    for (const guard of [isSessionId, isSessionCommandId, isSessionAccountId]) {
+      expect(guard(deterministicUuid('session-id'))).toBe(true);
+      expect(guard('safe-value')).toBe(false);
       expect(guard('')).toBe(false);
       expect(guard(' padded ')).toBe(false);
       expect(guard('control\nvalue')).toBe(false);
       expect(guard('x'.repeat(257))).toBe(false);
     }
+  });
+
+  it('keeps request digests as bounded opaque values', () => {
+    expect(isSessionRequestDigest('safe-value')).toBe(true);
+    expect(isSessionRequestDigest(' padded ')).toBe(false);
   });
 
   it('accepts only a lowercase SHA-256 credential digest', () => {
@@ -61,5 +67,29 @@ describe('session contracts', () => {
     ]) {
       expect(isSessionCredentialGeneration(invalid)).toBe(false);
     }
+  });
+
+  it('keeps terminal persistence records free of credential references', () => {
+    const record: SessionCommandPersistenceRecord = {
+      sessionId: deterministicUuid('session') as SessionId,
+      commandId: deterministicUuid('session-command') as SessionCommandId,
+      commandSequence: aggregateCommandSequence(1),
+      commandType: 'expire_session',
+      requestDigest: 'safe-request-digest' as SessionRequestDigest,
+      appliedAt: unixEpochSeconds(1_784_635_500),
+      result: {
+        type: 'session_expired',
+        expiration: {
+          expiredAt: unixEpochSeconds(1_784_635_500),
+          commandId: deterministicUuid(
+            'session-command',
+          ) as SessionCommandId,
+        },
+      },
+    };
+
+    expect(record).not.toHaveProperty('presentedCredential');
+    expect(record).not.toHaveProperty('nextCredential');
+    expect(record).not.toHaveProperty('credential');
   });
 });

@@ -2,6 +2,7 @@ import {
   externalIdentityNamespace,
   trustProviderCanonicalizedExternalIdentitySubject,
 } from '../accounts/external-identity.types';
+import { deterministicUuid } from '../../test/deterministic-uuid';
 import {
   AuthenticationIdempotencyKey,
   AuthenticationOperationId,
@@ -38,7 +39,7 @@ function requestDigest(value: string): AuthenticationRequestDigest {
 }
 
 function operationId(value: string): AuthenticationOperationId {
-  return value as AuthenticationOperationId;
+  return deterministicUuid(value) as AuthenticationOperationId;
 }
 
 function verifiedProof(

@@ -1,5 +1,11 @@
 import { AccountId } from '../accounts/account.types';
-import { UnixEpochSeconds, unixEpochSeconds } from './auth.types';
+import { deterministicUuid } from '../../test/deterministic-uuid';
+import { aggregateCommandSequence } from './aggregate-command-sequence';
+import {
+  AuthenticationOperationId,
+  UnixEpochSeconds,
+  unixEpochSeconds,
+} from './auth.types';
 import {
   ActiveSessionState,
   CreateActiveSessionBinding,
@@ -8,6 +14,7 @@ import {
   RotateSessionCredentialCommand,
   SessionCommand,
   SessionCommandId,
+  SessionCommandPersistenceRecord,
   SessionCredentialBinding,
   SessionCredentialDigest,
   SessionId,
@@ -18,10 +25,16 @@ import {
 import {
   SessionTransitionResult,
   createActiveSession,
+  hydrateAppliedSessionCommandHistory,
+  hydrateSessionStateFromCommandPersistenceRecords,
+  isSessionCommandPersistenceRecord,
   transitionSession,
 } from './session.state-machine';
 
-const ACCOUNT_ID = '00000000-0000-4000-8000-000000000001' as AccountId;
+const ACCOUNT_ID = deterministicUuid('account-1') as AccountId;
+const AUTHENTICATION_OPERATION_ID = deterministicUuid(
+  'authentication-operation-1',
+) as AuthenticationOperationId;
 const CREATED_AT = unixEpochSeconds(1_784_635_200);
 const EXPIRES_AT = unixEpochSeconds(1_784_635_500);
 const BEFORE_EXPIRY = unixEpochSeconds(1_784_635_499);
@@ -33,11 +46,11 @@ const DIGEST_C = 'c'.repeat(64) as SessionCredentialDigest;
 const DIGEST_D = 'd'.repeat(64) as SessionCredentialDigest;
 
 function sessionId(value = 'session-1'): SessionId {
-  return value as SessionId;
+  return deterministicUuid(value) as SessionId;
 }
 
 function commandId(value = 'command-1'): SessionCommandId {
-  return value as SessionCommandId;
+  return deterministicUuid(value) as SessionCommandId;
 }
 
 function requestDigest(value = 'request-1'): SessionRequestDigest {
@@ -57,6 +70,7 @@ function activeBinding(
 ): CreateActiveSessionBinding {
   return {
     sessionId: sessionId(),
+    authenticationOperationId: AUTHENTICATION_OPERATION_ID,
     accountId: ACCOUNT_ID,
     createdAt: CREATED_AT,
     expiresAt: EXPIRES_AT,
@@ -176,6 +190,29 @@ function reuseDetectedSession(): Extract<
   );
 }
 
+function sessionPersistenceRecords(
+  state: SessionState,
+): SessionCommandPersistenceRecord[] {
+  return state.appliedCommands.map(
+    (command, index) =>
+      ({
+        ...structuredClone(command),
+        commandSequence: aggregateCommandSequence(index + 1),
+      }) as SessionCommandPersistenceRecord,
+  );
+}
+
+function hydrateSessionFromCommandRecords(
+  state: SessionState,
+  records: readonly SessionCommandPersistenceRecord[] =
+    sessionPersistenceRecords(state),
+): SessionState {
+  return hydrateSessionStateFromCommandPersistenceRecords({
+    ...structuredClone(state),
+    appliedCommands: records,
+  });
+}
+
 describe('active session creation', () => {
   it('creates an immutable active domain value with generation one', () => {
     const result = createActiveSession(activeBinding());
@@ -185,7 +222,8 @@ describe('active session creation', () => {
       return;
     }
     expect(result.state).toEqual({
-      sessionId: 'session-1',
+      sessionId: sessionId(),
+      authenticationOperationId: AUTHENTICATION_OPERATION_ID,
       accountId: ACCOUNT_ID,
       createdAt: CREATED_AT,
       expiresAt: EXPIRES_AT,
@@ -219,6 +257,11 @@ describe('active session creation', () => {
       'accountId',
       '' as AccountId,
       'invalid_account_id',
+    ],
+    [
+      'authenticationOperationId',
+      'authentication-operation-1' as AuthenticationOperationId,
+      'invalid_authentication_operation_id',
     ],
     [
       'currentCredential',
@@ -618,7 +661,7 @@ describe('session credential reuse detection', () => {
         detectedAt: ROTATION_TIME_2,
         generation: 1,
         digest: DIGEST_A,
-        commandId: 'reuse-command',
+        commandId: commandId('reuse-command'),
       },
       currentCredential: { digest: DIGEST_B, generation: 2 },
     });
@@ -890,7 +933,7 @@ describe('session expiry', () => {
       transition: 'session_expired',
       state: {
         status: 'expired',
-        expiration: { expiredAt: EXPIRES_AT, commandId: 'command-1' },
+        expiration: { expiredAt: EXPIRES_AT, commandId: commandId() },
       },
     });
   });
@@ -908,7 +951,7 @@ describe('session expiry', () => {
       outcome: 'idempotent_retry',
       originalResult: {
         type: 'session_expired',
-        expiration: { expiredAt: EXPIRES_AT, commandId: 'command-1' },
+        expiration: { expiredAt: EXPIRES_AT, commandId: commandId() },
       },
     });
     expect(retry.state).toBe(first.state);
@@ -1053,7 +1096,7 @@ describe('session revoke', () => {
       transition: 'session_revoked',
       state: {
         status: 'revoked',
-        revocation: { reason, commandId: 'command-1' },
+        revocation: { reason, commandId: commandId() },
       },
     });
   });
@@ -1224,11 +1267,11 @@ describe('session command idempotency', () => {
 
     expect(firstResult).toMatchObject({
       outcome: 'transitioned',
-      state: { sessionId: 'session-1' },
+      state: { sessionId: sessionId('session-1') },
     });
     expect(secondResult).toMatchObject({
       outcome: 'transitioned',
-      state: { sessionId: 'session-2' },
+      state: { sessionId: sessionId('session-2') },
     });
     expect(firstResult.state).not.toBe(secondResult.state);
   });
@@ -1921,5 +1964,238 @@ describe('session persisted state guard', () => {
       rotated,
       'invalid_next_credential',
     );
+  });
+});
+
+describe('session command persistence hydration', () => {
+  function twoRotations() {
+    const initial = activeSession();
+    const firstCommand = rotateCommand(initial, {
+      commandId: commandId('persisted-rotation-1'),
+      requestDigest: requestDigest('persisted-request-1'),
+      now: ROTATION_TIME_1,
+    });
+    const first = transitionedState(
+      transitionSession(initial, firstCommand),
+      'active',
+    );
+    const secondCommand = rotateCommand(first, {
+      commandId: commandId('persisted-rotation-2'),
+      requestDigest: requestDigest('persisted-request-2'),
+      now: ROTATION_TIME_2,
+    });
+    const second = transitionedState(
+      transitionSession(first, secondCommand),
+      'active',
+    );
+    return { firstCommand, secondCommand, state: second };
+  }
+
+  it('hydrates multiple rotations with their exact credential references', () => {
+    const { state } = twoRotations();
+    const records = sessionPersistenceRecords(state).reverse();
+    const hydrated = hydrateSessionFromCommandRecords(state, records);
+
+    expect(hydrated.appliedCommands).toEqual(state.appliedCommands);
+    expect(hydrated.appliedCommands).toHaveLength(2);
+    expect(Object.isFrozen(hydrated.appliedCommands)).toBe(true);
+    for (const record of records) {
+      expect(isSessionCommandPersistenceRecord(record)).toBe(true);
+      expect(record).toHaveProperty('presentedCredential.digest');
+      expect(record).toHaveProperty('nextCredential.digest');
+    }
+  });
+
+  it('uses sequence as the only order when rotations share appliedAt', () => {
+    const initial = activeSession();
+    const first = transitionedState(
+      transitionSession(
+        initial,
+        rotateCommand(initial, {
+          commandId: commandId('same-time-rotation-1'),
+          requestDigest: requestDigest('same-time-request-1'),
+          now: ROTATION_TIME_1,
+        }),
+      ),
+      'active',
+    );
+    const second = transitionedState(
+      transitionSession(
+        first,
+        rotateCommand(first, {
+          commandId: commandId('same-time-rotation-2'),
+          requestDigest: requestDigest('same-time-request-2'),
+          now: ROTATION_TIME_1,
+        }),
+      ),
+      'active',
+    );
+    const records = sessionPersistenceRecords(second).reverse();
+    const hydrated = hydrateSessionFromCommandRecords(second, records);
+
+    expect(hydrated.appliedCommands.map(({ commandId }) => commandId)).toEqual(
+      second.appliedCommands.map(({ commandId }) => commandId),
+    );
+    expect(hydrated.appliedCommands.map(({ appliedAt }) => appliedAt)).toEqual([
+      ROTATION_TIME_1,
+      ROTATION_TIME_1,
+    ]);
+  });
+
+  it.each([
+    ['duplicate', [1, 1]],
+    ['gap', [1, 3]],
+  ])('rejects %s persistence sequence', (_label, sequences) => {
+    const { state } = twoRotations();
+    const records = sessionPersistenceRecords(state).map((record, index) => ({
+      ...record,
+      commandSequence: aggregateCommandSequence(sequences[index]),
+    }));
+
+    expect(() => hydrateSessionFromCommandRecords(state, records)).toThrow(
+      'Session command persistence sequence is invalid',
+    );
+  });
+
+  it.each([0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, '1'])(
+    'rejects invalid persistence sequence %#',
+    (commandSequence) => {
+      const { state } = twoRotations();
+      const records = sessionPersistenceRecords(state) as unknown as Array<
+        Record<string, unknown>
+      >;
+      records[0] = { ...records[0], commandSequence };
+
+      expect(() =>
+        hydrateSessionFromCommandRecords(
+          state,
+          records as unknown as SessionCommandPersistenceRecord[],
+        ),
+      ).toThrow('Session command persistence record is invalid');
+    },
+  );
+
+  it('returns the original result for an exact retry after hydration', () => {
+    const { firstCommand, state } = twoRotations();
+    const hydrated = hydrateSessionFromCommandRecords(state);
+    const retry = transitionSession(hydrated, firstCommand);
+
+    expect(retry).toMatchObject({
+      outcome: 'idempotent_retry',
+      originalResult: state.appliedCommands[0].result,
+    });
+  });
+
+  it('rejects conflicting command reuse after hydration', () => {
+    const { firstCommand, state } = twoRotations();
+    const hydrated = hydrateSessionFromCommandRecords(state);
+    const conflict = transitionSession(hydrated, {
+      ...firstCommand,
+      requestDigest: requestDigest('conflicting-persisted-request'),
+    });
+
+    expect(conflict).toMatchObject({
+      outcome: 'rejected',
+      reason: 'command_reuse_conflict',
+    });
+  });
+
+  it('hydrates reuse-detected history without inventing a credential reference', () => {
+    const initial = activeSession();
+    const rotated = transitionedState(
+      transitionSession(initial, rotateCommand(initial)),
+      'active',
+    );
+    const reuseCommand = rotateCommand(rotated, {
+      commandId: commandId('persisted-reuse-command'),
+      requestDigest: requestDigest('persisted-reuse-request'),
+      now: ROTATION_TIME_2,
+      presentedCredential: { digest: DIGEST_A, generation: 1 },
+      nextCredential: { digest: DIGEST_D, generation: 3 },
+    });
+    const reused = transitionedState(
+      transitionSession(rotated, reuseCommand),
+      'reuse_detected',
+    );
+    const hydrated = hydrateSessionFromCommandRecords(reused);
+    const retry = transitionSession(hydrated, reuseCommand);
+
+    expect(hydrated.appliedCommands[1]).toMatchObject({
+      commandType: 'rotate_credential',
+      presentedCredential: reuseCommand.presentedCredential,
+      nextCredential: reuseCommand.nextCredential,
+      result: { type: 'reuse_detected' },
+    });
+    expect(retry).toMatchObject({ outcome: 'idempotent_retry' });
+  });
+
+  it('detects consumed credential reuse by a new command after hydration', () => {
+    const { state } = twoRotations();
+    const hydrated = hydrateSessionFromCommandRecords(
+      state,
+      sessionPersistenceRecords(state).reverse(),
+    );
+    const command = rotateCommand(hydrated, {
+      commandId: commandId('post-hydration-reuse'),
+      requestDigest: requestDigest('post-hydration-reuse-request'),
+      now: BEFORE_EXPIRY,
+      presentedCredential: { digest: DIGEST_A, generation: 1 },
+      nextCredential: { digest: DIGEST_D, generation: 4 },
+    });
+    const reused = transitionSession(hydrated, command);
+
+    expect(reused).toMatchObject({
+      outcome: 'transitioned',
+      transition: 'reuse_detected',
+      state: { status: 'reuse_detected', reuse: { generation: 1 } },
+    });
+    if (reused.outcome !== 'transitioned') {
+      throw new Error('Expected consumed credential reuse after hydration');
+    }
+    expect(transitionSession(reused.state, command)).toMatchObject({
+      outcome: 'idempotent_retry',
+      originalResult: reused.result,
+    });
+  });
+
+  it('rejects a rotate record missing a required credential reference', () => {
+    const initial = activeSession();
+    const rotated = transitionedState(
+      transitionSession(initial, rotateCommand(initial)),
+      'active',
+    );
+    const record = structuredClone(
+      sessionPersistenceRecords(rotated)[0],
+    ) as unknown as Record<string, unknown>;
+    delete record.nextCredential;
+
+    expect(isSessionCommandPersistenceRecord(record)).toBe(false);
+    expect(() => hydrateAppliedSessionCommandHistory([record])).toThrow(
+      'Session command persistence record is invalid',
+    );
+  });
+
+  it('persists credential digests and generations without plaintext credentials', () => {
+    const { state } = twoRotations();
+    const records = sessionPersistenceRecords(state);
+    const serialized = JSON.stringify(records);
+
+    expect(records[0]).toMatchObject({
+      presentedCredential: { digest: DIGEST_A, generation: 1 },
+      nextCredential: { digest: DIGEST_B, generation: 2 },
+    });
+    expect(serialized).not.toContain('plaintext-session-credential');
+    expect(records[0]).not.toHaveProperty('presentedCredential.plaintext');
+    expect(records[0]).not.toHaveProperty('nextCredential.plaintext');
+  });
+
+  it('does not mutate the input persistence-record array', () => {
+    const { state } = twoRotations();
+    const records = sessionPersistenceRecords(state).reverse();
+    const snapshot = structuredClone(records);
+
+    hydrateSessionFromCommandRecords(state, records);
+
+    expect(records).toEqual(snapshot);
   });
 });

@@ -13,14 +13,14 @@ import {
   AuthenticationIdempotencyKey,
   AuthenticationIntent,
   AuthenticationOperationId,
-  AuthenticationProofFingerprint,
+  AuthenticationProofReference,
   AuthenticationRequestDigest,
   UnixEpochSeconds,
   isAuthenticationCommandId,
   isAuthenticationIdempotencyKey,
   isAuthenticationIntent,
   isAuthenticationOperationId,
-  isAuthenticationProofFingerprint,
+  isAuthenticationProofReference,
   isAuthenticationRequestDigest,
   isUnixEpochSeconds,
 } from './auth.types';
@@ -81,7 +81,7 @@ export const AUTHENTICATION_OPERATION_BINDING_REJECTION_REASONS =
     'invalid_operation_id',
     'invalid_intent',
     'invalid_identity_key',
-    'invalid_proof_fingerprint',
+    'invalid_proof_reference',
     'invalid_idempotency_key',
     'invalid_request_digest',
     'invalid_created_at',
@@ -112,7 +112,7 @@ export interface AuthenticationOperationBinding {
   readonly operationId: AuthenticationOperationId;
   readonly intent: AuthenticationIntent;
   readonly identityKey: ExternalIdentityKey;
-  readonly proofFingerprint: AuthenticationProofFingerprint;
+  readonly proofReference: AuthenticationProofReference;
   readonly createdAt: UnixEpochSeconds;
   readonly expiresAt: UnixEpochSeconds;
   readonly idempotencyKey: AuthenticationIdempotencyKey;
@@ -124,7 +124,7 @@ export type AuthenticationOperationCommandBinding = Pick<
   | 'operationId'
   | 'intent'
   | 'identityKey'
-  | 'proofFingerprint'
+  | 'proofReference'
   | 'idempotencyKey'
   | 'requestDigest'
 >;
@@ -300,8 +300,8 @@ function operationBindingRejectionReason(
   if (!isValidExternalIdentityKey(binding.identityKey)) {
     return 'invalid_identity_key';
   }
-  if (!isAuthenticationProofFingerprint(binding.proofFingerprint)) {
-    return 'invalid_proof_fingerprint';
+  if (!isAuthenticationProofReference(binding.proofReference)) {
+    return 'invalid_proof_reference';
   }
   if (!isAuthenticationIdempotencyKey(binding.idempotencyKey)) {
     return 'invalid_idempotency_key';
@@ -341,7 +341,7 @@ function isValidCommandBinding(
     isAuthenticationOperationId(binding.operationId) &&
     isAuthenticationIntent(binding.intent) &&
     isValidExternalIdentityKey(binding.identityKey) &&
-    isAuthenticationProofFingerprint(binding.proofFingerprint) &&
+    isAuthenticationProofReference(binding.proofReference) &&
     isAuthenticationIdempotencyKey(binding.idempotencyKey) &&
     isAuthenticationRequestDigest(binding.requestDigest)
   );
@@ -446,11 +446,40 @@ function identityKeysEqual(
   );
 }
 
+function immutableProofReference(
+  proofReference: AuthenticationProofReference,
+): AuthenticationProofReference {
+  return proofReference.type === 'telegram_proof'
+    ? Object.freeze({
+        type: proofReference.type,
+        proofFingerprint: proofReference.proofFingerprint,
+      })
+    : Object.freeze({
+        type: proofReference.type,
+        challengeId: proofReference.challengeId,
+      });
+}
+
+function proofReferencesEqual(
+  left: AuthenticationProofReference,
+  right: AuthenticationProofReference,
+): boolean {
+  if (left.type !== right.type) {
+    return false;
+  }
+
+  return left.type === 'telegram_proof' && right.type === 'telegram_proof'
+    ? left.proofFingerprint === right.proofFingerprint
+    : left.type === 'otp_challenge' &&
+        right.type === 'otp_challenge' &&
+        left.challengeId === right.challengeId;
+}
+
 const AUTHENTICATION_OPERATION_BINDING_KEYS = Object.freeze([
   'operationId',
   'intent',
   'identityKey',
-  'proofFingerprint',
+  'proofReference',
   'createdAt',
   'expiresAt',
   'idempotencyKey',
@@ -579,7 +608,7 @@ function commandBindingMatches(
     state.operationId === binding.operationId &&
     state.intent === binding.intent &&
     identityKeysEqual(state.identityKey, binding.identityKey) &&
-    state.proofFingerprint === binding.proofFingerprint &&
+    proofReferencesEqual(state.proofReference, binding.proofReference) &&
     state.idempotencyKey === binding.idempotencyKey &&
     state.requestDigest === binding.requestDigest
   );
@@ -674,7 +703,7 @@ function baseState(
     operationId: state.operationId,
     intent: state.intent,
     identityKey: state.identityKey,
-    proofFingerprint: state.proofFingerprint,
+    proofReference: state.proofReference,
     createdAt: state.createdAt,
     expiresAt: state.expiresAt,
     idempotencyKey: state.idempotencyKey,
@@ -731,7 +760,7 @@ export function createAuthenticationOperation(
     operationId: binding.operationId,
     intent: binding.intent,
     identityKey: immutableIdentityKey(binding.identityKey),
-    proofFingerprint: binding.proofFingerprint,
+    proofReference: immutableProofReference(binding.proofReference),
     createdAt: binding.createdAt,
     expiresAt: binding.expiresAt,
     idempotencyKey: binding.idempotencyKey,

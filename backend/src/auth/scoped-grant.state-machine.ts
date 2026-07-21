@@ -1,4 +1,9 @@
 import { AccountId } from '../accounts/account.types';
+import {
+  InternalUuid,
+  isInternalUuid,
+  newInternalUuid,
+} from '../common/internal-uuid';
 import { UnixEpochSeconds, isUnixEpochSeconds } from './auth.types';
 import {
   FreshAuthenticationEvidence,
@@ -31,11 +36,9 @@ declare const scopedGrantCommandIdBrand: unique symbol;
 declare const scopedGrantResourceDigestBrand: unique symbol;
 declare const scopedGrantRequestDigestBrand: unique symbol;
 
-const MAX_SCOPED_GRANT_OPAQUE_VALUE_LENGTH = 256;
-const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f-\u009f]/u;
 const SHA_256_HEX_PATTERN = /^[0-9a-f]{64}$/u;
 
-export type ScopedGrantId = string & {
+export type ScopedGrantId = InternalUuid & {
   readonly [scopedGrantIdBrand]: 'ScopedGrantId';
 };
 
@@ -43,7 +46,7 @@ export type ScopedGrantId = string & {
  * A command ID is unique within one grant. A future persistence adapter must
  * atomically enforce uniqueness for the pair (grantId, commandId).
  */
-export type ScopedGrantCommandId = string & {
+export type ScopedGrantCommandId = InternalUuid & {
   readonly [scopedGrantCommandIdBrand]: 'ScopedGrantCommandId';
 };
 
@@ -549,24 +552,22 @@ function isSessionStateContext(value: unknown): value is SessionState {
   }
 }
 
-function isOpaqueValue(value: unknown): value is string {
-  return (
-    typeof value === 'string' &&
-    value.length > 0 &&
-    value.length <= MAX_SCOPED_GRANT_OPAQUE_VALUE_LENGTH &&
-    value.trim() === value &&
-    !CONTROL_CHARACTER_PATTERN.test(value)
-  );
-}
-
 export function isScopedGrantId(value: unknown): value is ScopedGrantId {
-  return isOpaqueValue(value);
+  return isInternalUuid(value);
 }
 
 export function isScopedGrantCommandId(
   value: unknown,
 ): value is ScopedGrantCommandId {
-  return isOpaqueValue(value);
+  return isInternalUuid(value);
+}
+
+export function newScopedGrantId(): ScopedGrantId {
+  return newInternalUuid() as ScopedGrantId;
+}
+
+export function newScopedGrantCommandId(): ScopedGrantCommandId {
+  return newInternalUuid() as ScopedGrantCommandId;
 }
 
 export function isScopedGrantResourceDigest(

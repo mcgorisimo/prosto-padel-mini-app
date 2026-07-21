@@ -5,6 +5,7 @@ import {
   externalIdentityNamespace,
   trustProviderCanonicalizedExternalIdentitySubject,
 } from '../accounts/external-identity.types';
+import { deterministicUuid } from '../../test/deterministic-uuid';
 import {
   AccountResolutionOutcome,
   accountResolutionConflict,
@@ -17,11 +18,15 @@ import {
   AuthenticationIdempotencyKey,
   AuthenticationIntent,
   AuthenticationOperationId,
+  AuthenticationProofReference,
   AuthenticationProofFingerprint,
   AuthenticationRequestDigest,
   UnixEpochSeconds,
+  otpAuthenticationProofReference,
+  telegramAuthenticationProofReference,
   unixEpochSeconds,
 } from './auth.types';
+import { OtpChallengeId } from './otp.types';
 import {
   AUTHENTICATION_OPERATION_FAILURE_REASONS,
   AuthenticationOperationBinding,
@@ -36,18 +41,18 @@ import {
   transitionAuthenticationOperation,
 } from './authentication-operation.state-machine';
 
-const ACCOUNT_ID = '00000000-0000-4000-8000-000000000001' as AccountId;
+const ACCOUNT_ID = deterministicUuid('account-1') as AccountId;
 const CREATED_AT = unixEpochSeconds(1_784_635_200);
 const EXPIRES_AT = unixEpochSeconds(1_784_635_500);
 const BEFORE_EXPIRY = unixEpochSeconds(1_784_635_499);
 const PROOF_FINGERPRINT = 'a'.repeat(64) as AuthenticationProofFingerprint;
 
 function operationId(value = 'operation-1'): AuthenticationOperationId {
-  return value as AuthenticationOperationId;
+  return deterministicUuid(value) as AuthenticationOperationId;
 }
 
 function commandId(value = 'command-1'): AuthenticationCommandId {
-  return value as AuthenticationCommandId;
+  return deterministicUuid(value) as AuthenticationCommandId;
 }
 
 function proofFingerprint(
@@ -123,7 +128,7 @@ function operationBinding(
     operationId: operationId(),
     intent: 'sign_in',
     identityKey: identityKey(),
-    proofFingerprint: proofFingerprint(),
+    proofReference: telegramAuthenticationProofReference(proofFingerprint()),
     createdAt: CREATED_AT,
     expiresAt: EXPIRES_AT,
     idempotencyKey: idempotencyKey(),
@@ -150,7 +155,7 @@ function commandBinding(
     operationId: state.operationId,
     intent: state.intent,
     identityKey: state.identityKey,
-    proofFingerprint: state.proofFingerprint,
+    proofReference: state.proofReference,
     idempotencyKey: state.idempotencyKey,
     requestDigest: state.requestDigest,
     ...overrides,
@@ -235,6 +240,28 @@ describe('authentication operation creation', () => {
     expect(Object.isFrozen(result.state.identityKey.lookup)).toBe(true);
   });
 
+  it('binds an OTP operation to one specific challenge reference', () => {
+    const challengeId = deterministicUuid(
+      'otp-challenge-1',
+    ) as OtpChallengeId;
+    const result = createAuthenticationOperation(
+      operationBinding({
+        identityKey: identityKey('phone', 'phone:e164:v1', '+79990000000'),
+        proofReference: otpAuthenticationProofReference(challengeId),
+      }),
+    );
+
+    expect(result).toMatchObject({
+      outcome: 'created',
+      state: {
+        proofReference: { type: 'otp_challenge', challengeId },
+      },
+    });
+    if (result.outcome === 'created') {
+      expect(Object.isFrozen(result.state.proofReference)).toBe(true);
+    }
+  });
+
   it.each([
     [EXPIRES_AT, EXPIRES_AT, 'invalid_operation_window'],
     [EXPIRES_AT, CREATED_AT, 'invalid_operation_window'],
@@ -283,9 +310,12 @@ describe('authentication operation creation', () => {
       'invalid_request_digest',
     ],
     [
-      'proofFingerprint',
-      'not-a-sha-256-digest' as AuthenticationProofFingerprint,
-      'invalid_proof_fingerprint',
+      'proofReference',
+      {
+        type: 'telegram_proof',
+        proofFingerprint: 'not-a-sha-256-digest',
+      } as AuthenticationProofReference,
+      'invalid_proof_reference',
     ],
   ] as const)(
     'rejects invalid runtime binding field %s',
@@ -900,8 +930,7 @@ describe('authentication operation command idempotency', () => {
       pending,
       completeCommand(pending),
     );
-    const otherAccountId =
-      '00000000-0000-4000-8000-000000000002' as AccountId;
+    const otherAccountId = deterministicUuid('account-2') as AccountId;
     const result = transitionAuthenticationOperation(
       first.state,
       completeCommand(first.state, {
@@ -993,11 +1022,11 @@ describe('authentication operation command idempotency', () => {
 
     expect(first).toMatchObject({
       outcome: 'transitioned',
-      state: { status: 'completed', operationId: 'operation-1' },
+      state: { status: 'completed', operationId: operationId('operation-1') },
     });
     expect(second).toMatchObject({
       outcome: 'transitioned',
-      state: { status: 'completed', operationId: 'operation-2' },
+      state: { status: 'completed', operationId: operationId('operation-2') },
     });
     expect(first.state).not.toBe(second.state);
   });
@@ -1026,7 +1055,16 @@ describe('authentication operation binding', () => {
     ['operationId', operationId('operation-2')],
     ['intent', 'link_identity' as AuthenticationIntent],
     ['identityKey', identityKey('telegram', 'telegram:bot:999', '987654321')],
-    ['proofFingerprint', proofFingerprint('b'.repeat(64))],
+    [
+      'proofReference',
+      telegramAuthenticationProofReference(proofFingerprint('b'.repeat(64))),
+    ],
+    [
+      'proofReference',
+      otpAuthenticationProofReference(
+        deterministicUuid('otp-challenge-2') as OtpChallengeId,
+      ),
+    ],
     ['idempotencyKey', idempotencyKey('idempotency-key-2')],
     ['requestDigest', requestDigest('request-digest-2')],
   ] as const)('rejects a command that changes %s', (field, value) => {
@@ -1038,6 +1076,30 @@ describe('authentication operation binding', () => {
     );
 
     expectRejectedWithoutStateChange(result, pending, 'operation_binding_conflict');
+  });
+
+  it('rejects completion with another OTP challenge reference', () => {
+    const pending = pendingOperation({
+      proofReference: otpAuthenticationProofReference(
+        deterministicUuid('otp-challenge-1') as OtpChallengeId,
+      ),
+    });
+    const result = transitionAuthenticationOperation(
+      pending,
+      completeCommand(pending, {
+        binding: commandBinding(pending, {
+          proofReference: otpAuthenticationProofReference(
+            deterministicUuid('otp-challenge-2') as OtpChallengeId,
+          ),
+        }),
+      }),
+    );
+
+    expectRejectedWithoutStateChange(
+      result,
+      pending,
+      'operation_binding_conflict',
+    );
   });
 });
 

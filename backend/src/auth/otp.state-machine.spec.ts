@@ -3,6 +3,8 @@ import {
   externalIdentityNamespace,
   trustProviderCanonicalizedExternalIdentitySubject,
 } from '../accounts/external-identity.types';
+import { deterministicUuid } from '../../test/deterministic-uuid';
+import { aggregateCommandSequence } from './aggregate-command-sequence';
 import {
   AUTHENTICATION_INTENTS,
   AuthenticationIntent,
@@ -14,6 +16,9 @@ import {
   CreateOtpChallengeResult,
   OtpTransitionResult,
   createOtpChallenge,
+  hydrateAppliedOtpCommandHistory,
+  hydrateOtpChallengeStateFromCommandPersistenceRecords,
+  isOtpCommandPersistenceRecord,
   transitionOtpChallenge,
 } from './otp.state-machine';
 import {
@@ -26,6 +31,7 @@ import {
   OtpChallengeState,
   OtpCommand,
   OtpCommandId,
+  OtpCommandPersistenceRecord,
   OtpRequestDigest,
   OtpVerifierDigest,
   PendingOtpChallenge,
@@ -44,15 +50,15 @@ const COMMAND_REQUEST = 'e'.repeat(64) as OtpRequestDigest;
 const OTHER_REQUEST = 'f'.repeat(64) as OtpRequestDigest;
 
 function challengeId(value = 'otp-challenge-1'): OtpChallengeId {
-  return value as OtpChallengeId;
+  return deterministicUuid(value) as OtpChallengeId;
 }
 
 function commandId(value = 'otp-command-1'): OtpCommandId {
-  return value as OtpCommandId;
+  return deterministicUuid(value) as OtpCommandId;
 }
 
 function operationId(value = 'auth-operation-1'): AuthenticationOperationId {
-  return value as AuthenticationOperationId;
+  return deterministicUuid(value) as AuthenticationOperationId;
 }
 
 function phoneIdentity(): ExternalIdentityKey {
@@ -222,6 +228,29 @@ function cancelledChallenge(): OtpChallengeState {
   );
 }
 
+function otpPersistenceRecords(
+  state: OtpChallengeState,
+): OtpCommandPersistenceRecord[] {
+  return state.appliedCommands.map(
+    (command, index) =>
+      ({
+        ...structuredClone(command),
+        commandSequence: aggregateCommandSequence(index + 1),
+      }) as OtpCommandPersistenceRecord,
+  );
+}
+
+function hydrateOtpFromCommandRecords(
+  state: OtpChallengeState,
+  records: readonly OtpCommandPersistenceRecord[] =
+    otpPersistenceRecords(state),
+): OtpChallengeState {
+  return hydrateOtpChallengeStateFromCommandPersistenceRecords({
+    ...structuredClone(state),
+    appliedCommands: records,
+  });
+}
+
 describe('OTP challenge creation', () => {
   it.each(AUTHENTICATION_INTENTS)(
     'creates a phone challenge for intent %s',
@@ -257,7 +286,7 @@ describe('OTP challenge creation', () => {
     'rejects invalid challenge ID %#',
     (value) => {
       expect(
-        createOtpChallenge(binding({ challengeId: challengeId(value) })),
+        createOtpChallenge(binding({ challengeId: value as OtpChallengeId })),
       ).toMatchObject({
         outcome: 'rejected',
         reason: 'invalid_otp_challenge',
@@ -290,7 +319,9 @@ describe('OTP challenge creation', () => {
 
   it('rejects an invalid operation binding', () => {
     expect(
-      createOtpChallenge(binding({ operationId: operationId(' ') })),
+      createOtpChallenge(
+        binding({ operationId: ' ' as AuthenticationOperationId }),
+      ),
     ).toMatchObject({
       outcome: 'rejected',
       challengeReason: 'invalid_operation_id',
@@ -417,7 +448,7 @@ describe('OTP submit and attempts', () => {
     expect(verified.attemptsRemaining).toBe(3);
     expect(verified.verification).toEqual({
       verifiedAt: BEFORE_EXPIRY,
-      commandId: 'otp-command-1',
+      commandId: commandId(),
     });
     expect(state.status).toBe('pending');
   });
@@ -448,7 +479,7 @@ describe('OTP submit and attempts', () => {
 
   it('keeps verified metadata free of raw code and digests', () => {
     const state = verifiedChallenge();
-    expect(state).toMatchObject({ verification: { commandId: 'otp-command-1' } });
+    expect(state).toMatchObject({ verification: { commandId: commandId() } });
     expect((state as Extract<OtpChallengeState, { status: 'verified' }>).verification)
       .not.toHaveProperty('presentedDigest');
     expect((state as Extract<OtpChallengeState, { status: 'verified' }>).verification)
@@ -510,7 +541,7 @@ describe('OTP submit and attempts', () => {
     expect(exhausted.attemptsRemaining).toBe(0);
     expect(exhausted.exhaustion).toEqual({
       exhaustedAt: BEFORE_EXPIRY,
-      commandId: 'otp-command-1',
+      commandId: commandId(),
     });
     expect(exhausted.exhaustion).not.toHaveProperty('presentedDigest');
   });
@@ -747,7 +778,7 @@ describe('OTP cancellation', () => {
     expect(cancelled.cancellation).toEqual({
       reason,
       cancelledAt: BEFORE_EXPIRY,
-      commandId: 'otp-command-1',
+      commandId: commandId(),
     });
   });
 
@@ -1287,9 +1318,9 @@ describe('OTP immutability and data minimization', () => {
     command.presentedDigest = WRONG_DIGEST;
     command.smsProviderResponse.id = 'changed';
 
-    expect(verified.verification.commandId).toBe('otp-command-1');
+    expect(verified.verification.commandId).toBe(commandId());
     expect(verified.appliedCommands[0]).toMatchObject({
-      commandId: 'otp-command-1',
+      commandId: commandId(),
       presentedDigest: CORRECT_DIGEST,
     });
     for (const field of [
@@ -1363,5 +1394,190 @@ describe('OTP immutability and data minimization', () => {
     for (const field of ['destination', 'plaintextCode', 'channel', 'sender']) {
       expect(result.state).not.toHaveProperty(field);
     }
+  });
+});
+
+describe('OTP command persistence hydration', () => {
+  function twoIncorrectAttempts(maxAttempts = 3) {
+    const initial = pending({ maxAttempts });
+    const firstCommand = submitCommand(initial, {
+      commandId: commandId('persisted-otp-attempt-1'),
+      requestDigest: COMMAND_REQUEST,
+      presentedDigest: WRONG_DIGEST,
+    });
+    const first = transitionedState(
+      transitionOtpChallenge(initial, firstCommand),
+      'pending',
+    );
+    const secondCommand = submitCommand(first, {
+      commandId: commandId('persisted-otp-attempt-2'),
+      requestDigest: OTHER_REQUEST,
+      presentedDigest: OTHER_DIGEST,
+    });
+    const expectedStatus = maxAttempts === 2 ? 'attempts_exhausted' : 'pending';
+    const second = transitionedState(
+      transitionOtpChallenge(first, secondCommand),
+      expectedStatus,
+    );
+    return { firstCommand, secondCommand, state: second };
+  }
+
+  it('hydrates multiple incorrect attempts with their original results', () => {
+    const { state } = twoIncorrectAttempts();
+    const records = otpPersistenceRecords(state).reverse();
+    const hydrated = hydrateOtpFromCommandRecords(state, records);
+
+    expect(hydrated.appliedCommands).toEqual(state.appliedCommands);
+    expect(hydrated.appliedCommands).toHaveLength(2);
+    expect(hydrated.appliedCommands.map(({ result }) => result)).toEqual([
+      { type: 'incorrect_code', attemptsRemaining: 2 },
+      { type: 'incorrect_code', attemptsRemaining: 1 },
+    ]);
+    expect(Object.isFrozen(hydrated.appliedCommands)).toBe(true);
+    expect(hydrated.appliedCommands.map(({ appliedAt }) => appliedAt)).toEqual([
+      BEFORE_EXPIRY,
+      BEFORE_EXPIRY,
+    ]);
+  });
+
+  it.each([
+    ['duplicate', [1, 1]],
+    ['gap', [1, 3]],
+  ])('rejects %s persistence sequence', (_label, sequences) => {
+    const { state } = twoIncorrectAttempts();
+    const records = otpPersistenceRecords(state).map((record, index) => ({
+      ...record,
+      commandSequence: aggregateCommandSequence(sequences[index]),
+    }));
+
+    expect(() => hydrateOtpFromCommandRecords(state, records)).toThrow(
+      'OTP command persistence sequence is invalid',
+    );
+  });
+
+  it.each([0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, '1'])(
+    'rejects invalid persistence sequence %#',
+    (commandSequence) => {
+      const { state } = twoIncorrectAttempts();
+      const records = otpPersistenceRecords(state) as unknown as Array<
+        Record<string, unknown>
+      >;
+      records[0] = { ...records[0], commandSequence };
+
+      expect(() =>
+        hydrateOtpFromCommandRecords(
+          state,
+          records as unknown as OtpCommandPersistenceRecord[],
+        ),
+      ).toThrow('OTP command persistence record is invalid');
+    },
+  );
+
+  it('returns the first attempt result after later attempts and reload', () => {
+    const { firstCommand, state } = twoIncorrectAttempts();
+    const hydrated = hydrateOtpFromCommandRecords(state);
+    const retry = transitionOtpChallenge(hydrated, firstCommand);
+
+    expect(retry).toMatchObject({
+      outcome: 'idempotent_retry',
+      originalResult: { type: 'incorrect_code', attemptsRemaining: 2 },
+    });
+  });
+
+  it('verifies a correct OTP after reloading prior incorrect attempts', () => {
+    const { state } = twoIncorrectAttempts();
+    const hydrated = hydrateOtpFromCommandRecords(state);
+    const verified = transitionOtpChallenge(
+      hydrated,
+      submitCommand(hydrated, {
+        commandId: commandId('persisted-otp-verification'),
+        requestDigest: '1'.repeat(64) as OtpRequestDigest,
+        presentedDigest: CORRECT_DIGEST,
+      }),
+    );
+
+    expect(verified).toMatchObject({
+      outcome: 'transitioned',
+      transition: 'otp_verified',
+      state: { status: 'verified' },
+    });
+  });
+
+  it('hydrates an already verified terminal challenge through the full validator', () => {
+    const verified = verifiedChallenge();
+    const records = otpPersistenceRecords(verified);
+    const hydrated = hydrateOtpFromCommandRecords(verified, records);
+
+    expect(hydrated).toEqual(verified);
+    expect(hydrated.status).toBe('verified');
+    expect(hydrated.appliedCommands).toHaveLength(1);
+  });
+
+  it('hydrates an exhausted challenge and preserves its terminal retry', () => {
+    const { secondCommand, state } = twoIncorrectAttempts(2);
+    const hydrated = hydrateOtpFromCommandRecords(state);
+    const retry = transitionOtpChallenge(hydrated, secondCommand);
+
+    expect(hydrated.status).toBe('attempts_exhausted');
+    expect(retry).toMatchObject({
+      outcome: 'idempotent_retry',
+      originalResult: { type: 'otp_attempts_exhausted' },
+    });
+  });
+
+  it('rejects a submit record without its protected presented digest', () => {
+    const initial = pending();
+    const attempted = transitionedState(
+      transitionOtpChallenge(
+        initial,
+        submitCommand(initial, { presentedDigest: WRONG_DIGEST }),
+      ),
+      'pending',
+    );
+    const record = structuredClone(
+      otpPersistenceRecords(attempted)[0],
+    ) as unknown as Record<string, unknown>;
+    delete record.presentedDigest;
+
+    expect(isOtpCommandPersistenceRecord(record)).toBe(false);
+    expect(() => hydrateAppliedOtpCommandHistory([record])).toThrow(
+      'OTP command persistence record is invalid',
+    );
+  });
+
+  it('still rejects an incorrect result whose presented digest matches verifier', () => {
+    const { state } = twoIncorrectAttempts();
+    const records = otpPersistenceRecords(state);
+    records[0] = {
+      ...records[0],
+      presentedDigest: CORRECT_DIGEST,
+    } as OtpCommandPersistenceRecord;
+    expect(() => hydrateOtpFromCommandRecords(state, records)).toThrow(
+      'OTP persistence state is invalid',
+    );
+  });
+
+  it('persists only protected OTP digests and no plaintext or destination', () => {
+    const { state } = twoIncorrectAttempts();
+    const records = otpPersistenceRecords(state);
+    const serialized = JSON.stringify(records);
+
+    expect(records[0]).toMatchObject({ presentedDigest: WRONG_DIGEST });
+    expect(serialized).not.toContain('+79990000000');
+    expect(serialized).not.toContain('plaintext-otp-code');
+    for (const record of records) {
+      expect(record).not.toHaveProperty('otp');
+      expect(record).not.toHaveProperty('destination');
+    }
+  });
+
+  it('does not mutate the input persistence-record array', () => {
+    const { state } = twoIncorrectAttempts();
+    const records = otpPersistenceRecords(state).reverse();
+    const snapshot = structuredClone(records);
+
+    hydrateOtpFromCommandRecords(state, records);
+
+    expect(records).toEqual(snapshot);
   });
 });

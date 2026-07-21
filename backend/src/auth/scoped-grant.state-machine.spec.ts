@@ -1,5 +1,10 @@
 import { AccountId } from '../accounts/account.types';
-import { UnixEpochSeconds, unixEpochSeconds } from './auth.types';
+import { deterministicUuid } from '../../test/deterministic-uuid';
+import {
+  AuthenticationOperationId,
+  UnixEpochSeconds,
+  unixEpochSeconds,
+} from './auth.types';
 import {
   FreshAuthenticationEvidence,
   FreshAuthenticationEvidenceId,
@@ -38,8 +43,11 @@ import {
   SessionState,
 } from './session.types';
 
-const ACCOUNT_ID = 'account-1' as AccountId;
-const SESSION_ID = 'session-1' as SessionId;
+const ACCOUNT_ID = deterministicUuid('account-1') as AccountId;
+const SESSION_ID = deterministicUuid('session-1') as SessionId;
+const AUTHENTICATION_OPERATION_ID = deterministicUuid(
+  'authentication-operation-1',
+) as AuthenticationOperationId;
 const SESSION_CREATED_AT = unixEpochSeconds(1_784_635_000);
 const EVIDENCE_AUTHENTICATED_AT = unixEpochSeconds(1_784_635_100);
 const GRANT_CREATED_AT = unixEpochSeconds(1_784_635_200);
@@ -56,11 +64,11 @@ const REQUEST_A = 'c'.repeat(64) as ScopedGrantRequestDigest;
 const REQUEST_B = 'd'.repeat(64) as ScopedGrantRequestDigest;
 
 function grantId(value = 'grant-1'): ScopedGrantId {
-  return value as ScopedGrantId;
+  return deterministicUuid(value) as ScopedGrantId;
 }
 
 function grantCommandId(value = 'grant-command-1'): ScopedGrantCommandId {
-  return value as ScopedGrantCommandId;
+  return deterministicUuid(value) as ScopedGrantCommandId;
 }
 
 function activeSession(
@@ -68,6 +76,7 @@ function activeSession(
 ): ActiveSessionState {
   const result = createActiveSession({
     sessionId: SESSION_ID,
+    authenticationOperationId: AUTHENTICATION_OPERATION_ID,
     accountId: ACCOUNT_ID,
     createdAt: SESSION_CREATED_AT,
     expiresAt: SESSION_EXPIRES_AT,
@@ -88,7 +97,9 @@ function evidence(
   overrides: Partial<FreshAuthenticationEvidence> = {},
 ): FreshAuthenticationEvidence {
   const result = createFreshAuthenticationEvidence({
-    evidenceId: 'evidence-1' as FreshAuthenticationEvidenceId,
+    evidenceId: deterministicUuid(
+      'evidence-1',
+    ) as FreshAuthenticationEvidenceId,
     accountId: ACCOUNT_ID,
     sessionId: SESSION_ID,
     verificationMethod: 'external_identity',
@@ -256,7 +267,7 @@ function terminalGrant(
 }
 
 function sessionCommandId(value: string): SessionCommandId {
-  return value as SessionCommandId;
+  return deterministicUuid(value) as SessionCommandId;
 }
 
 function sessionRequestDigest(value: string): SessionRequestDigest {
@@ -318,8 +329,10 @@ describe('scoped grant creation', () => {
       outcome: 'created',
       state: {
         status: 'active',
-        grantId: 'grant-1',
-        evidenceId: 'evidence-1',
+        grantId: grantId(),
+        evidenceId: deterministicUuid(
+          'evidence-1',
+        ) as FreshAuthenticationEvidenceId,
         accountId: ACCOUNT_ID,
         sessionId: SESSION_ID,
         scope,
@@ -422,7 +435,9 @@ describe('scoped grant creation', () => {
   });
 
   it('rejects evidence account mismatch', () => {
-    const session = activeSession({ accountId: 'account-2' as AccountId });
+    const session = activeSession({
+      accountId: deterministicUuid('account-2') as AccountId,
+    });
     expect(createScopedGrant(grantBinding({ session }))).toEqual({
       outcome: 'rejected',
       reason: 'evidence_binding_mismatch',
@@ -430,7 +445,9 @@ describe('scoped grant creation', () => {
   });
 
   it('rejects evidence session mismatch', () => {
-    const session = activeSession({ sessionId: 'session-2' as SessionId });
+    const session = activeSession({
+      sessionId: deterministicUuid('session-2') as SessionId,
+    });
     expect(createScopedGrant(grantBinding({ session }))).toEqual({
       outcome: 'rejected',
       reason: 'evidence_binding_mismatch',
@@ -557,7 +574,7 @@ describe('scoped grant consume', () => {
       status: 'consumed',
       consumption: {
         consumedAt: CONSUME_AT,
-        commandId: 'grant-command-1',
+        commandId: grantCommandId(),
       },
       appliedCommands: [{ commandType: 'consume_grant' }],
     });
@@ -602,11 +619,17 @@ describe('scoped grant consume', () => {
   it.each([
     [
       'session ID',
-      () => activeSession({ sessionId: 'session-2' as SessionId }),
+      () =>
+        activeSession({
+          sessionId: deterministicUuid('session-2') as SessionId,
+        }),
     ],
     [
       'account ID',
-      () => activeSession({ accountId: 'account-2' as AccountId }),
+      () =>
+        activeSession({
+          accountId: deterministicUuid('account-2') as AccountId,
+        }),
     ],
   ] as const)(
     'rejects consume with a current session %s mismatch',
@@ -742,8 +765,16 @@ describe('scoped grant consume', () => {
   });
 
   it.each([
-    ['accountId', 'account-2', 'account_mismatch'],
-    ['sessionId', 'session-2', 'session_mismatch'],
+    [
+      'accountId',
+      deterministicUuid('account-2') as AccountId,
+      'account_mismatch',
+    ],
+    [
+      'sessionId',
+      deterministicUuid('session-2') as SessionId,
+      'session_mismatch',
+    ],
     ['scope', 'unlink_identity', 'scope_mismatch'],
     ['resourceDigest', RESOURCE_B, 'resource_mismatch'],
   ] as const)('rejects consume %s mismatch', (field, value, reason) => {
@@ -942,11 +973,11 @@ describe('scoped grant idempotency', () => {
   it.each([
     ['account ID', (command: ConsumeGrantCommand) => ({
       ...command,
-      accountId: 'account-2' as AccountId,
+      accountId: deterministicUuid('account-2') as AccountId,
     })],
     ['session ID', (command: ConsumeGrantCommand) => ({
       ...command,
-      sessionId: 'session-2' as SessionId,
+      sessionId: deterministicUuid('session-2') as SessionId,
     })],
     ['scope', (command: ConsumeGrantCommand) => ({
       ...command,
@@ -1015,8 +1046,8 @@ describe('scoped grant idempotency', () => {
 
     expect(firstResult).toMatchObject({ outcome: 'transitioned' });
     expect(secondResult).toMatchObject({ outcome: 'transitioned' });
-    expect(firstResult.state.grantId).toBe('grant-1');
-    expect(secondResult.state.grantId).toBe('grant-2');
+    expect(firstResult.state.grantId).toBe(grantId('grant-1'));
+    expect(secondResult.state.grantId).toBe(grantId('grant-2'));
   });
 });
 
@@ -1156,9 +1187,9 @@ describe('scoped grant immutability', () => {
     }
 
     (mutableSession as { accountId: AccountId }).accountId =
-      'account-2' as AccountId;
+      deterministicUuid('account-2') as AccountId;
     (mutableBinding.evidence as { sessionId: SessionId }).sessionId =
-      'session-2' as SessionId;
+      deterministicUuid('session-2') as SessionId;
     mutableBinding.scope = 'unlink_identity';
     mutableBinding.resourceDigest = RESOURCE_B;
 
@@ -1189,9 +1220,9 @@ describe('scoped grant immutability', () => {
     const consumed = transitionedState(result, 'consumed');
 
     (mutableContext as { accountId: AccountId }).accountId =
-      'account-2' as AccountId;
+      deterministicUuid('account-2') as AccountId;
     (mutableContext as { sessionId: SessionId }).sessionId =
-      'session-2' as SessionId;
+      deterministicUuid('session-2') as SessionId;
     (mutableContext.currentCredential as { digest: SessionCredentialDigest }).digest =
       SESSION_DIGEST_C;
     mutableContext.sessionMetadata = { mutable: false };
@@ -1227,13 +1258,13 @@ describe('scoped grant immutability', () => {
 
     mutableCommand.scope = 'unlink_identity';
     mutableCommand.resourceDigest = RESOURCE_B;
-    mutableCommand.accountId = 'account-2' as AccountId;
+    mutableCommand.accountId = deterministicUuid('account-2') as AccountId;
 
     expect(consumed).toMatchObject({
       scope: 'link_identity',
       resourceDigest: RESOURCE_A,
       accountId: ACCOUNT_ID,
-      consumption: { commandId: 'grant-command-1' },
+      consumption: { commandId: grantCommandId() },
     });
     expect(consumed.appliedCommands[0]).toMatchObject({
       scope: 'link_identity',
@@ -1326,8 +1357,14 @@ describe('scoped grant persisted state guard', () => {
   });
 
   it.each([
-    ['account', { accountId: 'account-2' as AccountId }],
-    ['session', { sessionId: 'session-2' as SessionId }],
+    [
+      'account',
+      { accountId: deterministicUuid('account-2') as AccountId },
+    ],
+    [
+      'session',
+      { sessionId: deterministicUuid('session-2') as SessionId },
+    ],
     ['scope', { scope: 'unlink_identity' as ScopedGrantScope }],
     ['resource', { resourceDigest: RESOURCE_B }],
   ])('rejects consumed command bound to another %s', (_label, commandOverride) => {
