@@ -73,6 +73,7 @@ export type CreateActiveSessionResult =
     };
 
 export type SessionTransitionRejectionReason =
+  | 'invalid_session_state'
   | 'session_binding_conflict'
   | 'command_reuse_conflict'
   | 'invalid_session_credential'
@@ -96,6 +97,17 @@ export type SessionTransitionResult =
       readonly outcome: 'idempotent_retry';
       readonly state: SessionState;
       readonly originalResult: SessionAppliedCommandResult;
+    }
+  | {
+      readonly outcome: 'rejected';
+      readonly reason: 'invalid_session_state';
+      readonly stateReason:
+        | 'invalid_state_shape'
+        | 'invalid_state_binding'
+        | 'invalid_credential_history'
+        | 'invalid_command_history'
+        | 'invalid_status_metadata';
+      readonly state: SessionState;
     }
   | {
       readonly outcome: 'rejected';
@@ -398,6 +410,434 @@ function referencesEqual(
   );
 }
 
+function credentialBindingsEqual(
+  left: SessionCredentialBinding,
+  right: SessionCredentialBinding,
+): boolean {
+  return referencesEqual(left, right) && left.issuedAt === right.issuedAt;
+}
+
+function isSessionRevocationMetadata(
+  value: unknown,
+): value is SessionRevocationMetadata {
+  return (
+    isRecord(value) &&
+    hasExactlyKeys(value, ['reason', 'revokedAt', 'commandId']) &&
+    isSessionRevokeReason(value.reason) &&
+    isUnixEpochSeconds(value.revokedAt) &&
+    isSessionCommandId(value.commandId)
+  );
+}
+
+function isSessionExpirationMetadata(
+  value: unknown,
+): value is SessionExpirationMetadata {
+  return (
+    isRecord(value) &&
+    hasExactlyKeys(value, ['expiredAt', 'commandId']) &&
+    isUnixEpochSeconds(value.expiredAt) &&
+    isSessionCommandId(value.commandId)
+  );
+}
+
+function isSessionReuseMetadata(
+  value: unknown,
+): value is SessionCredentialReuseMetadata {
+  return (
+    isRecord(value) &&
+    hasExactlyKeys(value, [
+      'detectedAt',
+      'generation',
+      'digest',
+      'commandId',
+    ]) &&
+    isUnixEpochSeconds(value.detectedAt) &&
+    isSessionCredentialGeneration(value.generation) &&
+    isSessionCredentialDigest(value.digest) &&
+    isSessionCommandId(value.commandId)
+  );
+}
+
+function isSessionAppliedResult(
+  value: unknown,
+): value is SessionAppliedCommandResult {
+  if (!isRecord(value) || typeof value.type !== 'string') {
+    return false;
+  }
+  switch (value.type) {
+    case 'credential_rotated':
+      return (
+        hasExactlyKeys(value, ['type', 'credential']) &&
+        isCredentialBinding(value.credential)
+      );
+    case 'session_revoked':
+      return (
+        hasExactlyKeys(value, ['type', 'revocation']) &&
+        isSessionRevocationMetadata(value.revocation)
+      );
+    case 'session_expired':
+      return (
+        hasExactlyKeys(value, ['type', 'expiration']) &&
+        isSessionExpirationMetadata(value.expiration)
+      );
+    case 'reuse_detected':
+      return (
+        hasExactlyKeys(value, ['type', 'reuse']) &&
+        isSessionReuseMetadata(value.reuse)
+      );
+    default:
+      return false;
+  }
+}
+
+function isAppliedSessionCommandShape(
+  value: unknown,
+  sessionId: SessionState['sessionId'],
+): value is AppliedSessionCommand {
+  if (
+    !isRecord(value) ||
+    value.sessionId !== sessionId ||
+    !isSessionCommandId(value.commandId) ||
+    !isSessionRequestDigest(value.requestDigest) ||
+    !isUnixEpochSeconds(value.appliedAt) ||
+    !isSessionAppliedResult(value.result)
+  ) {
+    return false;
+  }
+
+  switch (value.commandType) {
+    case 'rotate_credential':
+      return (
+        hasExactlyKeys(value, [
+          'sessionId',
+          'commandId',
+          'commandType',
+          'requestDigest',
+          'appliedAt',
+          'presentedCredential',
+          'nextCredential',
+          'result',
+        ]) &&
+        isCredentialReference(value.presentedCredential) &&
+        isCredentialReference(value.nextCredential) &&
+        (value.result.type === 'credential_rotated' ||
+          value.result.type === 'reuse_detected')
+      );
+    case 'revoke_session':
+      return (
+        hasExactlyKeys(value, [
+          'sessionId',
+          'commandId',
+          'commandType',
+          'requestDigest',
+          'appliedAt',
+          'reason',
+          'result',
+        ]) &&
+        isSessionRevokeReason(value.reason) &&
+        value.result.type === 'session_revoked'
+      );
+    case 'expire_session':
+      return (
+        hasExactlyKeys(value, [
+          'sessionId',
+          'commandId',
+          'commandType',
+          'requestDigest',
+          'appliedAt',
+          'result',
+        ]) && value.result.type === 'session_expired'
+      );
+    default:
+      return false;
+  }
+}
+
+function revocationsEqual(
+  left: SessionRevocationMetadata,
+  right: SessionRevocationMetadata,
+): boolean {
+  return (
+    left.reason === right.reason &&
+    left.revokedAt === right.revokedAt &&
+    left.commandId === right.commandId
+  );
+}
+
+function expirationsEqual(
+  left: SessionExpirationMetadata,
+  right: SessionExpirationMetadata,
+): boolean {
+  return left.expiredAt === right.expiredAt && left.commandId === right.commandId;
+}
+
+function reuseMetadataEqual(
+  left: SessionCredentialReuseMetadata,
+  right: SessionCredentialReuseMetadata,
+): boolean {
+  return (
+    left.detectedAt === right.detectedAt &&
+    left.generation === right.generation &&
+    left.digest === right.digest &&
+    left.commandId === right.commandId
+  );
+}
+
+const SESSION_STATE_BINDING_KEYS = Object.freeze([
+  'sessionId',
+  'accountId',
+  'createdAt',
+  'expiresAt',
+  'currentCredential',
+  'consumedCredentials',
+  'appliedCommands',
+] as const);
+
+function sessionStateRejectionReason(
+  value: unknown,
+):
+  | 'invalid_state_shape'
+  | 'invalid_state_binding'
+  | 'invalid_credential_history'
+  | 'invalid_command_history'
+  | 'invalid_status_metadata'
+  | undefined {
+  if (!isRecord(value) || typeof value.status !== 'string') {
+    return 'invalid_state_shape';
+  }
+  if (
+    !isSessionId(value.sessionId) ||
+    !isSessionAccountId(value.accountId) ||
+    !isUnixEpochSeconds(value.createdAt) ||
+    !isUnixEpochSeconds(value.expiresAt) ||
+    value.createdAt >= value.expiresAt ||
+    !isCredentialBinding(value.currentCredential) ||
+    value.currentCredential.issuedAt < value.createdAt ||
+    value.currentCredential.issuedAt >= value.expiresAt ||
+    !Array.isArray(value.consumedCredentials) ||
+    !Array.isArray(value.appliedCommands)
+  ) {
+    return 'invalid_state_binding';
+  }
+
+  const sessionId = value.sessionId;
+  const currentCredential = value.currentCredential;
+  const consumedCredentials: ConsumedSessionCredential[] = [];
+  const credentialDigests = new Set<string>();
+  for (let index = 0; index < value.consumedCredentials.length; index += 1) {
+    const credential = value.consumedCredentials[index];
+    if (
+      !isRecord(credential) ||
+      !hasExactlyKeys(credential, [
+        'digest',
+        'generation',
+        'issuedAt',
+        'consumedAt',
+        'consumedByCommandId',
+      ]) ||
+      !isSessionCredentialDigest(credential.digest) ||
+      !isSessionCredentialGeneration(credential.generation) ||
+      !isUnixEpochSeconds(credential.issuedAt) ||
+      !isUnixEpochSeconds(credential.consumedAt) ||
+      !isSessionCommandId(credential.consumedByCommandId) ||
+      credential.generation !== index + 1 ||
+      credential.issuedAt < value.createdAt ||
+      credential.issuedAt >= value.expiresAt ||
+      credential.consumedAt < credential.issuedAt ||
+      credential.consumedAt >= value.expiresAt ||
+      credentialDigests.has(credential.digest)
+    ) {
+      return 'invalid_credential_history';
+    }
+    if (
+      index > 0 &&
+      credential.issuedAt !== consumedCredentials[index - 1].consumedAt
+    ) {
+      return 'invalid_credential_history';
+    }
+    credentialDigests.add(credential.digest);
+    consumedCredentials.push(credential as unknown as ConsumedSessionCredential);
+  }
+  if (
+    currentCredential.generation !== consumedCredentials.length + 1 ||
+    credentialDigests.has(currentCredential.digest) ||
+    (consumedCredentials.length > 0 &&
+      currentCredential.issuedAt !==
+        consumedCredentials[consumedCredentials.length - 1].consumedAt)
+  ) {
+    return 'invalid_credential_history';
+  }
+
+  const appliedCommands: AppliedSessionCommand[] = [];
+  const commandIds = new Set<string>();
+  for (const command of value.appliedCommands) {
+    if (
+      !isAppliedSessionCommandShape(command, sessionId) ||
+      commandIds.has(command.commandId)
+    ) {
+      return 'invalid_command_history';
+    }
+    commandIds.add(command.commandId);
+    appliedCommands.push(command);
+  }
+
+  let simulatedCredential: SessionCredentialBinding =
+    consumedCredentials.length === 0
+      ? currentCredential
+      : consumedCredentials[0];
+  let consumedIndex = 0;
+  let lifecycle: SessionState['status'] = 'active';
+  let storedRevocation: SessionRevocationMetadata | undefined;
+  let storedExpiration: SessionExpirationMetadata | undefined;
+  let storedReuse: SessionCredentialReuseMetadata | undefined;
+  let previousAppliedAt = value.createdAt;
+
+  for (const command of appliedCommands) {
+    if (
+      command.appliedAt < previousAppliedAt ||
+      lifecycle === 'expired' ||
+      lifecycle === 'reuse_detected'
+    ) {
+      return 'invalid_command_history';
+    }
+    previousAppliedAt = command.appliedAt;
+    if (command.commandType === 'rotate_credential') {
+      if (command.result.type === 'credential_rotated') {
+        const consumed = consumedCredentials[consumedIndex];
+        if (
+          lifecycle !== 'active' ||
+          command.appliedAt < value.createdAt ||
+          command.appliedAt >= value.expiresAt ||
+          !referencesEqual(command.presentedCredential, simulatedCredential) ||
+          command.nextCredential.generation !==
+            simulatedCredential.generation + 1 ||
+          command.nextCredential.digest === simulatedCredential.digest ||
+          !credentialBindingsEqual(command.result.credential, {
+            ...command.nextCredential,
+            issuedAt: command.appliedAt,
+          }) ||
+          consumed === undefined ||
+          !credentialBindingsEqual(consumed, simulatedCredential) ||
+          consumed.consumedAt !== command.appliedAt ||
+          consumed.consumedByCommandId !== command.commandId
+        ) {
+          return 'invalid_command_history';
+        }
+        simulatedCredential = command.result.credential;
+        consumedIndex += 1;
+        continue;
+      }
+
+      if (
+        command.result.type !== 'reuse_detected' ||
+        (lifecycle !== 'active' && lifecycle !== 'revoked') ||
+        command.appliedAt < value.createdAt ||
+        !consumedCredentials.some((credential) =>
+          referencesEqual(credential, command.presentedCredential),
+        ) ||
+        !reuseMetadataEqual(command.result.reuse, {
+          detectedAt: command.appliedAt,
+          generation: command.presentedCredential.generation,
+          digest: command.presentedCredential.digest,
+          commandId: command.commandId,
+        })
+      ) {
+        return 'invalid_command_history';
+      }
+      lifecycle = 'reuse_detected';
+      storedReuse = command.result.reuse;
+      continue;
+    }
+
+    if (command.commandType === 'revoke_session') {
+      if (
+        command.result.type !== 'session_revoked' ||
+        lifecycle !== 'active' ||
+        command.appliedAt < value.createdAt ||
+        command.appliedAt >= value.expiresAt ||
+        !revocationsEqual(command.result.revocation, {
+          reason: command.reason,
+          revokedAt: command.appliedAt,
+          commandId: command.commandId,
+        })
+      ) {
+        return 'invalid_command_history';
+      }
+      lifecycle = 'revoked';
+      storedRevocation = command.result.revocation;
+      continue;
+    }
+
+    if (
+      command.result.type !== 'session_expired' ||
+      lifecycle !== 'active' ||
+      command.appliedAt < value.expiresAt ||
+      !expirationsEqual(command.result.expiration, {
+        expiredAt: command.appliedAt,
+        commandId: command.commandId,
+      })
+    ) {
+      return 'invalid_command_history';
+    }
+    lifecycle = 'expired';
+    storedExpiration = command.result.expiration;
+  }
+
+  if (
+    consumedIndex !== consumedCredentials.length ||
+    !credentialBindingsEqual(simulatedCredential, currentCredential) ||
+    value.status !== lifecycle
+  ) {
+    return 'invalid_command_history';
+  }
+
+  switch (value.status) {
+    case 'active':
+      return hasExactlyKeys(value, [...SESSION_STATE_BINDING_KEYS, 'status'])
+        ? undefined
+        : 'invalid_status_metadata';
+    case 'expired':
+      return hasExactlyKeys(value, [
+        ...SESSION_STATE_BINDING_KEYS,
+        'status',
+        'expiration',
+      ]) &&
+        isSessionExpirationMetadata(value.expiration) &&
+        storedExpiration !== undefined &&
+        expirationsEqual(value.expiration, storedExpiration)
+        ? undefined
+        : 'invalid_status_metadata';
+    case 'revoked':
+      return hasExactlyKeys(value, [
+        ...SESSION_STATE_BINDING_KEYS,
+        'status',
+        'revocation',
+      ]) &&
+        isSessionRevocationMetadata(value.revocation) &&
+        storedRevocation !== undefined &&
+        revocationsEqual(value.revocation, storedRevocation)
+        ? undefined
+        : 'invalid_status_metadata';
+    case 'reuse_detected':
+      return hasExactlyKeys(value, [
+        ...SESSION_STATE_BINDING_KEYS,
+        'status',
+        'reuse',
+      ]) &&
+        isSessionReuseMetadata(value.reuse) &&
+        storedReuse !== undefined &&
+        reuseMetadataEqual(value.reuse, storedReuse)
+        ? undefined
+        : 'invalid_status_metadata';
+    default:
+      return 'invalid_state_shape';
+  }
+}
+
+export function isValidSessionState(value: unknown): value is SessionState {
+  return sessionStateRejectionReason(value) === undefined;
+}
+
 function isExactAppliedCommand(
   applied: AppliedSessionCommand,
   command: SessionCommand,
@@ -666,6 +1106,16 @@ export function transitionSession(
   state: SessionState,
   command: SessionCommand,
 ): SessionTransitionResult {
+  const stateReason = sessionStateRejectionReason(state);
+  if (stateReason !== undefined) {
+    return {
+      outcome: 'rejected',
+      reason: 'invalid_session_state',
+      stateReason,
+      state,
+    };
+  }
+
   const commandReason = sessionCommandRejectionReason(command);
   if (commandReason !== undefined) {
     return {
@@ -711,11 +1161,33 @@ export function transitionSession(
     };
   }
 
+  const lastAppliedCommand =
+    state.appliedCommands[state.appliedCommands.length - 1];
+  if (
+    command.now < state.createdAt ||
+    (lastAppliedCommand !== undefined &&
+      command.now < lastAppliedCommand.appliedAt)
+  ) {
+    return {
+      outcome: 'rejected',
+      reason: 'invalid_session_command',
+      commandReason: 'invalid_time',
+      state,
+    };
+  }
+
   if (command.type === 'rotate_credential') {
     const consumed = state.consumedCredentials.find((credential) =>
       referencesEqual(credential, command.presentedCredential),
     );
     if (consumed !== undefined) {
+      if (!isCredentialReference(command.nextCredential)) {
+        return {
+          outcome: 'rejected',
+          reason: 'invalid_next_credential',
+          state,
+        };
+      }
       return transitionToReuseDetected(state, command, consumed);
     }
   }

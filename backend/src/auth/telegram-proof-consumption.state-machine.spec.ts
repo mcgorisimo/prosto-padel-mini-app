@@ -25,7 +25,8 @@ const AT_EXPIRY = EXPIRES_AT;
 const AFTER_EXPIRY = unixEpochSeconds(EXPIRES_AT + 1);
 
 function fingerprint(value: string): AuthenticationProofFingerprint {
-  return value as AuthenticationProofFingerprint;
+  const digest = Buffer.from(value).toString('hex').padEnd(64, '0').slice(0, 64);
+  return digest as AuthenticationProofFingerprint;
 }
 
 function idempotencyKey(value: string): AuthenticationIdempotencyKey {
@@ -411,5 +412,101 @@ describe('Telegram proof consumption state machine', () => {
       first.state.consumptions,
     );
     expect(first.state.consumptions).toEqual(savedSnapshot);
+  });
+
+  describe('persisted state and runtime command guards', () => {
+    function forgedState(value: unknown): TelegramProofConsumptionState {
+      return value as TelegramProofConsumptionState;
+    }
+
+    function expectInvalidState(state: TelegramProofConsumptionState): void {
+      const result = consumeTelegramProof(state, command());
+      expect(result.outcome).toBe('invalid_proof_consumption_state');
+      expect(result.state).toBe(state);
+    }
+
+    it.each([
+      ['missing consumptions', {}],
+      ['non-array consumptions', { consumptions: null }],
+    ])('rejects %s without throwing', (_label, value) => {
+      const state = forgedState(value);
+      expect(() => consumeTelegramProof(state, command())).not.toThrow();
+      expectInvalidState(state);
+    });
+
+    it.each([
+      ['malformed fingerprint', { proofFingerprint: 'bad' }],
+      ['malformed intent', { intent: 'route_login' }],
+      ['malformed operation ID', { operationId: ' operation-a' }],
+      ['malformed request digest', { requestDigest: '' }],
+      ['malformed consumed time', { consumedAt: Number.NaN }],
+      ['malformed expiry time', { proofExpiresAt: -1 }],
+      ['malformed saved outcome', { outcome: 'replay' }],
+    ])('rejects a record with %s', (_label, recordOverride) => {
+      const first = firstUse();
+      const state = forgedState({
+        consumptions: [{ ...first.state.consumptions[0], ...recordOverride }],
+      });
+      expectInvalidState(state);
+    });
+
+    it('rejects duplicate proof fingerprints', () => {
+      const first = firstUse();
+      const record = first.state.consumptions[0];
+      const state = forgedState({
+        consumptions: [
+          record,
+          {
+            ...record,
+            idempotencyKey: idempotencyKey('idempotency-b'),
+            operationId: operationId('operation-b'),
+          },
+        ],
+      });
+      expectInvalidState(state);
+    });
+
+    it('rejects duplicate idempotency keys with incompatible bindings', () => {
+      const first = firstUse();
+      const record = first.state.consumptions[0];
+      const state = forgedState({
+        consumptions: [
+          record,
+          {
+            ...record,
+            proofFingerprint: fingerprint('proof-b'),
+            requestDigest: requestDigest('request-b'),
+          },
+        ],
+      });
+      expectInvalidState(state);
+    });
+
+    it.each([
+      ['missing proof', { ...command(), proof: undefined }],
+      ['missing command object', null],
+      ['unknown proof status', { ...command(), proof: { status: 'accepted' } }],
+      [
+        'malformed verified proof',
+        {
+          ...command(),
+          proof: { status: 'verified', proof: { proofFingerprint: 'bad' } },
+        },
+      ],
+    ])('rejects a malformed command with %s', (_label, value) => {
+      const runtimeCommand = value as ConsumeTelegramProofCommand;
+      expect(() =>
+        consumeTelegramProof(
+          EMPTY_TELEGRAM_PROOF_CONSUMPTION_STATE,
+          runtimeCommand,
+        ),
+      ).not.toThrow();
+      const result = consumeTelegramProof(
+        EMPTY_TELEGRAM_PROOF_CONSUMPTION_STATE,
+        runtimeCommand,
+      );
+      expect(result.outcome).toBe('invalid_proof_consumption_command');
+      expect(result.state).toBe(EMPTY_TELEGRAM_PROOF_CONSUMPTION_STATE);
+    });
   });
 });

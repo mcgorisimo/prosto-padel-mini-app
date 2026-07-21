@@ -1636,3 +1636,290 @@ describe('session state immutability', () => {
     expect(Number.isSafeInteger(rotated.appliedCommands[0].appliedAt)).toBe(true);
   });
 });
+
+describe('session persisted state guard', () => {
+  function forgedState(value: unknown): SessionState {
+    return value as SessionState;
+  }
+
+  function twiceRotatedSession(): ActiveSessionState {
+    const initial = activeSession();
+    const first = transitionedState(
+      transitionSession(initial, rotateCommand(initial)),
+      'active',
+    );
+    return transitionedState(
+      transitionSession(
+        first,
+        rotateCommand(first, {
+          commandId: commandId('command-2'),
+          now: ROTATION_TIME_2,
+        }),
+      ),
+      'active',
+    );
+  }
+
+  function expectInvalidState(state: SessionState): void {
+    const result = transitionSession(state, revokeCommand(activeSession()));
+    expect(result).toMatchObject({
+      outcome: 'rejected',
+      reason: 'invalid_session_state',
+      state,
+    });
+    expect(result.state).toBe(state);
+  }
+
+  it('rejects missing appliedCommands without throwing', () => {
+    const active = activeSession();
+    const { appliedCommands: _removed, ...withoutHistory } = active;
+    const state = forgedState(withoutHistory);
+    expect(() => expectInvalidState(state)).not.toThrow();
+  });
+
+  it('rejects a malformed current credential', () => {
+    const active = activeSession();
+    expectInvalidState(
+      forgedState({
+        ...active,
+        currentCredential: { ...active.currentCredential, digest: 'bad' },
+      }),
+    );
+  });
+
+  it.each([
+    [
+      'duplicate consumed digest',
+      (state: ActiveSessionState) => ({
+        ...state,
+        consumedCredentials: [
+          state.consumedCredentials[0],
+          {
+            ...state.consumedCredentials[1],
+            digest: state.consumedCredentials[0].digest,
+          },
+        ],
+      }),
+    ],
+    [
+      'duplicate consumed generation',
+      (state: ActiveSessionState) => ({
+        ...state,
+        consumedCredentials: [
+          state.consumedCredentials[0],
+          {
+            ...state.consumedCredentials[1],
+            generation: state.consumedCredentials[0].generation,
+          },
+        ],
+      }),
+    ],
+    [
+      'a generation gap',
+      (state: ActiveSessionState) => ({
+        ...state,
+        consumedCredentials: [
+          state.consumedCredentials[0],
+          { ...state.consumedCredentials[1], generation: 3 },
+        ],
+      }),
+    ],
+    [
+      'current digest in consumed history',
+      (state: ActiveSessionState) => ({
+        ...state,
+        currentCredential: {
+          ...state.currentCredential,
+          digest: state.consumedCredentials[0].digest,
+        },
+      }),
+    ],
+  ])('rejects %s', (_label, forge) => {
+    expectInvalidState(forgedState(forge(twiceRotatedSession())));
+  });
+
+  it('rejects rotation history inconsistent with consumed credentials', () => {
+    const state = twiceRotatedSession();
+    const firstApplied = state.appliedCommands[0];
+    if (firstApplied.commandType !== 'rotate_credential') {
+      throw new Error('Expected rotation history');
+    }
+    expectInvalidState(
+      forgedState({
+        ...state,
+        appliedCommands: [
+          {
+            ...firstApplied,
+            nextCredential: { ...firstApplied.nextCredential, digest: DIGEST_D },
+          },
+          state.appliedCommands[1],
+        ],
+      }),
+    );
+  });
+
+  it('rejects active state with terminal metadata', () => {
+    expectInvalidState(
+      forgedState({
+        ...activeSession(),
+        expiration: { expiredAt: EXPIRES_AT, commandId: commandId() },
+      }),
+    );
+  });
+
+  it('rejects expired state without expiration metadata', () => {
+    const active = activeSession();
+    const expired = transitionedState(
+      transitionSession(active, expireCommand(active)),
+      'expired',
+    );
+    const { expiration: _removed, ...withoutExpiration } = expired;
+    expectInvalidState(forgedState(withoutExpiration));
+  });
+
+  it('rejects revoked state with an arbitrary reason', () => {
+    const active = activeSession();
+    const revoked = transitionedState(
+      transitionSession(active, revokeCommand(active)),
+      'revoked',
+    );
+    expectInvalidState(
+      forgedState({
+        ...revoked,
+        revocation: { ...revoked.revocation, reason: 'database_error' },
+      }),
+    );
+  });
+
+  it('rejects reuse metadata for a credential absent from consumed history', () => {
+    const reused = reuseDetectedSession();
+    const appliedCommands = reused.appliedCommands.map((applied, index) => {
+      if (
+        index !== reused.appliedCommands.length - 1 ||
+        applied.commandType !== 'rotate_credential' ||
+        applied.result.type !== 'reuse_detected'
+      ) {
+        return applied;
+      }
+      const reuse = {
+        ...applied.result.reuse,
+        digest: DIGEST_D,
+        generation: 1,
+      };
+      return {
+        ...applied,
+        presentedCredential: { digest: DIGEST_D, generation: 1 },
+        result: { type: 'reuse_detected', reuse },
+      };
+    });
+    expectInvalidState(
+      forgedState({
+        ...reused,
+        reuse: { ...reused.reuse, digest: DIGEST_D, generation: 1 },
+        appliedCommands,
+      }),
+    );
+  });
+
+  it('rejects duplicate applied command IDs', () => {
+    const state = twiceRotatedSession();
+    expectInvalidState(
+      forgedState({
+        ...state,
+        appliedCommands: [
+          state.appliedCommands[0],
+          {
+            ...state.appliedCommands[1],
+            commandId: state.appliedCommands[0].commandId,
+          },
+        ],
+      }),
+    );
+  });
+
+  it('rejects a terminal state without the command that created it', () => {
+    const active = activeSession();
+    const expired = transitionedState(
+      transitionSession(active, expireCommand(active)),
+      'expired',
+    );
+    expectInvalidState(forgedState({ ...expired, appliedCommands: [] }));
+  });
+
+  it('preserves malformed state and history by reference and value', () => {
+    const valid = twiceRotatedSession();
+    const state = forgedState({
+      ...valid,
+      consumedCredentials: [
+        valid.consumedCredentials[0],
+        {
+          ...valid.consumedCredentials[1],
+          generation: valid.consumedCredentials[0].generation,
+        },
+      ],
+    });
+    const snapshot = structuredClone(state);
+    const result = transitionSession(state, revokeCommand(activeSession()));
+    expect(result.state).toBe(state);
+    expect(state).toEqual(snapshot);
+  });
+
+  it('rejects a new command before session creation', () => {
+    const active = activeSession();
+    const result = transitionSession(
+      active,
+      revokeCommand(active, { now: unixEpochSeconds(CREATED_AT - 1) }),
+    );
+    expect(result).toMatchObject({
+      outcome: 'rejected',
+      reason: 'invalid_session_command',
+      commandReason: 'invalid_time',
+      state: active,
+    });
+  });
+
+  it('rejects a command older than the latest applied transition', () => {
+    const initial = activeSession();
+    const rotated = transitionedState(
+      transitionSession(initial, rotateCommand(initial)),
+      'active',
+    );
+    const result = transitionSession(
+      rotated,
+      revokeCommand(rotated, {
+        commandId: commandId('command-2'),
+        now: unixEpochSeconds(ROTATION_TIME_1 - 1),
+      }),
+    );
+    expect(result).toMatchObject({
+      outcome: 'rejected',
+      reason: 'invalid_session_command',
+      commandReason: 'invalid_time',
+      state: rotated,
+    });
+  });
+
+  it('does not persist a malformed next credential during reuse detection', () => {
+    const initial = activeSession();
+    const rotated = transitionedState(
+      transitionSession(initial, rotateCommand(initial)),
+      'active',
+    );
+    const result = transitionSession(
+      rotated,
+      rotateCommand(rotated, {
+        commandId: commandId('reuse-command'),
+        presentedCredential: { digest: DIGEST_A, generation: 1 },
+        nextCredential: {
+          digest: 'bad' as SessionCredentialDigest,
+          generation: 3,
+        },
+      }),
+    );
+    expectRejectedWithoutStateChange(
+      result,
+      rotated,
+      'invalid_next_credential',
+    );
+  });
+});

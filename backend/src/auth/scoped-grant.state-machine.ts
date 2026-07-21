@@ -4,6 +4,7 @@ import {
   FreshAuthenticationEvidence,
   FreshAuthenticationEvidenceId,
   isFreshAuthenticationEvidence,
+  isFreshAuthenticationEvidenceId,
 } from './fresh-authentication.types';
 import {
   AppliedSessionCommand,
@@ -314,6 +315,16 @@ export type ScopedGrantTransitionResult =
     }
   | {
       readonly outcome: 'rejected';
+      readonly reason: 'invalid_scoped_grant_state';
+      readonly stateReason:
+        | 'invalid_state_shape'
+        | 'invalid_state_binding'
+        | 'invalid_command_history'
+        | 'invalid_status_metadata';
+      readonly state: ScopedGrantState;
+    }
+  | {
+      readonly outcome: 'rejected';
       readonly reason: 'invalid_grant_command';
       readonly commandReason: ScopedGrantCommandRejectionReason;
       readonly state: ScopedGrantState;
@@ -326,6 +337,19 @@ export type ScopedGrantTransitionResult =
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function hasExactlyKeys(
+  value: Record<string, unknown>,
+  expectedKeys: readonly string[],
+): boolean {
+  const keys = Object.keys(value);
+  return (
+    keys.length === expectedKeys.length &&
+    expectedKeys.every((key) =>
+      Object.prototype.hasOwnProperty.call(value, key),
+    )
+  );
 }
 
 function isSessionCredentialReference(
@@ -659,6 +683,295 @@ function commandRejectionReason(
   return undefined;
 }
 
+function isGrantConsumptionMetadata(
+  value: unknown,
+): value is ScopedGrantConsumptionMetadata {
+  return (
+    isRecord(value) &&
+    hasExactlyKeys(value, ['consumedAt', 'commandId']) &&
+    isUnixEpochSeconds(value.consumedAt) &&
+    isScopedGrantCommandId(value.commandId)
+  );
+}
+
+function isGrantRevocationMetadata(
+  value: unknown,
+): value is ScopedGrantRevocationMetadata {
+  return (
+    isRecord(value) &&
+    hasExactlyKeys(value, ['reason', 'revokedAt', 'commandId']) &&
+    isScopedGrantRevokeReason(value.reason) &&
+    isUnixEpochSeconds(value.revokedAt) &&
+    isScopedGrantCommandId(value.commandId)
+  );
+}
+
+function isGrantExpirationMetadata(
+  value: unknown,
+): value is ScopedGrantExpirationMetadata {
+  return (
+    isRecord(value) &&
+    hasExactlyKeys(value, ['expiredAt', 'commandId']) &&
+    isUnixEpochSeconds(value.expiredAt) &&
+    isScopedGrantCommandId(value.commandId)
+  );
+}
+
+function isGrantAppliedResult(
+  value: unknown,
+): value is ScopedGrantAppliedResult {
+  if (!isRecord(value) || typeof value.type !== 'string') {
+    return false;
+  }
+  switch (value.type) {
+    case 'grant_consumed':
+      return (
+        hasExactlyKeys(value, ['type', 'consumption']) &&
+        isGrantConsumptionMetadata(value.consumption)
+      );
+    case 'grant_revoked':
+      return (
+        hasExactlyKeys(value, ['type', 'revocation']) &&
+        isGrantRevocationMetadata(value.revocation)
+      );
+    case 'grant_expired':
+      return (
+        hasExactlyKeys(value, ['type', 'expiration']) &&
+        isGrantExpirationMetadata(value.expiration)
+      );
+    default:
+      return false;
+  }
+}
+
+function isAppliedScopedGrantCommandShape(
+  value: unknown,
+  grantId: ScopedGrantId,
+): value is AppliedScopedGrantCommand {
+  if (
+    !isRecord(value) ||
+    value.grantId !== grantId ||
+    !isScopedGrantCommandId(value.commandId) ||
+    !isScopedGrantRequestDigest(value.requestDigest) ||
+    !isUnixEpochSeconds(value.appliedAt) ||
+    !isGrantAppliedResult(value.result)
+  ) {
+    return false;
+  }
+  switch (value.commandType) {
+    case 'consume_grant':
+      return (
+        hasExactlyKeys(value, [
+          'grantId',
+          'commandId',
+          'requestDigest',
+          'appliedAt',
+          'result',
+          'commandType',
+          'accountId',
+          'sessionId',
+          'scope',
+          'resourceDigest',
+        ]) &&
+        isSessionAccountId(value.accountId) &&
+        isSessionId(value.sessionId) &&
+        isScopedGrantScope(value.scope) &&
+        isScopedGrantResourceDigest(value.resourceDigest) &&
+        value.result.type === 'grant_consumed'
+      );
+    case 'revoke_grant':
+      return (
+        hasExactlyKeys(value, [
+          'grantId',
+          'commandId',
+          'requestDigest',
+          'appliedAt',
+          'result',
+          'commandType',
+          'reason',
+        ]) &&
+        isScopedGrantRevokeReason(value.reason) &&
+        value.result.type === 'grant_revoked'
+      );
+    case 'expire_grant':
+      return (
+        hasExactlyKeys(value, [
+          'grantId',
+          'commandId',
+          'requestDigest',
+          'appliedAt',
+          'result',
+          'commandType',
+        ]) && value.result.type === 'grant_expired'
+      );
+    default:
+      return false;
+  }
+}
+
+function consumptionsEqual(
+  left: ScopedGrantConsumptionMetadata,
+  right: ScopedGrantConsumptionMetadata,
+): boolean {
+  return left.consumedAt === right.consumedAt && left.commandId === right.commandId;
+}
+
+function grantRevocationsEqual(
+  left: ScopedGrantRevocationMetadata,
+  right: ScopedGrantRevocationMetadata,
+): boolean {
+  return (
+    left.reason === right.reason &&
+    left.revokedAt === right.revokedAt &&
+    left.commandId === right.commandId
+  );
+}
+
+function grantExpirationsEqual(
+  left: ScopedGrantExpirationMetadata,
+  right: ScopedGrantExpirationMetadata,
+): boolean {
+  return left.expiredAt === right.expiredAt && left.commandId === right.commandId;
+}
+
+const SCOPED_GRANT_STATE_BINDING_KEYS = Object.freeze([
+  'grantId',
+  'evidenceId',
+  'accountId',
+  'sessionId',
+  'scope',
+  'resourceDigest',
+  'createdAt',
+  'expiresAt',
+  'appliedCommands',
+] as const);
+
+function scopedGrantStateRejectionReason(
+  value: unknown,
+):
+  | 'invalid_state_shape'
+  | 'invalid_state_binding'
+  | 'invalid_command_history'
+  | 'invalid_status_metadata'
+  | undefined {
+  if (!isRecord(value) || typeof value.status !== 'string') {
+    return 'invalid_state_shape';
+  }
+  if (
+    !isScopedGrantId(value.grantId) ||
+    !isFreshAuthenticationEvidenceId(value.evidenceId) ||
+    !isSessionAccountId(value.accountId) ||
+    !isSessionId(value.sessionId) ||
+    !isScopedGrantScope(value.scope) ||
+    !isScopedGrantResourceDigest(value.resourceDigest) ||
+    !isUnixEpochSeconds(value.createdAt) ||
+    !isUnixEpochSeconds(value.expiresAt) ||
+    value.createdAt >= value.expiresAt ||
+    !Array.isArray(value.appliedCommands)
+  ) {
+    return 'invalid_state_binding';
+  }
+
+  const commands: AppliedScopedGrantCommand[] = [];
+  const commandIds = new Set<string>();
+  for (const command of value.appliedCommands) {
+    if (
+      !isAppliedScopedGrantCommandShape(command, value.grantId) ||
+      commandIds.has(command.commandId)
+    ) {
+      return 'invalid_command_history';
+    }
+    commandIds.add(command.commandId);
+    commands.push(command);
+  }
+
+  if (value.status === 'active') {
+    return commands.length === 0 &&
+      hasExactlyKeys(value, [...SCOPED_GRANT_STATE_BINDING_KEYS, 'status'])
+      ? undefined
+      : 'invalid_status_metadata';
+  }
+  if (commands.length !== 1) {
+    return 'invalid_command_history';
+  }
+  const command = commands[0];
+
+  if (value.status === 'consumed') {
+    if (
+      !hasExactlyKeys(value, [
+        ...SCOPED_GRANT_STATE_BINDING_KEYS,
+        'status',
+        'consumption',
+      ]) ||
+      command.commandType !== 'consume_grant' ||
+      command.result.type !== 'grant_consumed' ||
+      command.accountId !== value.accountId ||
+      command.sessionId !== value.sessionId ||
+      command.scope !== value.scope ||
+      command.resourceDigest !== value.resourceDigest ||
+      command.appliedAt < value.createdAt ||
+      command.appliedAt >= value.expiresAt ||
+      !isGrantConsumptionMetadata(value.consumption) ||
+      !consumptionsEqual(command.result.consumption, {
+        consumedAt: command.appliedAt,
+        commandId: command.commandId,
+      }) ||
+      !consumptionsEqual(value.consumption, command.result.consumption)
+    ) {
+      return 'invalid_status_metadata';
+    }
+    return undefined;
+  }
+
+  if (value.status === 'revoked') {
+    if (
+      !hasExactlyKeys(value, [
+        ...SCOPED_GRANT_STATE_BINDING_KEYS,
+        'status',
+        'revocation',
+      ]) ||
+      command.commandType !== 'revoke_grant' ||
+      command.result.type !== 'grant_revoked' ||
+      command.appliedAt < value.createdAt ||
+      command.appliedAt >= value.expiresAt ||
+      !isGrantRevocationMetadata(value.revocation) ||
+      !grantRevocationsEqual(command.result.revocation, {
+        reason: command.reason,
+        revokedAt: command.appliedAt,
+        commandId: command.commandId,
+      }) ||
+      !grantRevocationsEqual(value.revocation, command.result.revocation)
+    ) {
+      return 'invalid_status_metadata';
+    }
+    return undefined;
+  }
+
+  if (value.status === 'expired') {
+    if (
+      !hasExactlyKeys(value, [
+        ...SCOPED_GRANT_STATE_BINDING_KEYS,
+        'status',
+        'expiration',
+      ]) ||
+      command.commandType !== 'expire_grant' ||
+      command.result.type !== 'grant_expired' ||
+      command.appliedAt < value.expiresAt ||
+      !isGrantExpirationMetadata(value.expiration) ||
+      !grantExpirationsEqual(command.result.expiration, {
+        expiredAt: command.appliedAt,
+        commandId: command.commandId,
+      }) ||
+      !grantExpirationsEqual(value.expiration, command.result.expiration)
+    ) {
+      return 'invalid_status_metadata';
+    }
+    return undefined;
+  }
+
+  return 'invalid_state_shape';
+}
+
 function immutableConsumption(
   consumption: ScopedGrantConsumptionMetadata,
 ): ScopedGrantConsumptionMetadata {
@@ -922,6 +1235,16 @@ export function transitionScopedGrant(
   command: ScopedGrantCommand,
   context?: ScopedGrantCommandContext,
 ): ScopedGrantTransitionResult {
+  const stateReason = scopedGrantStateRejectionReason(state);
+  if (stateReason !== undefined) {
+    return {
+      outcome: 'rejected',
+      reason: 'invalid_scoped_grant_state',
+      stateReason,
+      state,
+    };
+  }
+
   const commandReason = commandRejectionReason(command);
   if (commandReason !== undefined) {
     return {
@@ -951,6 +1274,15 @@ export function transitionScopedGrant(
 
   if (state.status !== 'active') {
     return { outcome: 'rejected', reason: 'forbidden_transition', state };
+  }
+
+  if (command.now < state.createdAt) {
+    return {
+      outcome: 'rejected',
+      reason: 'invalid_grant_command',
+      commandReason: 'invalid_time',
+      state,
+    };
   }
 
   if (command.type === 'expire_grant') {

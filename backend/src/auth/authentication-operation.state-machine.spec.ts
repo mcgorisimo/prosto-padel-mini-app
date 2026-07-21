@@ -1217,6 +1217,7 @@ describe('authentication operation immutability', () => {
     expect(result.state).not.toHaveProperty('debugMessage');
     expect(result.state).not.toHaveProperty('arbitraryObject');
     expect(result.state.appliedCommand).toEqual({
+      operationId: operationId(),
       commandId: commandId(),
       commandType: 'fail',
       appliedAt: BEFORE_EXPIRY,
@@ -1241,3 +1242,174 @@ function terminalStateForImmutability(): AuthenticationOperationState {
   const pending = pendingOperation();
   return transitionAuthenticationOperation(pending, completeCommand(pending)).state;
 }
+
+describe('authentication operation persisted state guard', () => {
+  function forgedState(value: unknown): AuthenticationOperationState {
+    return value as AuthenticationOperationState;
+  }
+
+  function expectInvalidState(state: AuthenticationOperationState): void {
+    const result = transitionAuthenticationOperation(
+      state,
+      failCommand(pendingOperation()),
+    );
+    expect(result).toMatchObject({
+      outcome: 'rejected',
+      reason: 'invalid_authentication_operation_state',
+      state,
+    });
+    expect(result.state).toBe(state);
+  }
+
+  it('rejects a terminal state without appliedCommand without throwing', () => {
+    const completed = terminalStateForImmutability();
+    if (completed.status !== 'completed') {
+      throw new Error('Expected completed operation');
+    }
+    const { appliedCommand: _removed, ...withoutApplied } = completed;
+    const state = forgedState(withoutApplied);
+    expect(() => expectInvalidState(state)).not.toThrow();
+  });
+
+  it('rejects completed without resolution', () => {
+    const completed = terminalStateForImmutability();
+    if (completed.status !== 'completed') {
+      throw new Error('Expected completed operation');
+    }
+    const { resolution: _removed, ...withoutResolution } = completed;
+    expectInvalidState(forgedState(withoutResolution));
+  });
+
+  it('rejects completed with an incompatible intent/outcome', () => {
+    const pending = pendingOperation();
+    const completed = transitionAuthenticationOperation(
+      pending,
+      completeCommand(pending),
+    ).state;
+    const state = forgedState({
+      ...completed,
+      resolution: newAccountRequired(completed.identityKey),
+    });
+    expectInvalidState(state);
+  });
+
+  it('rejects failed with an arbitrary failure reason', () => {
+    const pending = pendingOperation();
+    const failed = transitionAuthenticationOperation(
+      pending,
+      failCommand(pending),
+    ).state;
+    expectInvalidState(
+      forgedState({ ...failed, failureReason: 'database_stack_trace' }),
+    );
+  });
+
+  it('rejects expired with appliedAt before expiry', () => {
+    const pending = pendingOperation();
+    const expired = transitionAuthenticationOperation(
+      pending,
+      expireCommand(pending),
+    ).state;
+    if (expired.status !== 'expired') {
+      throw new Error('Expected expired operation');
+    }
+    expectInvalidState(
+      forgedState({
+        ...expired,
+        appliedCommand: { ...expired.appliedCommand, appliedAt: BEFORE_EXPIRY },
+      }),
+    );
+  });
+
+  it('rejects pending with terminal metadata', () => {
+    expectInvalidState(
+      forgedState({
+        ...pendingOperation(),
+        appliedCommand: {
+          operationId: operationId(),
+          commandId: commandId(),
+          commandType: 'fail',
+          appliedAt: BEFORE_EXPIRY,
+        },
+      }),
+    );
+  });
+
+  it('rejects terminal applied metadata bound to another operation', () => {
+    const completed = terminalStateForImmutability();
+    if (completed.status !== 'completed') {
+      throw new Error('Expected completed operation');
+    }
+    expectInvalidState(
+      forgedState({
+        ...completed,
+        appliedCommand: {
+          ...completed.appliedCommand,
+          operationId: operationId('operation-2'),
+        },
+      }),
+    );
+  });
+
+  it('rejects identity mismatch in a stored resolution', () => {
+    const completed = terminalStateForImmutability();
+    if (completed.status !== 'completed') {
+      throw new Error('Expected completed operation');
+    }
+    expectInvalidState(
+      forgedState({
+        ...completed,
+        resolution: resolveExistingAccountStatus(
+          identityKey('telegram', 'telegram:bot:999'),
+          ACCOUNT_ID,
+          'active',
+        ),
+      }),
+    );
+  });
+
+  it('rejects duplicate terminal command history represented at runtime', () => {
+    const completed = terminalStateForImmutability();
+    if (completed.status !== 'completed') {
+      throw new Error('Expected completed operation');
+    }
+    expectInvalidState(
+      forgedState({
+        ...completed,
+        appliedCommands: [completed.appliedCommand, completed.appliedCommand],
+      }),
+    );
+  });
+
+  it('does not mutate malformed state or its terminal metadata', () => {
+    const completed = terminalStateForImmutability();
+    if (completed.status !== 'completed') {
+      throw new Error('Expected completed operation');
+    }
+    const state = forgedState({ ...completed, resolution: undefined });
+    const snapshot = structuredClone(state);
+    const result = transitionAuthenticationOperation(
+      state,
+      failCommand(pendingOperation()),
+    );
+    expect(result.state).toBe(state);
+    expect(state).toEqual(snapshot);
+  });
+
+  it('rejects a new command before the operation creation time', () => {
+    const pending = pendingOperation();
+    const result = transitionAuthenticationOperation(
+      pending,
+      failCommand(pending, {
+        now: unixEpochSeconds(CREATED_AT - 1),
+      }),
+    );
+    expect(result).toMatchObject({
+      outcome: 'rejected',
+      reason: 'invalid_command',
+      commandReason: 'invalid_time',
+      state: pending,
+    });
+    expect(result.state).toBe(pending);
+  });
+});

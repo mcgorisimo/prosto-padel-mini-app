@@ -1271,3 +1271,214 @@ describe('scoped grant immutability', () => {
     expect(Object.isFrozen(consumed.appliedCommands[0])).toBe(true);
   });
 });
+
+describe('scoped grant persisted state guard', () => {
+  function forgedState(value: unknown): ScopedGrantState {
+    return value as ScopedGrantState;
+  }
+
+  function expectInvalidState(state: ScopedGrantState): void {
+    const result = transitionScopedGrantReducer(
+      state,
+      revokeCommand(activeGrant()),
+    );
+    expect(result).toMatchObject({
+      outcome: 'rejected',
+      reason: 'invalid_scoped_grant_state',
+      state,
+    });
+    expect(result.state).toBe(state);
+  }
+
+  it('rejects missing applied history without throwing', () => {
+    const active = activeGrant();
+    const { appliedCommands: _removed, ...withoutHistory } = active;
+    const state = forgedState(withoutHistory);
+    expect(() => expectInvalidState(state)).not.toThrow();
+  });
+
+  it.each([
+    ['unknown scope', { scope: 'delete_everything' }],
+    ['malformed resource digest', { resourceDigest: 'bad' }],
+  ])('rejects %s', (_label, override) => {
+    expectInvalidState(forgedState({ ...activeGrant(), ...override }));
+  });
+
+  it('rejects active state with terminal metadata', () => {
+    expectInvalidState(
+      forgedState({
+        ...activeGrant(),
+        consumption: {
+          consumedAt: CONSUME_AT,
+          commandId: grantCommandId(),
+        },
+      }),
+    );
+  });
+
+  it('rejects consumed state without consumption metadata', () => {
+    const consumed = terminalGrant('consumed');
+    if (consumed.status !== 'consumed') {
+      throw new Error('Expected consumed grant');
+    }
+    const { consumption: _removed, ...withoutConsumption } = consumed;
+    expectInvalidState(forgedState(withoutConsumption));
+  });
+
+  it.each([
+    ['account', { accountId: 'account-2' as AccountId }],
+    ['session', { sessionId: 'session-2' as SessionId }],
+    ['scope', { scope: 'unlink_identity' as ScopedGrantScope }],
+    ['resource', { resourceDigest: RESOURCE_B }],
+  ])('rejects consumed command bound to another %s', (_label, commandOverride) => {
+    const consumed = terminalGrant('consumed');
+    if (
+      consumed.status !== 'consumed' ||
+      consumed.appliedCommands[0].commandType !== 'consume_grant'
+    ) {
+      throw new Error('Expected consumed grant');
+    }
+    expectInvalidState(
+      forgedState({
+        ...consumed,
+        appliedCommands: [
+          { ...consumed.appliedCommands[0], ...commandOverride },
+        ],
+      }),
+    );
+  });
+
+  it('rejects revoked state with an arbitrary reason', () => {
+    const revoked = terminalGrant('revoked');
+    if (revoked.status !== 'revoked') {
+      throw new Error('Expected revoked grant');
+    }
+    expectInvalidState(
+      forgedState({
+        ...revoked,
+        revocation: { ...revoked.revocation, reason: 'database_error' },
+      }),
+    );
+  });
+
+  it('rejects expired state with appliedAt before expiry', () => {
+    const expired = terminalGrant('expired');
+    if (
+      expired.status !== 'expired' ||
+      expired.appliedCommands[0].commandType !== 'expire_grant'
+    ) {
+      throw new Error('Expected expired grant');
+    }
+    expectInvalidState(
+      forgedState({
+        ...expired,
+        expiration: {
+          ...expired.expiration,
+          expiredAt: unixEpochSeconds(GRANT_EXPIRES_AT - 1),
+        },
+        appliedCommands: [
+          {
+            ...expired.appliedCommands[0],
+            appliedAt: unixEpochSeconds(GRANT_EXPIRES_AT - 1),
+            result: {
+              type: 'grant_expired',
+              expiration: {
+                ...expired.expiration,
+                expiredAt: unixEpochSeconds(GRANT_EXPIRES_AT - 1),
+              },
+            },
+          },
+        ],
+      }),
+    );
+  });
+
+  it('rejects state with multiple terminal metadata fields', () => {
+    const consumed = terminalGrant('consumed');
+    expectInvalidState(
+      forgedState({
+        ...consumed,
+        revocation: {
+          reason: 'security_event',
+          revokedAt: CONSUME_AT,
+          commandId: grantCommandId('other-command'),
+        },
+      }),
+    );
+  });
+
+  it('rejects duplicate applied command IDs', () => {
+    const consumed = terminalGrant('consumed');
+    expectInvalidState(
+      forgedState({
+        ...consumed,
+        appliedCommands: [
+          consumed.appliedCommands[0],
+          consumed.appliedCommands[0],
+        ],
+      }),
+    );
+  });
+
+  it('rejects terminal state without its applied command', () => {
+    expectInvalidState(
+      forgedState({ ...terminalGrant('revoked'), appliedCommands: [] }),
+    );
+  });
+
+  it('rejects malformed grant before reading session context', () => {
+    const malformed = forgedState({ ...activeGrant(), appliedCommands: null });
+    const throwingContext = Object.defineProperty({}, 'session', {
+      get(): never {
+        throw new Error('session context must not be read');
+      },
+    });
+    let result: ScopedGrantTransitionResult | undefined;
+    expect(() => {
+      result = transitionScopedGrantReducer(
+        malformed,
+        consumeCommand(activeGrant()),
+        throwingContext,
+      );
+    }).not.toThrow();
+    expect(result).toMatchObject({
+      outcome: 'rejected',
+      reason: 'invalid_scoped_grant_state',
+      state: malformed,
+    });
+  });
+
+  it('preserves malformed state and history by reference and value', () => {
+    const consumed = terminalGrant('consumed');
+    const state = forgedState({
+      ...consumed,
+      appliedCommands: [
+        consumed.appliedCommands[0],
+        consumed.appliedCommands[0],
+      ],
+    });
+    const snapshot = structuredClone(state);
+    const result = transitionScopedGrantReducer(
+      state,
+      revokeCommand(activeGrant()),
+    );
+    expect(result.state).toBe(state);
+    expect(state).toEqual(snapshot);
+  });
+
+  it('rejects a new command before grant creation', () => {
+    const active = activeGrant();
+    const result = transitionScopedGrantReducer(
+      active,
+      revokeCommand(active, {
+        now: unixEpochSeconds(GRANT_CREATED_AT - 1),
+      }),
+    );
+    expect(result).toMatchObject({
+      outcome: 'rejected',
+      reason: 'invalid_grant_command',
+      commandReason: 'invalid_time',
+      state: active,
+    });
+  });
+});

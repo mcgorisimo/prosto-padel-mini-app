@@ -130,6 +130,7 @@ export type AuthenticationOperationCommandBinding = Pick<
 >;
 
 interface AppliedAuthenticationOperationCommand {
+  readonly operationId: AuthenticationOperationId;
   readonly commandId: AuthenticationCommandId;
   readonly commandType: 'complete' | 'fail' | 'expire';
   readonly appliedAt: UnixEpochSeconds;
@@ -206,6 +207,7 @@ export type AuthenticationOperationCommand =
  * so implicitly.
  */
 export type AuthenticationOperationRejectionReason =
+  | 'invalid_authentication_operation_state'
   | 'invalid_operation_binding'
   | 'invalid_command'
   | 'invalid_resolution_outcome'
@@ -239,6 +241,18 @@ export type AuthenticationOperationTransitionResult =
     }
   | {
       readonly outcome: 'rejected';
+      readonly reason: 'invalid_authentication_operation_state';
+      readonly stateReason:
+        | 'invalid_state_shape'
+        | 'invalid_state_binding'
+        | 'invalid_pending_state'
+        | 'invalid_completed_state'
+        | 'invalid_failed_state'
+        | 'invalid_expired_state';
+      readonly state: AuthenticationOperationState;
+    }
+  | {
+      readonly outcome: 'rejected';
       readonly reason: 'invalid_command';
       readonly commandReason: AuthenticationOperationCommandRejectionReason;
       readonly state: AuthenticationOperationState;
@@ -247,13 +261,28 @@ export type AuthenticationOperationTransitionResult =
       readonly outcome: 'rejected';
       readonly reason: Exclude<
         AuthenticationOperationRejectionReason,
-        'invalid_operation_binding' | 'invalid_command'
+        | 'invalid_authentication_operation_state'
+        | 'invalid_operation_binding'
+        | 'invalid_command'
       >;
       readonly state: AuthenticationOperationState;
     };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function hasExactlyKeys(
+  value: Record<string, unknown>,
+  expectedKeys: readonly string[],
+): boolean {
+  const keys = Object.keys(value);
+  return (
+    keys.length === expectedKeys.length &&
+    expectedKeys.every((key) =>
+      Object.prototype.hasOwnProperty.call(value, key),
+    )
+  );
 }
 
 function operationBindingRejectionReason(
@@ -417,6 +446,131 @@ function identityKeysEqual(
   );
 }
 
+const AUTHENTICATION_OPERATION_BINDING_KEYS = Object.freeze([
+  'operationId',
+  'intent',
+  'identityKey',
+  'proofFingerprint',
+  'createdAt',
+  'expiresAt',
+  'idempotencyKey',
+  'requestDigest',
+] as const);
+
+function isValidAppliedAuthenticationOperationCommand(
+  value: unknown,
+  state: AuthenticationOperationBinding,
+  expectedType: AppliedAuthenticationOperationCommand['commandType'],
+): value is AppliedAuthenticationOperationCommand {
+  if (
+    !isRecord(value) ||
+    !hasExactlyKeys(value, [
+      'operationId',
+      'commandId',
+      'commandType',
+      'appliedAt',
+    ]) ||
+    value.operationId !== state.operationId ||
+    !isAuthenticationCommandId(value.commandId) ||
+    value.commandType !== expectedType ||
+    !isUnixEpochSeconds(value.appliedAt)
+  ) {
+    return false;
+  }
+
+  return expectedType === 'expire'
+    ? value.appliedAt >= state.expiresAt
+    : value.appliedAt >= state.createdAt && value.appliedAt < state.expiresAt;
+}
+
+function authenticationOperationStateRejectionReason(
+  value: unknown,
+):
+  | 'invalid_state_shape'
+  | 'invalid_state_binding'
+  | 'invalid_pending_state'
+  | 'invalid_completed_state'
+  | 'invalid_failed_state'
+  | 'invalid_expired_state'
+  | undefined {
+  if (!isRecord(value) || typeof value.status !== 'string') {
+    return 'invalid_state_shape';
+  }
+  if (operationBindingRejectionReason(value) !== undefined) {
+    return 'invalid_state_binding';
+  }
+
+  const binding = value as unknown as AuthenticationOperationBinding;
+  switch (value.status) {
+    case 'pending':
+      return hasExactlyKeys(value, [
+        ...AUTHENTICATION_OPERATION_BINDING_KEYS,
+        'status',
+      ])
+        ? undefined
+        : 'invalid_pending_state';
+    case 'completed':
+      if (
+        !hasExactlyKeys(value, [
+          ...AUTHENTICATION_OPERATION_BINDING_KEYS,
+          'status',
+          'resolution',
+          'appliedCommand',
+        ]) ||
+        !isValidAccountResolutionOutcome(value.resolution) ||
+        !isAuthenticationIntentOutcomeCompatible(
+          binding.intent,
+          value.resolution.type,
+        ) ||
+        !identityKeysEqual(binding.identityKey, value.resolution.identityKey) ||
+        !isValidAppliedAuthenticationOperationCommand(
+          value.appliedCommand,
+          binding,
+          'complete',
+        )
+      ) {
+        return 'invalid_completed_state';
+      }
+      return undefined;
+    case 'failed':
+      if (
+        !hasExactlyKeys(value, [
+          ...AUTHENTICATION_OPERATION_BINDING_KEYS,
+          'status',
+          'failureReason',
+          'appliedCommand',
+        ]) ||
+        !isAuthenticationOperationFailureReason(value.failureReason) ||
+        !isValidAppliedAuthenticationOperationCommand(
+          value.appliedCommand,
+          binding,
+          'fail',
+        )
+      ) {
+        return 'invalid_failed_state';
+      }
+      return undefined;
+    case 'expired':
+      if (
+        !hasExactlyKeys(value, [
+          ...AUTHENTICATION_OPERATION_BINDING_KEYS,
+          'status',
+          'appliedCommand',
+        ]) ||
+        !isValidAppliedAuthenticationOperationCommand(
+          value.appliedCommand,
+          binding,
+          'expire',
+        )
+      ) {
+        return 'invalid_expired_state';
+      }
+      return undefined;
+    default:
+      return 'invalid_state_shape';
+  }
+}
+
 function commandBindingMatches(
   state: AuthenticationOperationState,
   binding: AuthenticationOperationCommandBinding,
@@ -532,6 +686,7 @@ function appliedCommand(
   command: AuthenticationOperationCommand,
 ): AppliedAuthenticationOperationCommand {
   return Object.freeze({
+    operationId: command.binding.operationId,
     commandId: command.commandId,
     commandType: command.type,
     appliedAt: command.now,
@@ -591,6 +746,16 @@ export function transitionAuthenticationOperation(
   state: AuthenticationOperationState,
   command: AuthenticationOperationCommand,
 ): AuthenticationOperationTransitionResult {
+  const stateReason = authenticationOperationStateRejectionReason(state);
+  if (stateReason !== undefined) {
+    return {
+      outcome: 'rejected',
+      reason: 'invalid_authentication_operation_state',
+      stateReason,
+      state,
+    };
+  }
+
   const invalidCommandReason = commandRejectionReason(command);
   if (invalidCommandReason !== undefined) {
     return {
@@ -639,6 +804,15 @@ export function transitionAuthenticationOperation(
     return {
       outcome: 'rejected',
       reason: 'forbidden_transition',
+      state,
+    };
+  }
+
+  if (command.now < state.createdAt) {
+    return {
+      outcome: 'rejected',
+      reason: 'invalid_command',
+      commandReason: 'invalid_time',
       state,
     };
   }
