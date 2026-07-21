@@ -32,7 +32,12 @@ declare const authenticationProofFingerprintBrand: unique symbol;
 declare const authenticationOperationIdBrand: unique symbol;
 declare const authenticationIdempotencyKeyBrand: unique symbol;
 declare const authenticationRequestDigestBrand: unique symbol;
+declare const authenticationCommandIdBrand: unique symbol;
 declare const unixEpochSecondsBrand: unique symbol;
+
+const MAX_AUTHENTICATION_OPAQUE_VALUE_LENGTH = 256;
+const AUTHENTICATION_CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f-\u009f]/u;
+const SHA_256_HEX_PATTERN = /^[0-9a-f]{64}$/u;
 
 export type AuthenticationProofFingerprint = string & {
   readonly [authenticationProofFingerprintBrand]:
@@ -50,6 +55,15 @@ export type AuthenticationIdempotencyKey = string & {
 
 export type AuthenticationRequestDigest = string & {
   readonly [authenticationRequestDigestBrand]: 'AuthenticationRequestDigest';
+};
+
+/**
+ * A command ID is unique within one authentication operation. A future
+ * persistence adapter must atomically enforce uniqueness for the pair
+ * (operationId, commandId); commandId alone is not globally unique.
+ */
+export type AuthenticationCommandId = string & {
+  readonly [authenticationCommandIdBrand]: 'AuthenticationCommandId';
 };
 
 export type UnixEpochSeconds = number & {
@@ -72,16 +86,64 @@ export function unixEpochSeconds(value: number): UnixEpochSeconds {
   return value;
 }
 
+function isAuthenticationOpaqueValue(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= MAX_AUTHENTICATION_OPAQUE_VALUE_LENGTH &&
+    value.trim() === value &&
+    !AUTHENTICATION_CONTROL_CHARACTER_PATTERN.test(value)
+  );
+}
+
+export function isAuthenticationOperationId(
+  value: unknown,
+): value is AuthenticationOperationId {
+  return isAuthenticationOpaqueValue(value);
+}
+
+export function isAuthenticationIdempotencyKey(
+  value: unknown,
+): value is AuthenticationIdempotencyKey {
+  return isAuthenticationOpaqueValue(value);
+}
+
+export function isAuthenticationRequestDigest(
+  value: unknown,
+): value is AuthenticationRequestDigest {
+  return isAuthenticationOpaqueValue(value);
+}
+
+export function isAuthenticationCommandId(
+  value: unknown,
+): value is AuthenticationCommandId {
+  return isAuthenticationOpaqueValue(value);
+}
+
+export function isAuthenticationProofFingerprint(
+  value: unknown,
+): value is AuthenticationProofFingerprint {
+  return typeof value === 'string' && SHA_256_HEX_PATTERN.test(value);
+}
+
 export const AUTHENTICATION_INTENTS = Object.freeze([
   'sign_in',
+  'sign_up',
   'link_identity',
   'fresh_authentication',
-  'manual_recovery',
-  'identity_transfer',
-  'account_deletion',
+  'account_recovery',
 ] as const);
 
 export type AuthenticationIntent = (typeof AUTHENTICATION_INTENTS)[number];
+
+export function isAuthenticationIntent(
+  value: unknown,
+): value is AuthenticationIntent {
+  return (
+    typeof value === 'string' &&
+    (AUTHENTICATION_INTENTS as readonly string[]).includes(value)
+  );
+}
 
 export interface VerifiedTelegramProof {
   readonly provider: 'telegram';

@@ -10,6 +10,12 @@ import {
   SessionMetadata,
   VerifiedExternalIdentity,
   VerifiedTelegramIdentity,
+  isAuthenticationCommandId,
+  isAuthenticationIdempotencyKey,
+  isAuthenticationIntent,
+  isAuthenticationOperationId,
+  isAuthenticationProofFingerprint,
+  isAuthenticationRequestDigest,
   isUnixEpochSeconds,
   unixEpochSeconds,
 } from './auth.types';
@@ -31,13 +37,46 @@ describe('authentication contracts', () => {
   it('defines provider-neutral authentication intents', () => {
     expect(AUTHENTICATION_INTENTS).toEqual([
       'sign_in',
+      'sign_up',
       'link_identity',
       'fresh_authentication',
-      'manual_recovery',
-      'identity_transfer',
-      'account_deletion',
+      'account_recovery',
     ]);
     expect(Object.isFrozen(AUTHENTICATION_INTENTS)).toBe(true);
+  });
+
+  it('does not accept arbitrary strings as authentication intents', () => {
+    type AuthenticationIntent = (typeof AUTHENTICATION_INTENTS)[number];
+
+    // @ts-expect-error Authentication intents are a closed provider-neutral union.
+    const intent: AuthenticationIntent = 'telegram_login_button';
+    expect(AUTHENTICATION_INTENTS).not.toContain(intent);
+    expect(isAuthenticationIntent('sign_in')).toBe(true);
+    expect(isAuthenticationIntent('telegram_login_button')).toBe(false);
+  });
+
+  it('validates opaque authentication identifiers at runtime', () => {
+    const guards = [
+      isAuthenticationOperationId,
+      isAuthenticationCommandId,
+      isAuthenticationIdempotencyKey,
+      isAuthenticationRequestDigest,
+    ];
+
+    for (const guard of guards) {
+      expect(guard('safe-value')).toBe(true);
+      expect(guard('')).toBe(false);
+      expect(guard(' padded ')).toBe(false);
+      expect(guard('control\nvalue')).toBe(false);
+      expect(guard('x'.repeat(257))).toBe(false);
+    }
+  });
+
+  it('accepts only a lowercase SHA-256 proof fingerprint', () => {
+    expect(isAuthenticationProofFingerprint('a'.repeat(64))).toBe(true);
+    expect(isAuthenticationProofFingerprint('A'.repeat(64))).toBe(false);
+    expect(isAuthenticationProofFingerprint('a'.repeat(63))).toBe(false);
+    expect(isAuthenticationProofFingerprint('proof-fingerprint')).toBe(false);
   });
 
   it('accepts only finite non-negative integer Unix epoch seconds', () => {
