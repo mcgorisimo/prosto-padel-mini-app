@@ -1,16 +1,32 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
-import { VerifiedTelegramIdentity } from './auth.types';
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
+import {
+  ExternalIdentityNamespace,
+  CanonicalExternalIdentitySubject,
+  externalIdentityNamespace,
+  trustProviderCanonicalizedExternalIdentitySubject,
+} from '../accounts/external-identity.types';
+import {
+  AuthenticationProofFingerprint,
+  TelegramProofVerificationOutcome,
+  UnixEpochSeconds,
+  VerifiedTelegramIdentity,
+  unixEpochSeconds,
+} from './auth.types';
 
 const MAX_RAW_INIT_DATA_BYTES = 16 * 1024;
 const MAX_PARAMETER_COUNT = 64;
 const MAX_PARAMETER_NAME_LENGTH = 64;
 const MAX_PARAMETER_VALUE_BYTES = 8 * 1024;
 const MAX_TELEGRAM_USER_ID = 2 ** 52 - 1;
+const MAX_TELEGRAM_USER_ID_TEXT = String(MAX_TELEGRAM_USER_ID);
 const MAX_NAME_CODE_POINTS = 256;
 const MAX_SHORT_TEXT_CODE_POINTS = 64;
 const MAX_PHOTO_URL_CODE_POINTS = 2048;
 const FUTURE_CLOCK_SKEW_SECONDS = 30;
+const MAX_TELEGRAM_BOT_ID_DIGITS = 20;
 const SAFE_ERROR_MESSAGE = 'Telegram authentication data is invalid';
+const PROOF_FINGERPRINT_DOMAIN =
+  'prosto-padel:telegram-init-data-proof:v1\0';
 
 const PARAMETER_NAME_PATTERN = /^[A-Za-z0-9_]+$/;
 const HASH_PATTERN = /^[0-9a-fA-F]{64}$/;
@@ -36,6 +52,17 @@ export class TelegramInitDataVerificationError extends Error {
 }
 
 type TelegramUserData = Record<string, unknown>;
+
+type TelegramInitDataVerificationInternalOutcome =
+  | {
+      readonly status: 'verified';
+      readonly proof: Extract<
+        TelegramProofVerificationOutcome,
+        { readonly status: 'verified' }
+      >['proof'];
+      readonly identity: VerifiedTelegramIdentity;
+    }
+  | Exclude<TelegramProofVerificationOutcome, { readonly status: 'verified' }>;
 
 function failVerification(): never {
   throw new TelegramInitDataVerificationError();
@@ -111,7 +138,7 @@ function compareParameterNames(left: [string, string], right: [string, string]):
 function verifyHash(
   parameters: ReadonlyMap<string, string>,
   botToken: string,
-): void {
+): Buffer {
   const receivedHash = parameters.get('hash');
   if (receivedHash === undefined || !HASH_PATTERN.test(receivedHash)) {
     return failVerification();
@@ -138,13 +165,59 @@ function verifyHash(
   ) {
     return failVerification();
   }
+
+  return expectedHash;
+}
+
+function readTelegramIssuerNamespace(
+  botToken: string,
+): ExternalIdentityNamespace {
+  const separatorIndex = botToken.indexOf(':');
+  if (
+    separatorIndex <= 0 ||
+    separatorIndex !== botToken.lastIndexOf(':')
+  ) {
+    return failVerification();
+  }
+
+  const botId = botToken.slice(0, separatorIndex);
+  const tokenSecret = botToken.slice(separatorIndex + 1);
+  if (
+    botId.length > MAX_TELEGRAM_BOT_ID_DIGITS ||
+    !/^[1-9][0-9]*$/.test(botId) ||
+    tokenSecret.length === 0 ||
+    !/^[A-Za-z0-9_-]+$/.test(tokenSecret)
+  ) {
+    return failVerification();
+  }
+
+  return externalIdentityNamespace(`telegram:bot:${botId}`);
+}
+
+function createProofFingerprint(
+  namespace: ExternalIdentityNamespace,
+  verifiedHash: Buffer,
+): AuthenticationProofFingerprint {
+  return createHash('sha256')
+    .update(PROOF_FINGERPRINT_DOMAIN, 'utf8')
+    .update(namespace, 'utf8')
+    .update('\0', 'utf8')
+    .update(verifiedHash)
+    .digest('hex') as AuthenticationProofFingerprint;
 }
 
 function readAuthDate(
   parameters: ReadonlyMap<string, string>,
   now: Date,
   maxAgeSeconds: number,
-): { authDate: Date; verifiedAt: Date } {
+): {
+  authDate: UnixEpochSeconds;
+  verifiedAt: UnixEpochSeconds;
+  expiresAt: UnixEpochSeconds;
+  authDateAsDate: Date;
+  verifiedAtAsDate: Date;
+  expired: boolean;
+} {
   const rawAuthDate = parameters.get('auth_date');
   if (rawAuthDate === undefined || !POSITIVE_DECIMAL_PATTERN.test(rawAuthDate)) {
     return failVerification();
@@ -155,22 +228,28 @@ function readAuthDate(
   if (
     !Number.isSafeInteger(authDateSeconds) ||
     authDateSeconds <= 0 ||
-    !Number.isFinite(verifiedAtMilliseconds)
+    !Number.isFinite(verifiedAtMilliseconds) ||
+    !Number.isSafeInteger(maxAgeSeconds) ||
+    maxAgeSeconds <= 0
   ) {
     return failVerification();
   }
 
-  const verifiedAtSeconds = Math.floor(verifiedAtMilliseconds / 1000);
-  if (
-    authDateSeconds > verifiedAtSeconds + FUTURE_CLOCK_SKEW_SECONDS ||
-    verifiedAtSeconds - authDateSeconds > maxAgeSeconds
-  ) {
+  const verifiedAtSecondsValue = Math.floor(verifiedAtMilliseconds / 1000);
+  const authDate = unixEpochSeconds(authDateSeconds);
+  const verifiedAt = unixEpochSeconds(verifiedAtSecondsValue);
+  const expiresAt = unixEpochSeconds(authDateSeconds + maxAgeSeconds);
+  if (authDateSeconds > verifiedAtSecondsValue + FUTURE_CLOCK_SKEW_SECONDS) {
     return failVerification();
   }
 
   return {
-    authDate: new Date(authDateSeconds * 1000),
-    verifiedAt: new Date(verifiedAtMilliseconds),
+    authDate,
+    verifiedAt,
+    expiresAt,
+    authDateAsDate: new Date(authDateSeconds * 1000),
+    verifiedAtAsDate: new Date(verifiedAtMilliseconds),
+    expired: verifiedAt >= expiresAt,
   };
 }
 
@@ -253,6 +332,21 @@ function readTelegramId(user: TelegramUserData): number {
   return id;
 }
 
+export function telegramCanonicalSubjectFromUserId(
+  telegramUserId: string,
+): CanonicalExternalIdentitySubject {
+  if (
+    !/^[1-9][0-9]*$/.test(telegramUserId) ||
+    telegramUserId.length > MAX_TELEGRAM_USER_ID_TEXT.length ||
+    (telegramUserId.length === MAX_TELEGRAM_USER_ID_TEXT.length &&
+      telegramUserId > MAX_TELEGRAM_USER_ID_TEXT)
+  ) {
+    return failVerification();
+  }
+
+  return trustProviderCanonicalizedExternalIdentitySubject(telegramUserId);
+}
+
 function readPhotoUrl(user: TelegramUserData): string | undefined {
   const photoUrl = readOptionalString(
     user,
@@ -282,20 +376,49 @@ export class TelegramInitDataVerifier {
   ) {}
 
   verify(rawInitData: string): VerifiedTelegramIdentity {
+    const outcome = this.verifyInternal(rawInitData);
+
+    if (outcome.status !== 'verified') {
+      return failVerification();
+    }
+
+    return outcome.identity;
+  }
+
+  verifyProof(rawInitData: string): TelegramProofVerificationOutcome {
+    const outcome = this.verifyInternal(rawInitData);
+
+    if (outcome.status === 'verified') {
+      return {
+        status: 'verified',
+        proof: outcome.proof,
+      };
+    }
+
+    return outcome;
+  }
+
+  private verifyInternal(
+    rawInitData: string,
+  ): TelegramInitDataVerificationInternalOutcome {
     try {
       if (!this.settings.enabled) {
         return failVerification();
       }
 
+      const namespace = readTelegramIssuerNamespace(this.settings.botToken);
       const parameters = parseInitData(rawInitData);
-      verifyHash(parameters, this.settings.botToken);
+      const verifiedHash = verifyHash(parameters, this.settings.botToken);
 
       const now = this.clock();
-      const { authDate, verifiedAt } = readAuthDate(
-        parameters,
-        now,
-        this.settings.maxAgeSeconds,
-      );
+      const {
+        authDate,
+        verifiedAt,
+        expiresAt,
+        authDateAsDate,
+        verifiedAtAsDate,
+        expired,
+      } = readAuthDate(parameters, now, this.settings.maxAgeSeconds);
       const user = parseTelegramUser(parameters.get('user'));
       const telegramId = readTelegramId(user);
       const firstName = readRequiredString(
@@ -319,23 +442,57 @@ export class TelegramInitDataVerifier {
         MAX_SHORT_TEXT_CODE_POINTS,
       );
       const photoUrl = readPhotoUrl(user);
-
-      return {
+      const subject = telegramCanonicalSubjectFromUserId(String(telegramId));
+      const identity: VerifiedTelegramIdentity = {
         provider: 'telegram',
-        subject: String(telegramId),
-        authDate,
-        verifiedAt,
+        subject,
+        authDate: authDateAsDate,
+        verifiedAt: verifiedAtAsDate,
         firstName,
         ...(lastName === undefined ? {} : { lastName }),
         ...(username === undefined ? {} : { username }),
         ...(languageCode === undefined ? {} : { languageCode }),
         ...(photoUrl === undefined ? {} : { photoUrl }),
       };
-    } catch (error: unknown) {
-      if (error instanceof TelegramInitDataVerificationError) {
-        throw error;
+      const proofFingerprint = createProofFingerprint(
+        namespace,
+        verifiedHash,
+      );
+
+      if (expired) {
+        return {
+          status: 'expired',
+          reason: 'expired_proof',
+          proofFingerprint,
+          expiresAt,
+        };
       }
-      return failVerification();
+
+      return {
+        status: 'verified',
+        proof: {
+          provider: 'telegram',
+          namespace,
+          identityKey: {
+            provider: 'telegram',
+            namespace,
+            lookup: {
+              kind: 'canonical_subject',
+              subject,
+            },
+          },
+          authDate,
+          verifiedAt,
+          expiresAt,
+          proofFingerprint,
+        },
+        identity,
+      };
+    } catch {
+      return {
+        status: 'invalid',
+        reason: 'invalid_proof',
+      };
     }
   }
 }

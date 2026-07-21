@@ -3,16 +3,17 @@ import {
   TelegramInitDataVerificationError,
   TelegramInitDataVerifier,
   TelegramInitDataVerifierSettings,
+  telegramCanonicalSubjectFromUserId,
 } from './telegram-init-data.verifier';
 
 const FAKE_BOT_TOKEN =
-  '000000000:AA_TEST_ONLY_FAKE_TELEGRAM_BOT_TOKEN_DO_NOT_USE';
+  '123456789:AA_TEST_ONLY_FAKE_TELEGRAM_BOT_TOKEN_DO_NOT_USE';
 const FIXED_NOW = new Date('2026-07-21T12:00:00.000Z');
 const FIXED_NOW_SECONDS = 1_784_635_200;
 const MAX_AGE_SECONDS = 300;
 const SAFE_ERROR_MESSAGE = 'Telegram authentication data is invalid';
 const FIXED_MINIMAL_VECTOR =
-  'auth_date=1784635200&user=%7B%22id%22%3A123456789%2C%22first_name%22%3A%22Fixture%22%7D&hash=a21bee00fbe91ca10030e51bff6cd19a810c3bd0f984d7c82c20a51ee39694c3';
+  'auth_date=1784635200&user=%7B%22id%22%3A123456789%2C%22first_name%22%3A%22Fixture%22%7D&hash=3075d2eff161122e1b1ff0f5b53fe9b99761547f5658140eaf522e6e1f65a38b';
 
 type Parameter = readonly [name: string, value: string];
 
@@ -185,6 +186,192 @@ describe('TelegramInitDataVerifier', () => {
 
   });
 
+  describe('verified proof envelope', () => {
+    it('uses finite integer epoch seconds in the proof contract', () => {
+      const outcome = makeVerifier().verifyProof(FIXED_MINIMAL_VECTOR);
+
+      expect(outcome.status).toBe('verified');
+      if (outcome.status === 'verified') {
+        expect(outcome.proof.authDate).toBe(FIXED_NOW_SECONDS);
+        expect(outcome.proof.verifiedAt).toBe(FIXED_NOW_SECONDS);
+        expect(outcome.proof.expiresAt).toBe(
+          FIXED_NOW_SECONDS + MAX_AGE_SECONDS,
+        );
+        expect(outcome.proof).not.toHaveProperty('identity');
+      }
+    });
+
+    it('normalizes a subsecond verifier clock to epoch seconds', () => {
+      const clock = () => new Date(FIXED_NOW.getTime() + 999);
+      const outcome = makeVerifier(undefined, clock).verifyProof(
+        FIXED_MINIMAL_VECTOR,
+      );
+
+      expect(outcome.status).toBe('verified');
+      if (outcome.status === 'verified') {
+        expect(outcome.proof.verifiedAt).toBe(FIXED_NOW_SECONDS);
+      }
+    });
+
+    it('returns the same fingerprint for the same valid proof', () => {
+      const first = makeVerifier().verifyProof(FIXED_MINIMAL_VECTOR);
+      const second = makeVerifier().verifyProof(FIXED_MINIMAL_VECTOR);
+
+      expect(first.status).toBe('verified');
+      expect(second.status).toBe('verified');
+      if (first.status === 'verified' && second.status === 'verified') {
+        expect(first.proof.proofFingerprint).toBe(
+          second.proof.proofFingerprint,
+        );
+      }
+    });
+
+    it('changes the fingerprint when the signed payload changes', () => {
+      const first = makeVerifier().verifyProof(
+        signParameters(
+          userParameters({ id: 46, first_name: 'First payload' }),
+        ),
+      );
+      const second = makeVerifier().verifyProof(
+        signParameters(
+          userParameters({ id: 46, first_name: 'Second payload' }),
+        ),
+      );
+
+      expect(first.status).toBe('verified');
+      expect(second.status).toBe('verified');
+      if (first.status === 'verified' && second.status === 'verified') {
+        expect(first.proof.proofFingerprint).not.toBe(
+          second.proof.proofFingerprint,
+        );
+      }
+    });
+
+    it('does not expose the raw Telegram hash as the fingerprint', () => {
+      const outcome = makeVerifier().verifyProof(FIXED_MINIMAL_VECTOR);
+      const rawHash = new URLSearchParams(FIXED_MINIMAL_VECTOR).get('hash');
+
+      expect(outcome.status).toBe('verified');
+      if (outcome.status === 'verified') {
+        expect(outcome.proof.proofFingerprint).toMatch(/^[0-9a-f]{64}$/);
+        expect(outcome.proof.proofFingerprint).not.toBe(rawHash);
+      }
+    });
+
+    it('uses only the numeric bot ID in the Telegram issuer namespace', () => {
+      const outcome = makeVerifier().verifyProof(FIXED_MINIMAL_VECTOR);
+      const tokenSecret = FAKE_BOT_TOKEN.split(':')[1];
+
+      expect(outcome.status).toBe('verified');
+      if (outcome.status === 'verified') {
+        expect(outcome.proof.namespace).toBe('telegram:bot:123456789');
+        expect(outcome.proof.namespace).not.toContain(tokenSecret);
+        expect(outcome.proof.identityKey).toEqual({
+          provider: 'telegram',
+          namespace: 'telegram:bot:123456789',
+          lookup: {
+            kind: 'canonical_subject',
+            subject: '123456789',
+          },
+        });
+      }
+    });
+
+    it('binds the same payload to different bot namespaces', () => {
+      const secondBotToken =
+        '987654321:AA_TEST_ONLY_FAKE_TELEGRAM_BOT_TOKEN_DO_NOT_USE';
+      const parameters = userParameters({ id: 49, first_name: 'Namespace' });
+      const first = makeVerifier().verifyProof(
+        signParameters(parameters, FAKE_BOT_TOKEN),
+      );
+      const second = makeVerifier({
+        enabled: true,
+        botToken: secondBotToken,
+        maxAgeSeconds: MAX_AGE_SECONDS,
+      }).verifyProof(signParameters(parameters, secondBotToken));
+
+      expect(first.status).toBe('verified');
+      expect(second.status).toBe('verified');
+      if (first.status === 'verified' && second.status === 'verified') {
+        expect(first.proof.namespace).not.toBe(second.proof.namespace);
+        expect(first.proof.proofFingerprint).not.toBe(
+          second.proof.proofFingerprint,
+        );
+      }
+    });
+
+    it('does not expose proof material or the bot token in the envelope', () => {
+      const outcome = makeVerifier().verifyProof(FIXED_MINIMAL_VECTOR);
+
+      expect(outcome.status).toBe('verified');
+      if (outcome.status === 'verified') {
+        expect(outcome.proof).not.toHaveProperty('rawInitData');
+        expect(outcome.proof).not.toHaveProperty('hash');
+        expect(outcome.proof).not.toHaveProperty('canonicalPayload');
+        expect(outcome.proof).not.toHaveProperty('botToken');
+        expect(JSON.stringify(outcome.proof)).not.toContain(FAKE_BOT_TOKEN);
+      }
+    });
+
+    it('does not return a fingerprint for an invalid signature', () => {
+      const outcome = makeVerifier().verifyProof(
+        FIXED_MINIMAL_VECTOR.replace(/hash=[0-9a-f]+$/, `hash=${'0'.repeat(64)}`),
+      );
+
+      expect(outcome).toEqual({
+        status: 'invalid',
+        reason: 'invalid_proof',
+      });
+      expect(outcome).not.toHaveProperty('proofFingerprint');
+    });
+
+    it('classifies a valid signed but expired proof internally', () => {
+      const authDate = FIXED_NOW_SECONDS - MAX_AGE_SECONDS - 1;
+      const rawInitData = signParameters(
+        userParameters({ id: 47, first_name: 'Expired' }, authDate),
+      );
+      const outcome = makeVerifier().verifyProof(rawInitData);
+
+      expect(outcome).toMatchObject({
+        status: 'expired',
+        reason: 'expired_proof',
+        expiresAt: authDate + MAX_AGE_SECONDS,
+      });
+      if (outcome.status === 'expired') {
+        expect(outcome.proofFingerprint).toMatch(/^[0-9a-f]{64}$/);
+      }
+      expectInvalid(rawInitData);
+    });
+
+    it.each([
+      ['zero bot ID', '0:test-secret'],
+      ['leading-zero bot ID', '000123:test-secret'],
+      ['empty bot ID', ':test-secret'],
+      ['negative bot ID', '-1:test-secret'],
+      ['fractional bot ID', '1.5:test-secret'],
+      ['non-numeric bot ID', 'bot:test-secret'],
+      ['overlong bot ID', `${'1'.repeat(21)}:test-secret`],
+      ['missing separator', '123test-secret'],
+      ['missing secret', '123:'],
+    ])('rejects a token with %s', (_description, malformedToken) => {
+      const rawInitData = signParameters(
+        userParameters({ id: 48, first_name: 'Malformed token' }),
+        malformedToken,
+      );
+      const verifier = makeVerifier({
+        enabled: true,
+        botToken: malformedToken,
+        maxAgeSeconds: MAX_AGE_SECONDS,
+      });
+
+      expect(verifier.verifyProof(rawInitData)).toEqual({
+        status: 'invalid',
+        reason: 'invalid_proof',
+      });
+      expectInvalid(rawInitData, verifier);
+    });
+  });
+
   describe('hash and parameter validation', () => {
     const parameters = userParameters({ id: 51, first_name: 'Hash' });
 
@@ -238,13 +425,27 @@ describe('TelegramInitDataVerifier', () => {
       },
     );
 
-    it('accepts an age exactly equal to max age', () => {
+    it('accepts data one second before expiry', () => {
+      const rawInitData = signParameters([
+        ['auth_date', String(FIXED_NOW_SECONDS - MAX_AGE_SECONDS + 1)],
+        user,
+      ]);
+
+      expect(makeVerifier().verify(rawInitData).subject).toBe('61');
+    });
+
+    it('expires data exactly at expiresAt', () => {
       const rawInitData = signParameters([
         ['auth_date', String(FIXED_NOW_SECONDS - MAX_AGE_SECONDS)],
         user,
       ]);
 
-      expect(makeVerifier().verify(rawInitData).subject).toBe('61');
+      expect(makeVerifier().verifyProof(rawInitData)).toMatchObject({
+        status: 'expired',
+        reason: 'expired_proof',
+        expiresAt: FIXED_NOW_SECONDS,
+      });
+      expectInvalid(rawInitData);
     });
 
     it('rejects data older than max age', () => {
@@ -282,6 +483,44 @@ describe('TelegramInitDataVerifier', () => {
         ]),
       );
     });
+
+    it.each([Number.NaN, Number.POSITIVE_INFINITY, -1_000])(
+      'rejects an invalid verifier clock value %s',
+      (milliseconds) => {
+        const verifier = makeVerifier(undefined, () => new Date(milliseconds));
+
+        expect(verifier.verifyProof(FIXED_MINIMAL_VECTOR)).toEqual({
+          status: 'invalid',
+          reason: 'invalid_proof',
+        });
+        expectInvalid(FIXED_MINIMAL_VECTOR, verifier);
+      },
+    );
+  });
+
+  describe('Telegram canonical subject', () => {
+    it('accepts a canonical positive Telegram user ID', () => {
+      expect(telegramCanonicalSubjectFromUserId('123456789')).toBe(
+        '123456789',
+      );
+    });
+
+    it.each([
+      '0',
+      '00',
+      '000123',
+      '-1',
+      '1.5',
+      'user',
+      '9'.repeat(17),
+    ])(
+      'rejects a non-canonical Telegram user ID %s',
+      (telegramUserId) => {
+        expect(() =>
+          telegramCanonicalSubjectFromUserId(telegramUserId),
+        ).toThrow(TelegramInitDataVerificationError);
+      },
+    );
   });
 
   describe('Telegram user validation', () => {

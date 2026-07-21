@@ -4,11 +4,14 @@ import {
   ExternalIdentityReference,
 } from '../accounts/external-identity.types';
 import {
+  AUTHENTICATION_INTENTS,
   AdminStepUpState,
   AuthenticatedPrincipal,
   SessionMetadata,
   VerifiedExternalIdentity,
   VerifiedTelegramIdentity,
+  isUnixEpochSeconds,
+  unixEpochSeconds,
 } from './auth.types';
 
 describe('authentication contracts', () => {
@@ -23,6 +26,28 @@ describe('authentication contracts', () => {
       'phone',
     ]);
     expect(Object.isFrozen(EXTERNAL_IDENTITY_PROVIDERS)).toBe(true);
+  });
+
+  it('defines provider-neutral authentication intents', () => {
+    expect(AUTHENTICATION_INTENTS).toEqual([
+      'sign_in',
+      'link_identity',
+      'fresh_authentication',
+      'manual_recovery',
+      'identity_transfer',
+      'account_deletion',
+    ]);
+    expect(Object.isFrozen(AUTHENTICATION_INTENTS)).toBe(true);
+  });
+
+  it('accepts only finite non-negative integer Unix epoch seconds', () => {
+    expect(unixEpochSeconds(1_784_635_200)).toBe(1_784_635_200);
+    expect(isUnixEpochSeconds(1_784_635_200)).toBe(true);
+
+    for (const invalid of [Number.NaN, Number.POSITIVE_INFINITY, -1, 1.5]) {
+      expect(isUnixEpochSeconds(invalid)).toBe(false);
+      expect(() => unixEpochSeconds(invalid)).toThrow(TypeError);
+    }
   });
 
   it('supports provider-neutral external identity references', () => {
