@@ -1447,21 +1447,23 @@ begin
     raise exception 'POSTCHECK_FAILED: owner default ACL grants access to backend_auth_app';
   end if;
 
+  -- pg_get_functiondef rejects aggregate, window, and procedure entries.
+  -- Materialize ordinary-function OIDs first; WHERE order is not an evaluation guarantee.
   if exists (
-    select 1 from pg_catalog.pg_proc p
-    join pg_catalog.pg_namespace n on n.oid = p.pronamespace
-    where n.nspname = 'backend_auth'
-      and (
-        pg_catalog.strpos(
-          pg_catalog.lower(pg_catalog.pg_get_functiondef(p.oid)), 'auth.uid()'
-        ) > 0
-        or pg_catalog.strpos(
-          pg_catalog.lower(pg_catalog.pg_get_functiondef(p.oid)), 'supabase'
-        ) > 0
-        or pg_catalog.strpos(
-          pg_catalog.lower(pg_catalog.pg_get_functiondef(p.oid)), 'service_role'
-        ) > 0
-      )
+    with ordinary_functions as materialized (
+      select p.oid
+      from pg_catalog.pg_proc p
+      join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'backend_auth' and p.prokind = 'f'
+    ), function_definitions as materialized (
+      select pg_catalog.lower(pg_catalog.pg_get_functiondef(f.oid)) as definition
+      from ordinary_functions f
+    )
+    select 1
+    from function_definitions f
+    where pg_catalog.strpos(f.definition, 'auth.uid()') > 0
+       or pg_catalog.strpos(f.definition, 'supabase') > 0
+       or pg_catalog.strpos(f.definition, 'service_role') > 0
   ) then
     raise exception 'POSTCHECK_FAILED: Supabase-specific function dependency found';
   end if;
