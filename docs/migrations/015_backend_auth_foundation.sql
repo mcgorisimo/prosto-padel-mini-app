@@ -1132,20 +1132,40 @@ as $$
       where a.attrelid = rel.oid and a.attnum > 0 and not a.attisdropped
     ), '[]'::pg_catalog.jsonb),
     'constraints', coalesce((
+      -- Keep this portable across a PostgreSQL 14 dump/restore round-trip:
+      -- resolve physical catalog identifiers to names and normalize deparse output.
       select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
         'name', c.conname,
         'type', c.contype,
         'deferrable', c.condeferrable,
         'deferred', c.condeferred,
         'validated', c.convalidated,
-        'keys', c.conkey::text,
+        'table', c.conrelid::pg_catalog.regclass::text,
+        'keys', coalesce((
+          select pg_catalog.jsonb_agg(a.attname::text order by
+            case when c.contype = 'c' then a.attname::text collate "C" end,
+            case when c.contype <> 'c' then k.key_position end)
+          from pg_catalog.unnest(c.conkey)
+            with ordinality k(attnum, key_position)
+          join pg_catalog.pg_attribute a
+            on a.attrelid = c.conrelid and a.attnum = k.attnum
+        ), '[]'::pg_catalog.jsonb),
+        'backing_index', case when c.conindid = 0 then null
+          else c.conindid::pg_catalog.regclass::text end,
         'referenced_table', case when c.confrelid = 0 then null
           else c.confrelid::pg_catalog.regclass::text end,
-        'referenced_keys', c.confkey::text,
+        'referenced_keys', coalesce((
+          select pg_catalog.jsonb_agg(a.attname::text order by k.key_position)
+          from pg_catalog.unnest(c.confkey)
+            with ordinality k(attnum, key_position)
+          join pg_catalog.pg_attribute a
+            on a.attrelid = c.confrelid and a.attnum = k.attnum
+        ), '[]'::pg_catalog.jsonb),
+        'match_type', c.confmatchtype,
         'on_update', c.confupdtype,
         'on_delete', c.confdeltype,
-        'definition', pg_catalog.pg_get_constraintdef(c.oid, false)
-      ) order by c.conname)
+        'definition', pg_catalog.pg_get_constraintdef(c.oid, true)
+      ) order by c.conname::text collate "C")
       from pg_catalog.pg_constraint c where c.conrelid = rel.oid
     ), '[]'::pg_catalog.jsonb),
     'indexes', coalesce((
