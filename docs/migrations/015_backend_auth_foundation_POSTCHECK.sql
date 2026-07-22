@@ -436,17 +436,25 @@ declare
   $keys$::pg_catalog.jsonb;
   v_mismatch_count bigint;
 begin
-  select pg_catalog.array_agg(c.conname order by c.conname)
+  select pg_catalog.array_agg(
+           c.conname::text collate "C" order by c.conname::text collate "C"
+         )
   into v_actual_constraint_names
   from pg_catalog.pg_constraint c
   join pg_catalog.pg_class r on r.oid = c.conrelid
   join pg_catalog.pg_namespace n on n.oid = r.relnamespace
   where n.nspname = 'backend_auth' and c.contype in ('p', 'u', 'f', 'c');
 
-  if v_actual_constraint_names is distinct from (
-    select pg_catalog.array_agg(name order by name)
-    from pg_catalog.unnest(v_expected_constraint_names) name
-  ) then
+  if (select pg_catalog.count(*) <>
+             pg_catalog.count(distinct expected_name.name collate "C")
+      from pg_catalog.unnest(v_expected_constraint_names) as expected_name(name))
+     or v_actual_constraint_names is distinct from (
+       select pg_catalog.array_agg(
+                expected_name.name collate "C"
+                order by expected_name.name collate "C"
+              )
+       from pg_catalog.unnest(v_expected_constraint_names) as expected_name(name)
+     ) then
     raise exception 'POSTCHECK_FAILED: exact constraint-name inventory differs';
   end if;
 
@@ -877,17 +885,30 @@ begin
     raise exception 'POSTCHECK_FAILED: schema owner is not backend_auth_owner';
   end if;
 
-  select pg_catalog.array_agg(c.relname order by c.relname) into v_actual_tables
+  select pg_catalog.array_agg(
+           c.relname::text collate "C" order by c.relname::text collate "C"
+         ) into v_actual_tables
   from pg_catalog.pg_class c
   join pg_catalog.pg_namespace n on n.oid = c.relnamespace
   where n.nspname = 'backend_auth' and c.relkind = 'r';
 
-  if v_actual_tables is distinct from v_expected_tables then
+  if (select pg_catalog.count(*) <>
+             pg_catalog.count(distinct expected_name.name collate "C")
+      from pg_catalog.unnest(v_expected_tables) as expected_name(name))
+     or v_actual_tables is distinct from (
+       select pg_catalog.array_agg(
+                expected_name.name collate "C"
+                order by expected_name.name collate "C"
+              )
+       from pg_catalog.unnest(v_expected_tables) as expected_name(name)
+     ) then
     raise exception 'POSTCHECK_FAILED: table set differs from the exact 14-table mapping: %',
       v_actual_tables;
   end if;
 
-  select pg_catalog.array_agg(idx.relname order by idx.relname)
+  select pg_catalog.array_agg(
+           idx.relname::text collate "C" order by idx.relname::text collate "C"
+         )
   into v_actual_indexes
   from pg_catalog.pg_index i
   join pg_catalog.pg_class idx on idx.oid = i.indexrelid
@@ -897,7 +918,16 @@ begin
     and not exists (
       select 1 from pg_catalog.pg_constraint c where c.conindid = i.indexrelid
     );
-  if v_actual_indexes is distinct from v_expected_indexes then
+  if (select pg_catalog.count(*) <>
+             pg_catalog.count(distinct expected_name.name collate "C")
+      from pg_catalog.unnest(v_expected_indexes) as expected_name(name))
+     or v_actual_indexes is distinct from (
+       select pg_catalog.array_agg(
+                expected_name.name collate "C"
+                order by expected_name.name collate "C"
+              )
+       from pg_catalog.unnest(v_expected_indexes) as expected_name(name)
+     ) then
     raise exception 'POSTCHECK_FAILED: explicit index set differs: %', v_actual_indexes;
   end if;
 

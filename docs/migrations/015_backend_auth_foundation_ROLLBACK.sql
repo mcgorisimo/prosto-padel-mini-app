@@ -40,11 +40,22 @@ begin
   -- Resolve the exact expected set before taking locks. Any concurrent DDL
   -- that changes this set causes either LOCK or the authoritative reread
   -- below to fail closed.
-  select pg_catalog.array_agg(c.relname order by c.relname) into v_actual_tables
+  select pg_catalog.array_agg(
+           c.relname::text collate "C" order by c.relname::text collate "C"
+         ) into v_actual_tables
   from pg_catalog.pg_class c
   join pg_catalog.pg_namespace n on n.oid = c.relnamespace
   where n.nspname = 'backend_auth' and c.relkind = 'r';
-  if v_actual_tables is distinct from v_expected_tables then
+  if (select pg_catalog.count(*) <>
+             pg_catalog.count(distinct expected_name.name collate "C")
+      from pg_catalog.unnest(v_expected_tables) as expected_name(name))
+     or v_actual_tables is distinct from (
+       select pg_catalog.array_agg(
+                expected_name.name collate "C"
+                order by expected_name.name collate "C"
+              )
+       from pg_catalog.unnest(v_expected_tables) as expected_name(name)
+     ) then
     raise exception 'ROLLBACK_015_REFUSED: exact 14-table set does not match: %',
       v_actual_tables;
   end if;
@@ -114,11 +125,22 @@ begin
     raise exception 'ROLLBACK_015_REFUSED: schema missing or owner changed after lock wait';
   end if;
 
-  select pg_catalog.array_agg(c.relname order by c.relname) into v_actual_tables
+  select pg_catalog.array_agg(
+           c.relname::text collate "C" order by c.relname::text collate "C"
+         ) into v_actual_tables
   from pg_catalog.pg_class c
   join pg_catalog.pg_namespace n on n.oid = c.relnamespace
   where n.nspname = 'backend_auth' and c.relkind = 'r';
-  if v_actual_tables is distinct from v_expected_tables then
+  if (select pg_catalog.count(*) <>
+             pg_catalog.count(distinct expected_name.name collate "C")
+      from pg_catalog.unnest(v_expected_tables) as expected_name(name))
+     or v_actual_tables is distinct from (
+       select pg_catalog.array_agg(
+                expected_name.name collate "C"
+                order by expected_name.name collate "C"
+              )
+       from pg_catalog.unnest(v_expected_tables) as expected_name(name)
+     ) then
     raise exception 'ROLLBACK_015_REFUSED: table set changed after lock wait: %',
       v_actual_tables;
   end if;
@@ -151,12 +173,24 @@ begin
   from pg_catalog.pg_proc p
   join pg_catalog.pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'backend_auth';
-  select pg_catalog.array_agg(p.proname order by p.proname)
+  select pg_catalog.array_agg(
+           p.proname::text collate "C" order by p.proname::text collate "C"
+         )
   into v_actual_functions
   from pg_catalog.pg_proc p
   join pg_catalog.pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'backend_auth';
-  if v_count <> 20 or v_actual_functions is distinct from v_expected_functions then
+  if v_count <> 20
+     or (select pg_catalog.count(*) <>
+                pg_catalog.count(distinct expected_name.name collate "C")
+         from pg_catalog.unnest(v_expected_functions) as expected_name(name))
+     or v_actual_functions is distinct from (
+       select pg_catalog.array_agg(
+                expected_name.name collate "C"
+                order by expected_name.name collate "C"
+              )
+       from pg_catalog.unnest(v_expected_functions) as expected_name(name)
+     ) then
     raise exception 'ROLLBACK_015_REFUSED: exact function set changed after lock wait: %',
       v_actual_functions;
   end if;
