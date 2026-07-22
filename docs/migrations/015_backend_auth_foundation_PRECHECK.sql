@@ -124,7 +124,7 @@ reset role;
 
 select
   pg_catalog.current_database() as database_name,
-  pg_catalog.current_user as migration_principal,
+  current_user as migration_principal,
   pg_catalog.current_setting('server_version') as server_version,
   'backend_auth_owner present and NOLOGIN' as owner_role,
   'backend_auth_app present, LOGIN, no dangerous attributes' as application_role,
