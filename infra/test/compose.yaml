@@ -76,6 +76,7 @@ services:
       retries: 12
       start_period: 5s
     networks:
+      - test_edge
       - test_internal
 
   db-tools:
@@ -106,6 +107,8 @@ services:
       - test_internal
 
 networks:
+  test_edge:
+    driver: bridge
   test_internal:
     internal: true
 
