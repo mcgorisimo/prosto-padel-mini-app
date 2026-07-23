@@ -179,9 +179,15 @@ interface SecurityAuditMetadataByEvent {
     readonly terminalStatus:
       (typeof SECURITY_AUDIT_OPERATION_TERMINAL_STATUSES)[number];
   };
-  readonly telegram_proof_consumption: {
-    readonly operationId: AuthenticationOperationId;
-  };
+  readonly telegram_proof_consumption:
+    | {
+        readonly operationId: AuthenticationOperationId;
+        readonly attemptedOperationId?: never;
+      }
+    | {
+        readonly operationId?: never;
+        readonly attemptedOperationId: AuthenticationOperationId;
+      };
   readonly otp_challenge_transition: {
     readonly challengeId: OtpChallengeId;
     readonly status: (typeof SECURITY_AUDIT_OTP_STATUSES)[number];
@@ -225,6 +231,23 @@ export type SecurityAuditMetadata<EventType extends SecurityAuditEventType> =
   Readonly<SecurityAuditMetadataByEvent[EventType]> & {
     readonly [securityAuditMetadataBrand]: EventType;
   };
+
+type RejectConflictingOperationReferenceKeys<Value> =
+  'operationId' extends keyof Value
+    ? 'attemptedOperationId' extends keyof Value
+      ? never
+      : unknown
+    : unknown;
+
+type RejectUnexpectedMetadataKeys<
+  EventType extends SecurityAuditEventType,
+  Value,
+> = Exclude<
+  keyof Value,
+  keyof SecurityAuditMetadataByEvent[EventType]
+> extends never
+  ? unknown
+  : never;
 
 export interface SecurityAuditEvent<EventType extends SecurityAuditEventType> {
   readonly eventId: SecurityAuditEventId;
@@ -314,8 +337,10 @@ function assertMetadata(
       break;
     case 'telegram_proof_consumption':
       valid =
-        hasExactlyKeys(value, ['operationId']) &&
-        isAuthenticationOperationId(value.operationId);
+        (hasExactlyKeys(value, ['operationId']) &&
+          isAuthenticationOperationId(value.operationId)) ||
+        (hasExactlyKeys(value, ['attemptedOperationId']) &&
+          isAuthenticationOperationId(value.attemptedOperationId));
       break;
     case 'otp_challenge_transition':
       valid =
@@ -397,10 +422,13 @@ function assertMetadata(
 }
 
 export function createSecurityAuditMetadata<
-  EventType extends SecurityAuditEventType,
+  const EventType extends SecurityAuditEventType,
+  const Value extends SecurityAuditMetadataByEvent[EventType],
 >(
   eventType: EventType,
-  value: SecurityAuditMetadataByEvent[EventType],
+  value: Value &
+    RejectUnexpectedMetadataKeys<EventType, Value> &
+    RejectConflictingOperationReferenceKeys<Value>,
 ): SecurityAuditMetadata<EventType> {
   assertMetadata(eventType, value);
   return Object.freeze({ ...value }) as SecurityAuditMetadata<EventType>;

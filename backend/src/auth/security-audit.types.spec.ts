@@ -8,7 +8,7 @@ import {
   createSecurityAuditEvent,
   createSecurityAuditMetadata,
 } from './security-audit.types';
-import { unixEpochSeconds } from './auth.types';
+import { AuthenticationOperationId, unixEpochSeconds } from './auth.types';
 
 describe('security audit contracts', () => {
   it('keeps event types and outcomes closed', () => {
@@ -83,6 +83,83 @@ describe('security audit contracts', () => {
     });
     expect(Object.isFrozen(metadata)).toBe(true);
     expect(Object.isFrozen(event)).toBe(true);
+  });
+
+  it('supports either an existing or attempted operation for Telegram proof audit', () => {
+    const operationId = deterministicUuid(
+      'audit-existing-operation',
+    ) as AuthenticationOperationId;
+    const attemptedOperationId = deterministicUuid(
+      'audit-attempted-operation',
+    ) as AuthenticationOperationId;
+
+    expect(
+      createSecurityAuditMetadata('telegram_proof_consumption', {
+        operationId,
+      }),
+    ).toEqual({ operationId });
+    expect(
+      createSecurityAuditMetadata('telegram_proof_consumption', {
+        attemptedOperationId,
+      }),
+    ).toEqual({ attemptedOperationId });
+  });
+
+  it('requires exactly one Telegram proof operation reference', () => {
+    const operationId = deterministicUuid(
+      'audit-existing-operation',
+    ) as AuthenticationOperationId;
+    const attemptedOperationId = deterministicUuid(
+      'audit-attempted-operation',
+    ) as AuthenticationOperationId;
+
+    expect(() => {
+      // @ts-expect-error Existing and attempted operation references are exclusive.
+      createSecurityAuditMetadata('telegram_proof_consumption', {
+        operationId,
+        attemptedOperationId,
+      });
+    }).toThrow(TypeError);
+    expect(() => {
+      // @ts-expect-error Explicit undefined still means the conflicting key is present.
+      createSecurityAuditMetadata('telegram_proof_consumption', {
+        operationId,
+        attemptedOperationId: undefined,
+      });
+    }).toThrow(TypeError);
+    expect(() => {
+      // @ts-expect-error A Telegram proof audit requires one operation reference.
+      createSecurityAuditMetadata('telegram_proof_consumption', {});
+    }).toThrow(TypeError);
+  });
+
+  it('does not expose attemptedOperationId to other audit event types', () => {
+    const accountId = deterministicUuid('audit-account') as AccountId;
+    const attemptedOperationId = deterministicUuid(
+      'audit-attempted-operation',
+    ) as AuthenticationOperationId;
+
+    expect(() => {
+      // @ts-expect-error attemptedOperationId belongs only to Telegram proof audit.
+      createSecurityAuditMetadata('account_created', {
+        accountId,
+        role: 'player',
+        attemptedOperationId,
+      });
+    }).toThrow(TypeError);
+  });
+
+  it.each([
+    ['operationId', 'not-an-operation-id'],
+    ['operationId', 123],
+    ['attemptedOperationId', 'not-an-attempted-operation-id'],
+    ['attemptedOperationId', { id: 'not-an-operation-id' }],
+  ])('rejects invalid runtime value for %s', (field, value) => {
+    expect(() =>
+      createSecurityAuditMetadata('telegram_proof_consumption', {
+        [field]: value,
+      } as never),
+    ).toThrow(new TypeError('Security audit metadata is invalid'));
   });
 
   it.each([
