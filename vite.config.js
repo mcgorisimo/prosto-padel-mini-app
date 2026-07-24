@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig(({ command }) => ({
   plugins: [react()],
-  base: './', // Use relative paths for all assets
+  base: '/', // Use root-relative paths for all assets
   server: {
     host: '127.0.0.1',
     port: 5173,
