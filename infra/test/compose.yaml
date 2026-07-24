@@ -57,6 +57,27 @@ services:
     networks:
       - test_internal
 
+  frontend:
+    build:
+      context: ../..
+      dockerfile: infra/test/frontend/Dockerfile
+      args:
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:?VITE_SUPABASE_URL is required}
+        VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY:?VITE_SUPABASE_ANON_KEY is required}
+    restart: unless-stopped
+    expose:
+      - "8080"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - wget -q -O - http://127.0.0.1:8080/healthz >/dev/null
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+    networks:
+      - test_edge
+
   nginx:
     image: ${TEST_NGINX_IMAGE:-nginx:1.27.4-alpine}
     restart: unless-stopped
@@ -66,6 +87,8 @@ services:
       - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
       backend:
+        condition: service_healthy
+      frontend:
         condition: service_healthy
     healthcheck:
       test:
