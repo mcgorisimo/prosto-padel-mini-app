@@ -336,7 +336,7 @@ interface ParsedAliasInsertSql {
 function parseAliasInsertSql(text: string): ParsedAliasInsertSql {
   const normalized = text.replace(/\s+/gu, ' ').trim();
   const match =
-    /INSERT INTO backend_auth\.external_identity_lookup_digests \(([^)]+)\) SELECT (.+?) FROM pg_catalog\.unnest\(/u.exec(
+    /INSERT INTO backend_auth\.external_identity_lookup_digests \(([^)]+)\) SELECT (.+?) FROM ROWS FROM \(/u.exec(
       normalized,
     );
   if (match === null) {
@@ -718,6 +718,7 @@ describe('PostgresPlayerAccountProvisioningRepository', () => {
     ]);
 
     const aliasCall = transaction.calls[3];
+    const normalizedAliasSql = aliasCall.text.replace(/\s+/gu, ' ').trim();
     expect(parseAliasInsertSql(aliasCall.text)).toEqual({
       columns: [
         'identity_id',
@@ -740,10 +741,18 @@ describe('PostgresPlayerAccountProvisioningRepository', () => {
         '$8::bigint',
       ],
     });
-    expect(aliasCall.text).toMatch(/pg_catalog\.unnest/u);
-    expect(aliasCall.text).toMatch(/\$5::bytea\[\]/u);
-    expect(aliasCall.text).toMatch(/\$6::bigint\[\]/u);
-    expect(aliasCall.text).toMatch(/\$7::bigint\[\]/u);
+    expect(normalizedAliasSql).toContain(
+      'FROM ROWS FROM ( ' +
+        'pg_catalog.unnest($5::bytea[]), ' +
+        'pg_catalog.unnest($6::bigint[]), ' +
+        'pg_catalog.unnest($7::bigint[]) ' +
+        ') WITH ORDINALITY AS input( ' +
+        'digest, digest_version, pepper_version, input_order )',
+    );
+    expect(normalizedAliasSql).toContain(
+      'ORDER BY input.digest, input.digest_version, ' +
+        'input.pepper_version, input.input_order',
+    );
     expect(aliasCall.text).not.toMatch(/ON\s+CONFLICT/iu);
     expect(aliasCall.values.slice(0, 4)).toEqual([
       IDENTITY_ID,

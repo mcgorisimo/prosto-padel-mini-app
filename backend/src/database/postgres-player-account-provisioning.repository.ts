@@ -77,10 +77,10 @@ const INSERT_LOOKUP_DIGEST_ALIASES_SQL = `
     input.digest_version,
     input.pepper_version,
     $8::bigint
-  FROM pg_catalog.unnest(
-    $5::bytea[],
-    $6::bigint[],
-    $7::bigint[]
+  FROM ROWS FROM (
+    pg_catalog.unnest($5::bytea[]),
+    pg_catalog.unnest($6::bigint[]),
+    pg_catalog.unnest($7::bigint[])
   ) WITH ORDINALITY AS input(
     digest,
     digest_version,

@@ -34,13 +34,13 @@ import {
 const RESOLVE_EXTERNAL_IDENTITY_SQL = `
   WITH input_aliases AS (
     SELECT *
-    FROM pg_catalog.unnest(
-      $1::text[],
-      $2::text[],
-      $3::text[],
-      $4::bytea[],
-      $5::bigint[],
-      $6::bigint[]
+    FROM ROWS FROM (
+      pg_catalog.unnest($1::text[]),
+      pg_catalog.unnest($2::text[]),
+      pg_catalog.unnest($3::text[]),
+      pg_catalog.unnest($4::bytea[]),
+      pg_catalog.unnest($5::bigint[]),
+      pg_catalog.unnest($6::bigint[])
     ) WITH ORDINALITY AS input(
       algorithm,
       provider,

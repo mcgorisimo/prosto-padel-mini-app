@@ -283,7 +283,7 @@ describe('PostgresExternalIdentityResolutionRepository', () => {
     expect(transaction.calls).toHaveLength(0);
   });
 
-  it('uses one static parameterized UNNEST SELECT', async () => {
+  it('uses a static PostgreSQL 14-compatible ROWS FROM SELECT', async () => {
     const first = candidate();
     const second = candidate({
       digestCharacter: 'b',
@@ -302,7 +302,22 @@ describe('PostgresExternalIdentityResolutionRepository', () => {
 
     expect(transaction.calls).toHaveLength(1);
     const [call] = transaction.calls;
-    expect(call.text).toContain('pg_catalog.unnest');
+    const normalizedSql = call.text.replace(/\s+/gu, ' ').trim();
+    expect(normalizedSql).toContain(
+      'FROM ROWS FROM ( ' +
+        'pg_catalog.unnest($1::text[]), ' +
+        'pg_catalog.unnest($2::text[]), ' +
+        'pg_catalog.unnest($3::text[]), ' +
+        'pg_catalog.unnest($4::bytea[]), ' +
+        'pg_catalog.unnest($5::bigint[]), ' +
+        'pg_catalog.unnest($6::bigint[]) ' +
+        ') WITH ORDINALITY AS input( ' +
+        'algorithm, provider, namespace, digest, digest_version, ' +
+        'pepper_version, input_order )',
+    );
+    expect(normalizedSql).toContain(
+      'ORDER BY input.input_order, identity.id',
+    );
     expect(call.text).toContain(
       'backend_auth.external_identity_lookup_digests',
     );
