@@ -19,6 +19,10 @@ import { PostgresTransactionExecutorAdapter } from '../database/postgres-transac
 import { NodeSessionCredentialIssuer } from './session-credential-issuer.adapter';
 import { TelegramInitDataVerifier } from './telegram-init-data.verifier';
 import {
+  TELEGRAM_LOGIN_HTTP_CLOCK_PROVIDER,
+  TelegramLoginController,
+} from './telegram-login.controller';
+import {
   TELEGRAM_LOGIN_FEATURE,
   TelegramLoginFeature,
 } from './telegram-login.feature';
@@ -121,7 +125,9 @@ function createTelegramLoginFeature(
 
 @Module({
   imports: [DatabaseModule],
+  controllers: [TelegramLoginController],
   providers: [
+    TELEGRAM_LOGIN_HTTP_CLOCK_PROVIDER,
     {
       provide: TELEGRAM_LOGIN_FEATURE,
       inject: [

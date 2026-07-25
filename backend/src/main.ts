@@ -1,6 +1,7 @@
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
+import fastifyCookie from '@fastify/cookie';
 import {
   FastifyAdapter,
   NestFastifyApplication,
@@ -14,6 +15,7 @@ async function bootstrap(): Promise<void> {
   );
   const config = app.get(ConfigService);
 
+  await app.register(fastifyCookie);
   app.setGlobalPrefix('api/v1');
   app.enableShutdownHooks();
 

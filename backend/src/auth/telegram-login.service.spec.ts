@@ -529,6 +529,32 @@ describe('TelegramLoginService', () => {
     });
   });
 
+  it('allows the accepted server operation to outlive a still-valid Telegram proof', async () => {
+    const subject = harness();
+    const verified = verifiedProof();
+    subject.verifier.outcome = {
+      ...verified,
+      proof: {
+        ...verified.proof,
+        expiresAt: unixEpochSeconds(NOW + 1),
+      },
+    };
+
+    await expect(
+      subject.service.authenticateWithTelegram(input()),
+    ).resolves.toEqual({
+      outcome: 'authenticated',
+      credential: PLAINTEXT,
+      expiresAt: SESSION_EXPIRES_AT,
+      accountKind: 'existing',
+    });
+    expect(BINDINGS.timestamps.operationExpiresAt).toBeGreaterThan(
+      subject.verifier.outcome.status === 'verified'
+        ? subject.verifier.outcome.proof.expiresAt
+        : 0,
+    );
+  });
+
   it.each(['blocked', 'pending_deletion'] as const)(
     'rejects a %s account without issuing a session',
     async (status) => {

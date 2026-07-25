@@ -240,7 +240,6 @@ function validTimestamps(
 
   return (
     value.operationCreatedAt < value.operationExpiresAt &&
-    value.operationExpiresAt <= proof.expiresAt &&
     value.proofConsumedAt < proof.expiresAt &&
     value.terminalAppliedAt >= value.operationCreatedAt &&
     value.sessionCreatedAt < value.sessionExpiresAt &&

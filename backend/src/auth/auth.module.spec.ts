@@ -27,6 +27,7 @@ import {
 } from './auth.types';
 import { AuthModule } from './auth.module';
 import { NodeSessionCredentialIssuer } from './session-credential-issuer.adapter';
+import { TelegramLoginController } from './telegram-login.controller';
 import { TelegramInitDataVerifier } from './telegram-init-data.verifier';
 import {
   TELEGRAM_LOGIN_FEATURE,
@@ -125,6 +126,16 @@ function getServiceDependencies(
   ).dependencies;
 }
 
+function getControllerFeature(
+  controller: TelegramLoginController,
+): TelegramLoginFeature {
+  return (
+    controller as unknown as {
+      readonly feature: TelegramLoginFeature;
+    }
+  ).feature;
+}
+
 function expectProviderNotRegistered(
   moduleRef: TestingModule,
   token: string | symbol | Type<unknown>,
@@ -146,6 +157,9 @@ describe('AuthModule Telegram login wiring', () => {
     });
 
     expect(getFeature(moduleRef)).toEqual({ enabled: false });
+    expect(
+      getControllerFeature(moduleRef.get(TelegramLoginController)),
+    ).toBe(getFeature(moduleRef));
     expect(moduleRef.get(PostgresService).isEnabled()).toBe(false);
     for (const token of [
       TelegramLoginService,
@@ -171,6 +185,9 @@ describe('AuthModule Telegram login wiring', () => {
     }
 
     expect(feature.service).toBeInstanceOf(TelegramLoginService);
+    expect(
+      getControllerFeature(moduleRef.get(TelegramLoginController)),
+    ).toBe(feature);
     expectProviderNotRegistered(moduleRef, TelegramLoginService);
     const dependencies = getServiceDependencies(feature.service);
     expect(dependencies.verifier).toBeInstanceOf(TelegramInitDataVerifier);
