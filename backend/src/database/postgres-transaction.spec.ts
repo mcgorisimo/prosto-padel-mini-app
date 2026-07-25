@@ -10,6 +10,8 @@ import { PostgresService } from './postgres.service';
 import {
   PostgresTransactionRunner,
 } from './postgres-transaction';
+import { PostgresTransactionExecutorAdapter } from './postgres-transaction-executor.adapter';
+import { PostgresSecurityAuditRepository } from './postgres-security-audit.repository';
 
 function emptyQueryResult<Row extends QueryResultRow = QueryResultRow>(
   rows: Row[] = [],
@@ -280,7 +282,13 @@ describe('DatabaseModule', () => {
       DatabaseModule,
     ) as unknown[];
 
-    expect(exportedProviders).toEqual([PostgresTransactionRunner]);
+    expect(exportedProviders).toEqual(
+      expect.arrayContaining([
+        PostgresTransactionRunner,
+        PostgresTransactionExecutorAdapter,
+        PostgresSecurityAuditRepository,
+      ]),
+    );
     expect(exportedProviders).not.toContain(PostgresService);
   });
 });

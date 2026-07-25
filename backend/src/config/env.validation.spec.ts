@@ -1,4 +1,28 @@
 import { envValidationSchema } from './env.validation';
+import {
+  TELEGRAM_AUTH_OPERATION_TTL_SECONDS,
+  TELEGRAM_LOGIN_CONFIG_KEYS,
+  TELEGRAM_LOOKUP_DIGEST_VERSION,
+  TELEGRAM_LOOKUP_PEPPER_VERSION,
+  TELEGRAM_SESSION_TTL_SECONDS,
+} from './telegram-login.config';
+
+const SAFE_TEST_TELEGRAM_CRYPTO_CONFIG = Object.freeze({
+  [TELEGRAM_LOGIN_CONFIG_KEYS.lookupPepperBase64]: Buffer.alloc(
+    32,
+    0x11,
+  ).toString('base64'),
+  [TELEGRAM_LOGIN_CONFIG_KEYS.workflowHmacSecretBase64]: Buffer.alloc(
+    32,
+    0x22,
+  ).toString('base64'),
+  [TELEGRAM_LOGIN_CONFIG_KEYS.uuidNamespace]:
+    '12345678-1234-5678-9234-567812345678',
+});
+const SAFE_TEST_DATABASE_CONFIG = Object.freeze({
+  DATABASE_ENABLED: 'true',
+  DATABASE_URL: 'postgresql://test-only.invalid/prosto_padel',
+});
 
 function validate(environment: Record<string, unknown> = {}) {
   return envValidationSchema.validate(environment, {
@@ -42,6 +66,7 @@ describe('envValidationSchema', () => {
 
   it('rejects a missing token when enabled', () => {
     const { error } = validate({
+      ...SAFE_TEST_DATABASE_CONFIG,
       TELEGRAM_AUTH_ENABLED: 'true',
       TELEGRAM_INIT_DATA_MAX_AGE_SECONDS: '300',
     });
@@ -51,6 +76,7 @@ describe('envValidationSchema', () => {
 
   it('rejects an empty token when enabled', () => {
     const { error } = validate({
+      ...SAFE_TEST_DATABASE_CONFIG,
       TELEGRAM_AUTH_ENABLED: 'true',
       TELEGRAM_BOT_TOKEN: '',
       TELEGRAM_INIT_DATA_MAX_AGE_SECONDS: '300',
@@ -61,6 +87,7 @@ describe('envValidationSchema', () => {
 
   it('rejects a whitespace-only token when enabled', () => {
     const { error } = validate({
+      ...SAFE_TEST_DATABASE_CONFIG,
       TELEGRAM_AUTH_ENABLED: 'true',
       TELEGRAM_BOT_TOKEN: '   ',
       TELEGRAM_INIT_DATA_MAX_AGE_SECONDS: '300',
@@ -71,6 +98,8 @@ describe('envValidationSchema', () => {
 
   it('accepts an obviously fake test token when enabled', () => {
     const { error } = validate({
+      ...SAFE_TEST_DATABASE_CONFIG,
+      ...SAFE_TEST_TELEGRAM_CRYPTO_CONFIG,
       TELEGRAM_AUTH_ENABLED: 'true',
       TELEGRAM_BOT_TOKEN: 'obviously-fake-test-token',
       TELEGRAM_INIT_DATA_MAX_AGE_SECONDS: '300',
@@ -81,6 +110,7 @@ describe('envValidationSchema', () => {
 
   it('rejects a missing max age when enabled', () => {
     const { error } = validate({
+      ...SAFE_TEST_DATABASE_CONFIG,
       TELEGRAM_AUTH_ENABLED: 'true',
       TELEGRAM_BOT_TOKEN: 'obviously-fake-test-token',
     });
@@ -90,6 +120,8 @@ describe('envValidationSchema', () => {
 
   it('accepts a positive integer max age', () => {
     const { error, value } = validate({
+      ...SAFE_TEST_DATABASE_CONFIG,
+      ...SAFE_TEST_TELEGRAM_CRYPTO_CONFIG,
       TELEGRAM_AUTH_ENABLED: 'true',
       TELEGRAM_BOT_TOKEN: 'obviously-fake-test-token',
       TELEGRAM_INIT_DATA_MAX_AGE_SECONDS: '300',
@@ -101,6 +133,8 @@ describe('envValidationSchema', () => {
 
   it('accepts the maximum Telegram init data age', () => {
     const { error, value } = validate({
+      ...SAFE_TEST_DATABASE_CONFIG,
+      ...SAFE_TEST_TELEGRAM_CRYPTO_CONFIG,
       TELEGRAM_AUTH_ENABLED: 'true',
       TELEGRAM_BOT_TOKEN: 'obviously-fake-test-token',
       TELEGRAM_INIT_DATA_MAX_AGE_SECONDS: '86400',
@@ -112,6 +146,7 @@ describe('envValidationSchema', () => {
 
   it('rejects a Telegram init data age above the maximum', () => {
     const { error } = validate({
+      ...SAFE_TEST_DATABASE_CONFIG,
       TELEGRAM_AUTH_ENABLED: 'true',
       TELEGRAM_BOT_TOKEN: 'obviously-fake-test-token',
       TELEGRAM_INIT_DATA_MAX_AGE_SECONDS: '86401',
@@ -124,6 +159,7 @@ describe('envValidationSchema', () => {
     'rejects invalid max age %s',
     (maxAge) => {
       const { error } = validate({
+        ...SAFE_TEST_DATABASE_CONFIG,
         TELEGRAM_AUTH_ENABLED: 'true',
         TELEGRAM_BOT_TOKEN: 'obviously-fake-test-token',
         TELEGRAM_INIT_DATA_MAX_AGE_SECONDS: maxAge,
@@ -170,6 +206,7 @@ describe('envValidationSchema', () => {
 
   it('rejects production Telegram auth without required values', () => {
     const { error } = validate({
+      ...SAFE_TEST_DATABASE_CONFIG,
       NODE_ENV: 'production',
       TELEGRAM_AUTH_ENABLED: 'true',
     });
@@ -185,6 +222,8 @@ describe('envValidationSchema', () => {
 
   it('accepts explicitly enabled test authentication with safe values', () => {
     const { error } = validate({
+      ...SAFE_TEST_DATABASE_CONFIG,
+      ...SAFE_TEST_TELEGRAM_CRYPTO_CONFIG,
       NODE_ENV: 'test',
       TELEGRAM_AUTH_ENABLED: 'true',
       TELEGRAM_BOT_TOKEN: 'obviously-fake-test-token',
@@ -192,6 +231,135 @@ describe('envValidationSchema', () => {
     });
 
     expect(error).toBeUndefined();
+  });
+
+  it('keeps crypto secrets optional and fixed public values available when disabled', () => {
+    const { error, value } = validate({ TELEGRAM_AUTH_ENABLED: 'false' });
+
+    expect(error).toBeUndefined();
+    expect(value).toMatchObject({
+      [TELEGRAM_LOGIN_CONFIG_KEYS.lookupPepperBase64]: '',
+      [TELEGRAM_LOGIN_CONFIG_KEYS.workflowHmacSecretBase64]: '',
+      [TELEGRAM_LOGIN_CONFIG_KEYS.uuidNamespace]: '',
+      [TELEGRAM_LOGIN_CONFIG_KEYS.digestVersion]:
+        TELEGRAM_LOOKUP_DIGEST_VERSION,
+      [TELEGRAM_LOGIN_CONFIG_KEYS.pepperVersion]:
+        TELEGRAM_LOOKUP_PEPPER_VERSION,
+      [TELEGRAM_LOGIN_CONFIG_KEYS.operationTtlSeconds]:
+        TELEGRAM_AUTH_OPERATION_TTL_SECONDS,
+      [TELEGRAM_LOGIN_CONFIG_KEYS.sessionTtlSeconds]:
+        TELEGRAM_SESSION_TTL_SECONDS,
+    });
+  });
+
+  it('rejects Telegram authentication when PostgreSQL is disabled', () => {
+    const { error } = validate({
+      ...SAFE_TEST_TELEGRAM_CRYPTO_CONFIG,
+      DATABASE_ENABLED: 'false',
+      TELEGRAM_AUTH_ENABLED: 'true',
+      TELEGRAM_BOT_TOKEN: 'obviously-fake-test-token',
+      TELEGRAM_INIT_DATA_MAX_AGE_SECONDS: '300',
+    });
+
+    expect(error?.message).toBe(
+      'TELEGRAM_AUTH_ENABLED requires DATABASE_ENABLED to be enabled',
+    );
+    expect(error?.message).not.toContain(
+      SAFE_TEST_TELEGRAM_CRYPTO_CONFIG[
+        TELEGRAM_LOGIN_CONFIG_KEYS.lookupPepperBase64
+      ],
+    );
+    expect(error?.message).not.toContain(
+      SAFE_TEST_TELEGRAM_CRYPTO_CONFIG[
+        TELEGRAM_LOGIN_CONFIG_KEYS.workflowHmacSecretBase64
+      ],
+    );
+  });
+
+  it('allows PostgreSQL with Telegram authentication disabled and no Telegram secrets', () => {
+    const { error, value } = validate({
+      ...SAFE_TEST_DATABASE_CONFIG,
+      TELEGRAM_AUTH_ENABLED: 'false',
+    });
+
+    expect(error).toBeUndefined();
+    expect(value).toMatchObject({
+      DATABASE_ENABLED: true,
+      TELEGRAM_AUTH_ENABLED: false,
+      [TELEGRAM_LOGIN_CONFIG_KEYS.lookupPepperBase64]: '',
+      [TELEGRAM_LOGIN_CONFIG_KEYS.workflowHmacSecretBase64]: '',
+      [TELEGRAM_LOGIN_CONFIG_KEYS.uuidNamespace]: '',
+    });
+  });
+
+  it('accepts the complete enabled Telegram workflow configuration', () => {
+    const { error, value } = validate({
+      ...SAFE_TEST_DATABASE_CONFIG,
+      ...SAFE_TEST_TELEGRAM_CRYPTO_CONFIG,
+      TELEGRAM_AUTH_ENABLED: 'true',
+      TELEGRAM_BOT_TOKEN: 'obviously-fake-test-token',
+      TELEGRAM_INIT_DATA_MAX_AGE_SECONDS: '300',
+    });
+
+    expect(error).toBeUndefined();
+    expect(value).toMatchObject({
+      [TELEGRAM_LOGIN_CONFIG_KEYS.digestVersion]: 1,
+      [TELEGRAM_LOGIN_CONFIG_KEYS.pepperVersion]: 1,
+      [TELEGRAM_LOGIN_CONFIG_KEYS.operationTtlSeconds]: 300,
+      [TELEGRAM_LOGIN_CONFIG_KEYS.sessionTtlSeconds]: 2_592_000,
+    });
+  });
+
+  it('requires both crypto secrets and UUID namespace when enabled', () => {
+    const { error } = validate({
+      ...SAFE_TEST_DATABASE_CONFIG,
+      TELEGRAM_AUTH_ENABLED: 'true',
+      TELEGRAM_BOT_TOKEN: 'obviously-fake-test-token',
+      TELEGRAM_INIT_DATA_MAX_AGE_SECONDS: '300',
+    });
+
+    expect(error?.details.map((detail) => detail.path[0])).toEqual(
+      expect.arrayContaining([
+        TELEGRAM_LOGIN_CONFIG_KEYS.lookupPepperBase64,
+        TELEGRAM_LOGIN_CONFIG_KEYS.workflowHmacSecretBase64,
+        TELEGRAM_LOGIN_CONFIG_KEYS.uuidNamespace,
+      ]),
+    );
+  });
+
+  it('rejects a short secret without including its value in the message', () => {
+    const secretMarker = 'short-secret-marker';
+    const { error } = validate({
+      ...SAFE_TEST_DATABASE_CONFIG,
+      ...SAFE_TEST_TELEGRAM_CRYPTO_CONFIG,
+      TELEGRAM_AUTH_ENABLED: 'true',
+      TELEGRAM_BOT_TOKEN: 'obviously-fake-test-token',
+      TELEGRAM_INIT_DATA_MAX_AGE_SECONDS: '300',
+      [TELEGRAM_LOGIN_CONFIG_KEYS.lookupPepperBase64]:
+        Buffer.from(secretMarker).toString('base64'),
+    });
+
+    expect(error).toBeDefined();
+    expect(error?.message).not.toContain(secretMarker);
+    expect(error?.message).not.toContain(
+      Buffer.from(secretMarker).toString('base64'),
+    );
+  });
+
+  it('rejects non-canonical UUID namespace and unsupported fixed values', () => {
+    const { error } = validate({
+      ...SAFE_TEST_DATABASE_CONFIG,
+      ...SAFE_TEST_TELEGRAM_CRYPTO_CONFIG,
+      TELEGRAM_AUTH_ENABLED: 'true',
+      TELEGRAM_BOT_TOKEN: 'obviously-fake-test-token',
+      TELEGRAM_INIT_DATA_MAX_AGE_SECONDS: '300',
+      [TELEGRAM_LOGIN_CONFIG_KEYS.uuidNamespace]:
+        '12345678-1234-5678-9234-56781234567Z',
+      [TELEGRAM_LOGIN_CONFIG_KEYS.digestVersion]: '2',
+      [TELEGRAM_LOGIN_CONFIG_KEYS.operationTtlSeconds]: '301',
+    });
+
+    expect(error).toBeDefined();
   });
 
   it.each(['test', 'production'])(

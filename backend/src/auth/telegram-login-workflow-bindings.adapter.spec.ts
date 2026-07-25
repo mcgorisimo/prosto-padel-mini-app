@@ -196,6 +196,45 @@ describe('DeterministicTelegramLoginWorkflowBindingsAdapter', () => {
     });
   });
 
+  it('starts a full operation when the verified proof has one second remaining', () => {
+    const nearlyExpiredProof = {
+      ...proof(),
+      expiresAt: unixEpochSeconds(NOW + 1),
+    };
+
+    const result = adapter().create(
+      REQUEST_KEY,
+      nearlyExpiredProof,
+      NOW,
+    );
+
+    expect(result.timestamps.operationCreatedAt).toBe(NOW);
+    expect(result.timestamps.operationExpiresAt).toBe(NOW + 300);
+    expect(result.timestamps.proofConsumedAt).toBe(NOW);
+  });
+
+  it('rejects a proof that expires exactly at now', () => {
+    const expiredProof = {
+      ...proof(),
+      expiresAt: NOW,
+    };
+
+    expect(() =>
+      adapter().create(REQUEST_KEY, expiredProof, NOW),
+    ).toThrow(expect.objectContaining({ reason: 'invalid_input' }));
+  });
+
+  it('rejects a proof that expired before now', () => {
+    const expiredProof = {
+      ...proof(),
+      expiresAt: unixEpochSeconds(NOW - 1),
+    };
+
+    expect(() =>
+      adapter().create(REQUEST_KEY, expiredProof, NOW),
+    ).toThrow(expect.objectContaining({ reason: 'invalid_input' }));
+  });
+
   it('rejects safe-integer timestamp overflow', () => {
     const maximum = unixEpochSeconds(Number.MAX_SAFE_INTEGER);
     const nearMaximumProof = {

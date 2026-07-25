@@ -174,7 +174,7 @@ export class DeterministicTelegramLoginWorkflowBindingsAdapter
         this.#operationTtlSeconds,
       );
       const sessionExpiresAt = addTimestamp(now, this.#sessionTtlSeconds);
-      if (operationExpiresAt > proof.expiresAt) {
+      if (now >= proof.expiresAt) {
         throw failure('invalid_input');
       }
 
