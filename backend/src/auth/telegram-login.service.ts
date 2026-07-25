@@ -25,7 +25,7 @@ import {
   telegramAuthenticationProofReference,
 } from './auth.types';
 import {
-  AuthenticationOperationBinding,
+  AuthenticationOperationCommandBinding,
   PendingAuthenticationOperation,
   createAuthenticationOperation,
 } from './authentication-operation.state-machine';
@@ -381,14 +381,12 @@ function mapFailure(error: unknown): TelegramLoginRejectionReason {
 
 function operationBinding(
   prepared: PreparedWorkflow,
-): AuthenticationOperationBinding {
+): AuthenticationOperationCommandBinding {
   return {
     operationId: prepared.operation.operationId,
     intent: prepared.operation.intent,
     identityKey: prepared.operation.identityKey,
     proofReference: prepared.operation.proofReference,
-    createdAt: prepared.operation.createdAt,
-    expiresAt: prepared.operation.expiresAt,
     idempotencyKey: prepared.operation.idempotencyKey,
     requestDigest: prepared.operation.requestDigest,
   };

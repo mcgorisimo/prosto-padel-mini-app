@@ -794,6 +794,15 @@ describe('TelegramLoginService', () => {
       OPERATION_ID,
     );
     expect(subject.terminal.calls[0].input.command.commandId).toBe(COMMAND_ID);
+    const operation = subject.pending.calls[0].input.operation;
+    expect(subject.terminal.calls[0].input.command.binding).toEqual({
+      operationId: operation.operationId,
+      intent: operation.intent,
+      identityKey: operation.identityKey,
+      proofReference: operation.proofReference,
+      idempotencyKey: operation.idempotencyKey,
+      requestDigest: operation.requestDigest,
+    });
     expect(subject.sessions.calls[0].input.binding.sessionId).toBe(SESSION_ID);
     expect(subject.pending.calls[0].input.audit.eventId).toBe(
       BINDINGS.auditEventIds.proofConsumption,
