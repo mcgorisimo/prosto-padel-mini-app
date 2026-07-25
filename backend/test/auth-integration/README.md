@@ -19,11 +19,26 @@ that must be retained.
    - `AUTH_INTEGRATION_DATABASE_URL=<URL of the disposable database>`
    - `AUTH_INTEGRATION_EXPECTED_DATABASE_NAME=<exact database name>`
 
-5. Run:
+5. Use the one-shot Docker runner documented in
+   `infra/test/auth-integration/README.md`. It builds from the backend
+   package lock, runs as the unprivileged `node` user, and connects only
+   to the internal Compose network.
 
-   ```powershell
-   npm.cmd --prefix backend run test:integration:auth
+   The image/test-discovery check does not connect to PostgreSQL:
+
+   ```bash
+   docker compose \
+     -f infra/test/compose.yaml \
+     --env-file infra/test/.env.test \
+     --profile auth-integration \
+     run --rm --no-deps --build \
+     auth-integration-runner --listTests
    ```
+
+   The real suite remains the backend command
+   `npm run test:integration:auth`, invoked by that runner only after
+   the four guarded integration environment values have been supplied.
+   Do not run it as part of image discovery.
 
 The harness never creates a database or schema, applies migration 015, grants
 roles, repairs schema state, or rolls a migration back. Before the first data
@@ -39,6 +54,15 @@ integration Pool. The test-only Pool applies finite connection, query,
 statement, lock, idle-transaction, and idle-connection timeouts to every
 connection. Concurrency barriers also have a finite safety timeout below the
 Jest suite timeout.
+
+The Compose runner does not store the URL in its service definition or
+image. Its recommended entrypoint path receives the disposable database
+password transiently, constructs the canonical URL with the standard
+Node.js encoding and URL APIs used by the guard, removes the
+password-only variable, and then lets this harness validate the URL
+before a Pool can be created.
+The URL must never be written to `.env.test`, Git, logs, or shell
+history.
 
 Each run uses a fresh UUID and unique synthetic Telegram subjects, request
 keys, operation/account/identity/session IDs, and audit IDs. The committed

@@ -26,6 +26,13 @@ import {
 } from '../../test/auth-integration/auth-integration.lifecycle';
 import { PostgresService } from './postgres.service';
 
+const runnerUrl = require(
+  '../../test/auth-integration/runner-url.cjs',
+) as Readonly<{
+  AUTH_INTEGRATION_RUNNER_DATABASE_NAME: string;
+  buildAuthIntegrationDatabaseUrl(password: string): string;
+}>;
+
 const SAFE_URL =
   'postgresql://backend_auth_app:test-only@localhost/example_auth_integration_test';
 const EXPECTED_DATABASE_NAME = 'example_auth_integration_test';
@@ -153,6 +160,46 @@ describe('auth integration environment guard', () => {
       EXPECTED_DATABASE_NAME,
     );
   });
+
+  it.each([
+    ['percent sign', 'test-%-password'],
+    ['escape-like percent sequence', 'test-%2F-password'],
+    ['dollar sign', 'test-$-password'],
+    ['ampersand', 'test-&-password'],
+    ['plus sign', 'test-+-password'],
+    ['comma', 'test-,-password'],
+    ['reserved URL characters', 'test-@-:-/-?-#-password'],
+    ['space', 'test password'],
+    ['tab', 'test\tpassword'],
+    ['newline', 'test\npassword'],
+    ['Unicode', 'тестовый-пароль'],
+  ])(
+    'builds a runner URL accepted by the canonical guard for %s',
+    (_caseName, password) => {
+      const databaseUrl =
+        runnerUrl.buildAuthIntegrationDatabaseUrl(password);
+      const parsed = new URL(databaseUrl);
+      const environment = readAuthIntegrationEnvironment({
+        AUTH_INTEGRATION_TESTS_ENABLED: 'true',
+        AUTH_INTEGRATION_DISPOSABLE_DATABASE: 'true',
+        AUTH_INTEGRATION_DATABASE_URL: databaseUrl,
+        AUTH_INTEGRATION_EXPECTED_DATABASE_NAME:
+          runnerUrl.AUTH_INTEGRATION_RUNNER_DATABASE_NAME,
+      });
+
+      expect(
+        parsed.username === 'backend_auth_app' &&
+          parsed.hostname === 'postgres' &&
+          parsed.port === '5432' &&
+          parsed.password === encodeURIComponent(password) &&
+          decodeURIComponent(parsed.password) === password &&
+          parsed.pathname ===
+            `/${runnerUrl.AUTH_INTEGRATION_RUNNER_DATABASE_NAME}` &&
+          parsed.toString() === databaseUrl &&
+          environment.databaseUrl === databaseUrl,
+      ).toBe(true);
+    },
+  );
 
   it('returns the exact checked canonical connection URL', () => {
     const environment = readAuthIntegrationEnvironment(

@@ -102,6 +102,28 @@ services:
       - test_edge
       - test_internal
 
+  auth-integration-runner:
+    build:
+      context: ../../backend
+      dockerfile: ../infra/test/auth-integration/Dockerfile
+      args:
+        NODE_IMAGE: ${TEST_NODE_IMAGE:-node:20.11.0-bookworm-slim}
+    profiles:
+      - auth-integration
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=256m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - test_internal
+
   db-tools:
     image: ${TEST_POSTGRES_IMAGE:-postgres:14-bookworm}
     working_dir: /workspace
