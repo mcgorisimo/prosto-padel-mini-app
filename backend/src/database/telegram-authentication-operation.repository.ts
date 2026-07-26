@@ -5,7 +5,6 @@ import {
 import {
   AuthenticationOperationId,
   TelegramAuthenticationProofReference,
-  UnixEpochSeconds,
 } from '../auth/auth.types';
 import { PendingAuthenticationOperation } from '../auth/authentication-operation.state-machine';
 import { SecurityAuditEventId } from '../auth/security-audit.types';
@@ -33,7 +32,6 @@ export interface PersistPendingTelegramAuthenticationInput {
   readonly consumption: TelegramProofConsumptionRecord;
   readonly audit: {
     readonly eventId: SecurityAuditEventId;
-    readonly occurredAt: UnixEpochSeconds;
   };
 }
 

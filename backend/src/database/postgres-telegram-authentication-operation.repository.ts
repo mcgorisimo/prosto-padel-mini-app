@@ -244,6 +244,11 @@ interface ValidatedInput {
   readonly audit: PersistPendingTelegramAuthenticationInput['audit'];
 }
 
+interface PersistenceResolution {
+  readonly result: TelegramAuthenticationOperationResult;
+  readonly auditOccurredAt: UnixEpochSeconds;
+}
+
 function persistenceFailure(
   reason: TelegramAuthenticationOperationPersistenceFailure,
 ): TelegramAuthenticationOperationPersistenceError {
@@ -375,9 +380,8 @@ function validateInput(value: unknown): ValidatedInput {
     !isUnixEpochSeconds(value.consumption.consumedAt) ||
     value.consumption.consumedAt >= value.consumption.proofExpiresAt ||
     !isRecord(value.audit) ||
-    !hasExactlyKeys(value.audit, ['eventId', 'occurredAt']) ||
-    !isInternalUuid(value.audit.eventId) ||
-    !isUnixEpochSeconds(value.audit.occurredAt)
+    !hasExactlyKeys(value.audit, ['eventId']) ||
+    !isInternalUuid(value.audit.eventId)
   ) {
     throw invalidInput();
   }
@@ -436,7 +440,6 @@ function validateInput(value: unknown): ValidatedInput {
     }),
     audit: Object.freeze({
       eventId: readInputAuditEventId(value.audit.eventId),
-      occurredAt: value.audit.occurredAt,
     }),
   });
 }
@@ -845,7 +848,7 @@ function classifyPersistedConflict(
   operations: readonly PersistedOperation[],
   consumptions: readonly PersistedConsumption[],
   input: ValidatedInput,
-): TelegramAuthenticationOperationResult {
+): PersistenceResolution {
   if (operations.length === 0 && consumptions.length === 0) {
     throw invalidPersistedState();
   }
@@ -893,8 +896,11 @@ function classifyPersistedConflict(
     }
     if (operationBindingsEqual(operation, input)) {
       return Object.freeze({
-        outcome: 'idempotent_retry',
-        operationId: operation.operationId,
+        result: Object.freeze({
+          outcome: 'idempotent_retry',
+          operationId: operation.operationId,
+        }),
+        auditOccurredAt: consumptionResult.consumption.consumedAt,
       });
     }
   }
@@ -904,22 +910,31 @@ function classifyPersistedConflict(
     consumptionByIdempotencyKey !== undefined
   ) {
     return Object.freeze({
-      outcome: 'conflict',
-      reason: 'idempotency_key_conflict',
+      result: Object.freeze({
+        outcome: 'conflict',
+        reason: 'idempotency_key_conflict',
+      }),
+      auditOccurredAt: input.consumption.consumedAt,
     });
   }
 
   if (consumptionResult.outcome === 'conflicting_reuse') {
     return Object.freeze({
-      outcome: 'conflict',
-      reason: 'idempotency_key_conflict',
+      result: Object.freeze({
+        outcome: 'conflict',
+        reason: 'idempotency_key_conflict',
+      }),
+      auditOccurredAt: input.consumption.consumedAt,
     });
   }
 
   if (consumptionResult.outcome === 'replay') {
     return Object.freeze({
-      outcome: 'replay',
-      reason: 'proof_already_consumed',
+      result: Object.freeze({
+        outcome: 'replay',
+        reason: 'proof_already_consumed',
+      }),
+      auditOccurredAt: input.consumption.consumedAt,
     });
   }
 
@@ -939,8 +954,11 @@ function classifyPersistedConflict(
   );
   if (operationById !== undefined) {
     return Object.freeze({
-      outcome: 'conflict',
-      reason: 'operation_binding_conflict',
+      result: Object.freeze({
+        outcome: 'conflict',
+        reason: 'operation_binding_conflict',
+      }),
+      auditOccurredAt: input.consumption.consumedAt,
     });
   }
 
@@ -950,6 +968,7 @@ function classifyPersistedConflict(
 function auditEventFor(
   result: TelegramAuthenticationOperationResult,
   input: ValidatedInput,
+  occurredAt: UnixEpochSeconds,
 ): SecurityAuditEvent<'telegram_proof_consumption'> {
   const metadata =
     result.outcome === 'created' ||
@@ -961,19 +980,18 @@ function auditEventFor(
           attemptedOperationId: input.operation.operationId,
         });
   const outcome =
-    result.outcome === 'created'
+    result.outcome === 'created' ||
+    result.outcome === 'idempotent_retry'
       ? 'success'
-      : result.outcome === 'idempotent_retry'
-        ? 'idempotent_retry'
-        : result.outcome === 'replay'
-          ? 'replay_detected'
-          : 'conflict';
+      : result.outcome === 'replay'
+        ? 'replay_detected'
+        : 'conflict';
 
   return createSecurityAuditEvent({
     eventId: input.audit.eventId,
     eventType: 'telegram_proof_consumption',
     outcome,
-    occurredAt: input.audit.occurredAt,
+    occurredAt,
     metadata,
   });
 }
@@ -983,15 +1001,20 @@ async function appendAudit(
   transaction: PostgresTransaction,
   result: TelegramAuthenticationOperationResult,
   input: ValidatedInput,
+  occurredAt: UnixEpochSeconds,
 ): Promise<void> {
   const auditResult = await repository.append(
     transaction,
-    auditEventFor(result, input),
+    auditEventFor(result, input, occurredAt),
   );
-  if (
-    auditResult.status !== 'appended' &&
-    auditResult.status !== 'idempotent_retry'
-  ) {
+  const statusMatchesResult =
+    (result.outcome === 'created' && auditResult.status === 'appended') ||
+    (result.outcome === 'idempotent_retry' &&
+      auditResult.status === 'idempotent_retry') ||
+    ((result.outcome === 'conflict' || result.outcome === 'replay') &&
+      (auditResult.status === 'appended' ||
+        auditResult.status === 'idempotent_retry'));
+  if (!statusMatchesResult) {
     throw persistenceFailure('audit_conflict');
   }
 }
@@ -1084,7 +1107,7 @@ export class PostgresTelegramAuthenticationOperationRepository
         throw invalidPersistedState();
       }
 
-      let result: TelegramAuthenticationOperationResult;
+      let resolution: PersistenceResolution;
       if (inserted.rows.length === 1) {
         if (
           !isAuthenticationOperationId(inserted.rows[0].id) ||
@@ -1096,9 +1119,12 @@ export class PostgresTelegramAuthenticationOperationRepository
           INSERT_CONSUMPTION_SQL,
           consumptionInsertValues(validated),
         );
-        result = Object.freeze({
-          outcome: 'created',
-          operationId: validated.operation.operationId,
+        resolution = Object.freeze({
+          result: Object.freeze({
+            outcome: 'created',
+            operationId: validated.operation.operationId,
+          }),
+          auditOccurredAt: validated.consumption.consumedAt,
         });
       } else {
         const values = rereadValues(validated);
@@ -1112,15 +1138,21 @@ export class PostgresTelegramAuthenticationOperationRepository
             SELECT_MATCHING_CONSUMPTIONS_SQL,
             values,
           );
-        result = classifyPersistedConflict(
+        resolution = classifyPersistedConflict(
           operationRows.rows.map(hydrateOperation),
           consumptionRows.rows.map(hydrateConsumption),
           validated,
         );
       }
 
-      await appendAudit(this.securityAudit, transaction, result, validated);
-      return result;
+      await appendAudit(
+        this.securityAudit,
+        transaction,
+        resolution.result,
+        validated,
+        resolution.auditOccurredAt,
+      );
+      return resolution.result;
     } catch (error) {
       throw mapPersistenceError(error);
     }

@@ -339,7 +339,6 @@ async function provisionAndCompleteInTransaction(
       },
       audit: {
         eventId: prepared.bindings.auditEventIds.operationTerminal,
-        occurredAt: prepared.bindings.timestamps.auditOccurredAt,
       },
     });
   if (
@@ -486,8 +485,6 @@ export async function openAuthIntegrationHarness(): Promise<AuthIntegrationHarne
           audit: {
             eventId:
               prepared.bindings.auditEventIds.proofConsumption,
-            occurredAt:
-              prepared.bindings.timestamps.auditOccurredAt,
           },
         }),
       );
@@ -510,8 +507,6 @@ export async function openAuthIntegrationHarness(): Promise<AuthIntegrationHarne
           binding,
           audit: {
             eventId: prepared.bindings.auditEventIds.sessionCreated,
-            occurredAt:
-              prepared.bindings.timestamps.auditOccurredAt,
           },
         }),
       );

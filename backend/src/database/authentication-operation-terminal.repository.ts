@@ -4,7 +4,6 @@ import {
 } from '../auth/authentication-operation.state-machine';
 import {
   AuthenticationOperationId,
-  UnixEpochSeconds,
 } from '../auth/auth.types';
 import { SecurityAuditEventId } from '../auth/security-audit.types';
 import { PostgresTransaction } from './postgres-transaction';
@@ -13,7 +12,6 @@ export interface ApplyAuthenticationOperationTerminalInput {
   readonly command: AuthenticationOperationCommand;
   readonly audit: {
     readonly eventId: SecurityAuditEventId;
-    readonly occurredAt: UnixEpochSeconds;
   };
 }
 

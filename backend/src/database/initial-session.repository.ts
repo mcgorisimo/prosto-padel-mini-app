@@ -12,7 +12,6 @@ export interface CreateInitialSessionInput {
   readonly binding: CreateActiveSessionBinding;
   readonly audit: {
     readonly eventId: SecurityAuditEventId;
-    readonly occurredAt: UnixEpochSeconds;
   };
 }
 

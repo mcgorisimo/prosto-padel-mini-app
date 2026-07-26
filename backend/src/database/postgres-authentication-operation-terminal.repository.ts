@@ -283,9 +283,8 @@ function assertValidInput(
     !hasExactlyKeys(value, ['command', 'audit']) ||
     !isValidCommand(value.command) ||
     !isRecord(value.audit) ||
-    !hasExactlyKeys(value.audit, ['eventId', 'occurredAt']) ||
-    !isInternalUuid(value.audit.eventId) ||
-    !isUnixEpochSeconds(value.audit.occurredAt)
+    !hasExactlyKeys(value.audit, ['eventId']) ||
+    !isInternalUuid(value.audit.eventId)
   ) {
     throw invalidInput();
   }
@@ -823,10 +822,10 @@ function auditOutcome(
       },
   status: 'completed' | 'failed' | 'expired',
 ): SecurityAuditOutcome {
-  if (transition.outcome === 'idempotent_retry') {
-    return 'idempotent_retry';
-  }
-  if (transition.outcome === 'transitioned') {
+  if (
+    transition.outcome === 'transitioned' ||
+    transition.outcome === 'idempotent_retry'
+  ) {
     return status === 'expired' ? 'expired' : 'success';
   }
   if (transition.reason === 'operation_not_expired') {
@@ -958,6 +957,7 @@ export class PostgresAuthenticationOperationTerminalRepository
           { outcome: 'rejected', reason: transition.reason },
           targetStatus,
         ),
+        input.command.now,
       );
       return { outcome: 'rejected', reason: transition.reason };
     }
@@ -1004,6 +1004,10 @@ export class PostgresAuthenticationOperationTerminalRepository
       current.intent,
       targetStatus,
       auditOutcome({ outcome: transition.outcome }, targetStatus),
+      transition.state.appliedCommand.appliedAt,
+      transition.outcome === 'transitioned'
+        ? 'appended'
+        : 'idempotent_retry',
     );
 
     return {
@@ -1019,6 +1023,8 @@ export class PostgresAuthenticationOperationTerminalRepository
     intent: AuthenticationIntent,
     terminalStatus: (typeof TERMINAL_STATUSES)[number],
     outcome: SecurityAuditOutcome,
+    occurredAt: UnixEpochSeconds,
+    expectedStatus?: 'appended' | 'idempotent_retry',
   ): Promise<void> {
     try {
       const result = await this.auditRepository.append(
@@ -1027,7 +1033,7 @@ export class PostgresAuthenticationOperationTerminalRepository
           eventId: input.audit.eventId,
           eventType: 'authentication_operation_terminal',
           outcome,
-          occurredAt: input.audit.occurredAt,
+          occurredAt,
           metadata: createSecurityAuditMetadata(
             'authentication_operation_terminal',
             {
@@ -1038,7 +1044,10 @@ export class PostgresAuthenticationOperationTerminalRepository
           ),
         }),
       );
-      if (result.status === 'event_id_conflict') {
+      if (
+        result.status === 'event_id_conflict' ||
+        (expectedStatus !== undefined && result.status !== expectedStatus)
+      ) {
         throw new AuthenticationOperationTerminalPersistenceError(
           'audit_conflict',
         );

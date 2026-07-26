@@ -439,7 +439,6 @@ export class TelegramLoginService {
         consumption: prepared.consumption,
         audit: {
           eventId: prepared.bindings.auditEventIds.proofConsumption,
-          occurredAt: prepared.bindings.timestamps.auditOccurredAt,
         },
       }),
     );
@@ -506,7 +505,6 @@ export class TelegramLoginService {
         binding: sessionBinding,
         audit: {
           eventId: prepared.bindings.auditEventIds.sessionCreated,
-          occurredAt: prepared.bindings.timestamps.auditOccurredAt,
         },
       }),
     );
@@ -792,7 +790,6 @@ export class TelegramLoginService {
           },
           audit: {
             eventId: prepared.bindings.auditEventIds.operationTerminal,
-            occurredAt: prepared.bindings.timestamps.auditOccurredAt,
           },
         },
       );

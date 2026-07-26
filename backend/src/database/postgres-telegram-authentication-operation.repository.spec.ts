@@ -75,7 +75,19 @@ const CREATED_AT = unixEpochSeconds(1_000);
 const EXPIRES_AT = unixEpochSeconds(1_300);
 const CONSUMED_AT = unixEpochSeconds(1_010);
 const PROOF_EXPIRES_AT = unixEpochSeconds(1_120);
-const AUDIT_OCCURRED_AT = unixEpochSeconds(1_011);
+const RAW_INIT_DATA = 'query_id=sensitive-telegram-init-data';
+const SENSITIVE_AUDIT_VALUES = Object.freeze([
+  RAW_INIT_DATA,
+  PROOF_FINGERPRINT,
+  REQUEST_DIGEST,
+  LOOKUP_DIGEST,
+  'sensitive-session-credential',
+  '9'.repeat(64),
+  '123456:sensitive-bot-token',
+  'postgresql://sensitive-user:sensitive-password@postgres/database',
+  'sensitive-lookup-pepper',
+  'sensitive-workflow-secret',
+]);
 
 interface QueryCall {
   readonly text: string;
@@ -141,9 +153,12 @@ class FakeSecurityAuditRepository implements SecurityAuditRepository {
   constructor(
     private readonly response:
       | SecurityAuditAppendResult
+      | readonly SecurityAuditAppendResult[]
       | SecurityAuditPersistenceError = { status: 'appended' },
     private readonly order: string[] = [],
   ) {}
+
+  private responseIndex = 0;
 
   async append<EventType extends SecurityAuditEventType>(
     transaction: PostgresTransaction,
@@ -154,11 +169,27 @@ class FakeSecurityAuditRepository implements SecurityAuditRepository {
       event: event as SecurityAuditEvent<SecurityAuditEventType>,
     });
     this.order.push('audit');
-    if (this.response instanceof SecurityAuditPersistenceError) {
-      throw this.response;
+    const response = Array.isArray(this.response)
+      ? this.response[this.responseIndex++]
+      : this.response;
+    if (response === undefined) {
+      throw new Error('Unexpected audit append');
     }
-    return this.response;
+    if (response instanceof SecurityAuditPersistenceError) {
+      throw response;
+    }
+    return response;
   }
+}
+
+function expectNoSensitiveAuditValues(
+  events: readonly SecurityAuditEvent<SecurityAuditEventType>[],
+): void {
+  const serialized = events.map((event) => JSON.stringify(event));
+  const containsSensitiveValue = SENSITIVE_AUDIT_VALUES.some((secret) =>
+    serialized.some((event) => event.includes(secret)),
+  );
+  expect(containsSensitiveValue).toBe(false);
 }
 
 function validOperation(): PendingTelegramAuthenticationOperation {
@@ -200,7 +231,6 @@ function validInput(): PersistPendingTelegramAuthenticationInput {
     },
     audit: {
       eventId: AUDIT_EVENT_ID,
-      occurredAt: AUDIT_OCCURRED_AT,
     },
   };
 }
@@ -327,6 +357,10 @@ function consumptionOf(
   value: Record<string, unknown>,
 ): Record<string, unknown> {
   return value.consumption as Record<string, unknown>;
+}
+
+function auditOf(value: Record<string, unknown>): Record<string, unknown> {
+  return value.audit as Record<string, unknown>;
 }
 
 function expectPersistenceReason(
@@ -545,6 +579,12 @@ describe('PostgresTelegramAuthenticationOperationRepository', () => {
         'terminal field',
         (value: Record<string, unknown>) => {
           operationOf(value).resolution = { type: 'existing_account' };
+        },
+      ],
+      [
+        'redundant audit timestamp',
+        (value: Record<string, unknown>) => {
+          auditOf(value).occurredAt = CONSUMED_AT;
         },
       ],
     ])(
@@ -799,7 +839,10 @@ describe('PostgresTelegramAuthenticationOperationRepository', () => {
   describe('conflict reread and classification', () => {
     it('rereads both tables sequentially without LIMIT or FOR UPDATE', async () => {
       const transaction = conflictTransaction();
-      const subject = repository(transaction);
+      const subject = repository(
+        transaction,
+        new FakeSecurityAuditRepository({ status: 'idempotent_retry' }),
+      );
       await subject.repository.persistPending(transaction, validInput());
 
       expect(transaction.calls).toHaveLength(3);
@@ -824,7 +867,10 @@ describe('PostgresTelegramAuthenticationOperationRepository', () => {
 
     it('classifies a full match as an idempotent retry', async () => {
       const transaction = conflictTransaction();
-      const subject = repository(transaction);
+      const subject = repository(
+        transaction,
+        new FakeSecurityAuditRepository({ status: 'idempotent_retry' }),
+      );
       await expect(
         subject.repository.persistPending(transaction, validInput()),
       ).resolves.toEqual({
@@ -834,7 +880,7 @@ describe('PostgresTelegramAuthenticationOperationRepository', () => {
       expect(transaction.calls).toHaveLength(3);
     });
 
-    it('keeps exact retry priority after current proof TTL and does not compare persisted proof times', async () => {
+    it('uses the persisted consumption time for an exact retry after the current proof TTL', async () => {
       const transaction = conflictTransaction(
         [operationRow()],
         [
@@ -844,24 +890,19 @@ describe('PostgresTelegramAuthenticationOperationRepository', () => {
           }),
         ],
       );
-      const subject = repository(transaction);
-      const input = validInput();
-      const afterProofExpiry: PersistPendingTelegramAuthenticationInput = {
-        ...input,
-        audit: {
-          ...input.audit,
-          occurredAt: unixEpochSeconds(2_000),
-        },
-      };
+      const subject = repository(
+        transaction,
+        new FakeSecurityAuditRepository({ status: 'idempotent_retry' }),
+      );
       await expect(
-        subject.repository.persistPending(
-          transaction,
-          afterProofExpiry,
-        ),
+        subject.repository.persistPending(transaction, validInput()),
       ).resolves.toEqual({
         outcome: 'idempotent_retry',
         operationId: OPERATION_ID,
       });
+      expect(subject.audit.calls[0].event.occurredAt).toBe(
+        unixEpochSeconds(1_009),
+      );
     });
 
     it('returns idempotency conflict when consumption is exact but lookup digest differs', async () => {
@@ -1143,12 +1184,14 @@ describe('PostgresTelegramAuthenticationOperationRepository', () => {
         createdTransaction(),
         'success',
         'operationId',
+        { status: 'appended' } as const,
       ],
       [
         'retry',
         conflictTransaction(),
-        'idempotent_retry',
+        'success',
         'operationId',
+        { status: 'idempotent_retry' } as const,
       ],
       [
         'conflict',
@@ -1166,6 +1209,7 @@ describe('PostgresTelegramAuthenticationOperationRepository', () => {
         ),
         'conflict',
         'attemptedOperationId',
+        { status: 'appended' } as const,
       ],
       [
         'replay',
@@ -1187,11 +1231,15 @@ describe('PostgresTelegramAuthenticationOperationRepository', () => {
         ),
         'replay_detected',
         'attemptedOperationId',
+        { status: 'appended' } as const,
       ],
     ])(
       'builds the %s audit event from the actual result',
-      async (_label, transaction, outcome, metadataKey) => {
-        const subject = repository(transaction);
+      async (_label, transaction, outcome, metadataKey, auditResult) => {
+        const subject = repository(
+          transaction,
+          new FakeSecurityAuditRepository(auditResult),
+        );
         await subject.repository.persistPending(transaction, validInput());
         expect(subject.audit.calls).toHaveLength(1);
         const event = subject.audit.calls[0].event;
@@ -1199,29 +1247,166 @@ describe('PostgresTelegramAuthenticationOperationRepository', () => {
           eventId: AUDIT_EVENT_ID,
           eventType: 'telegram_proof_consumption',
           outcome,
-          occurredAt: AUDIT_OCCURRED_AT,
+          occurredAt: CONSUMED_AT,
           metadata: { [metadataKey]: OPERATION_ID },
         });
         expect(Object.keys(event.metadata)).toEqual([metadataKey]);
+        const serialized = JSON.stringify(event);
+        expect(serialized).not.toContain(LOOKUP_DIGEST);
+        expect(serialized).not.toContain(PROOF_FINGERPRINT);
+        expect(serialized).not.toContain(REQUEST_DIGEST);
+        expect(serialized).not.toContain(RAW_INIT_DATA);
       },
     );
 
-    it('accepts an exact retry from the audit repository', async () => {
-      const transaction = createdTransaction();
-      const audit = new FakeSecurityAuditRepository({
+    it('submits the same canonical success audit event on an exact retry', async () => {
+      const createdAudit = new FakeSecurityAuditRepository();
+      const retryAudit = new FakeSecurityAuditRepository({
         status: 'idempotent_retry',
       });
-      const subject = repository(transaction, audit);
+      const created = repository(createdTransaction(), createdAudit);
+      const retry = repository(conflictTransaction(), retryAudit);
+
+      await created.repository.persistPending(
+        created.transaction,
+        validInput(),
+      );
+      const changedRetryInput: PersistPendingTelegramAuthenticationInput = {
+        ...validInput(),
+        consumption: {
+          ...validInput().consumption,
+          consumedAt: unixEpochSeconds(Number(CONSUMED_AT) + 1),
+        },
+      };
       await expect(
-        subject.repository.persistPending(transaction, validInput()),
-      ).resolves.toEqual({
-        outcome: 'created',
-        operationId: OPERATION_ID,
-      });
+        retry.repository.persistPending(
+          retry.transaction,
+          changedRetryInput,
+        ),
+      ).resolves.toMatchObject({ outcome: 'idempotent_retry' });
+
+      expect(retryAudit.calls[0].event).toEqual(createdAudit.calls[0].event);
     });
 
-    it('maps an audit event ID conflict to a safe audit conflict', async () => {
-      const transaction = createdTransaction();
+    it('rejects a retry caller attempt to override the canonical audit timestamp', async () => {
+      const transaction = conflictTransaction();
+      const subject = repository(
+        transaction,
+        new FakeSecurityAuditRepository({ status: 'idempotent_retry' }),
+      );
+      const rawInput = {
+        ...validInput(),
+        audit: {
+          eventId: AUDIT_EVENT_ID,
+          occurredAt: unixEpochSeconds(Number(CONSUMED_AT) + 1),
+        },
+      } as unknown as PersistPendingTelegramAuthenticationInput;
+
+      await expectPersistenceReason(
+        subject.repository.persistPending(transaction, rawInput),
+        'invalid_input',
+      );
+      expect(transaction.calls).toHaveLength(0);
+      expect(subject.audit.calls).toHaveLength(0);
+    });
+
+    it.each(['conflict', 'replay'] as const)(
+      'accepts an identical repeated %s audit event',
+      async (outcome) => {
+        const transactionForAttempt = (): FakeTransaction =>
+          outcome === 'conflict'
+            ? conflictTransaction(
+                [operationRow({ request_digest: OTHER_REQUEST_DIGEST })],
+                [
+                  consumptionRow({
+                    request_digest: OTHER_REQUEST_DIGEST,
+                  }),
+                ],
+              )
+            : conflictTransaction(
+                [
+                  operationRow({
+                    id: OTHER_OPERATION_ID,
+                    idempotency_key: OTHER_IDEMPOTENCY_KEY,
+                    request_digest: OTHER_REQUEST_DIGEST,
+                  }),
+                ],
+                [
+                  consumptionRow({
+                    operation_id: OTHER_OPERATION_ID,
+                    idempotency_key: OTHER_IDEMPOTENCY_KEY,
+                    request_digest: OTHER_REQUEST_DIGEST,
+                  }),
+                ],
+              );
+        const expectedResult =
+          outcome === 'conflict'
+            ? {
+                outcome: 'conflict' as const,
+                reason: 'idempotency_key_conflict' as const,
+              }
+            : {
+                outcome: 'replay' as const,
+                reason: 'proof_already_consumed' as const,
+              };
+        const audit = new FakeSecurityAuditRepository([
+          { status: 'appended' },
+          { status: 'idempotent_retry' },
+        ]);
+        const subject =
+          new PostgresTelegramAuthenticationOperationRepository(audit);
+
+        await expect(
+          subject.persistPending(transactionForAttempt(), validInput()),
+        ).resolves.toEqual(expectedResult);
+        await expect(
+          subject.persistPending(transactionForAttempt(), validInput()),
+        ).resolves.toEqual(expectedResult);
+
+        expect(audit.calls).toHaveLength(2);
+        expect(audit.calls[1].event).toEqual(audit.calls[0].event);
+        expect(audit.calls[0].event).toEqual({
+          eventId: AUDIT_EVENT_ID,
+          eventType: 'telegram_proof_consumption',
+          outcome:
+            outcome === 'conflict' ? 'conflict' : 'replay_detected',
+          occurredAt: CONSUMED_AT,
+          metadata: {
+            attemptedOperationId: OPERATION_ID,
+          },
+        });
+        expectNoSensitiveAuditValues(
+          audit.calls.map((call) => call.event),
+        );
+      },
+    );
+
+    it.each([
+      [
+        'created aggregate with an existing audit event',
+        createdTransaction(),
+        { status: 'idempotent_retry' } as const,
+      ],
+      [
+        'existing aggregate with a newly appended audit event',
+        conflictTransaction(),
+        { status: 'appended' } as const,
+      ],
+    ])('fails closed for %s', async (_label, transaction, auditResult) => {
+      const subject = repository(
+        transaction,
+        new FakeSecurityAuditRepository(auditResult),
+      );
+      await expectPersistenceReason(
+        subject.repository.persistPending(transaction, validInput()),
+        'audit_conflict',
+      );
+    });
+
+    it.each([
+      ['new aggregate', createdTransaction()],
+      ['existing aggregate', conflictTransaction()],
+    ])('maps an audit event ID conflict for %s to a safe audit conflict', async (_label, transaction) => {
       const audit = new FakeSecurityAuditRepository({
         status: 'event_id_conflict',
       });
@@ -1230,7 +1415,6 @@ describe('PostgresTelegramAuthenticationOperationRepository', () => {
         subject.repository.persistPending(transaction, validInput()),
         'audit_conflict',
       );
-      expect(transaction.calls).toHaveLength(2);
       expect(audit.calls).toHaveLength(1);
     });
 

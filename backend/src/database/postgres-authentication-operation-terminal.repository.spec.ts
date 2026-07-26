@@ -68,12 +68,28 @@ const EXPIRES_AT = unixEpochSeconds(1_800_000_300);
 const BEFORE_EXPIRY = unixEpochSeconds(1_800_000_200);
 const AT_EXPIRY = EXPIRES_AT;
 const LOOKUP_DIGEST = externalIdentityLookupDigest('a'.repeat(64));
+const CONFLICT_LOOKUP_DIGEST = externalIdentityLookupDigest('c'.repeat(64));
 const FINGERPRINT = 'b'.repeat(64) as AuthenticationProofFingerprint;
 const IDEMPOTENCY_KEY =
   'terminal-idempotency-key' as AuthenticationIdempotencyKey;
 const REQUEST_DIGEST =
   'terminal-request-digest' as AuthenticationRequestDigest;
 const NAMESPACE = externalIdentityNamespace('telegram:bot:123');
+const RAW_INIT_DATA = 'query_id=sensitive-telegram-init-data';
+const PLAINTEXT_CREDENTIAL = 'sensitive-session-credential';
+const SENSITIVE_AUDIT_VALUES = Object.freeze([
+  RAW_INIT_DATA,
+  FINGERPRINT,
+  REQUEST_DIGEST,
+  LOOKUP_DIGEST,
+  CONFLICT_LOOKUP_DIGEST,
+  PLAINTEXT_CREDENTIAL,
+  '9'.repeat(64),
+  '123456:sensitive-bot-token',
+  'postgresql://sensitive-user:sensitive-password@postgres/database',
+  'sensitive-lookup-pepper',
+  'sensitive-workflow-secret',
+]);
 
 const IDENTITY_KEY: ExternalIdentityKey = Object.freeze({
   provider: 'telegram',
@@ -123,11 +139,14 @@ class FakeAuditRepository implements SecurityAuditRepository {
   }> = [];
 
   constructor(
-    private readonly result: SecurityAuditAppendResult | Error = {
-      status: 'appended',
-    },
+    private readonly result:
+      | SecurityAuditAppendResult
+      | readonly SecurityAuditAppendResult[]
+      | Error = { status: 'appended' },
     private readonly timeline?: string[],
   ) {}
+
+  private resultIndex = 0;
 
   async append<EventType extends SecurityAuditEventType>(
     transaction: PostgresTransaction,
@@ -138,11 +157,27 @@ class FakeAuditRepository implements SecurityAuditRepository {
       transaction,
       event: event as SecurityAuditEvent<SecurityAuditEventType>,
     });
-    if (this.result instanceof Error) {
-      throw this.result;
+    const result = Array.isArray(this.result)
+      ? this.result[this.resultIndex++]
+      : this.result;
+    if (result === undefined) {
+      throw new Error('Unexpected audit append');
     }
-    return this.result;
+    if (result instanceof Error) {
+      throw result;
+    }
+    return result;
   }
+}
+
+function expectNoSensitiveAuditValues(
+  events: readonly SecurityAuditEvent<SecurityAuditEventType>[],
+): void {
+  const serialized = events.map((event) => JSON.stringify(event));
+  const containsSensitiveValue = SENSITIVE_AUDIT_VALUES.some((secret) =>
+    serialized.some((event) => event.includes(secret)),
+  );
+  expect(containsSensitiveValue).toBe(false);
 }
 
 function queryResult<Row extends QueryResultRow>(
@@ -222,7 +257,6 @@ function input(
     command,
     audit: {
       eventId: AUDIT_EVENT_ID,
-      occurredAt: BEFORE_EXPIRY,
     },
   };
 }
@@ -392,7 +426,7 @@ describe('PostgresAuthenticationOperationTerminalRepository input validation', (
       { ...input(), audit: { ...input().audit, eventId: 'bad' } },
     ],
     [
-      'invalid audit time',
+      'redundant audit time',
       { ...input(), audit: { ...input().audit, occurredAt: -1 } },
     ],
   ])('rejects %s before side effects', async (_name, value) => {
@@ -527,7 +561,9 @@ describe('PostgresAuthenticationOperationTerminalRepository locking and hydratio
       const transaction = new FakeTransaction([
         queryResult([rowForState(terminal)]),
       ]);
-      const { repository: subject, audit } = repository();
+      const { repository: subject, audit } = repository(
+        new FakeAuditRepository({ status: 'idempotent_retry' }),
+      );
 
       await expect(
         subject.applyTerminalCommand(transaction, input(retry)),
@@ -537,9 +573,52 @@ describe('PostgresAuthenticationOperationTerminalRepository locking and hydratio
         status,
       });
       expect(transaction.calls).toHaveLength(1);
-      expect(audit.calls[0].event.outcome).toBe('idempotent_retry');
+      expect(audit.calls[0].event.outcome).toBe(
+        status === 'expired' ? 'expired' : 'success',
+      );
+      expect(audit.calls[0].event.occurredAt).toBe(
+        terminal.appliedCommand.appliedAt,
+      );
     },
   );
+
+  it('submits the same canonical terminal audit event on an exact retry', async () => {
+    const pending = pendingOperation();
+    const command = commandFor(pending);
+    const terminal = transitionedState(pending, command);
+    const createdAudit = new FakeAuditRepository();
+    const retryAudit = new FakeAuditRepository({
+      status: 'idempotent_retry',
+    });
+    const { repository: createdRepository } = repository(createdAudit);
+    const { repository: retryRepository } = repository(retryAudit);
+
+    await createdRepository.applyTerminalCommand(
+      new FakeTransaction([
+        queryResult([rowForState(pending)]),
+        queryResult([rowForState(terminal)]),
+      ]),
+      input(command),
+    );
+    await expect(
+      retryRepository.applyTerminalCommand(
+        new FakeTransaction([queryResult([rowForState(terminal)])]),
+        input({
+          ...command,
+          now: unixEpochSeconds(Number(AT_EXPIRY) + 10),
+        } as AuthenticationOperationCommand),
+      ),
+    ).resolves.toMatchObject({ outcome: 'idempotent_retry' });
+
+    expect(retryAudit.calls[0].event).toEqual(createdAudit.calls[0].event);
+    expect(createdAudit.calls[0].event.occurredAt).toBe(command.now);
+    const serialized = JSON.stringify(retryAudit.calls[0].event);
+    expect(serialized).not.toContain(FINGERPRINT);
+    expect(serialized).not.toContain(LOOKUP_DIGEST);
+    expect(serialized).not.toContain(REQUEST_DIGEST);
+    expect(serialized).not.toContain(RAW_INIT_DATA);
+    expect(serialized).not.toContain(PLAINTEXT_CREDENTIAL);
+  });
 
   it.each([
     ['bad completed resolution', { resolution_type: 'unknown' }],
@@ -896,7 +975,7 @@ describe('PostgresAuthenticationOperationTerminalRepository transitions', () => 
 });
 
 describe('PostgresAuthenticationOperationTerminalRepository rejections and audit', () => {
-  it.each([
+  const rejectionCases = [
     [
       'operation_binding_conflict',
       (pending: PendingAuthenticationOperation) =>
@@ -907,7 +986,7 @@ describe('PostgresAuthenticationOperationTerminalRepository rejections and audit
               ...pending.identityKey,
               lookup: {
                 kind: 'lookup_digest',
-                digest: externalIdentityLookupDigest('c'.repeat(64)),
+                digest: CONFLICT_LOOKUP_DIGEST,
               },
             },
           },
@@ -929,7 +1008,9 @@ describe('PostgresAuthenticationOperationTerminalRepository rejections and audit
       'denied',
       'expired',
     ],
-  ] as const)(
+  ] as const;
+
+  it.each(rejectionCases)(
     'returns %s and audits attempted status',
     async (reason, makeCommand, outcome, terminalStatus) => {
       const pending = pendingOperation();
@@ -945,8 +1026,55 @@ describe('PostgresAuthenticationOperationTerminalRepository rejections and audit
       expect(transaction.calls).toHaveLength(1);
       expect(audit.calls[0].event).toMatchObject({
         outcome,
+        occurredAt: command.now,
         metadata: { terminalStatus },
       });
+    },
+  );
+
+  it.each(rejectionCases)(
+    'submits the same canonical audit event for a repeated %s rejection',
+    async (reason, makeCommand, outcome, terminalStatus) => {
+      const pending = pendingOperation();
+      const command = makeCommand(pending);
+      const audit = new FakeAuditRepository([
+        { status: 'appended' },
+        { status: 'idempotent_retry' },
+      ]);
+      const subject =
+        new PostgresAuthenticationOperationTerminalRepository(audit);
+      const transactionForAttempt = (): FakeTransaction =>
+        new FakeTransaction([queryResult([rowForState(pending)])]);
+
+      await expect(
+        subject.applyTerminalCommand(
+          transactionForAttempt(),
+          input(command),
+        ),
+      ).resolves.toEqual({ outcome: 'rejected', reason });
+      await expect(
+        subject.applyTerminalCommand(
+          transactionForAttempt(),
+          input(command),
+        ),
+      ).resolves.toEqual({ outcome: 'rejected', reason });
+
+      expect(audit.calls).toHaveLength(2);
+      expect(audit.calls[1].event).toEqual(audit.calls[0].event);
+      expect(audit.calls[0].event).toEqual({
+        eventId: AUDIT_EVENT_ID,
+        eventType: 'authentication_operation_terminal',
+        outcome,
+        occurredAt: command.now,
+        metadata: {
+          operationId: OPERATION_ID,
+          intent: 'sign_in',
+          terminalStatus,
+        },
+      });
+      expectNoSensitiveAuditValues(
+        audit.calls.map((call) => call.event),
+      );
     },
   );
 
@@ -1023,16 +1151,7 @@ describe('PostgresAuthenticationOperationTerminalRepository rejections and audit
     expect(transaction.calls).toHaveLength(1);
   });
 
-  it.each([
-    [
-      { status: 'appended' } as const,
-      { outcome: 'transitioned', status: 'completed' },
-    ],
-    [
-      { status: 'idempotent_retry' } as const,
-      { outcome: 'transitioned', status: 'completed' },
-    ],
-  ])('accepts audit result %p', async (auditResult, expected) => {
+  it('accepts an appended audit event for a new terminal transition', async () => {
     const pending = pendingOperation();
     const command = commandFor(pending);
     const transaction = new FakeTransaction([
@@ -1040,27 +1159,70 @@ describe('PostgresAuthenticationOperationTerminalRepository rejections and audit
       queryResult([rowForState(transitionedState(pending, command))]),
     ]);
     const { repository: subject } = repository(
-      new FakeAuditRepository(auditResult),
+      new FakeAuditRepository({ status: 'appended' }),
     );
     await expect(
       subject.applyTerminalCommand(transaction, input(command)),
-    ).resolves.toMatchObject(expected);
+    ).resolves.toMatchObject({
+      outcome: 'transitioned',
+      status: 'completed',
+    });
   });
 
-  it('turns audit event conflict into audit_conflict', async () => {
+  it.each([
+    [
+      'new terminal state with an existing audit event',
+      false,
+      { status: 'idempotent_retry' } as const,
+    ],
+    [
+      'existing terminal state with a newly appended audit event',
+      true,
+      { status: 'appended' } as const,
+    ],
+  ])('fails closed for %s', async (_label, existing, auditResult) => {
     const pending = pendingOperation();
     const command = commandFor(pending);
-    const transaction = new FakeTransaction([
-      queryResult([rowForState(pending)]),
-      queryResult([rowForState(transitionedState(pending, command))]),
-    ]);
+    const terminal = transitionedState(pending, command);
+    const transaction = new FakeTransaction(
+      existing
+        ? [queryResult([rowForState(terminal)])]
+        : [
+            queryResult([rowForState(pending)]),
+            queryResult([rowForState(terminal)]),
+          ],
+    );
+    const { repository: subject } = repository(
+      new FakeAuditRepository(auditResult),
+    );
+
+    await expect(
+      subject.applyTerminalCommand(transaction, input(command)),
+    ).rejects.toMatchObject({ reason: 'audit_conflict' });
+  });
+
+  it.each([false, true])(
+    'turns audit event conflict into audit_conflict for existing=%s',
+    async (existing) => {
+    const pending = pendingOperation();
+    const command = commandFor(pending);
+    const terminal = transitionedState(pending, command);
+    const transaction = new FakeTransaction(
+      existing
+        ? [queryResult([rowForState(terminal)])]
+        : [
+            queryResult([rowForState(pending)]),
+            queryResult([rowForState(terminal)]),
+          ],
+    );
     const { repository: subject } = repository(
       new FakeAuditRepository({ status: 'event_id_conflict' }),
     );
     await expect(
       subject.applyTerminalCommand(transaction, input(command)),
     ).rejects.toMatchObject({ reason: 'audit_conflict' });
-  });
+    },
+  );
 
   it('wraps an audit exception without additional SQL', async () => {
     const pending = pendingOperation();

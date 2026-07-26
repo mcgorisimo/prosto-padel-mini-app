@@ -156,7 +156,6 @@ function input(
     binding: binding(),
     audit: {
       eventId: AUDIT_EVENT_ID,
-      occurredAt: ISSUED_AT,
     },
     ...overrides,
   };
@@ -390,7 +389,7 @@ describe('PostgresInitialSessionRepository', () => {
       },
     ],
     [
-      'invalid audit timestamp',
+      'redundant audit timestamp',
       {
         ...input(),
         audit: { ...input().audit, occurredAt: -1 },
@@ -760,13 +759,70 @@ describe('PostgresInitialSessionRepository', () => {
     expect(timeline).toEqual(['query:1', 'query:2', 'query:3', 'audit']);
     expect(audit.calls[0].event).toMatchObject({
       eventType: 'session_family_created',
-      outcome: 'idempotent_retry',
+      outcome: 'success',
       metadata: {
         sessionId: SESSION_ID,
         accountId: ACCOUNT_ID,
         authenticationOperationId: OPERATION_ID,
       },
     });
+  });
+
+  it('submits the same canonical success audit event on an exact retry', async () => {
+    const createdAudit = new FakeAuditRepository();
+    const retryAudit = new FakeAuditRepository({
+      status: 'idempotent_retry',
+    });
+    const createdRepository = new PostgresInitialSessionRepository(
+      createdAudit,
+    );
+    const retryRepository = new PostgresInitialSessionRepository(retryAudit);
+
+    await createdRepository.createInitialSession(
+      new FakeTransaction(createdQueue()),
+      input(),
+    );
+    await expect(
+      retryRepository.createInitialSession(
+        new FakeTransaction([
+          queryResult([completedExistingOperation()]),
+          queryResult([activeAccount()]),
+          queryResult([existingSessionRow()]),
+        ]),
+        input(),
+      ),
+    ).resolves.toMatchObject({ outcome: 'idempotent_retry' });
+
+    expect(retryAudit.calls[0].event).toEqual(createdAudit.calls[0].event);
+    const serialized = JSON.stringify(retryAudit.calls[0].event);
+    expect(serialized).not.toContain(DIGEST);
+    expect(serialized).not.toContain(PLAINTEXT_CREDENTIAL);
+  });
+
+  it('rejects a retry caller attempt to override the canonical audit timestamp', async () => {
+    const transaction = new FakeTransaction([
+      queryResult([completedExistingOperation()]),
+      queryResult([activeAccount()]),
+      queryResult([existingSessionRow()]),
+    ]);
+    const audit = new FakeAuditRepository({
+      status: 'idempotent_retry',
+    });
+    const repository = new PostgresInitialSessionRepository(audit);
+    const rawInput = {
+      ...input(),
+      audit: {
+        eventId: AUDIT_EVENT_ID,
+        occurredAt: unixEpochSeconds(Number(CREATED_AT) + 1),
+      },
+    } as unknown as CreateInitialSessionInput;
+
+    await expectPersistenceFailure(
+      repository.createInitialSession(transaction, rawInput),
+      'invalid_input',
+    );
+    expect(transaction.calls).toHaveLength(0);
+    expect(audit.calls).toHaveLength(0);
   });
 
   it.each([
@@ -930,7 +986,7 @@ describe('PostgresInitialSessionRepository', () => {
         eventId: AUDIT_EVENT_ID,
         eventType: 'session_family_created',
         outcome: 'success',
-        occurredAt: ISSUED_AT,
+        occurredAt: CREATED_AT,
         metadata: {
           sessionId: SESSION_ID,
           accountId: ACCOUNT_ID,
@@ -943,25 +999,47 @@ describe('PostgresInitialSessionRepository', () => {
     expect(serialized).not.toContain(PLAINTEXT_CREDENTIAL);
   });
 
-  it('accepts an exact audit retry but rejects an audit event ID conflict', async () => {
-    const retryRepository = new PostgresInitialSessionRepository(
-      new FakeAuditRepository({ status: 'idempotent_retry' }),
+  it.each([
+    [
+      'new aggregate with an existing audit event',
+      createdQueue(),
+      { status: 'idempotent_retry' } as const,
+    ],
+    [
+      'existing aggregate with a newly appended audit event',
+      [
+        queryResult([completedExistingOperation()]),
+        queryResult([activeAccount()]),
+        queryResult([existingSessionRow()]),
+      ],
+      { status: 'appended' } as const,
+    ],
+  ])('fails closed for %s', async (_label, queued, auditResult) => {
+    const repository = new PostgresInitialSessionRepository(
+      new FakeAuditRepository(auditResult),
     );
-    await expect(
-      retryRepository.createInitialSession(
-        new FakeTransaction(createdQueue()),
-        input(),
-      ),
-    ).resolves.toMatchObject({ outcome: 'created' });
+    await expectPersistenceFailure(
+      repository.createInitialSession(new FakeTransaction(queued), input()),
+      'audit_conflict',
+    );
+  });
 
-    const conflictRepository = new PostgresInitialSessionRepository(
+  it.each([
+    ['new aggregate', createdQueue()],
+    [
+      'existing aggregate',
+      [
+        queryResult([completedExistingOperation()]),
+        queryResult([activeAccount()]),
+        queryResult([existingSessionRow()]),
+      ],
+    ],
+  ])('rejects an audit event ID conflict for %s', async (_label, queued) => {
+    const repository = new PostgresInitialSessionRepository(
       new FakeAuditRepository({ status: 'event_id_conflict' }),
     );
     await expectPersistenceFailure(
-      conflictRepository.createInitialSession(
-        new FakeTransaction(createdQueue()),
-        input(),
-      ),
+      repository.createInitialSession(new FakeTransaction(queued), input()),
       'audit_conflict',
     );
   });

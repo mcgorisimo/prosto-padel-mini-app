@@ -292,9 +292,8 @@ function validateInput(value: unknown): {
       'issuedAt',
     ]) ||
     !isRecord(value.audit) ||
-    !hasExactlyKeys(value.audit, ['eventId', 'occurredAt']) ||
-    !isInternalUuid(value.audit.eventId) ||
-    !isUnixEpochSeconds(value.audit.occurredAt)
+    !hasExactlyKeys(value.audit, ['eventId']) ||
+    !isInternalUuid(value.audit.eventId)
   ) {
     throw invalidInput();
   }
@@ -323,7 +322,6 @@ function validateInput(value: unknown): {
     audit: Object.freeze({
       eventId:
         value.audit.eventId as CreateInitialSessionInput['audit']['eventId'],
-      occurredAt: value.audit.occurredAt,
     }),
   });
 }
@@ -912,11 +910,7 @@ export class PostgresInitialSessionRepository
         if (classified.outcome === 'conflict') {
           return classified;
         }
-        await this.appendAudit(
-          transaction,
-          input,
-          'idempotent_retry',
-        );
+        await this.appendAudit(transaction, input, 'idempotent_retry');
         return successResult('idempotent_retry', binding);
       }
 
@@ -986,7 +980,7 @@ export class PostgresInitialSessionRepository
         throw invalidPersistedState();
       }
 
-      await this.appendAudit(transaction, input, 'success');
+      await this.appendAudit(transaction, input, 'appended');
       return successResult('created', binding);
     } catch (error) {
       if (error instanceof InitialSessionPersistenceError) {
@@ -1001,15 +995,15 @@ export class PostgresInitialSessionRepository
   private async appendAudit(
     transaction: PostgresTransaction,
     input: ReturnType<typeof validateInput>,
-    outcome: 'success' | 'idempotent_retry',
+    expectedStatus: 'appended' | 'idempotent_retry',
   ): Promise<void> {
     const result = await this.auditRepository.append(
       transaction,
       createSecurityAuditEvent({
         eventId: input.audit.eventId,
         eventType: 'session_family_created',
-        outcome,
-        occurredAt: input.audit.occurredAt,
+        outcome: 'success',
+        occurredAt: input.binding.createdAt,
         metadata: createSecurityAuditMetadata(
           'session_family_created',
           {
@@ -1021,7 +1015,7 @@ export class PostgresInitialSessionRepository
         ),
       }),
     );
-    if (result.status === 'event_id_conflict') {
+    if (result.status !== expectedStatus) {
       throw new InitialSessionPersistenceError('audit_conflict');
     }
   }

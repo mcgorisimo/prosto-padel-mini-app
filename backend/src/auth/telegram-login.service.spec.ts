@@ -804,15 +804,15 @@ describe('TelegramLoginService', () => {
       requestDigest: operation.requestDigest,
     });
     expect(subject.sessions.calls[0].input.binding.sessionId).toBe(SESSION_ID);
-    expect(subject.pending.calls[0].input.audit.eventId).toBe(
-      BINDINGS.auditEventIds.proofConsumption,
-    );
-    expect(subject.terminal.calls[0].input.audit.eventId).toBe(
-      BINDINGS.auditEventIds.operationTerminal,
-    );
-    expect(subject.sessions.calls[0].input.audit.eventId).toBe(
-      BINDINGS.auditEventIds.sessionCreated,
-    );
+    expect(subject.pending.calls[0].input.audit).toEqual({
+      eventId: BINDINGS.auditEventIds.proofConsumption,
+    });
+    expect(subject.terminal.calls[0].input.audit).toEqual({
+      eventId: BINDINGS.auditEventIds.operationTerminal,
+    });
+    expect(subject.sessions.calls[0].input.audit).toEqual({
+      eventId: BINDINGS.auditEventIds.sessionCreated,
+    });
   });
 
   it('provisions and completes a new account in one transaction', async () => {
