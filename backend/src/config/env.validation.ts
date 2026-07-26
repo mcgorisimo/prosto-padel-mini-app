@@ -22,6 +22,17 @@ const canonicalBase64Secret = Joi.string()
     'string.base64Secret': '{{#label}} must be a canonical base64 secret of at least 32 bytes',
   });
 
+const telegramBotToken = Joi.string()
+  .custom((value: string, helpers) =>
+    /^[1-9][0-9]{0,19}:[A-Za-z0-9_-]+$/u.test(value)
+      ? value
+      : helpers.error('string.telegramBotToken'),
+  )
+  .messages({
+    'string.telegramBotToken':
+      '{{#label}} must be a canonical Telegram bot token',
+  });
+
 function requiredWhenTelegramEnabled(schema: Joi.StringSchema) {
   return Joi.when('TELEGRAM_AUTH_ENABLED', {
     is: true,
@@ -64,7 +75,7 @@ export const envValidationSchema = Joi.object({
     }),
   TELEGRAM_BOT_TOKEN: Joi.when('TELEGRAM_AUTH_ENABLED', {
     is: true,
-    then: Joi.string().trim().min(1).required(),
+    then: telegramBotToken.required(),
     otherwise: Joi.string().allow('').default(''),
   }),
   TELEGRAM_INIT_DATA_MAX_AGE_SECONDS: Joi.when('TELEGRAM_AUTH_ENABLED', {

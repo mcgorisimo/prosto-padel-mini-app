@@ -23,6 +23,8 @@ const SAFE_TEST_DATABASE_CONFIG = Object.freeze({
   DATABASE_ENABLED: 'true',
   DATABASE_URL: 'postgresql://test-only.invalid/prosto_padel',
 });
+const SAFE_TEST_BOT_TOKEN =
+  '123456789:AA_TEST_ONLY_FAKE_TELEGRAM_BOT_TOKEN';
 
 function validate(environment: Record<string, unknown> = {}) {
   return envValidationSchema.validate(environment, {
@@ -57,7 +59,7 @@ describe('envValidationSchema', () => {
 
   it('does not enable authentication when only a token is present', () => {
     const { error, value } = validate({
-      TELEGRAM_BOT_TOKEN: 'obviously-fake-test-token',
+      TELEGRAM_BOT_TOKEN: SAFE_TEST_BOT_TOKEN,
     });
 
     expect(error).toBeUndefined();
@@ -96,12 +98,12 @@ describe('envValidationSchema', () => {
     expect(error).toBeDefined();
   });
 
-  it('accepts an obviously fake test token when enabled', () => {
+  it('accepts a syntactically valid fake test token when enabled', () => {
     const { error } = validate({
       ...SAFE_TEST_DATABASE_CONFIG,
       ...SAFE_TEST_TELEGRAM_CRYPTO_CONFIG,
       TELEGRAM_AUTH_ENABLED: 'true',
-      TELEGRAM_BOT_TOKEN: 'obviously-fake-test-token',
+      TELEGRAM_BOT_TOKEN: SAFE_TEST_BOT_TOKEN,
       TELEGRAM_INIT_DATA_MAX_AGE_SECONDS: '300',
     });
 
@@ -112,7 +114,7 @@ describe('envValidationSchema', () => {
     const { error } = validate({
       ...SAFE_TEST_DATABASE_CONFIG,
       TELEGRAM_AUTH_ENABLED: 'true',
-      TELEGRAM_BOT_TOKEN: 'obviously-fake-test-token',
+      TELEGRAM_BOT_TOKEN: SAFE_TEST_BOT_TOKEN,
     });
 
     expect(error).toBeDefined();
@@ -123,7 +125,7 @@ describe('envValidationSchema', () => {
       ...SAFE_TEST_DATABASE_CONFIG,
       ...SAFE_TEST_TELEGRAM_CRYPTO_CONFIG,
       TELEGRAM_AUTH_ENABLED: 'true',
-      TELEGRAM_BOT_TOKEN: 'obviously-fake-test-token',
+      TELEGRAM_BOT_TOKEN: SAFE_TEST_BOT_TOKEN,
       TELEGRAM_INIT_DATA_MAX_AGE_SECONDS: '300',
     });
 
@@ -136,7 +138,7 @@ describe('envValidationSchema', () => {
       ...SAFE_TEST_DATABASE_CONFIG,
       ...SAFE_TEST_TELEGRAM_CRYPTO_CONFIG,
       TELEGRAM_AUTH_ENABLED: 'true',
-      TELEGRAM_BOT_TOKEN: 'obviously-fake-test-token',
+      TELEGRAM_BOT_TOKEN: SAFE_TEST_BOT_TOKEN,
       TELEGRAM_INIT_DATA_MAX_AGE_SECONDS: '86400',
     });
 
@@ -148,7 +150,7 @@ describe('envValidationSchema', () => {
     const { error } = validate({
       ...SAFE_TEST_DATABASE_CONFIG,
       TELEGRAM_AUTH_ENABLED: 'true',
-      TELEGRAM_BOT_TOKEN: 'obviously-fake-test-token',
+      TELEGRAM_BOT_TOKEN: SAFE_TEST_BOT_TOKEN,
       TELEGRAM_INIT_DATA_MAX_AGE_SECONDS: '86401',
     });
 
@@ -161,7 +163,7 @@ describe('envValidationSchema', () => {
       const { error } = validate({
         ...SAFE_TEST_DATABASE_CONFIG,
         TELEGRAM_AUTH_ENABLED: 'true',
-        TELEGRAM_BOT_TOKEN: 'obviously-fake-test-token',
+        TELEGRAM_BOT_TOKEN: SAFE_TEST_BOT_TOKEN,
         TELEGRAM_INIT_DATA_MAX_AGE_SECONDS: maxAge,
       });
 
@@ -226,7 +228,7 @@ describe('envValidationSchema', () => {
       ...SAFE_TEST_TELEGRAM_CRYPTO_CONFIG,
       NODE_ENV: 'test',
       TELEGRAM_AUTH_ENABLED: 'true',
-      TELEGRAM_BOT_TOKEN: 'obviously-fake-test-token',
+      TELEGRAM_BOT_TOKEN: SAFE_TEST_BOT_TOKEN,
       TELEGRAM_INIT_DATA_MAX_AGE_SECONDS: '300',
     });
 
@@ -257,7 +259,7 @@ describe('envValidationSchema', () => {
       ...SAFE_TEST_TELEGRAM_CRYPTO_CONFIG,
       DATABASE_ENABLED: 'false',
       TELEGRAM_AUTH_ENABLED: 'true',
-      TELEGRAM_BOT_TOKEN: 'obviously-fake-test-token',
+      TELEGRAM_BOT_TOKEN: SAFE_TEST_BOT_TOKEN,
       TELEGRAM_INIT_DATA_MAX_AGE_SECONDS: '300',
     });
 
@@ -297,7 +299,7 @@ describe('envValidationSchema', () => {
       ...SAFE_TEST_DATABASE_CONFIG,
       ...SAFE_TEST_TELEGRAM_CRYPTO_CONFIG,
       TELEGRAM_AUTH_ENABLED: 'true',
-      TELEGRAM_BOT_TOKEN: 'obviously-fake-test-token',
+      TELEGRAM_BOT_TOKEN: SAFE_TEST_BOT_TOKEN,
       TELEGRAM_INIT_DATA_MAX_AGE_SECONDS: '300',
     });
 
@@ -314,7 +316,7 @@ describe('envValidationSchema', () => {
     const { error } = validate({
       ...SAFE_TEST_DATABASE_CONFIG,
       TELEGRAM_AUTH_ENABLED: 'true',
-      TELEGRAM_BOT_TOKEN: 'obviously-fake-test-token',
+      TELEGRAM_BOT_TOKEN: SAFE_TEST_BOT_TOKEN,
       TELEGRAM_INIT_DATA_MAX_AGE_SECONDS: '300',
     });
 
@@ -333,7 +335,7 @@ describe('envValidationSchema', () => {
       ...SAFE_TEST_DATABASE_CONFIG,
       ...SAFE_TEST_TELEGRAM_CRYPTO_CONFIG,
       TELEGRAM_AUTH_ENABLED: 'true',
-      TELEGRAM_BOT_TOKEN: 'obviously-fake-test-token',
+      TELEGRAM_BOT_TOKEN: SAFE_TEST_BOT_TOKEN,
       TELEGRAM_INIT_DATA_MAX_AGE_SECONDS: '300',
       [TELEGRAM_LOGIN_CONFIG_KEYS.lookupPepperBase64]:
         Buffer.from(secretMarker).toString('base64'),
@@ -351,7 +353,7 @@ describe('envValidationSchema', () => {
       ...SAFE_TEST_DATABASE_CONFIG,
       ...SAFE_TEST_TELEGRAM_CRYPTO_CONFIG,
       TELEGRAM_AUTH_ENABLED: 'true',
-      TELEGRAM_BOT_TOKEN: 'obviously-fake-test-token',
+      TELEGRAM_BOT_TOKEN: SAFE_TEST_BOT_TOKEN,
       TELEGRAM_INIT_DATA_MAX_AGE_SECONDS: '300',
       [TELEGRAM_LOGIN_CONFIG_KEYS.uuidNamespace]:
         '12345678-1234-5678-9234-56781234567Z',

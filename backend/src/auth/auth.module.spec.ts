@@ -68,7 +68,8 @@ function enabledConfiguration(): Record<string, unknown> {
     DATABASE_ENABLED: true,
     DATABASE_URL: 'postgresql://test-only.invalid/prosto_padel',
     TELEGRAM_AUTH_ENABLED: true,
-    TELEGRAM_BOT_TOKEN: 'obviously-fake-test-token',
+    TELEGRAM_BOT_TOKEN:
+      '123456789:AA_TEST_ONLY_FAKE_TELEGRAM_BOT_TOKEN',
     TELEGRAM_INIT_DATA_MAX_AGE_SECONDS: 300,
     [TELEGRAM_LOGIN_CONFIG_KEYS.lookupPepperBase64]: TEST_LOOKUP_PEPPER,
     [TELEGRAM_LOGIN_CONFIG_KEYS.workflowHmacSecretBase64]:
