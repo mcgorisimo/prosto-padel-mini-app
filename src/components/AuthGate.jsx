@@ -5,6 +5,8 @@ import SignUpScreen  from './auth/SignUpScreen';
 import LoginScreen   from './auth/LoginScreen';
 import Toast from './Toast'; // Correct path for Toast
 import { supabase } from '../lib/supabaseClient';
+import { useTelegramBackendLogin } from '../hooks/useTelegramBackendLogin';
+import TelegramBackendLoginStatus from './auth/TelegramBackendLoginStatus';
 import BallLoader from './BallLoader'; // Если мяч лежит в папке components
 
 const normalizeTelegramUsername = (value) =>
@@ -14,6 +16,7 @@ const normalizeTelegramUsername = (value) =>
     .replace(/\s+/g, '');
 
 export default function AuthGate() {
+  const telegramBackendLogin = useTelegramBackendLogin();
   const [session, setSession] = useState(null);
   const [authView, setAuthView] = useState('welcome'); // welcome, signup, login
   const [loading, setLoading] = useState(true);
@@ -30,13 +33,16 @@ export default function AuthGate() {
     getSession();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
+      (event, session) => {
+        if (event === 'SIGNED_OUT') {
+          telegramBackendLogin.clear();
+        }
         setSession(session);
       }
     );
 
     return () => subscription.unsubscribe();
-  }, []);
+  }, [telegramBackendLogin.clear]);
 
   const showToast = (message, variant = 'info') => {
     setToastMessage({ message, variant });
@@ -107,7 +113,21 @@ const handleSignUp = async ({ email, password, options }) => {
   };
 
   // 1. Показываем лоадер (если ты сделал BallLoader, используй его тут!)
-  if (loading) return <BallLoader />;
+  const telegramBackendStatus = (
+    <TelegramBackendLoginStatus
+      status={telegramBackendLogin.status}
+      accountKind={telegramBackendLogin.accountKind}
+    />
+  );
+
+  if (loading) {
+    return (
+      <>
+        <BallLoader />
+        {telegramBackendStatus}
+      </>
+    );
+  }
 
   const toast = toastMessage && (
     <Toast
@@ -123,6 +143,7 @@ const handleSignUp = async ({ email, password, options }) => {
       <>
         <App session={session} showToast={showToast} />
         {toast}
+        {telegramBackendStatus}
       </>
     );
   }
@@ -162,6 +183,7 @@ const handleSignUp = async ({ email, password, options }) => {
       )}
 
       {toast}
+      {telegramBackendStatus}
     </>
   );
 }
