@@ -64,6 +64,7 @@ services:
       args:
         VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:?VITE_SUPABASE_URL is required}
         VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY:?VITE_SUPABASE_ANON_KEY is required}
+        VITE_TELEGRAM_BACKEND_LOGIN_ENABLED: ${VITE_TELEGRAM_BACKEND_LOGIN_ENABLED:-false}
     restart: unless-stopped
     expose:
       - "8080"

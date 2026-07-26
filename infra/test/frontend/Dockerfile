@@ -6,6 +6,7 @@ WORKDIR /app
 
 ARG VITE_SUPABASE_URL
 ARG VITE_SUPABASE_ANON_KEY
+ARG VITE_TELEGRAM_BACKEND_LOGIN_ENABLED=false
 
 RUN if [ -z "${VITE_SUPABASE_URL}" ]; then \
       echo "VITE_SUPABASE_URL build argument is required" >&2; \
@@ -13,6 +14,11 @@ RUN if [ -z "${VITE_SUPABASE_URL}" ]; then \
     fi; \
     if [ -z "${VITE_SUPABASE_ANON_KEY}" ]; then \
       echo "VITE_SUPABASE_ANON_KEY build argument is required" >&2; \
+      exit 1; \
+    fi; \
+    if [ "${VITE_TELEGRAM_BACKEND_LOGIN_ENABLED}" != "true" ] && \
+       [ "${VITE_TELEGRAM_BACKEND_LOGIN_ENABLED}" != "false" ]; then \
+      echo "VITE_TELEGRAM_BACKEND_LOGIN_ENABLED must be true or false" >&2; \
       exit 1; \
     fi
 

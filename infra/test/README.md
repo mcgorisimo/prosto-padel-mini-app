@@ -39,6 +39,24 @@ Migration 015 is not in `docker-entrypoint-initdb.d`, an entrypoint, Compose
 startup, or an npm script. Every database operation below is a separate manual
 `db-tools` run through a guarded wrapper. No local PostgreSQL client is needed.
 
+## Frontend Telegram backend login build flag
+
+`VITE_TELEGRAM_BACKEND_LOGIN_ENABLED` is a public build-time Vite setting, not
+a runtime setting or a secret. Its Dockerfile and Compose default is `false`.
+With that value the frontend does not call the Telegram backend login endpoint,
+even if the backend endpoint remains enabled. Supabase remains the current
+session and data plane in both flag states.
+
+Changing the value requires rebuilding and recreating only `frontend`; changing
+an environment variable on an already-built container has no effect. For a
+separately approved Selectel rollout, set
+`VITE_TELEGRAM_BACKEND_LOGIN_ENABLED=true` in the server's non-secret
+environment file, then rebuild and recreate only `frontend` with the base
+Compose file followed by `compose.runtime-backend.yaml`. Roll back by restoring
+the value to `false` and rebuilding and recreating only `frontend` in the same
+way. Do not perform either deployment while preparing or reviewing this
+repository change.
+
 ## Guard model
 
 Every wrapper requires `ALLOW_LOCAL_TEST_DB_OPERATIONS=YES`, exact host
