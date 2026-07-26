@@ -1,0 +1,37 @@
+services:
+  backend:
+    environment:
+      DATABASE_URL: !reset null
+      DATABASE_PASSWORD: !reset null
+      DATABASE_ENABLED: "true"
+      DATABASE_HOST: postgres
+      DATABASE_PORT: "5432"
+      DATABASE_NAME: prosto_padel_test_migration_cycle
+      DATABASE_USER: backend_auth_app
+      DATABASE_PASSWORD_FILE: /run/secrets/backend-auth-app-password
+      TELEGRAM_AUTH_ENABLED: ${TELEGRAM_AUTH_ENABLED:-false}
+      TELEGRAM_BOT_TOKEN: !reset null
+      TELEGRAM_IDENTITY_LOOKUP_PEPPER_BASE64: !reset null
+      TELEGRAM_LOGIN_WORKFLOW_HMAC_SECRET_BASE64: !reset null
+      TELEGRAM_INIT_DATA_MAX_AGE_SECONDS: ${TELEGRAM_INIT_DATA_MAX_AGE_SECONDS:?TELEGRAM_INIT_DATA_MAX_AGE_SECONDS is required}
+      TELEGRAM_LOGIN_UUID_NAMESPACE: ${TELEGRAM_LOGIN_UUID_NAMESPACE:?TELEGRAM_LOGIN_UUID_NAMESPACE is required}
+      TELEGRAM_BOT_TOKEN_FILE: /run/secrets/telegram-bot-token
+      TELEGRAM_IDENTITY_LOOKUP_PEPPER_BASE64_FILE: /run/secrets/telegram-identity-lookup-pepper-base64
+      TELEGRAM_LOGIN_WORKFLOW_HMAC_SECRET_BASE64_FILE: /run/secrets/telegram-login-workflow-hmac-secret-base64
+    volumes:
+      - type: bind
+        source: ${BACKEND_AUTH_APP_PASSWORD_FILE_HOST:?BACKEND_AUTH_APP_PASSWORD_FILE_HOST is required}
+        target: /run/secrets/backend-auth-app-password
+        read_only: true
+      - type: bind
+        source: ${TELEGRAM_BOT_TOKEN_FILE_HOST:?TELEGRAM_BOT_TOKEN_FILE_HOST is required}
+        target: /run/secrets/telegram-bot-token
+        read_only: true
+      - type: bind
+        source: ${TELEGRAM_IDENTITY_LOOKUP_PEPPER_BASE64_FILE_HOST:?TELEGRAM_IDENTITY_LOOKUP_PEPPER_BASE64_FILE_HOST is required}
+        target: /run/secrets/telegram-identity-lookup-pepper-base64
+        read_only: true
+      - type: bind
+        source: ${TELEGRAM_LOGIN_WORKFLOW_HMAC_SECRET_BASE64_FILE_HOST:?TELEGRAM_LOGIN_WORKFLOW_HMAC_SECRET_BASE64_FILE_HOST is required}
+        target: /run/secrets/telegram-login-workflow-hmac-secret-base64
+        read_only: true

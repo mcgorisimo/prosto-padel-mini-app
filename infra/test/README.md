@@ -16,7 +16,7 @@ Run from the repository root:
 
 ```bash
 cp infra/test/.env.test.example infra/test/.env.test
-docker compose -f infra/test/compose.yaml --env-file infra/test/.env.test config
+docker compose -f infra/test/compose.yaml --env-file infra/test/.env.test config --services
 docker compose -f infra/test/compose.yaml --env-file infra/test/.env.test up --build -d postgres backend nginx
 curl --fail http://127.0.0.1:8080/api/v1/health
 docker compose -f infra/test/compose.yaml --env-file infra/test/.env.test ps
@@ -52,6 +52,179 @@ The commands below set the target database, opt-in, and confirmations explicitly
 on the `db-tools` container. Only the prompted synthetic role password is passed
 from the host. Other connection values and the synthetic connection password
 come from `infra/test/.env.test`.
+
+## Persistent runtime backend override
+
+This is a deployment runbook for a separately approved Selectel operation. Do
+not execute its commands while merely preparing or reviewing repository
+changes.
+
+The base `compose.yaml` remains the disposable/local contour and the only file
+used by `db-tools` and `auth-integration-runner`. The persistent runtime backend
+is selected explicitly with both files:
+
+```text
+-f infra/test/compose.yaml
+-f infra/test/compose.runtime-backend.yaml
+```
+
+The override changes only `backend`. PostgreSQL and `db-tools` continue to use
+`prosto_padel_test`; the backend connects to
+`prosto_padel_test_migration_cycle` as `backend_auth_app`. The override uses the
+Compose `!reset null` merge tag to remove the base `DATABASE_URL` and all direct
+Telegram secret variables. Stop if the installed Compose version cannot parse
+that tag. This safe command validates interpolation and merge syntax while
+printing nothing:
+
+```bash
+docker compose \
+  -f infra/test/compose.yaml \
+  -f infra/test/compose.runtime-backend.yaml \
+  --env-file infra/test/.env.test \
+  config --quiet
+```
+
+After that succeeds, this safe form may be used to print service names only:
+
+```bash
+docker compose \
+  -f infra/test/compose.yaml \
+  -f infra/test/compose.runtime-backend.yaml \
+  --env-file infra/test/.env.test \
+  config --services
+```
+
+Never run or share unfiltered `docker compose config` output on the server. It
+can expand and print existing database environment credentials. Do not enable
+shell tracing around any runtime-secret operation.
+
+The four required files are:
+
+- the `backend_auth_app` password;
+- the Telegram bot token;
+- the Telegram identity lookup pepper in canonical base64;
+- the Telegram login workflow HMAC secret in canonical base64.
+
+Create them manually through the approved server secret process, outside the
+Git repository. Each file must be a regular, non-symlink file owned by
+`prostopadel` with mode `600`. Put only its corresponding secret in the file;
+the backend removes a final CR/LF itself. Configure only their non-secret host
+paths in `infra/test/.env.test`, using the four `*_FILE_HOST` variables from the
+example. Never put the file contents in that env file, Compose, an image build
+argument, or Git.
+
+Set these non-secret server values explicitly in `infra/test/.env.test`:
+
+- `TELEGRAM_AUTH_ENABLED=false` until the approved activation;
+- `TELEGRAM_INIT_DATA_MAX_AGE_SECONDS=<approved value>`;
+- `TELEGRAM_LOGIN_UUID_NAMESPACE=<stable approved UUID>`.
+
+No default max age or UUID is supplied by the override. Missing values stop
+Compose interpolation. The authentication feature itself remains disabled by
+default.
+
+### Mandatory UID/GID stop point
+
+The backend image runs as its existing unprivileged `node` user. A bind mount
+retains host numeric ownership, so mode `600` works only when the host
+`prostopadel` UID/GID matches the actual runtime `node` UID/GID. Do not assume
+that it does.
+
+After building only the backend image, compare the IDs without the runtime
+override or secret mounts:
+
+```bash
+docker compose \
+  -f infra/test/compose.yaml \
+  --env-file infra/test/.env.test \
+  build backend
+
+HOST_RUNTIME_IDS="$(id -u prostopadel):$(id -g prostopadel)"
+CONTAINER_RUNTIME_IDS="$(
+  docker compose \
+    -f infra/test/compose.yaml \
+    --env-file infra/test/.env.test \
+    run --rm --no-deps --entrypoint sh backend \
+    -c 'printf "%s:%s" "$(id -u)" "$(id -g)"'
+)"
+test "$HOST_RUNTIME_IDS" = "$CONTAINER_RUNTIME_IDS" || {
+  echo 'STOP: backend runtime UID/GID does not match the secret-file owner' >&2
+  exit 1
+}
+```
+
+If the IDs differ, stop and design an approved non-root user mapping or secret
+delivery boundary separately. Do not use `chmod 644`, make files
+world-readable, change the persistent backend to root, or copy files into the
+repository.
+
+After creating the files and exporting the same non-secret host-path variables
+used by Compose, verify ownership/mode without reading contents:
+
+```bash
+HOST_UID="$(id -u prostopadel)"
+HOST_GID="$(id -g prostopadel)"
+for secret_path in \
+  "$BACKEND_AUTH_APP_PASSWORD_FILE_HOST" \
+  "$TELEGRAM_BOT_TOKEN_FILE_HOST" \
+  "$TELEGRAM_IDENTITY_LOOKUP_PEPPER_BASE64_FILE_HOST" \
+  "$TELEGRAM_LOGIN_WORKFLOW_HMAC_SECRET_BASE64_FILE_HOST"
+do
+  test -f "$secret_path" &&
+    test ! -L "$secret_path" &&
+    test "$(stat -c '%u:%g:%a' "$secret_path")" = "$HOST_UID:$HOST_GID:600" ||
+    {
+      echo 'STOP: runtime secret file ownership or mode is unsafe' >&2
+      exit 1
+    }
+done
+```
+
+Finally, prove that the actual container user can open every read-only mount.
+This checks access only and never reads or prints contents:
+
+```bash
+docker compose \
+  -f infra/test/compose.yaml \
+  -f infra/test/compose.runtime-backend.yaml \
+  --env-file infra/test/.env.test \
+  run --rm --no-deps --entrypoint node backend \
+  -e "const fs=require('node:fs'); for (const p of [
+    '/run/secrets/backend-auth-app-password',
+    '/run/secrets/telegram-bot-token',
+    '/run/secrets/telegram-identity-lookup-pepper-base64',
+    '/run/secrets/telegram-login-workflow-hmac-secret-base64'
+  ]) fs.accessSync(p, fs.constants.R_OK)"
+```
+
+Only after every stop point passes may an approved deployment recreate the
+backend alone:
+
+```bash
+docker compose \
+  -f infra/test/compose.yaml \
+  -f infra/test/compose.runtime-backend.yaml \
+  --env-file infra/test/.env.test \
+  up -d --build --no-deps backend
+
+curl --fail http://127.0.0.1:8080/api/v1/health
+```
+
+`/api/v1/health` proves only that the backend process is running. It is a
+static health response: it does not open a PostgreSQL connection and therefore
+does not verify the `backend_auth_app` password, role grants, ACL, or access to
+the `backend_auth` schema. A green health response is not approval to set
+`TELEGRAM_AUTH_ENABLED=true`.
+
+Stop after the health check. Enabling Telegram authentication requires a
+separately designed and approved DB-backed readiness or authentication smoke
+check. This runbook intentionally adds no readiness endpoint, SQL command, or
+manual table query as a substitute for that future check.
+
+The override does not publish PostgreSQL or backend ports and does not change
+frontend, nginx, or their networks. For rollback, retain the mounted files, set
+`TELEGRAM_AUTH_ENABLED=false`, and recreate only backend with the same override.
+Do not fall back to the base backend database identity.
 
 ## Migration-cycle workflow
 
