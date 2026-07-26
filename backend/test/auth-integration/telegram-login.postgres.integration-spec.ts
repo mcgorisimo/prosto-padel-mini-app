@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto';
-import fastifyCookie from '@fastify/cookie';
 import { Test } from '@nestjs/testing';
 import {
   FastifyAdapter,
@@ -414,7 +413,7 @@ describe('Telegram login PostgreSQL integration', () => {
     ).toBe(0);
   });
 
-  it('serves the real workflow through Fastify inject without exposing the credential', async () => {
+  it('serves the real workflow through Fastify inject with the exact public response', async () => {
     const prepared = await harness.prepareLogin({
       subjectLabel: 'http-user',
       proofLabel: 'http-proof',
@@ -439,17 +438,16 @@ describe('Telegram login PostgreSQL integration', () => {
           new FastifyAdapter(),
         );
       registerCleanup(async () => app.close());
-      await app.register(fastifyCookie);
       app.setGlobalPrefix('api/v1');
       await app.init();
       const response = await app.inject({
         method: 'POST',
         url: '/api/v1/auth/telegram/login',
-        headers: {
-          'content-type': 'application/json',
-          'idempotency-key': prepared.requestKey,
+        headers: { 'content-type': 'application/json' },
+        payload: {
+          initData: prepared.rawInitData,
+          requestKey: prepared.requestKey,
         },
-        payload: { initData: prepared.rawInitData },
       });
 
       expect(response.statusCode).toBe(200);
@@ -467,27 +465,24 @@ describe('Telegram login PostgreSQL integration', () => {
         );
       }
       const responseRecord = responseBody as Record<string, unknown>;
-      expect(responseRecord.authenticated === true).toBe(true);
       expect(
-        responseRecord.sessionExpiresAt ===
+        responseRecord.expiresAt ===
           prepared.bindings.timestamps.sessionExpiresAt,
       ).toBe(true);
+      expect(responseRecord.accountKind === 'new').toBe(true);
       expect(Object.keys(responseRecord).sort()).toEqual([
-        'authenticated',
-        'sessionExpiresAt',
+        'accountKind',
+        'credential',
+        'expiresAt',
       ]);
-      const setCookie = response.headers['set-cookie'];
-      expect(typeof setCookie).toBe('string');
-      const cookiePair = (setCookie as string).split(';', 1)[0];
-      const [cookieName, credential] = cookiePair.split('=', 2);
-      expect(cookieName).toBe('__Host-prosto_padel_session');
+      const credential = responseRecord.credential;
       expect(typeof credential === 'string').toBe(true);
-      if (credential === undefined) {
-        throw new Error('Auth integration session cookie is missing');
+      if (typeof credential !== 'string') {
+        throw new Error('Auth integration session credential is missing');
       }
       expect(isCanonicalSessionCredential(credential)).toBe(true);
-      expect(response.body.includes(credential)).toBe(false);
       expect(response.body.includes(prepared.rawInitData)).toBe(false);
+      expect(response.headers['set-cookie']).toBeUndefined();
 
       const persisted = await harness.query<CredentialRow>(
         `

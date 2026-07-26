@@ -1,7 +1,6 @@
 import {
   Body,
   Controller,
-  Headers,
   HttpCode,
   HttpException,
   HttpStatus,
@@ -17,13 +16,13 @@ import {
 import {
   SYSTEM_TELEGRAM_LOGIN_HTTP_CLOCK,
   TELEGRAM_LOGIN_HTTP_CLOCK,
-  TELEGRAM_SESSION_COOKIE_NAME,
   TelegramLoginHttpClock,
   TelegramLoginHttpSuccessResponse,
   TelegramLoginPublicError,
-  createTelegramSessionCookie,
+  createTelegramLoginHttpSuccessResponse,
   readTelegramLoginHttpRequest,
 } from './telegram-login.http';
+import { isUnixEpochSeconds } from './auth.types';
 import { TelegramLoginRejectionReason } from './telegram-login.types';
 
 function publicError(
@@ -117,17 +116,12 @@ export class TelegramLoginController {
   @HttpCode(HttpStatus.OK)
   async login(
     @Body() body: unknown,
-    @Headers('idempotency-key')
-    idempotencyKeyHeader: string | readonly string[] | undefined,
     @Res({ passthrough: true }) reply: FastifyReply,
   ): Promise<TelegramLoginHttpSuccessResponse> {
     reply.header('Cache-Control', 'no-store');
     reply.header('Pragma', 'no-cache');
 
-    const request = readTelegramLoginHttpRequest(
-      body,
-      idempotencyKeyHeader,
-    );
+    const request = readTelegramLoginHttpRequest(body);
     if (request === undefined) {
       throw invalidRequest();
     }
@@ -139,6 +133,9 @@ export class TelegramLoginController {
     try {
       now = this.clock.nowEpochSeconds();
     } catch {
+      throw internalFailure();
+    }
+    if (!isUnixEpochSeconds(now)) {
       throw internalFailure();
     }
 
@@ -157,36 +154,17 @@ export class TelegramLoginController {
       throw rejectionError(result.reason);
     }
 
-    const cookie = createTelegramSessionCookie(
+    const response = createTelegramLoginHttpSuccessResponse(
       result.credential,
       result.expiresAt,
+      result.accountKind,
       now,
     );
-    if (cookie === undefined) {
+    if (response === undefined) {
       throw internalFailure();
     }
 
-    try {
-      reply.setCookie(
-        TELEGRAM_SESSION_COOKIE_NAME,
-        cookie.credential,
-        {
-          httpOnly: true,
-          secure: true,
-          sameSite: 'lax',
-          path: '/',
-          expires: cookie.expires,
-          maxAge: cookie.maxAge,
-        },
-      );
-    } catch {
-      throw internalFailure();
-    }
-
-    return Object.freeze({
-      authenticated: true,
-      sessionExpiresAt: result.expiresAt,
-    });
+    return response;
   }
 }
 

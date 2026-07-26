@@ -1,4 +1,3 @@
-import { isInternalUuid } from '../common/internal-uuid';
 import {
   UnixEpochSeconds,
   isUnixEpochSeconds,
@@ -8,9 +7,10 @@ import {
 export const TELEGRAM_LOGIN_HTTP_CLOCK = Symbol(
   'TELEGRAM_LOGIN_HTTP_CLOCK',
 );
-export const TELEGRAM_SESSION_COOKIE_NAME =
-  '__Host-prosto_padel_session';
 export const TELEGRAM_INIT_DATA_MAX_UTF8_BYTES = 16_384;
+export const TELEGRAM_LOGIN_REQUEST_KEY_MAX_LENGTH = 256;
+
+const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f-\u009f]/u;
 
 export interface TelegramLoginHttpClock {
   nowEpochSeconds(): UnixEpochSeconds;
@@ -22,20 +22,15 @@ export type TelegramLoginHttpRequest = Readonly<{
 }>;
 
 export type TelegramLoginHttpSuccessResponse = Readonly<{
-  authenticated: true;
-  sessionExpiresAt: UnixEpochSeconds;
+  credential: string;
+  expiresAt: UnixEpochSeconds;
+  accountKind: 'existing' | 'new';
 }>;
 
 export type TelegramLoginPublicError = Readonly<{
   statusCode: number;
   code: string;
   message: string;
-}>;
-
-export type TelegramSessionCookie = Readonly<{
-  credential: string;
-  expires: Date;
-  maxAge: number;
 }>;
 
 export const SYSTEM_TELEGRAM_LOGIN_HTTP_CLOCK: TelegramLoginHttpClock =
@@ -46,12 +41,20 @@ export const SYSTEM_TELEGRAM_LOGIN_HTTP_CLOCK: TelegramLoginHttpClock =
   });
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    Array.isArray(value)
+  ) {
+    return false;
+  }
+
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
 }
 
 export function readTelegramLoginHttpRequest(
   body: unknown,
-  idempotencyKeyHeader: string | readonly string[] | undefined,
 ): TelegramLoginHttpRequest | undefined {
   if (!isRecord(body)) {
     return undefined;
@@ -59,21 +62,25 @@ export function readTelegramLoginHttpRequest(
 
   const keys = Object.keys(body);
   if (
-    keys.length !== 1 ||
-    keys[0] !== 'initData' ||
+    keys.length !== 2 ||
+    !Object.prototype.hasOwnProperty.call(body, 'initData') ||
+    !Object.prototype.hasOwnProperty.call(body, 'requestKey') ||
     typeof body.initData !== 'string' ||
     body.initData.length === 0 ||
     Buffer.byteLength(body.initData, 'utf8') >
       TELEGRAM_INIT_DATA_MAX_UTF8_BYTES ||
-    typeof idempotencyKeyHeader !== 'string' ||
-    !isInternalUuid(idempotencyKeyHeader)
+    typeof body.requestKey !== 'string' ||
+    body.requestKey.length === 0 ||
+    body.requestKey.length > TELEGRAM_LOGIN_REQUEST_KEY_MAX_LENGTH ||
+    body.requestKey.trim() !== body.requestKey ||
+    CONTROL_CHARACTER_PATTERN.test(body.requestKey)
   ) {
     return undefined;
   }
 
   return Object.freeze({
     initData: body.initData,
-    requestKey: idempotencyKeyHeader,
+    requestKey: body.requestKey,
   });
 }
 
@@ -92,37 +99,24 @@ function isCanonicalSessionCredential(value: unknown): value is string {
   return valid;
 }
 
-export function createTelegramSessionCookie(
+export function createTelegramLoginHttpSuccessResponse(
   credential: unknown,
   expiresAt: unknown,
+  accountKind: unknown,
   now: UnixEpochSeconds,
-): TelegramSessionCookie | undefined {
+): TelegramLoginHttpSuccessResponse | undefined {
   if (
     !isCanonicalSessionCredential(credential) ||
     !isUnixEpochSeconds(expiresAt) ||
-    expiresAt <= now
+    expiresAt <= now ||
+    (accountKind !== 'existing' && accountKind !== 'new')
   ) {
-    return undefined;
-  }
-
-  const maxAge = expiresAt - now;
-  const expiresAtMilliseconds = expiresAt * 1_000;
-  if (
-    !Number.isSafeInteger(maxAge) ||
-    maxAge <= 0 ||
-    !Number.isSafeInteger(expiresAtMilliseconds)
-  ) {
-    return undefined;
-  }
-
-  const expires = new Date(expiresAtMilliseconds);
-  if (!Number.isFinite(expires.getTime())) {
     return undefined;
   }
 
   return Object.freeze({
     credential,
-    expires,
-    maxAge,
+    expiresAt,
+    accountKind,
   });
 }
