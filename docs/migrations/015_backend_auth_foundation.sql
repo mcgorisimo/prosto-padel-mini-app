@@ -1480,12 +1480,21 @@ declare
   v_role text;
   v_has_profile boolean;
 begin
-  v_account_id := case
-    when tg_table_name = 'accounts' and tg_op = 'DELETE' then old.id
-    when tg_table_name = 'accounts' then new.id
-    when tg_op = 'DELETE' then old.account_id
-    else new.account_id
-  end;
+  if tg_table_name = 'accounts' then
+    if tg_op = 'DELETE' then
+      v_account_id := old.id;
+    else
+      v_account_id := new.id;
+    end if;
+  elsif tg_table_name = 'player_profiles' then
+    if tg_op = 'DELETE' then
+      v_account_id := old.account_id;
+    else
+      v_account_id := new.account_id;
+    end if;
+  else
+    raise exception using errcode = '55000', message = 'BACKEND_AUTH_PLAYER_PROFILE_TRIGGER_TABLE_INVALID';
+  end if;
 
   select a.role into v_role
   from backend_auth.accounts a
@@ -1517,12 +1526,21 @@ as $$
 declare
   v_identity_id uuid;
 begin
-  v_identity_id := case
-    when tg_table_name = 'external_identities' and tg_op = 'DELETE' then old.id
-    when tg_table_name = 'external_identities' then new.id
-    when tg_op = 'DELETE' then old.identity_id
-    else new.identity_id
-  end;
+  if tg_table_name = 'external_identities' then
+    if tg_op = 'DELETE' then
+      v_identity_id := old.id;
+    else
+      v_identity_id := new.id;
+    end if;
+  elsif tg_table_name = 'external_identity_lookup_digests' then
+    if tg_op = 'DELETE' then
+      v_identity_id := old.identity_id;
+    else
+      v_identity_id := new.identity_id;
+    end if;
+  else
+    raise exception using errcode = '55000', message = 'BACKEND_AUTH_IDENTITY_ALIAS_TRIGGER_TABLE_INVALID';
+  end if;
 
   perform 1 from backend_auth.external_identities i
   where i.id = v_identity_id
@@ -1778,11 +1796,27 @@ declare
   v_last_command backend_auth.auth_session_commands%rowtype;
   v_previous_command backend_auth.auth_session_commands%rowtype;
 begin
-  v_family_id := case
-    when tg_table_name = 'auth_session_families'
-      then case when tg_op = 'DELETE' then old.id else new.id end
-    else case when tg_op = 'DELETE' then old.family_id else new.family_id end
-  end;
+  if tg_table_name = 'auth_session_families' then
+    if tg_op = 'DELETE' then
+      v_family_id := old.id;
+    else
+      v_family_id := new.id;
+    end if;
+  elsif tg_table_name = 'auth_session_credentials' then
+    if tg_op = 'DELETE' then
+      v_family_id := old.family_id;
+    else
+      v_family_id := new.family_id;
+    end if;
+  elsif tg_table_name = 'auth_session_commands' then
+    if tg_op = 'DELETE' then
+      v_family_id := old.family_id;
+    else
+      v_family_id := new.family_id;
+    end if;
+  else
+    raise exception using errcode = '55000', message = 'BACKEND_AUTH_SESSION_TRIGGER_TABLE_INVALID';
+  end if;
 
   select f.* into v_family
   from backend_auth.auth_session_families f
@@ -2053,10 +2087,21 @@ declare
   v_last backend_auth.otp_commands%rowtype;
   v_incorrect_count bigint;
 begin
-  v_challenge_id := case when tg_table_name = 'otp_challenges'
-    then case when tg_op = 'DELETE' then old.id else new.id end
-    else case when tg_op = 'DELETE' then old.challenge_id else new.challenge_id end
-  end;
+  if tg_table_name = 'otp_challenges' then
+    if tg_op = 'DELETE' then
+      v_challenge_id := old.id;
+    else
+      v_challenge_id := new.id;
+    end if;
+  elsif tg_table_name = 'otp_commands' then
+    if tg_op = 'DELETE' then
+      v_challenge_id := old.challenge_id;
+    else
+      v_challenge_id := new.challenge_id;
+    end if;
+  else
+    raise exception using errcode = '55000', message = 'BACKEND_AUTH_OTP_TRIGGER_TABLE_INVALID';
+  end if;
 
   select c.* into v_challenge
   from backend_auth.otp_challenges c

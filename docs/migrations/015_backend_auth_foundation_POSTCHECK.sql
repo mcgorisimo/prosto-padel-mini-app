@@ -632,6 +632,10 @@ declare
   ]
   $triggers$::pg_catalog.jsonb;
   v_mismatch_count bigint;
+  v_function_definition text;
+  v_function_definition_lower text;
+  v_expected_selector text;
+  v_expected_error_message text;
 begin
   with expected as (
     select value ->> 0 as index_name, value ->> 1 as table_name,
@@ -781,6 +785,221 @@ begin
        'ordered_rotation.command_sequence <= c.command_sequence'
      ) = 0 then
     raise exception 'POSTCHECK_FAILED: sequence-ordered session rotation validation is missing';
+  end if;
+
+  select pg_catalog.regexp_replace(
+           pg_catalog.regexp_replace(
+             pg_catalog.regexp_replace(
+               p.prosrc,
+               '/\*.*?\*/',
+               '',
+               'gs'
+             ),
+             '--[^\r\n]*',
+             '',
+             'g'
+           ),
+           '[[:space:]]+',
+           '',
+           'g'
+         )
+  into v_function_definition
+  from pg_catalog.pg_proc p
+  where p.oid =
+    'backend_auth.assert_player_profile_consistency()'::pg_catalog.regprocedure;
+  v_function_definition_lower := pg_catalog.lower(v_function_definition);
+  v_expected_error_message :=
+    'BACKEND_AUTH_PLAYER_PROFILE_TRIGGER_TABLE_INVALID';
+  v_expected_selector :=
+    'iftg_table_name=''accounts''then'
+    || 'iftg_op=''delete''thenv_account_id:=old.id;'
+    || 'elsev_account_id:=new.id;endif;'
+    || 'elsiftg_table_name=''player_profiles''then'
+    || 'iftg_op=''delete''thenv_account_id:=old.account_id;'
+    || 'elsev_account_id:=new.account_id;endif;'
+    || 'elseraiseexceptionusingerrcode=''55000'','
+    || 'message=''backend_auth_player_profile_trigger_table_invalid'';'
+    || 'endif;';
+  if pg_catalog.strpos(
+       v_function_definition_lower, 'v_account_id:=case'
+     ) <> 0
+     or pg_catalog.strpos(
+       v_function_definition_lower, v_expected_selector
+     ) = 0
+     or pg_catalog.strpos(
+       v_function_definition,
+       pg_catalog.quote_literal(v_expected_error_message)
+     ) = 0
+     or pg_catalog.char_length(v_function_definition_lower)
+        - pg_catalog.char_length(pg_catalog.replace(
+            v_function_definition_lower,
+            pg_catalog.lower(v_expected_error_message),
+            ''
+          ))
+        <> pg_catalog.char_length(v_expected_error_message) then
+    raise exception 'POSTCHECK_FAILED: player-profile trigger row-shape selector differs';
+  end if;
+
+  select pg_catalog.regexp_replace(
+           pg_catalog.regexp_replace(
+             pg_catalog.regexp_replace(
+               p.prosrc,
+               '/\*.*?\*/',
+               '',
+               'gs'
+             ),
+             '--[^\r\n]*',
+             '',
+             'g'
+           ),
+           '[[:space:]]+',
+           '',
+           'g'
+         )
+  into v_function_definition
+  from pg_catalog.pg_proc p
+  where p.oid =
+    'backend_auth.assert_external_identity_aliases()'::pg_catalog.regprocedure;
+  v_function_definition_lower := pg_catalog.lower(v_function_definition);
+  v_expected_error_message :=
+    'BACKEND_AUTH_IDENTITY_ALIAS_TRIGGER_TABLE_INVALID';
+  v_expected_selector :=
+    'iftg_table_name=''external_identities''then'
+    || 'iftg_op=''delete''thenv_identity_id:=old.id;'
+    || 'elsev_identity_id:=new.id;endif;'
+    || 'elsiftg_table_name=''external_identity_lookup_digests''then'
+    || 'iftg_op=''delete''thenv_identity_id:=old.identity_id;'
+    || 'elsev_identity_id:=new.identity_id;endif;'
+    || 'elseraiseexceptionusingerrcode=''55000'','
+    || 'message=''backend_auth_identity_alias_trigger_table_invalid'';'
+    || 'endif;';
+  if pg_catalog.strpos(
+       v_function_definition_lower, 'v_identity_id:=case'
+     ) <> 0
+     or pg_catalog.strpos(
+       v_function_definition_lower, v_expected_selector
+     ) = 0
+     or pg_catalog.strpos(
+       v_function_definition,
+       pg_catalog.quote_literal(v_expected_error_message)
+     ) = 0
+     or pg_catalog.char_length(v_function_definition_lower)
+        - pg_catalog.char_length(pg_catalog.replace(
+            v_function_definition_lower,
+            pg_catalog.lower(v_expected_error_message),
+            ''
+          ))
+        <> pg_catalog.char_length(v_expected_error_message) then
+    raise exception 'POSTCHECK_FAILED: identity-alias trigger row-shape selector differs';
+  end if;
+
+  select pg_catalog.regexp_replace(
+           pg_catalog.regexp_replace(
+             pg_catalog.regexp_replace(
+               p.prosrc,
+               '/\*.*?\*/',
+               '',
+               'gs'
+             ),
+             '--[^\r\n]*',
+             '',
+             'g'
+           ),
+           '[[:space:]]+',
+           '',
+           'g'
+         )
+  into v_function_definition
+  from pg_catalog.pg_proc p
+  where p.oid =
+    'backend_auth.assert_session_consistency()'::pg_catalog.regprocedure;
+  v_function_definition_lower := pg_catalog.lower(v_function_definition);
+  v_expected_error_message :=
+    'BACKEND_AUTH_SESSION_TRIGGER_TABLE_INVALID';
+  v_expected_selector :=
+    'iftg_table_name=''auth_session_families''then'
+    || 'iftg_op=''delete''thenv_family_id:=old.id;'
+    || 'elsev_family_id:=new.id;endif;'
+    || 'elsiftg_table_name=''auth_session_credentials''then'
+    || 'iftg_op=''delete''thenv_family_id:=old.family_id;'
+    || 'elsev_family_id:=new.family_id;endif;'
+    || 'elsiftg_table_name=''auth_session_commands''then'
+    || 'iftg_op=''delete''thenv_family_id:=old.family_id;'
+    || 'elsev_family_id:=new.family_id;endif;'
+    || 'elseraiseexceptionusingerrcode=''55000'','
+    || 'message=''backend_auth_session_trigger_table_invalid'';'
+    || 'endif;';
+  if pg_catalog.strpos(
+       v_function_definition_lower, 'v_family_id:=case'
+     ) <> 0
+     or pg_catalog.strpos(
+       v_function_definition_lower, v_expected_selector
+     ) = 0
+     or pg_catalog.strpos(
+       v_function_definition,
+       pg_catalog.quote_literal(v_expected_error_message)
+     ) = 0
+     or pg_catalog.char_length(v_function_definition_lower)
+        - pg_catalog.char_length(pg_catalog.replace(
+            v_function_definition_lower,
+            pg_catalog.lower(v_expected_error_message),
+            ''
+          ))
+        <> pg_catalog.char_length(v_expected_error_message) then
+    raise exception 'POSTCHECK_FAILED: session trigger row-shape selector differs';
+  end if;
+
+  select pg_catalog.regexp_replace(
+           pg_catalog.regexp_replace(
+             pg_catalog.regexp_replace(
+               p.prosrc,
+               '/\*.*?\*/',
+               '',
+               'gs'
+             ),
+             '--[^\r\n]*',
+             '',
+             'g'
+           ),
+           '[[:space:]]+',
+           '',
+           'g'
+         )
+  into v_function_definition
+  from pg_catalog.pg_proc p
+  where p.oid =
+    'backend_auth.assert_otp_consistency()'::pg_catalog.regprocedure;
+  v_function_definition_lower := pg_catalog.lower(v_function_definition);
+  v_expected_error_message :=
+    'BACKEND_AUTH_OTP_TRIGGER_TABLE_INVALID';
+  v_expected_selector :=
+    'iftg_table_name=''otp_challenges''then'
+    || 'iftg_op=''delete''thenv_challenge_id:=old.id;'
+    || 'elsev_challenge_id:=new.id;endif;'
+    || 'elsiftg_table_name=''otp_commands''then'
+    || 'iftg_op=''delete''thenv_challenge_id:=old.challenge_id;'
+    || 'elsev_challenge_id:=new.challenge_id;endif;'
+    || 'elseraiseexceptionusingerrcode=''55000'','
+    || 'message=''backend_auth_otp_trigger_table_invalid'';'
+    || 'endif;';
+  if pg_catalog.strpos(
+       v_function_definition_lower, 'v_challenge_id:=case'
+     ) <> 0
+     or pg_catalog.strpos(
+       v_function_definition_lower, v_expected_selector
+     ) = 0
+     or pg_catalog.strpos(
+       v_function_definition,
+       pg_catalog.quote_literal(v_expected_error_message)
+     ) = 0
+     or pg_catalog.char_length(v_function_definition_lower)
+        - pg_catalog.char_length(pg_catalog.replace(
+            v_function_definition_lower,
+            pg_catalog.lower(v_expected_error_message),
+            ''
+          ))
+        <> pg_catalog.char_length(v_expected_error_message) then
+    raise exception 'POSTCHECK_FAILED: OTP trigger row-shape selector differs';
   end if;
 end;
 $$;
