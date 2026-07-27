@@ -14,10 +14,17 @@ import { PostgresAuthenticationOperationTerminalRepository } from '../database/p
 import { PostgresExternalIdentityResolutionRepository } from '../database/postgres-external-identity.repository';
 import { PostgresInitialSessionRepository } from '../database/postgres-initial-session.repository';
 import { PostgresPlayerAccountProvisioningRepository } from '../database/postgres-player-account-provisioning.repository';
+import { PostgresSessionAuthenticationRepository } from '../database/postgres-session-authentication.repository';
 import { PostgresSessionCredentialLifecycleRepository } from '../database/postgres-session-credential-lifecycle.repository';
 import { PostgresTelegramAuthenticationOperationRepository } from '../database/postgres-telegram-authentication-operation.repository';
 import { PostgresTransactionExecutorAdapter } from '../database/postgres-transaction-executor.adapter';
 import { NodeSessionCredentialIssuer } from './session-credential-issuer.adapter';
+import { SessionAuthenticationController } from './session-authentication.controller';
+import {
+  SESSION_AUTHENTICATION_CLOCK_PROVIDER,
+  SessionBearerGuard,
+} from './session-authentication.guard';
+import { SessionAuthenticationService } from './session-authentication.service';
 import {
   SESSION_LIFECYCLE_HTTP_CLOCK_PROVIDER,
   SessionLifecycleController,
@@ -194,12 +201,36 @@ function createSessionLifecycleService(
   });
 }
 
+function createSessionAuthenticationService(
+  transactions: PostgresTransactionExecutorAdapter,
+  sessions: PostgresSessionAuthenticationRepository,
+): SessionAuthenticationService {
+  return new SessionAuthenticationService({
+    transactions,
+    sessions,
+  });
+}
+
 @Module({
   imports: [DatabaseModule],
-  controllers: [TelegramLoginController, SessionLifecycleController],
+  controllers: [
+    TelegramLoginController,
+    SessionLifecycleController,
+    SessionAuthenticationController,
+  ],
   providers: [
     TELEGRAM_LOGIN_HTTP_CLOCK_PROVIDER,
     SESSION_LIFECYCLE_HTTP_CLOCK_PROVIDER,
+    SESSION_AUTHENTICATION_CLOCK_PROVIDER,
+    SessionBearerGuard,
+    {
+      provide: SessionAuthenticationService,
+      inject: [
+        PostgresTransactionExecutorAdapter,
+        PostgresSessionAuthenticationRepository,
+      ],
+      useFactory: createSessionAuthenticationService,
+    },
     {
       provide: SessionLifecycleService,
       inject: [
@@ -223,6 +254,10 @@ function createSessionLifecycleService(
       useFactory: createTelegramLoginFeature,
     },
   ],
-  exports: [TELEGRAM_LOGIN_FEATURE],
+  exports: [
+    TELEGRAM_LOGIN_FEATURE,
+    SessionAuthenticationService,
+    SessionBearerGuard,
+  ],
 })
 export class AuthModule {}

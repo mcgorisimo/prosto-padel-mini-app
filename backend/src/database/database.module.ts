@@ -5,6 +5,7 @@ import { PostgresExternalIdentityResolutionRepository } from './postgres-externa
 import { PostgresInitialSessionRepository } from './postgres-initial-session.repository';
 import { PostgresPlayerAccountProvisioningRepository } from './postgres-player-account-provisioning.repository';
 import { PostgresSecurityAuditRepository } from './postgres-security-audit.repository';
+import { PostgresSessionAuthenticationRepository } from './postgres-session-authentication.repository';
 import { PostgresSessionCredentialLifecycleRepository } from './postgres-session-credential-lifecycle.repository';
 import { PostgresService } from './postgres.service';
 import { PostgresTelegramAuthenticationOperationRepository } from './postgres-telegram-authentication-operation.repository';
@@ -15,6 +16,7 @@ const DATABASE_WORKFLOW_PROVIDERS: Provider[] = [
   PostgresSecurityAuditRepository,
   PostgresExternalIdentityResolutionRepository,
   PostgresAccountStatusReader,
+  PostgresSessionAuthenticationRepository,
   {
     provide: PostgresTransactionExecutorAdapter,
     inject: [PostgresTransactionRunner],
@@ -79,6 +81,7 @@ const DATABASE_WORKFLOW_EXPORTS = [
   PostgresTelegramAuthenticationOperationRepository,
   PostgresExternalIdentityResolutionRepository,
   PostgresAccountStatusReader,
+  PostgresSessionAuthenticationRepository,
   PostgresPlayerAccountProvisioningRepository,
   PostgresAuthenticationOperationTerminalRepository,
   PostgresInitialSessionRepository,
