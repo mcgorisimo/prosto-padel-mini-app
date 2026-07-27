@@ -20,6 +20,7 @@ import { PostgresSessionCredentialLifecycleRepository } from './postgres-session
 import { PostgresTransaction } from './postgres-transaction';
 import {
   ApplyPresentedSessionCredentialInput,
+  RevokePresentedSessionInput,
   SessionCredentialLifecyclePersistenceError,
   SessionCredentialLifecyclePersistenceFailure,
 } from './session-credential-lifecycle.repository';
@@ -220,6 +221,40 @@ function revokeCommandRow(): QueryResultRow {
   };
 }
 
+function expireCommandRow(): QueryResultRow {
+  return {
+    family_id: SESSION_ID,
+    command_id: OTHER_COMMAND_ID,
+    command_sequence: '1',
+    request_digest: OTHER_REQUEST_DIGEST,
+    command_type: 'expire_session',
+    applied_at: EXPIRES_AT.toString(10),
+    presented_generation: null,
+    presented_digest: null,
+    next_generation: null,
+    next_digest: null,
+    reason: null,
+    result_type: 'session_expired',
+  };
+}
+
+function reuseCommandRow(): QueryResultRow {
+  return {
+    family_id: SESSION_ID,
+    command_id: OTHER_COMMAND_ID,
+    command_sequence: '2',
+    request_digest: OTHER_REQUEST_DIGEST,
+    command_type: 'rotate_credential',
+    applied_at: REUSED_AT.toString(10),
+    presented_generation: '1',
+    presented_digest: bytea(DIGEST_A),
+    next_generation: '3',
+    next_digest: bytea(DIGEST_C),
+    reason: null,
+    result_type: 'reuse_detected',
+  };
+}
+
 function insertedCommandRow(
   commandId: SessionCommandId,
   sequence: number,
@@ -240,6 +275,19 @@ function input(
     commandId: COMMAND_ID,
     requestDigest: REQUEST_DIGEST,
     now: ROTATED_AT,
+    audit: { eventId: AUDIT_EVENT_ID },
+    ...overrides,
+  };
+}
+
+function revokeInput(
+  overrides: Partial<RevokePresentedSessionInput> = {},
+): RevokePresentedSessionInput {
+  return {
+    presentedCredentialDigest: DIGEST_A,
+    commandId: REVOKE_COMMAND_ID,
+    requestDigest: REVOKE_REQUEST_DIGEST,
+    now: REVOKED_AT,
     audit: { eventId: AUDIT_EVENT_ID },
     ...overrides,
   };
@@ -280,6 +328,23 @@ function rotationQueue(): QueuedQuery[] {
         id: SESSION_ID,
         status: 'active',
         current_credential_generation: '2',
+      },
+    ], 'UPDATE'),
+  ];
+}
+
+function revokeQueue(): QueuedQuery[] {
+  return [
+    queryResult([familyRow()]),
+    queryResult([credentialRow(1, DIGEST_A, ISSUED_AT)]),
+    queryResult([]),
+    queryResult([insertedCommandRow(REVOKE_COMMAND_ID, 1)], 'INSERT'),
+    queryResult([
+      {
+        id: SESSION_ID,
+        status: 'revoked',
+        current_credential_generation: '1',
+        terminal_command_id: REVOKE_COMMAND_ID,
       },
     ], 'UPDATE'),
   ];
@@ -825,5 +890,441 @@ describe('PostgresSessionCredentialLifecycleRepository', () => {
         ),
       ).toBe(true);
     }
+  });
+
+  describe('revokePresentedSession', () => {
+    it('revokes the active current session with user_sign_out and writes command then audit', async () => {
+      const harness = repository(revokeQueue());
+
+      await expect(
+        harness.subject.revokePresentedSession(
+          harness.transaction,
+          revokeInput(),
+        ),
+      ).resolves.toEqual({
+        outcome: 'session_revoked',
+        persistence: 'applied',
+        revokedAt: REVOKED_AT,
+      });
+
+      expect(harness.transaction.calls).toHaveLength(5);
+      expect(harness.transaction.calls[0]).toMatchObject({
+        text: expect.stringContaining('FOR UPDATE OF f'),
+        values: [bytea(DIGEST_A)],
+      });
+      expect(harness.transaction.calls[0].values).not.toContain(SESSION_ID);
+      expect(harness.transaction.calls[1].text).toContain('FOR UPDATE');
+      expect(harness.transaction.calls[2].text).toContain(
+        'backend_auth.auth_session_commands',
+      );
+      expect(harness.transaction.calls[3]).toMatchObject({
+        text: expect.stringContaining(
+          'INSERT INTO backend_auth.auth_session_commands',
+        ),
+        values: [
+          SESSION_ID,
+          REVOKE_COMMAND_ID,
+          '1',
+          REVOKE_REQUEST_DIGEST,
+          'revoke_session',
+          REVOKED_AT.toString(10),
+          null,
+          null,
+          null,
+          null,
+          'user_sign_out',
+          'session_revoked',
+        ],
+      });
+      expect(harness.transaction.calls[4]).toMatchObject({
+        text: expect.stringContaining(
+          'UPDATE backend_auth.auth_session_families',
+        ),
+        values: [
+          SESSION_ID,
+          'revoked',
+          REVOKE_COMMAND_ID,
+          'user_sign_out',
+          REVOKED_AT.toString(10),
+          null,
+          null,
+          'active',
+          '1',
+        ],
+      });
+      expect(harness.audit.calls).toEqual([
+        {
+          transaction: harness.transaction,
+          event: {
+            eventId: AUDIT_EVENT_ID,
+            eventType: 'session_family_transition',
+            outcome: 'success',
+            occurredAt: REVOKED_AT,
+            metadata: {
+              sessionId: SESSION_ID,
+              status: 'revoked',
+            },
+          },
+        },
+      ]);
+      expect(harness.timeline).toEqual([
+        'query:1',
+        'query:2',
+        'query:3',
+        'query:4',
+        'query:5',
+        'audit',
+      ]);
+    });
+
+    it('returns a safe rejection for an unknown credential digest', async () => {
+      const harness = repository([queryResult([])]);
+
+      await expect(
+        harness.subject.revokePresentedSession(
+          harness.transaction,
+          revokeInput(),
+        ),
+      ).resolves.toEqual({
+        outcome: 'rejected',
+        reason: 'credential_not_found',
+      });
+      expect(harness.transaction.calls).toHaveLength(1);
+      expect(harness.audit.calls).toHaveLength(0);
+    });
+
+    it('serializes concurrent revoke attempts through the family and credential row locks', async () => {
+      const harness = repository(revokeQueue());
+
+      await harness.subject.revokePresentedSession(
+        harness.transaction,
+        revokeInput(),
+      );
+
+      expect(harness.transaction.calls[0].text).toContain(
+        'ORDER BY f.id',
+      );
+      expect(harness.transaction.calls[0].text).toContain(
+        'FOR UPDATE OF f',
+      );
+      expect(harness.transaction.calls[1].text).toContain(
+        'FROM backend_auth.auth_session_credentials',
+      );
+      expect(harness.transaction.calls[1].text).toContain('FOR UPDATE');
+    });
+
+    it('rejects a consumed credential instead of revoking its active family', async () => {
+      const harness = repository([
+        queryResult([
+          familyRow({
+            current_credential_generation: '2',
+            presented_generation: '1',
+          }),
+        ]),
+        queryResult([
+          credentialRow(1, DIGEST_A, ISSUED_AT, ROTATED_AT, COMMAND_ID),
+          credentialRow(2, DIGEST_B, ROTATED_AT),
+        ]),
+        queryResult([rotationCommandRow()]),
+      ]);
+
+      await expect(
+        harness.subject.revokePresentedSession(
+          harness.transaction,
+          revokeInput(),
+        ),
+      ).resolves.toEqual({
+        outcome: 'rejected',
+        reason: 'credential_not_found',
+      });
+      expect(harness.transaction.calls).toHaveLength(3);
+      expect(harness.audit.calls).toHaveLength(0);
+    });
+
+    it('does not change an already revoked session for a new command', async () => {
+      const harness = repository([
+        queryResult([
+          familyRow({
+            status: 'revoked',
+            terminal_command_id: REVOKE_COMMAND_ID,
+            terminal_reason: 'user_sign_out',
+            terminal_at: REVOKED_AT.toString(10),
+          }),
+        ]),
+        queryResult([credentialRow(1, DIGEST_A, ISSUED_AT)]),
+        queryResult([revokeCommandRow()]),
+      ]);
+
+      await expect(
+        harness.subject.revokePresentedSession(
+          harness.transaction,
+          revokeInput({
+            commandId: OTHER_COMMAND_ID,
+            requestDigest: OTHER_REQUEST_DIGEST,
+            now: REUSED_AT,
+          }),
+        ),
+      ).resolves.toEqual({
+        outcome: 'rejected',
+        reason: 'session_closed',
+      });
+      expect(harness.transaction.calls).toHaveLength(3);
+      expect(harness.audit.calls).toHaveLength(0);
+    });
+
+    it('does not change an expired session', async () => {
+      const harness = repository([
+        queryResult([
+          familyRow({
+            status: 'expired',
+            terminal_command_id: OTHER_COMMAND_ID,
+            terminal_at: EXPIRES_AT.toString(10),
+          }),
+        ]),
+        queryResult([credentialRow(1, DIGEST_A, ISSUED_AT)]),
+        queryResult([expireCommandRow()]),
+      ]);
+
+      await expect(
+        harness.subject.revokePresentedSession(
+          harness.transaction,
+          revokeInput({ now: EXPIRES_AT }),
+        ),
+      ).resolves.toEqual({
+        outcome: 'rejected',
+        reason: 'session_closed',
+      });
+      expect(harness.transaction.calls).toHaveLength(3);
+      expect(harness.audit.calls).toHaveLength(0);
+    });
+
+    it('does not change a reuse-detected session', async () => {
+      const harness = repository([
+        queryResult([
+          familyRow({
+            status: 'reuse_detected',
+            current_credential_generation: '2',
+            presented_generation: '2',
+            terminal_command_id: OTHER_COMMAND_ID,
+            terminal_at: REUSED_AT.toString(10),
+            terminal_reuse_generation: '1',
+            terminal_reuse_digest: bytea(DIGEST_A),
+          }),
+        ]),
+        queryResult([
+          credentialRow(1, DIGEST_A, ISSUED_AT, ROTATED_AT, COMMAND_ID),
+          credentialRow(2, DIGEST_B, ROTATED_AT),
+        ]),
+        queryResult([rotationCommandRow(), reuseCommandRow()]),
+      ]);
+
+      await expect(
+        harness.subject.revokePresentedSession(
+          harness.transaction,
+          revokeInput({
+            presentedCredentialDigest: DIGEST_B,
+            now: EXPIRES_AT,
+          }),
+        ),
+      ).resolves.toEqual({
+        outcome: 'rejected',
+        reason: 'session_closed',
+      });
+      expect(harness.transaction.calls).toHaveLength(3);
+      expect(harness.audit.calls).toHaveLength(0);
+    });
+
+    it('returns the original revoke result idempotently without writes or audit', async () => {
+      const harness = repository([
+        queryResult([
+          familyRow({
+            status: 'revoked',
+            terminal_command_id: REVOKE_COMMAND_ID,
+            terminal_reason: 'user_sign_out',
+            terminal_at: REVOKED_AT.toString(10),
+          }),
+        ]),
+        queryResult([credentialRow(1, DIGEST_A, ISSUED_AT)]),
+        queryResult([revokeCommandRow()]),
+      ]);
+
+      await expect(
+        harness.subject.revokePresentedSession(
+          harness.transaction,
+          revokeInput({ now: REUSED_AT }),
+        ),
+      ).resolves.toEqual({
+        outcome: 'session_revoked',
+        persistence: 'idempotent_retry',
+        revokedAt: REVOKED_AT,
+      });
+      expect(harness.transaction.calls).toHaveLength(3);
+      expect(harness.audit.calls).toHaveLength(0);
+    });
+
+    it('returns command reuse conflict for the same commandId and a different requestDigest', async () => {
+      const harness = repository([
+        queryResult([
+          familyRow({
+            status: 'revoked',
+            terminal_command_id: REVOKE_COMMAND_ID,
+            terminal_reason: 'user_sign_out',
+            terminal_at: REVOKED_AT.toString(10),
+          }),
+        ]),
+        queryResult([credentialRow(1, DIGEST_A, ISSUED_AT)]),
+        queryResult([revokeCommandRow()]),
+      ]);
+
+      await expect(
+        harness.subject.revokePresentedSession(
+          harness.transaction,
+          revokeInput({
+            requestDigest: OTHER_REQUEST_DIGEST,
+            now: REUSED_AT,
+          }),
+        ),
+      ).resolves.toEqual({
+        outcome: 'rejected',
+        reason: 'command_reuse_conflict',
+      });
+      expect(harness.transaction.calls).toHaveLength(3);
+      expect(harness.audit.calls).toHaveLength(0);
+    });
+
+    it('rejects trusted sessionId or generation inputs before acquiring a lock', async () => {
+      const harness = repository([]);
+      const unsafe = {
+        ...revokeInput(),
+        sessionId: SESSION_ID,
+        generation: 1,
+      } as unknown as RevokePresentedSessionInput;
+
+      await expect(
+        harness.subject.revokePresentedSession(
+          harness.transaction,
+          unsafe,
+        ),
+      ).rejects.toMatchObject({ reason: 'invalid_input' });
+      expect(harness.transaction.calls).toHaveLength(0);
+      expect(harness.audit.calls).toHaveLength(0);
+    });
+
+    it('rejects corrupted persisted state with a fixed error', async () => {
+      const harness = repository([
+        queryResult([
+          familyRow({
+            current_credential_generation: '2',
+            presented_generation: '1',
+          }),
+        ]),
+        queryResult([
+          credentialRow(1, DIGEST_A, ISSUED_AT, ROTATED_AT, COMMAND_ID),
+        ]),
+        queryResult([]),
+      ]);
+
+      let caught: unknown;
+      try {
+        await harness.subject.revokePresentedSession(
+          harness.transaction,
+          revokeInput(),
+        );
+      } catch (error) {
+        caught = error;
+      }
+      expectPersistenceFailure(caught, 'invalid_persisted_state');
+      expect(JSON.stringify(caught)).not.toContain(DIGEST_A);
+    });
+
+    it('maps permission errors without leaking PostgreSQL details', async () => {
+      const harness = repository([
+        postgresError('42501', {
+          schema: 'backend_auth',
+          table: 'auth_session_families',
+        }),
+      ]);
+
+      let caught: unknown;
+      try {
+        await harness.subject.revokePresentedSession(
+          harness.transaction,
+          revokeInput(),
+        );
+      } catch (error) {
+        caught = error;
+      }
+      expectPersistenceFailure(caught, 'permission_denied');
+      const exposed = [
+        JSON.stringify(caught),
+        caught instanceof Error ? caught.message : '',
+        caught instanceof Error ? caught.stack : '',
+        caught instanceof Error ? String(caught.cause) : '',
+      ].join('\n');
+      expect(exposed).not.toContain(SYNTHETIC_DATABASE_DETAIL);
+      expect(exposed).not.toContain('backend_auth');
+      expect(exposed).not.toContain('auth_session_families');
+    });
+
+    it.each([
+      ['serialization failure', '40001'],
+      ['deadlock', '40P01'],
+    ])('maps revoke %s to transaction_conflict', async (_case, code) => {
+      const harness = repository([postgresError(code)]);
+
+      await expect(
+        harness.subject.revokePresentedSession(
+          harness.transaction,
+          revokeInput(),
+        ),
+      ).rejects.toMatchObject({ reason: 'transaction_conflict' });
+    });
+
+    it('maps revoke connection errors to database_unavailable', async () => {
+      const harness = repository([postgresError('08006')]);
+
+      await expect(
+        harness.subject.revokePresentedSession(
+          harness.transaction,
+          revokeInput(),
+        ),
+      ).rejects.toMatchObject({ reason: 'database_unavailable' });
+    });
+
+    it('never accepts or exposes a plaintext credential', async () => {
+      const rejectedHarness = repository([]);
+      const unsafe = {
+        ...revokeInput(),
+        credential: SYNTHETIC_PLAINTEXT,
+      } as unknown as RevokePresentedSessionInput;
+      let rejected: unknown;
+      try {
+        await rejectedHarness.subject.revokePresentedSession(
+          rejectedHarness.transaction,
+          unsafe,
+        );
+      } catch (error) {
+        rejected = error;
+      }
+      expectPersistenceFailure(rejected, 'invalid_input');
+      expect(JSON.stringify(rejected)).not.toContain(SYNTHETIC_PLAINTEXT);
+      expect(rejectedHarness.transaction.calls).toHaveLength(0);
+      expect(rejectedHarness.audit.calls).toHaveLength(0);
+
+      const harness = repository(revokeQueue());
+      const result = await harness.subject.revokePresentedSession(
+        harness.transaction,
+        revokeInput(),
+      );
+      const exposed = JSON.stringify({
+        result,
+        calls: harness.transaction.calls,
+        audit: harness.audit.calls,
+      });
+      expect(exposed).not.toContain(SYNTHETIC_PLAINTEXT);
+      for (const call of harness.transaction.calls) {
+        expect(call.text).not.toContain(SYNTHETIC_PLAINTEXT);
+      }
+    });
   });
 });

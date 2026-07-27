@@ -18,6 +18,16 @@ export interface ApplyPresentedSessionCredentialInput {
   };
 }
 
+export interface RevokePresentedSessionInput {
+  readonly presentedCredentialDigest: SessionCredentialDigest;
+  readonly commandId: SessionCommandId;
+  readonly requestDigest: SessionRequestDigest;
+  readonly now: UnixEpochSeconds;
+  readonly audit: {
+    readonly eventId: SecurityAuditEventId;
+  };
+}
+
 export type SessionCredentialLifecyclePersistence =
   | 'applied'
   | 'idempotent_retry';
@@ -48,6 +58,20 @@ export type ApplyPresentedSessionCredentialResult =
         | 'invalid_next_credential';
     };
 
+export type RevokePresentedSessionResult =
+  | {
+      readonly outcome: 'session_revoked';
+      readonly persistence: SessionCredentialLifecyclePersistence;
+      readonly revokedAt: UnixEpochSeconds;
+    }
+  | {
+      readonly outcome: 'rejected';
+      readonly reason:
+        | 'credential_not_found'
+        | 'session_closed'
+        | 'command_reuse_conflict';
+    };
+
 export type SessionCredentialLifecyclePersistenceFailure =
   | 'invalid_input'
   | 'invalid_persisted_state'
@@ -75,4 +99,9 @@ export interface SessionCredentialLifecycleRepository {
     transaction: PostgresTransaction,
     input: ApplyPresentedSessionCredentialInput,
   ): Promise<ApplyPresentedSessionCredentialResult>;
+
+  revokePresentedSession(
+    transaction: PostgresTransaction,
+    input: RevokePresentedSessionInput,
+  ): Promise<RevokePresentedSessionResult>;
 }

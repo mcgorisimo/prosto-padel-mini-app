@@ -7,6 +7,7 @@ import {
 } from '../auth/auth.types';
 import { aggregateCommandSequence } from '../auth/aggregate-command-sequence';
 import {
+  SecurityAuditEventId,
   createSecurityAuditEvent,
   createSecurityAuditMetadata,
 } from '../auth/security-audit.types';
@@ -47,6 +48,8 @@ import { PostgresTransaction } from './postgres-transaction';
 import {
   ApplyPresentedSessionCredentialInput,
   ApplyPresentedSessionCredentialResult,
+  RevokePresentedSessionInput,
+  RevokePresentedSessionResult,
   SessionCredentialLifecyclePersistenceError,
   SessionCredentialLifecyclePersistenceFailure,
   SessionCredentialLifecycleRepository,
@@ -292,6 +295,30 @@ function assertValidInput(
     ]) ||
     !isSessionCredentialDigest(value.presentedCredentialDigest) ||
     !isSessionCredentialDigest(value.nextCredentialDigest) ||
+    !isSessionCommandId(value.commandId) ||
+    !isSessionRequestDigest(value.requestDigest) ||
+    !isUnixEpochSeconds(value.now) ||
+    !isRecord(value.audit) ||
+    !hasExactlyKeys(value.audit, ['eventId']) ||
+    !isInternalUuid(value.audit.eventId)
+  ) {
+    throw invalidInput();
+  }
+}
+
+function assertValidRevokeInput(
+  value: unknown,
+): asserts value is RevokePresentedSessionInput {
+  if (
+    !isRecord(value) ||
+    !hasExactlyKeys(value, [
+      'presentedCredentialDigest',
+      'commandId',
+      'requestDigest',
+      'now',
+      'audit',
+    ]) ||
+    !isSessionCredentialDigest(value.presentedCredentialDigest) ||
     !isSessionCommandId(value.commandId) ||
     !isSessionRequestDigest(value.requestDigest) ||
     !isUnixEpochSeconds(value.now) ||
@@ -797,6 +824,35 @@ function commandFor(
   });
 }
 
+function presentedCredentialIsCurrent(aggregate: HydratedAggregate): boolean {
+  return (
+    aggregate.presentedCredential.generation ===
+      aggregate.state.currentCredential.generation &&
+    aggregate.presentedCredential.digest ===
+      aggregate.state.currentCredential.digest
+  );
+}
+
+function revokeCommandFor(
+  aggregate: HydratedAggregate,
+  input: RevokePresentedSessionInput,
+): Extract<SessionCommand, { readonly type: 'revoke_session' }> {
+  const existing = aggregate.state.appliedCommands.find(
+    (command) => command.commandId === input.commandId,
+  );
+  return Object.freeze({
+    type: 'revoke_session',
+    sessionId: aggregate.state.sessionId,
+    commandId: input.commandId,
+    requestDigest: input.requestDigest,
+    now:
+      existing?.commandType === 'revoke_session'
+        ? existing.appliedAt
+        : input.now,
+    reason: 'user_sign_out',
+  });
+}
+
 function mapRejectedTransition(
   transition: Extract<SessionTransitionResult, { readonly outcome: 'rejected' }>,
 ): ApplyPresentedSessionCredentialResult {
@@ -826,6 +882,54 @@ function mapRejectedTransition(
     case 'not_yet_expired':
       throw invalidPersistedState();
   }
+}
+
+function mapRejectedRevocation(
+  transition: Extract<SessionTransitionResult, { readonly outcome: 'rejected' }>,
+): RevokePresentedSessionResult {
+  switch (transition.reason) {
+    case 'command_reuse_conflict':
+      return Object.freeze({
+        outcome: 'rejected',
+        reason: 'command_reuse_conflict',
+      });
+    case 'forbidden_transition':
+    case 'session_expired':
+      return Object.freeze({
+        outcome: 'rejected',
+        reason: 'session_closed',
+      });
+    case 'invalid_session_state':
+      throw invalidPersistedState();
+    case 'invalid_session_command':
+      throw invalidInput();
+    case 'session_binding_conflict':
+    case 'invalid_session_credential':
+    case 'invalid_next_credential':
+    case 'not_yet_expired':
+      throw invalidPersistedState();
+  }
+}
+
+function revocationResultFor(
+  transition: Exclude<
+    SessionTransitionResult,
+    { readonly outcome: 'rejected' }
+  >,
+): RevokePresentedSessionResult {
+  const result =
+    transition.outcome === 'transitioned'
+      ? transition.result
+      : transition.originalResult;
+  if (result.type !== 'session_revoked') {
+    throw invalidPersistedState();
+  }
+  return Object.freeze({
+    outcome: 'session_revoked',
+    persistence:
+      transition.outcome === 'transitioned' ? 'applied' : 'idempotent_retry',
+    revokedAt: result.revocation.revokedAt,
+  });
 }
 
 function resultFor(
@@ -1073,6 +1177,50 @@ export class PostgresSessionCredentialLifecycleRepository
 {
   constructor(private readonly auditRepository: SecurityAuditRepository) {}
 
+  private async lockAndHydrateAggregate(
+    transaction: PostgresTransaction,
+    presentedCredentialDigest: SessionCredentialDigest,
+  ): Promise<HydratedAggregate | null> {
+    const locked = await transaction.query<LockedFamilyRow>(
+      SELECT_PRESENTED_CREDENTIAL_FAMILY_FOR_UPDATE_SQL,
+      [encodePostgresByteaDigest(presentedCredentialDigest)],
+    );
+    if (locked.rowCount !== locked.rows.length) {
+      throw invalidPersistedState();
+    }
+    if (locked.rows.length === 0) {
+      return null;
+    }
+    if (locked.rows.length !== 1) {
+      throw invalidPersistedState();
+    }
+    const familyId = locked.rows[0].family_id;
+    if (!isSessionId(familyId)) {
+      throw invalidPersistedState();
+    }
+
+    const credentials = await transaction.query<SessionCredentialRow>(
+      SELECT_SESSION_CREDENTIALS_FOR_UPDATE_SQL,
+      [familyId],
+    );
+    const commands = await transaction.query<SessionCommandRow>(
+      SELECT_SESSION_COMMANDS_SQL,
+      [familyId],
+    );
+    if (
+      credentials.rowCount !== credentials.rows.length ||
+      commands.rowCount !== commands.rows.length
+    ) {
+      throw invalidPersistedState();
+    }
+    return hydrateAggregate(
+      locked.rows[0],
+      credentials.rows,
+      commands.rows,
+      presentedCredentialDigest,
+    );
+  }
+
   async applyPresentedCredential(
     transaction: PostgresTransaction,
     input: ApplyPresentedSessionCredentialInput,
@@ -1080,50 +1228,16 @@ export class PostgresSessionCredentialLifecycleRepository
     assertValidInput(input);
 
     try {
-      const presentedDigest = encodePostgresByteaDigest(
+      const aggregate = await this.lockAndHydrateAggregate(
+        transaction,
         input.presentedCredentialDigest,
       );
-      const locked = await transaction.query<LockedFamilyRow>(
-        SELECT_PRESENTED_CREDENTIAL_FAMILY_FOR_UPDATE_SQL,
-        [presentedDigest],
-      );
-      if (locked.rowCount !== locked.rows.length) {
-        throw invalidPersistedState();
-      }
-      if (locked.rows.length === 0) {
+      if (aggregate === null) {
         return Object.freeze({
           outcome: 'rejected',
           reason: 'credential_not_found',
         });
       }
-      if (locked.rows.length !== 1) {
-        throw invalidPersistedState();
-      }
-      const familyId = locked.rows[0].family_id;
-      if (!isSessionId(familyId)) {
-        throw invalidPersistedState();
-      }
-
-      const credentials = await transaction.query<SessionCredentialRow>(
-        SELECT_SESSION_CREDENTIALS_FOR_UPDATE_SQL,
-        [familyId],
-      );
-      const commands = await transaction.query<SessionCommandRow>(
-        SELECT_SESSION_COMMANDS_SQL,
-        [familyId],
-      );
-      if (
-        credentials.rowCount !== credentials.rows.length ||
-        commands.rowCount !== commands.rows.length
-      ) {
-        throw invalidPersistedState();
-      }
-      const aggregate = hydrateAggregate(
-        locked.rows[0],
-        credentials.rows,
-        commands.rows,
-        input.presentedCredentialDigest,
-      );
       const transition = transitionSession(
         aggregate.state,
         commandFor(aggregate, input),
@@ -1142,8 +1256,54 @@ export class PostgresSessionCredentialLifecycleRepository
         transition,
         record,
       );
-      await this.appendAudit(transaction, input, transition);
+      await this.appendAudit(transaction, input.audit.eventId, transition);
       return resultFor(transition, aggregate.state.expiresAt);
+    } catch (error) {
+      throw mapPersistenceError(error);
+    }
+  }
+
+  async revokePresentedSession(
+    transaction: PostgresTransaction,
+    input: RevokePresentedSessionInput,
+  ): Promise<RevokePresentedSessionResult> {
+    assertValidRevokeInput(input);
+
+    try {
+      const aggregate = await this.lockAndHydrateAggregate(
+        transaction,
+        input.presentedCredentialDigest,
+      );
+      if (aggregate === null || !presentedCredentialIsCurrent(aggregate)) {
+        return Object.freeze({
+          outcome: 'rejected',
+          reason: 'credential_not_found',
+        });
+      }
+
+      const transition = transitionSession(
+        aggregate.state,
+        revokeCommandFor(aggregate, input),
+      );
+      if (transition.outcome === 'rejected') {
+        return mapRejectedRevocation(transition);
+      }
+      if (transition.outcome === 'idempotent_retry') {
+        return revocationResultFor(transition);
+      }
+      if (transition.transition !== 'session_revoked') {
+        throw invalidPersistedState();
+      }
+
+      const record = persistenceRecord(aggregate.state, transition);
+      await this.persistTransition(
+        transaction,
+        aggregate.state,
+        transition,
+        record,
+      );
+      await this.appendAudit(transaction, input.audit.eventId, transition);
+      return revocationResultFor(transition);
     } catch (error) {
       throw mapPersistenceError(error);
     }
@@ -1164,6 +1324,7 @@ export class PostgresSessionCredentialLifecycleRepository
         return;
       case 'session_expired':
       case 'reuse_detected':
+      case 'session_revoked':
         await this.persistTerminalTransition(
           transaction,
           previous,
@@ -1171,8 +1332,6 @@ export class PostgresSessionCredentialLifecycleRepository
           record,
         );
         return;
-      case 'session_revoked':
-        throw invalidPersistedState();
     }
   }
 
@@ -1277,44 +1436,79 @@ export class PostgresSessionCredentialLifecycleRepository
     >,
     record: SessionCommandPersistenceRecord,
   ): Promise<void> {
-    if (
-      transition.transition === 'session_revoked' ||
-      transition.transition === 'credential_rotated'
-    ) {
+    if (transition.transition === 'credential_rotated') {
       throw invalidPersistedState();
     }
     await this.insertCommand(transaction, record);
 
-    const target =
-      transition.transition === 'session_expired'
-        ? {
-            status: 'expired' as const,
-            terminalAt: transition.result.type === 'session_expired'
-              ? transition.result.expiration.expiredAt
-              : undefined,
-            reuseGeneration: null,
-            reuseDigest: null,
-          }
-        : {
-            status: 'reuse_detected' as const,
-            terminalAt: transition.result.type === 'reuse_detected'
-              ? transition.result.reuse.detectedAt
-              : undefined,
-            reuseGeneration:
-              transition.result.type === 'reuse_detected'
-                ? transition.result.reuse.generation
-                : undefined,
-            reuseDigest:
-              transition.result.type === 'reuse_detected'
-                ? transition.result.reuse.digest
-                : undefined,
-          };
-    if (
-      target.terminalAt === undefined ||
-      target.reuseGeneration === undefined ||
-      target.reuseDigest === undefined
-    ) {
-      throw invalidPersistedState();
+    let target:
+      | {
+          readonly status: 'revoked';
+          readonly reason: SessionRevokeReason;
+          readonly terminalAt: UnixEpochSeconds;
+          readonly reuseGeneration: null;
+          readonly reuseDigest: null;
+        }
+      | {
+          readonly status: 'expired';
+          readonly reason: null;
+          readonly terminalAt: UnixEpochSeconds;
+          readonly reuseGeneration: null;
+          readonly reuseDigest: null;
+        }
+      | {
+          readonly status: 'reuse_detected';
+          readonly reason: null;
+          readonly terminalAt: UnixEpochSeconds;
+          readonly reuseGeneration: number;
+          readonly reuseDigest: SessionCredentialDigest;
+        };
+    switch (transition.transition) {
+      case 'session_revoked':
+        if (
+          transition.result.type !== 'session_revoked' ||
+          transition.state.status !== 'revoked'
+        ) {
+          throw invalidPersistedState();
+        }
+        target = {
+          status: 'revoked',
+          reason: transition.result.revocation.reason,
+          terminalAt: transition.result.revocation.revokedAt,
+          reuseGeneration: null,
+          reuseDigest: null,
+        };
+        break;
+      case 'session_expired':
+        if (
+          transition.result.type !== 'session_expired' ||
+          transition.state.status !== 'expired'
+        ) {
+          throw invalidPersistedState();
+        }
+        target = {
+          status: 'expired',
+          reason: null,
+          terminalAt: transition.result.expiration.expiredAt,
+          reuseGeneration: null,
+          reuseDigest: null,
+        };
+        break;
+      case 'reuse_detected':
+        if (
+          transition.result.type !== 'reuse_detected' ||
+          transition.state.status !== 'reuse_detected'
+        ) {
+          throw invalidPersistedState();
+        }
+        target = {
+          status: 'reuse_detected',
+          reason: null,
+          terminalAt: transition.result.reuse.detectedAt,
+          reuseGeneration: transition.result.reuse.generation,
+          reuseDigest: transition.result.reuse.digest,
+        };
+        break;
     }
     const updated = await transaction.query(
       UPDATE_TERMINAL_SESSION_SQL,
@@ -1322,7 +1516,7 @@ export class PostgresSessionCredentialLifecycleRepository
         previous.sessionId,
         target.status,
         record.commandId,
-        null,
+        target.reason,
         target.terminalAt.toString(10),
         target.reuseGeneration === null
           ? null
@@ -1371,7 +1565,7 @@ export class PostgresSessionCredentialLifecycleRepository
 
   private async appendAudit(
     transaction: PostgresTransaction,
-    input: ApplyPresentedSessionCredentialInput,
+    eventId: SecurityAuditEventId,
     transition: Extract<
       SessionTransitionResult,
       { readonly outcome: 'transitioned' }
@@ -1382,7 +1576,7 @@ export class PostgresSessionCredentialLifecycleRepository
     const event =
       result.type === 'credential_rotated'
         ? createSecurityAuditEvent({
-            eventId: input.audit.eventId,
+            eventId,
             eventType: 'session_credential_rotation',
             outcome: 'success',
             occurredAt: result.credential.issuedAt,
@@ -1395,18 +1589,20 @@ export class PostgresSessionCredentialLifecycleRepository
             ),
           })
         : createSecurityAuditEvent({
-            eventId: input.audit.eventId,
+            eventId,
             eventType: 'session_family_transition',
             outcome:
               result.type === 'reuse_detected'
                 ? 'replay_detected'
-                : 'expired',
+                : result.type === 'session_expired'
+                  ? 'expired'
+                  : 'success',
             occurredAt:
               result.type === 'reuse_detected'
                 ? result.reuse.detectedAt
                 : result.type === 'session_expired'
                   ? result.expiration.expiredAt
-                  : input.now,
+                  : result.revocation.revokedAt,
             metadata: createSecurityAuditMetadata(
               'session_family_transition',
               {
@@ -1414,7 +1610,9 @@ export class PostgresSessionCredentialLifecycleRepository
                 status:
                   result.type === 'reuse_detected'
                     ? 'reuse_detected'
-                    : 'expired',
+                    : result.type === 'session_expired'
+                      ? 'expired'
+                      : 'revoked',
               },
             ),
           });
