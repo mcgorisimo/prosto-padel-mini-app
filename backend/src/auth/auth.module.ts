@@ -70,19 +70,6 @@ function logTelegramLoginDiagnostic(
   logger: Logger,
   event: TelegramLoginDiagnosticEvent,
 ): void {
-  if ('proofBindingCheck' in event) {
-    const check = event.proofBindingCheck;
-    logger.warn(
-      'Telegram proof binding check: ' +
-        `operation_exists=${check.operationExists} ` +
-        `consumption_exists=${check.consumptionExists} ` +
-        `operation_id_match=${check.operationIdMatch} ` +
-        `intent_match=${check.intentMatch} ` +
-        `idempotency_key_match=${check.idempotencyKeyMatch} ` +
-        `request_digest_match=${check.requestDigestMatch}`,
-    );
-    return;
-  }
   if ('checkpoint' in event) {
     logger.warn(`Telegram login failed checkpoint=${event.checkpoint}`);
     return;

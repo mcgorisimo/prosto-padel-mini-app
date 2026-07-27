@@ -526,55 +526,6 @@ describe('AuthModule Telegram login wiring', () => {
     await moduleRef.close();
   });
 
-  it('logs Telegram proof binding diagnostics as one boolean-only message', async () => {
-    const warn = jest
-      .spyOn(Logger.prototype, 'warn')
-      .mockImplementation(() => undefined);
-    const moduleRef = await compileAuthModule(enabledConfiguration());
-    warn.mockClear();
-    const feature = getFeature(moduleRef);
-    if (!feature.enabled) {
-      throw new Error('Expected enabled Telegram login feature');
-    }
-    const observer = getServiceDiagnosticObserver(feature.service);
-    expect(observer).toBeDefined();
-    const sensitiveMarker = 'SYNTHETIC_PROOF_BINDING_SECRET';
-
-    observer?.(
-      Object.freeze({
-        proofBindingCheck: Object.freeze({
-          operationExists: true,
-          consumptionExists: false,
-          operationIdMatch: false,
-          intentMatch: true,
-          idempotencyKeyMatch: true,
-          requestDigestMatch: false,
-          operationId: sensitiveMarker,
-          requestDigest: sensitiveMarker,
-          error: new Error(sensitiveMarker),
-        }),
-        rawInitData: sensitiveMarker,
-      }) as unknown as Parameters<TelegramLoginDiagnosticObserver>[0],
-    );
-
-    expect(warn).toHaveBeenCalledTimes(1);
-    expect(warn).toHaveBeenCalledWith(
-      'Telegram proof binding check: ' +
-        'operation_exists=true ' +
-        'consumption_exists=false ' +
-        'operation_id_match=false ' +
-        'intent_match=true ' +
-        'idempotency_key_match=true ' +
-        'request_digest_match=false',
-    );
-    const logged = inspect(warn.mock.calls);
-    expect(logged).not.toContain(sensitiveMarker);
-    expect(warn.mock.calls[0]).toHaveLength(1);
-    expect(warn.mock.calls[0]?.[0]).not.toBeInstanceOf(Error);
-
-    await moduleRef.close();
-  });
-
   it('keeps the public service result unchanged when the workflow Logger throws', async () => {
     const sensitiveMarker = 'SYNTHETIC_WORKFLOW_LOGGER_FAILURE';
     const warn = jest

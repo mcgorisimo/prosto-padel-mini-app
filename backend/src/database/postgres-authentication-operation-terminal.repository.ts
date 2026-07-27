@@ -65,7 +65,6 @@ import {
   AuthenticationOperationTerminalPersistenceError,
   AuthenticationOperationTerminalRejectionReason,
   AuthenticationOperationTerminalResult,
-  TelegramProofBindingDiagnosticCheck,
 } from './authentication-operation-terminal.repository';
 import {
   decodePostgresByteaDigest,
@@ -127,28 +126,6 @@ const UPDATE_OPERATION_TERMINAL_SQL = `
     ${OPERATION_COLUMNS}
 `;
 
-const SELECT_TELEGRAM_PROOF_BINDING_DIAGNOSTIC_SQL = `
-  SELECT
-    (o.id IS NOT NULL) AS operation_exists,
-    (c.proof_fingerprint IS NOT NULL) AS consumption_exists,
-    ((c.operation_id = o.id) IS TRUE) AS operation_id_match,
-    ((c.intent = o.intent) IS TRUE) AS intent_match,
-    ((c.idempotency_key = o.idempotency_key) IS TRUE) AS idempotency_key_match,
-    ((c.request_digest = o.request_digest) IS TRUE) AS request_digest_match
-  FROM (SELECT $1::uuid AS operation_id) target
-  LEFT JOIN backend_auth.authentication_operations o
-    ON o.id = target.operation_id
-  LEFT JOIN backend_auth.telegram_proof_consumptions c
-    ON c.proof_fingerprint = o.telegram_proof_fingerprint
-`;
-
-const PROOF_BINDING_DIAGNOSTIC_SAVEPOINT_SQL =
-  'SAVEPOINT telegram_proof_binding_diagnostic';
-const PROOF_BINDING_DIAGNOSTIC_ROLLBACK_SQL =
-  'ROLLBACK TO SAVEPOINT telegram_proof_binding_diagnostic';
-const PROOF_BINDING_DIAGNOSTIC_RELEASE_SQL =
-  'RELEASE SAVEPOINT telegram_proof_binding_diagnostic';
-
 const TERMINAL_STATUSES = Object.freeze([
   'completed',
   'failed',
@@ -180,15 +157,6 @@ interface AuthenticationOperationRow extends QueryResultRow {
   readonly terminal_applied_at: unknown;
 }
 
-interface TelegramProofBindingDiagnosticRow extends QueryResultRow {
-  readonly operation_exists: unknown;
-  readonly consumption_exists: unknown;
-  readonly operation_id_match: unknown;
-  readonly intent_match: unknown;
-  readonly idempotency_key_match: unknown;
-  readonly request_digest_match: unknown;
-}
-
 interface TerminalColumns {
   readonly status: 'completed' | 'failed' | 'expired';
   readonly resolutionType: AccountResolutionOutcome['type'] | null;
@@ -208,10 +176,6 @@ interface TerminalColumns {
 
 function invalidInput(): AuthenticationOperationTerminalPersistenceError {
   return new AuthenticationOperationTerminalPersistenceError('invalid_input');
-}
-
-function proofBindingDiagnosticFailure(): Error {
-  return new Error('Telegram proof binding diagnostic failed');
 }
 
 function invalidPersistedState(): AuthenticationOperationTerminalPersistenceError {
@@ -944,61 +908,6 @@ export class PostgresAuthenticationOperationTerminalRepository
   implements AuthenticationOperationTerminalRepository
 {
   constructor(private readonly auditRepository: SecurityAuditRepository) {}
-
-  async inspectTelegramProofBinding(
-    transaction: PostgresTransaction,
-    operationId: AuthenticationOperationId,
-  ): Promise<TelegramProofBindingDiagnosticCheck> {
-    if (!isAuthenticationOperationId(operationId)) {
-      throw proofBindingDiagnosticFailure();
-    }
-
-    let savepointCreated = false;
-    try {
-      await transaction.query(PROOF_BINDING_DIAGNOSTIC_SAVEPOINT_SQL);
-      savepointCreated = true;
-      const result =
-        await transaction.query<TelegramProofBindingDiagnosticRow>(
-          SELECT_TELEGRAM_PROOF_BINDING_DIAGNOSTIC_SQL,
-          [operationId],
-        );
-      if (result.rows.length !== 1) {
-        throw proofBindingDiagnosticFailure();
-      }
-      const row = result.rows[0];
-      if (
-        typeof row.operation_exists !== 'boolean' ||
-        typeof row.consumption_exists !== 'boolean' ||
-        typeof row.operation_id_match !== 'boolean' ||
-        typeof row.intent_match !== 'boolean' ||
-        typeof row.idempotency_key_match !== 'boolean' ||
-        typeof row.request_digest_match !== 'boolean'
-      ) {
-        throw proofBindingDiagnosticFailure();
-      }
-
-      const check = Object.freeze({
-        operationExists: row.operation_exists,
-        consumptionExists: row.consumption_exists,
-        operationIdMatch: row.operation_id_match,
-        intentMatch: row.intent_match,
-        idempotencyKeyMatch: row.idempotency_key_match,
-        requestDigestMatch: row.request_digest_match,
-      });
-      await transaction.query(PROOF_BINDING_DIAGNOSTIC_RELEASE_SQL);
-      return check;
-    } catch {
-      if (savepointCreated) {
-        try {
-          await transaction.query(PROOF_BINDING_DIAGNOSTIC_ROLLBACK_SQL);
-          await transaction.query(PROOF_BINDING_DIAGNOSTIC_RELEASE_SQL);
-        } catch {
-          // The caller still receives only a fixed diagnostic failure.
-        }
-      }
-      throw proofBindingDiagnosticFailure();
-    }
-  }
 
   async applyTerminalCommand(
     transaction: PostgresTransaction,
