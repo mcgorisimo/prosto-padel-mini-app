@@ -17,10 +17,11 @@ import {
 import {
   SecurityAuditEventId,
 } from './security-audit.types';
+import { SessionId } from './session.types';
 import {
-  SessionCredentialDigest,
-  SessionId,
-} from './session.types';
+  IssuedSessionCredential,
+  SessionCredentialIssuer,
+} from './session-credential';
 import {
   PostgresTransaction,
   PostgresTransactionCommitObserver,
@@ -63,14 +64,10 @@ export interface AccountStatusReader {
   >;
 }
 
-export interface IssuedSessionCredential {
-  readonly plaintext: string;
-  readonly digest: SessionCredentialDigest;
-}
-
-export interface SessionCredentialIssuer {
-  issue(): IssuedSessionCredential;
-}
+export type {
+  IssuedSessionCredential,
+  SessionCredentialIssuer,
+} from './session-credential';
 
 export interface TelegramLoginWorkflowAuditIds {
   readonly proofConsumption: SecurityAuditEventId;

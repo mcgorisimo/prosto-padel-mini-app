@@ -699,7 +699,10 @@ describe('PostgresSessionCredentialLifecycleRepository', () => {
     await expect(
       harness.subject.applyPresentedCredential(
         harness.transaction,
-        input({ now: REUSED_AT }),
+        input({
+          nextCredentialDigest: DIGEST_C,
+          now: REUSED_AT,
+        }),
       ),
     ).resolves.toEqual({
       outcome: 'credential_rotated',

@@ -1,9 +1,9 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import {
+  digestSessionCredential,
   IssuedSessionCredential,
   SessionCredentialIssuer,
-} from './telegram-login.ports';
-import { isSessionCredentialDigest } from './session.types';
+} from './session-credential';
 
 const CREDENTIAL_BYTES = 32;
 
@@ -30,14 +30,10 @@ export class NodeSessionCredentialIssuer implements SessionCredentialIssuer {
     try {
       randomMaterial = randomBytes(CREDENTIAL_BYTES);
       const plaintext = randomMaterial.toString('base64url');
-      const digestValue = createHash('sha256')
-        .update(plaintext, 'utf8')
-        .digest('hex');
-      if (!isSessionCredentialDigest(digestValue)) {
-        throw failure('crypto_failure');
-      }
-
-      return Object.freeze({ plaintext, digest: digestValue });
+      return Object.freeze({
+        plaintext,
+        digest: digestSessionCredential(plaintext),
+      });
     } catch (error) {
       if (error instanceof SessionCredentialIssuerAdapterError) {
         throw error;

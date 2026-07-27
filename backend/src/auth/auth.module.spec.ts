@@ -18,6 +18,7 @@ import { PostgresExternalIdentityResolutionRepository } from '../database/postgr
 import { PostgresInitialSessionRepository } from '../database/postgres-initial-session.repository';
 import { PostgresPlayerAccountProvisioningRepository } from '../database/postgres-player-account-provisioning.repository';
 import { PostgresSecurityAuditRepository } from '../database/postgres-security-audit.repository';
+import { PostgresSessionCredentialLifecycleRepository } from '../database/postgres-session-credential-lifecycle.repository';
 import { PostgresService } from '../database/postgres.service';
 import { PostgresTelegramAuthenticationOperationRepository } from '../database/postgres-telegram-authentication-operation.repository';
 import { PostgresTransactionRunner } from '../database/postgres-transaction';
@@ -29,6 +30,8 @@ import {
 } from './auth.types';
 import { AuthModule } from './auth.module';
 import { NodeSessionCredentialIssuer } from './session-credential-issuer.adapter';
+import { SessionLifecycleController } from './session-lifecycle.controller';
+import { SessionLifecycleService } from './session-lifecycle.service';
 import { TelegramLoginController } from './telegram-login.controller';
 import { TelegramInitDataVerifier } from './telegram-init-data.verifier';
 import {
@@ -173,6 +176,16 @@ function getControllerFeature(
   ).feature;
 }
 
+function getSessionLifecycleControllerService(
+  controller: SessionLifecycleController,
+): SessionLifecycleService {
+  return (
+    controller as unknown as {
+      readonly service: SessionLifecycleService;
+    }
+  ).service;
+}
+
 function expectProviderNotRegistered(
   moduleRef: TestingModule,
   token: string | symbol | Type<unknown>,
@@ -201,6 +214,21 @@ describe('AuthModule Telegram login wiring', () => {
       getControllerFeature(moduleRef.get(TelegramLoginController)),
     ).toBe(getFeature(moduleRef));
     expect(moduleRef.get(PostgresService).isEnabled()).toBe(false);
+    const sessionLifecycle = moduleRef.get(SessionLifecycleService);
+    expect(sessionLifecycle.dependencies.transactions).toBe(
+      moduleRef.get(PostgresTransactionExecutorAdapter),
+    );
+    expect(sessionLifecycle.dependencies.sessions).toBe(
+      moduleRef.get(PostgresSessionCredentialLifecycleRepository),
+    );
+    expect(sessionLifecycle.dependencies.credentialIssuer).toBeInstanceOf(
+      NodeSessionCredentialIssuer,
+    );
+    expect(
+      getSessionLifecycleControllerService(
+        moduleRef.get(SessionLifecycleController),
+      ),
+    ).toBe(sessionLifecycle);
     for (const token of [
       TelegramLoginService,
       TelegramInitDataVerifier,

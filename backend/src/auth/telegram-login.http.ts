@@ -3,6 +3,7 @@ import {
   isUnixEpochSeconds,
   unixEpochSeconds,
 } from './auth.types';
+import { isCanonicalSessionCredential } from './session-credential';
 
 export const TELEGRAM_LOGIN_HTTP_CLOCK = Symbol(
   'TELEGRAM_LOGIN_HTTP_CLOCK',
@@ -82,21 +83,6 @@ export function readTelegramLoginHttpRequest(
     initData: body.initData,
     requestKey: body.requestKey,
   });
-}
-
-function isCanonicalSessionCredential(value: unknown): value is string {
-  if (
-    typeof value !== 'string' ||
-    !/^[A-Za-z0-9_-]{43}$/u.test(value)
-  ) {
-    return false;
-  }
-
-  const decoded = Buffer.from(value, 'base64url');
-  const valid =
-    decoded.length === 32 && decoded.toString('base64url') === value;
-  decoded.fill(0);
-  return valid;
 }
 
 export function createTelegramLoginHttpSuccessResponse(

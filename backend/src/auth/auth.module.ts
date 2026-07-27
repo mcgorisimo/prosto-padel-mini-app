@@ -14,9 +14,15 @@ import { PostgresAuthenticationOperationTerminalRepository } from '../database/p
 import { PostgresExternalIdentityResolutionRepository } from '../database/postgres-external-identity.repository';
 import { PostgresInitialSessionRepository } from '../database/postgres-initial-session.repository';
 import { PostgresPlayerAccountProvisioningRepository } from '../database/postgres-player-account-provisioning.repository';
+import { PostgresSessionCredentialLifecycleRepository } from '../database/postgres-session-credential-lifecycle.repository';
 import { PostgresTelegramAuthenticationOperationRepository } from '../database/postgres-telegram-authentication-operation.repository';
 import { PostgresTransactionExecutorAdapter } from '../database/postgres-transaction-executor.adapter';
 import { NodeSessionCredentialIssuer } from './session-credential-issuer.adapter';
+import {
+  SESSION_LIFECYCLE_HTTP_CLOCK_PROVIDER,
+  SessionLifecycleController,
+} from './session-lifecycle.controller';
+import { SessionLifecycleService } from './session-lifecycle.service';
 import {
   TelegramInitDataDiagnosticEvent,
   TelegramInitDataVerifier,
@@ -177,11 +183,31 @@ function createTelegramLoginFeature(
   }
 }
 
+function createSessionLifecycleService(
+  transactions: PostgresTransactionExecutorAdapter,
+  sessions: PostgresSessionCredentialLifecycleRepository,
+): SessionLifecycleService {
+  return new SessionLifecycleService({
+    transactions,
+    sessions,
+    credentialIssuer: new NodeSessionCredentialIssuer(),
+  });
+}
+
 @Module({
   imports: [DatabaseModule],
-  controllers: [TelegramLoginController],
+  controllers: [TelegramLoginController, SessionLifecycleController],
   providers: [
     TELEGRAM_LOGIN_HTTP_CLOCK_PROVIDER,
+    SESSION_LIFECYCLE_HTTP_CLOCK_PROVIDER,
+    {
+      provide: SessionLifecycleService,
+      inject: [
+        PostgresTransactionExecutorAdapter,
+        PostgresSessionCredentialLifecycleRepository,
+      ],
+      useFactory: createSessionLifecycleService,
+    },
     {
       provide: TELEGRAM_LOGIN_FEATURE,
       inject: [

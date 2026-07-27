@@ -791,7 +791,7 @@ function commandFor(
       now: existing.appliedAt,
       presentedCredential: aggregate.presentedCredential,
       nextCredential: Object.freeze({
-        digest: input.nextCredentialDigest,
+        digest: existing.nextCredential.digest,
         generation: nextGeneration,
       }),
     });
