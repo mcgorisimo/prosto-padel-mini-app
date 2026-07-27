@@ -51,6 +51,12 @@ function logTelegramInitDataDiagnostic(
     );
     return;
   }
+  if (event.reason === 'optional_field_invalid') {
+    logger.warn(
+      `Telegram initData verification rejected reason=optional_field_invalid field=${event.field}`,
+    );
+    return;
+  }
 
   logger.warn(
     `Telegram initData verification rejected reason=${event.reason}`,

@@ -61,10 +61,27 @@ export type TelegramInitDataExpiredAgeBucket =
   | 'expired_by_301_3600s'
   | 'expired_by_over_3600s';
 
-export type TelegramInitDataDiagnosticEvent = Readonly<
+export type TelegramInitDataInvalidOptionalField =
+  | 'last_name'
+  | 'username'
+  | 'language_code'
+  | 'photo_url';
+
+type TelegramInitDataNonExpiredDiagnosticEvent = Readonly<
   | {
-      readonly reason: TelegramInitDataNonExpiredDiagnosticReason;
+      readonly reason: Exclude<
+        TelegramInitDataNonExpiredDiagnosticReason,
+        'optional_field_invalid'
+      >;
     }
+  | {
+      readonly reason: 'optional_field_invalid';
+      readonly field: TelegramInitDataInvalidOptionalField;
+    }
+>;
+
+export type TelegramInitDataDiagnosticEvent = Readonly<
+  | TelegramInitDataNonExpiredDiagnosticEvent
   | {
       readonly reason: 'auth_date_expired';
       readonly ageBucket: TelegramInitDataExpiredAgeBucket;
@@ -83,9 +100,7 @@ export class TelegramInitDataVerificationError extends Error {
 }
 
 class TelegramInitDataDiagnosticFailure extends Error {
-  constructor(
-    readonly reason: TelegramInitDataNonExpiredDiagnosticReason,
-  ) {
+  constructor(readonly event: TelegramInitDataNonExpiredDiagnosticEvent) {
     super(SAFE_ERROR_MESSAGE);
     this.name = 'TelegramInitDataDiagnosticFailure';
   }
@@ -109,9 +124,23 @@ function failPublicVerification(): never {
 }
 
 function failDiagnostic(
-  reason: TelegramInitDataNonExpiredDiagnosticReason,
+  reason: Exclude<
+    TelegramInitDataNonExpiredDiagnosticReason,
+    'optional_field_invalid'
+  >,
 ): never {
-  throw new TelegramInitDataDiagnosticFailure(reason);
+  throw new TelegramInitDataDiagnosticFailure(Object.freeze({ reason }));
+}
+
+function failOptionalFieldDiagnostic(
+  field: TelegramInitDataInvalidOptionalField,
+): never {
+  throw new TelegramInitDataDiagnosticFailure(
+    Object.freeze({
+      reason: 'optional_field_invalid',
+      field,
+    }),
+  );
 }
 
 function utf8ByteLength(value: string): number {
@@ -335,10 +364,9 @@ function readRequiredString(
   user: TelegramUserData,
   field: string,
   maxCodePoints: number,
-  reason: 'required_name_invalid' | 'optional_field_invalid',
 ): string {
   if (!hasOwn(user, field)) {
-    return failDiagnostic(reason);
+    return failDiagnostic('required_name_invalid');
   }
 
   const value = user[field];
@@ -347,7 +375,7 @@ function readRequiredString(
     value.length === 0 ||
     [...value].length > maxCodePoints
   ) {
-    return failDiagnostic(reason);
+    return failDiagnostic('required_name_invalid');
   }
 
   return value;
@@ -355,19 +383,23 @@ function readRequiredString(
 
 function readOptionalString(
   user: TelegramUserData,
-  field: string,
+  field: TelegramInitDataInvalidOptionalField,
   maxCodePoints: number,
 ): string | undefined {
   if (!hasOwn(user, field)) {
     return undefined;
   }
 
-  return readRequiredString(
-    user,
-    field,
-    maxCodePoints,
-    'optional_field_invalid',
-  );
+  const value = user[field];
+  if (
+    typeof value !== 'string' ||
+    value.length === 0 ||
+    [...value].length > maxCodePoints
+  ) {
+    return failOptionalFieldDiagnostic(field);
+  }
+
+  return value;
 }
 
 function readTelegramId(user: TelegramUserData): number {
@@ -413,13 +445,14 @@ function readPhotoUrl(user: TelegramUserData): string | undefined {
     return undefined;
   }
 
+  let parsed: URL;
   try {
-    const parsed = new URL(photoUrl);
-    if (parsed.protocol !== 'https:') {
-      return failDiagnostic('optional_field_invalid');
-    }
+    parsed = new URL(photoUrl);
   } catch {
-    return failDiagnostic('optional_field_invalid');
+    return failOptionalFieldDiagnostic('photo_url');
+  }
+  if (parsed.protocol !== 'https:') {
+    return failOptionalFieldDiagnostic('photo_url');
   }
 
   return photoUrl;
@@ -512,7 +545,6 @@ export class TelegramInitDataVerifier {
         user,
         'first_name',
         MAX_NAME_CODE_POINTS,
-        'required_name_invalid',
       );
       const lastName = readOptionalString(
         user,
@@ -584,13 +616,13 @@ export class TelegramInitDataVerifier {
         identity,
       };
     } catch (error: unknown) {
-      const reason =
+      const event: TelegramInitDataNonExpiredDiagnosticEvent =
         error instanceof TelegramInitDataDiagnosticFailure
-          ? error.reason
-          : 'unexpected_internal_failure';
+          ? error.event
+          : Object.freeze({ reason: 'unexpected_internal_failure' });
       notifyObserver(
         this.diagnosticObserver,
-        Object.freeze({ reason }),
+        event,
       );
       return {
         status: 'invalid',

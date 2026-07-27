@@ -393,6 +393,55 @@ describe('AuthModule Telegram login wiring', () => {
     await moduleRef.close();
   });
 
+  it('logs only the allowlisted invalid optional field name', async () => {
+    const warn = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+    const moduleRef = await compileAuthModule(enabledConfiguration());
+    warn.mockClear();
+    const feature = getFeature(moduleRef);
+    if (!feature.enabled) {
+      throw new Error('Expected enabled Telegram login feature');
+    }
+    const verifier = getServiceDependencies(feature.service).verifier;
+    const valueMarker = 'SYNTHETIC_PRIVATE_USERNAME_VALUE';
+    const rawAuthDate = '1700000000';
+    const rawInitData = signedInitData([
+      ['auth_date', rawAuthDate],
+      [
+        'user',
+        JSON.stringify({
+          id: 987654321,
+          first_name: 'Optional field logger',
+          username: { privateMarker: valueMarker },
+        }),
+      ],
+    ]);
+
+    expect(verifier.verifyProof(rawInitData)).toEqual({
+      status: 'invalid',
+      reason: 'invalid_proof',
+    });
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      'Telegram initData verification rejected reason=optional_field_invalid field=username',
+    );
+    const logged = inspect(warn.mock.calls);
+    for (const marker of [
+      rawInitData,
+      valueMarker,
+      '987654321',
+      rawAuthDate,
+      TEST_BOT_TOKEN,
+    ]) {
+      expect(logged.includes(marker)).toBe(false);
+    }
+    expect(warn.mock.calls[0]).toHaveLength(1);
+    expect(warn.mock.calls[0]?.[0]).not.toBeInstanceOf(Error);
+
+    await moduleRef.close();
+  });
+
   it('keeps verifier outcomes unchanged when the Logger throws', async () => {
     const warn = jest
       .spyOn(Logger.prototype, 'warn')
@@ -406,7 +455,19 @@ describe('AuthModule Telegram login wiring', () => {
       throw new Error('Expected enabled Telegram login feature');
     }
     const verifier = getServiceDependencies(feature.service).verifier;
-    const rawInitData = `hash=${'0'.repeat(64)}`;
+    const rawInitData = signedInitData([
+      ['auth_date', '1700000000'],
+      [
+        'user',
+        JSON.stringify({
+          id: 987654321,
+          first_name: 'Logger failure',
+          language_code: {
+            privateMarker: 'SYNTHETIC_LOGGER_FIELD_VALUE',
+          },
+        }),
+      ],
+    ]);
 
     expect(verifier.verifyProof(rawInitData)).toEqual({
       status: 'invalid',

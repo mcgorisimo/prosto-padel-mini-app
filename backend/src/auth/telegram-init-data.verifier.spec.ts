@@ -900,22 +900,60 @@ describe('TelegramInitDataVerifier', () => {
       expect(events).toEqual([{ reason: 'required_name_invalid' }]);
     });
 
-    it('reports optional_field_invalid for an invalid optional field', () => {
-      const events: TelegramInitDataDiagnosticEvent[] = [];
-      const rawInitData = signParameters(
-        userParameters({
-          id: 99,
-          first_name: 'Optional',
-          photo_url: 'synthetic-invalid-photo-url',
-        }),
-      );
+    it.each([
+      [
+        'last_name',
+        { privateMarker: 'SYNTHETIC_LAST_NAME_VALUE' },
+        'SYNTHETIC_LAST_NAME_VALUE',
+      ],
+      [
+        'username',
+        { privateMarker: 'SYNTHETIC_USERNAME_VALUE' },
+        'SYNTHETIC_USERNAME_VALUE',
+      ],
+      [
+        'language_code',
+        { privateMarker: 'SYNTHETIC_LANGUAGE_CODE_VALUE' },
+        'SYNTHETIC_LANGUAGE_CODE_VALUE',
+      ],
+      [
+        'photo_url',
+        'synthetic-invalid-photo-url-SYNTHETIC_PHOTO_URL_VALUE',
+        'SYNTHETIC_PHOTO_URL_VALUE',
+      ],
+    ] as const)(
+      'reports only the field name for invalid optional field %s',
+      (field, value, valueMarker) => {
+        const events: TelegramInitDataDiagnosticEvent[] = [];
+        const rawInitData = signParameters(
+          userParameters({
+            id: 99,
+            first_name: 'Optional',
+            [field]: value,
+          }),
+        );
 
-      expect(verifierWithEvents(events).verifyProof(rawInitData)).toEqual({
-        status: 'invalid',
-        reason: 'invalid_proof',
-      });
-      expect(events).toEqual([{ reason: 'optional_field_invalid' }]);
-    });
+        expect(
+          verifierWithEvents(events).verifyProof(rawInitData),
+        ).toEqual({
+          status: 'invalid',
+          reason: 'invalid_proof',
+        });
+        expect(events).toEqual([
+          {
+            reason: 'optional_field_invalid',
+            field,
+          },
+        ]);
+        expect(Object.keys(events[0]).sort()).toEqual([
+          'field',
+          'reason',
+        ]);
+        expect(Object.isFrozen(events[0])).toBe(true);
+        expect(JSON.stringify(events)).not.toContain(valueMarker);
+        expect(inspect(events)).not.toContain(valueMarker);
+      },
+    );
 
     it('reports unexpected_internal_failure without exposing the exception', () => {
       const events: TelegramInitDataDiagnosticEvent[] = [];
@@ -947,9 +985,14 @@ describe('TelegramInitDataVerifier', () => {
         observer,
       );
       const invalid = verifier.verifyProof(
-        FIXED_MINIMAL_VECTOR.replace(
-          /hash=[0-9a-f]+$/,
-          `hash=${'0'.repeat(64)}`,
+        signParameters(
+          userParameters({
+            id: 100,
+            first_name: 'Observer failure',
+            username: {
+              privateMarker: 'SYNTHETIC_OBSERVER_FIELD_VALUE',
+            },
+          }),
         ),
       );
       const authDate = FIXED_NOW_SECONDS - MAX_AGE_SECONDS - 1;
