@@ -234,7 +234,7 @@ function isStaleInvitationError(error) {
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 
-export default function App({ session, showToast }) { // Accept showToast as a prop
+export default function App({ session, showToast, onLogout }) { // Accept showToast as a prop
   const { user, tg } = useTelegram();
   
   // --- 1. СТЕЙТЫ ---
@@ -1148,10 +1148,14 @@ const handleBookSlot = async (booking) => {
 
   // ── Logout ──
   const handleLogout = async () => {
-    const { error } = await supabase.auth.signOut();
-    if (error) {
-      showToast?.('Не удалось выйти из аккаунта. Попробуйте еще раз.', 'error');
-      throw error;
+    if (typeof onLogout === 'function') {
+      await onLogout();
+    } else {
+      const { error } = await supabase.auth.signOut();
+      if (error) {
+        showToast?.('Не удалось выйти из аккаунта. Попробуйте еще раз.', 'error');
+        throw error;
+      }
     }
     localStorage.clear();
     window.location.reload();

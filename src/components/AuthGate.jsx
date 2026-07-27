@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
 import App          from '../App';
 import WelcomeScreen from './auth/WelcomeScreen';
 import SignUpScreen  from './auth/SignUpScreen';
@@ -14,6 +14,9 @@ const normalizeTelegramUsername = (value) =>
     .trim()
     .replace(/^@+/, '')
     .replace(/\s+/g, '');
+
+const isTelegramBackendSuccess = (status) =>
+  status === 'authenticated' || status === 'session_restored';
 
 export default function AuthGate() {
   const telegramBackendLogin = useTelegramBackendLogin();
@@ -47,7 +50,7 @@ export default function AuthGate() {
   useEffect(() => {
     if (
       (session || authView !== 'welcome') &&
-      telegramBackendLogin.status === 'authenticated'
+      isTelegramBackendSuccess(telegramBackendLogin.status)
     ) {
       telegramBackendLogin.dismissSuccess();
     }
@@ -57,6 +60,16 @@ export default function AuthGate() {
     telegramBackendLogin.dismissSuccess,
     telegramBackendLogin.status,
   ]);
+
+  const handleAppLogout = useCallback(async () => {
+    const backendResult = await telegramBackendLogin.logout();
+    if (backendResult.outcome !== 'logged_out') {
+      throw new Error('Backend session logout failed');
+    }
+
+    const { error: supabaseError } = await supabase.auth.signOut();
+    if (supabaseError) throw supabaseError;
+  }, [telegramBackendLogin.logout]);
 
   const showToast = (message, variant = 'info') => {
     setToastMessage({ message, variant });
@@ -131,7 +144,7 @@ const handleSignUp = async ({ email, password, options }) => {
     <TelegramBackendLoginStatus
       status={
         (session || authView !== 'welcome') &&
-        telegramBackendLogin.status === 'authenticated'
+        isTelegramBackendSuccess(telegramBackendLogin.status)
           ? 'idle'
           : telegramBackendLogin.status
       }
@@ -165,7 +178,11 @@ const handleSignUp = async ({ email, password, options }) => {
   if (session) {
     return (
       <>
-        <App session={session} showToast={showToast} />
+        <App
+          session={session}
+          showToast={showToast}
+          onLogout={handleAppLogout}
+        />
         {toast}
         {telegramBackendStatus}
       </>

@@ -14,6 +14,10 @@ const STATUS_MESSAGES = Object.freeze({
     'Вход через Telegram недоступен для этого аккаунта.',
   internal_error:
     'Не удалось безопасно завершить вход через Telegram.',
+  session_restored:
+    'Сессия Telegram восстановлена.',
+  session_expired:
+    'Сессия Telegram истекла. Переоткройте Mini App.',
 });
 
 export default function TelegramBackendLoginStatus({
@@ -27,10 +31,12 @@ export default function TelegramBackendLoginStatus({
   let background = 'rgba(7,31,22,0.96)';
   let border = 'rgba(216,243,74,0.28)';
 
-  if (status === 'authenticated') {
-    message = accountKind === 'new'
-      ? 'Вход через Telegram подтверждён: новый аккаунт создан.'
-      : 'Вход через Telegram подтверждён: аккаунт найден.';
+  if (status === 'authenticated' || status === 'session_restored') {
+    if (status === 'authenticated') {
+      message = accountKind === 'new'
+        ? 'Вход через Telegram подтверждён: новый аккаунт создан.'
+        : 'Вход через Telegram подтверждён: аккаунт найден.';
+    }
     tone = '#050F0B';
     background = 'rgba(216,243,74,0.96)';
     border = 'rgba(216,243,74,0.45)';
