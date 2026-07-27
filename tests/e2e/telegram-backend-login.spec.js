@@ -3,10 +3,12 @@ const { test, expect } = require('@playwright/test');
 const FEATURE_ENABLED =
   process.env.VITE_TELEGRAM_BACKEND_LOGIN_ENABLED === 'true';
 const LOGIN_ROUTE = '**/api/v1/auth/telegram/login';
+const SESSION_ME_ROUTE = '**/api/v1/auth/session/me';
 const SYNTHETIC_INIT_DATA =
   'query_id=synthetic-login&auth_date=1700000000&hash=synthetic-hash';
 const SYNTHETIC_CREDENTIAL =
-  'synthetic-credential-for-browser-regression-only';
+  'Q0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0M';
+const SYNTHETIC_ACCOUNT_ID = '11111111-1111-4111-8111-111111111111';
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
@@ -148,18 +150,30 @@ test.describe('Telegram backend login feature disabled', () => {
   test('keeps the existing Supabase UX and makes no backend request', async ({
     page,
   }) => {
-    let calls = 0;
+    let loginCalls = 0;
+    let sessionCalls = 0;
     await prepareBrowser(page);
     await page.route(LOGIN_ROUTE, async (route) => {
-      calls += 1;
+      loginCalls += 1;
       await fulfillJson(route, 200, successBody());
+    });
+    await page.route(SESSION_ME_ROUTE, async (route) => {
+      sessionCalls += 1;
+      await fulfillJson(route, 200, {
+        accountId: SYNTHETIC_ACCOUNT_ID,
+        role: 'player',
+        expiresAt: Math.floor(Date.now() / 1_000) + 3_600,
+      });
     });
 
     await page.goto('/');
     await expectExistingSupabaseWelcome(page);
     await page.waitForTimeout(300);
 
-    expect(calls).toBe(0);
+    expect({ loginCalls, sessionCalls }).toEqual({
+      loginCalls: 0,
+      sessionCalls: 0,
+    });
     await expect(
       page.getByTestId('telegram-backend-login-status'),
     ).toHaveCount(0);
@@ -171,6 +185,16 @@ test.describe('Telegram backend login feature enabled', () => {
     !FEATURE_ENABLED,
     'This regression requires VITE_TELEGRAM_BACKEND_LOGIN_ENABLED=true.',
   );
+
+  test.beforeEach(async ({ page }) => {
+    await page.route(SESSION_ME_ROUTE, async (route) => {
+      await fulfillJson(route, 200, {
+        accountId: SYNTHETIC_ACCOUNT_ID,
+        role: 'player',
+        expiresAt: Math.floor(Date.now() / 1_000) + 3_600,
+      });
+    });
+  });
 
   test('sends the exact request once, accepts new account and leaks no credential', async ({
     page,
@@ -398,7 +422,7 @@ test.describe('Telegram backend login feature enabled', () => {
       const waitFor = async (predicate) => {
         for (let index = 0; index < 100; index += 1) {
           if (predicate()) return true;
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
         }
         return false;
       };
@@ -432,7 +456,7 @@ test.describe('Telegram backend login feature enabled', () => {
       };
       const authenticated = {
         outcome: 'authenticated',
-        credential: 'synthetic-private-success-lifecycle-credential',
+        credential: 'REREREREREREREREREREREREREREREREREREREREREQ',
         expiresAt: Math.floor(Date.now() / 1_000) + 3_600,
         accountKind: 'new',
       };
@@ -877,7 +901,7 @@ test.describe('Telegram backend login feature enabled', () => {
       };
       const authenticated = {
         outcome: 'authenticated',
-        credential: 'synthetic-private-lifecycle-credential',
+        credential: 'RkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkY',
         expiresAt: Math.floor(Date.now() / 1_000) + 3_600,
         accountKind: 'new',
       };
@@ -1086,7 +1110,7 @@ test.describe('Telegram backend login feature enabled', () => {
             return new Promise((resolve) => {
               resolveSecondResponse = () => resolve(new Response(
                 JSON.stringify({
-                  credential: 'synthetic-second-identity-credential',
+                  credential: 'R0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0c',
                   expiresAt: Math.floor(Date.now() / 1_000) + 3_600,
                   accountKind: 'existing',
                 }),
@@ -1099,7 +1123,7 @@ test.describe('Telegram backend login feature enabled', () => {
           }
 
           return new Response(JSON.stringify({
-            credential: 'synthetic-first-identity-credential',
+            credential: 'SEhISEhISEhISEhISEhISEhISEhISEhISEhISEhISEg',
             expiresAt: Math.floor(Date.now() / 1_000) + 3_600,
             accountKind: 'new',
           }), {
@@ -1121,7 +1145,7 @@ test.describe('Telegram backend login feature enabled', () => {
         (snapshot) => sameIdentityStatuses.push(snapshot.status),
       );
 
-      await waitFor(() => lifecycle.hasCredential());
+      await waitFor(() => lifecycle.hasPrincipal());
       await new Promise((resolve) => setTimeout(resolve, 0));
       const callsForTwoSameConsumers = calls;
       const firstCredentialPresent = lifecycle.hasCredential();
@@ -1222,7 +1246,7 @@ test.describe('Telegram backend login feature enabled', () => {
           }
 
           return new Response(JSON.stringify({
-            credential: 'synthetic-new-active-identity-credential',
+            credential: 'SUlJSUlJSUlJSUlJSUlJSUlJSUlJSUlJSUlJSUlJSUk',
             expiresAt: Math.floor(Date.now() / 1_000) + 3_600,
             accountKind: 'existing',
           }), {
@@ -1245,7 +1269,8 @@ test.describe('Telegram backend login feature enabled', () => {
       await waitFor(() =>
         firstSignalAborted &&
         calls === 2 &&
-        lifecycle.hasCredential());
+        lifecycle.hasPrincipal() &&
+        secondStatuses.at(-1) === 'authenticated');
 
       const result = {
         calls,
@@ -1313,7 +1338,7 @@ test.describe('Telegram backend login feature enabled', () => {
           }
 
           return new Response(JSON.stringify({
-            credential: 'synthetic-valid-next-identity-credential',
+            credential: 'SkpKSkpKSkpKSkpKSkpKSkpKSkpKSkpKSkpKSkpKSko',
             expiresAt: Math.floor(Date.now() / 1_000) + 3_600,
             accountKind: 'existing',
           }), {
@@ -1365,7 +1390,7 @@ test.describe('Telegram backend login feature enabled', () => {
             }
             return {
               outcome: 'authenticated',
-              credential: 'synthetic-recovered-credential',
+              credential: 'RUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUU',
               expiresAt: Math.floor(Date.now() / 1_000) + 3_600,
               accountKind: 'existing',
             };

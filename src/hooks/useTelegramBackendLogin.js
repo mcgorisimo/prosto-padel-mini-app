@@ -76,6 +76,7 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
   let activeAttempt = null;
   let activeLogout = null;
   let privateCredential = null;
+  let privatePrincipal = null;
   let publicSnapshot = IDLE_SNAPSHOT;
   let storageMutations = Promise.resolve();
 
@@ -172,6 +173,11 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
     attempt?.controller.abort();
   }
 
+  function clearPrivateSession() {
+    privateCredential = null;
+    privatePrincipal = null;
+  }
+
   function clearBoundary({ removeStored = true } = {}) {
     generation += 1;
     identityToken += 1;
@@ -186,7 +192,7 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
     abortActiveAttempt();
     abortActiveLogout();
     currentIdentityFingerprint = null;
-    privateCredential = null;
+    clearPrivateSession();
     clearExpirationTimer();
     clearSuccessMessageTimer();
     if (removeStored) {
@@ -199,7 +205,7 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
     generation += 1;
     abortActiveAttempt();
     currentIdentityFingerprint = null;
-    privateCredential = null;
+    clearPrivateSession();
     clearExpirationTimer();
     clearSuccessMessageTimer();
     removeStoredCredentialBestEffort();
@@ -227,7 +233,7 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
 
       const remainingMs = (expiresAt * 1_000) - now();
       if (remainingMs <= 0) {
-        privateCredential = null;
+        clearPrivateSession();
         expirationTimer = null;
         removeStoredCredentialBestEffort();
         publish({
@@ -284,7 +290,7 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
         ) {
           pendingRecord.rawInitData = null;
           pendingIdentity = null;
-          privateCredential = null;
+          clearPrivateSession();
           publish({
             status: 'internal_error',
             errorKind: 'internal_error',
@@ -385,16 +391,57 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
             if (!attemptIsCurrent()) return;
 
             privateCredential = refreshResult.credential;
-            publish({
-              status: 'session_restored',
-              expiresAt: refreshResult.expiresAt,
-            });
-            scheduleSuccessMessageDismissal(attemptGeneration);
-            scheduleExpiration(refreshResult.expiresAt, attemptGeneration);
-            return;
-          }
+            let authenticationResult;
+            try {
+              authenticationResult = await sessions.authenticate(
+                refreshResult.credential,
+                { signal: controller.signal },
+              );
+            } catch {
+              authenticationResult = Object.freeze({
+                outcome: 'rejected',
+                reason: 'internal_error',
+              });
+            }
+            if (
+              !attemptIsCurrent() ||
+              authenticationResult.outcome === 'cancelled'
+            ) {
+              return;
+            }
 
-          if (
+            if (authenticationResult.outcome === 'authenticated') {
+              privatePrincipal = authenticationResult.principal;
+              publish({
+                status: 'session_restored',
+                expiresAt: authenticationResult.principal.expiresAt,
+              });
+              scheduleSuccessMessageDismissal(attemptGeneration);
+              scheduleExpiration(
+                authenticationResult.principal.expiresAt,
+                attemptGeneration,
+              );
+              return;
+            }
+
+            privatePrincipal = null;
+            if (authenticationResult.reason === 'invalid') {
+              privateCredential = null;
+              try {
+                await removeStoredCredential(controller.signal);
+              } catch {
+                // An invalid rotated credential is never reused.
+              }
+              if (!attemptIsCurrent()) return;
+            } else {
+              const errorKind =
+                authenticationResult.reason === 'temporary_unavailable'
+                  ? 'temporary_unavailable'
+                  : 'internal_error';
+              publish({ status: errorKind, errorKind });
+              return;
+            }
+          } else if (
             refreshResult.reason === 'invalid' ||
             refreshResult.reason === 'expired' ||
             refreshResult.reason === 'reopen_required'
@@ -406,7 +453,7 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
             }
             if (!attemptIsCurrent()) return;
           } else {
-            privateCredential = null;
+            clearPrivateSession();
             const errorKind =
               refreshResult.reason === 'temporary_unavailable'
                 ? 'temporary_unavailable'
@@ -429,17 +476,58 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
           if (!attemptIsCurrent()) return;
 
           privateCredential = result.credential;
+          let authenticationResult;
+          try {
+            authenticationResult = await sessions.authenticate(
+              result.credential,
+              { signal: controller.signal },
+            );
+          } catch {
+            authenticationResult = Object.freeze({
+              outcome: 'rejected',
+              reason: 'internal_error',
+            });
+          }
+          if (
+            !attemptIsCurrent() ||
+            authenticationResult.outcome === 'cancelled'
+          ) {
+            return;
+          }
+          if (authenticationResult.outcome !== 'authenticated') {
+            privatePrincipal = null;
+            if (authenticationResult.reason === 'invalid') {
+              privateCredential = null;
+              try {
+                await removeStoredCredential(controller.signal);
+              } catch {
+                // A credential rejected immediately after login is discarded.
+              }
+              if (!attemptIsCurrent()) return;
+            }
+            const errorKind =
+              authenticationResult.reason === 'temporary_unavailable'
+                ? 'temporary_unavailable'
+                : 'internal_error';
+            publish({ status: errorKind, errorKind });
+            return;
+          }
+
+          privatePrincipal = authenticationResult.principal;
           publish({
             status: 'authenticated',
             accountKind: result.accountKind,
-            expiresAt: result.expiresAt,
+            expiresAt: authenticationResult.principal.expiresAt,
           });
           scheduleSuccessMessageDismissal(attemptGeneration);
-          scheduleExpiration(result.expiresAt, attemptGeneration);
+          scheduleExpiration(
+            authenticationResult.principal.expiresAt,
+            attemptGeneration,
+          );
           return;
         }
 
-        privateCredential = null;
+        clearPrivateSession();
         publish({
           status: result.errorKind,
           errorKind: result.errorKind,
@@ -450,7 +538,7 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
           attemptGeneration === generation &&
           activeAttempt === attemptRecord
         ) {
-          privateCredential = null;
+          clearPrivateSession();
           publish({
             status: 'internal_error',
             errorKind: 'internal_error',
@@ -520,7 +608,7 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
         ) {
           generation += 1;
           currentIdentityFingerprint = null;
-          privateCredential = null;
+          clearPrivateSession();
           clearExpirationTimer();
           try {
             await removeStoredCredential(controller.signal);
@@ -610,6 +698,7 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
     clear: clearBoundary,
     dismissSuccess,
     hasCredential: () => privateCredential !== null,
+    hasPrincipal: () => privatePrincipal !== null,
     logout,
   });
 }

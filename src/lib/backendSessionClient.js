@@ -2,6 +2,7 @@ import { isCanonicalSessionCredential } from './sessionCredential';
 
 const REFRESH_PATH = '/api/v1/auth/session/refresh';
 const LOGOUT_PATH = '/api/v1/auth/session/logout';
+const AUTHENTICATE_PATH = '/api/v1/auth/session/me';
 const REQUEST_TIMEOUT_MS = 8_000;
 const MAX_REQUESTS = 3;
 const BACKOFF_BASE_MS = 250;
@@ -14,6 +15,8 @@ const BODY_NETWORK_FAILURE = Symbol('backend-session-body-network-failure');
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+const INTERNAL_UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 
 function frozen(outcome, extra = {}) {
   return Object.freeze({ outcome, ...extra });
@@ -199,6 +202,30 @@ function refreshSuccess(body) {
   });
 }
 
+function authenticationSuccess(body) {
+  if (!isPlainObject(body)) return null;
+  const keys = Object.keys(body).sort();
+  if (
+    keys.length !== 3 ||
+    keys[0] !== 'accountId' ||
+    keys[1] !== 'expiresAt' ||
+    keys[2] !== 'role' ||
+    !INTERNAL_UUID_PATTERN.test(body.accountId) ||
+    (body.role !== 'player' && body.role !== 'club_admin') ||
+    !Number.isSafeInteger(body.expiresAt) ||
+    body.expiresAt <= Math.floor(Date.now() / 1_000)
+  ) {
+    return null;
+  }
+  return frozen('authenticated', {
+    principal: Object.freeze({
+      accountId: body.accountId,
+      role: body.role,
+      expiresAt: body.expiresAt,
+    }),
+  });
+}
+
 function classifyRefresh(status, body) {
   const code = exactPublicCode(body);
   if (status === 401 && code === 'session_expired') {
@@ -223,6 +250,14 @@ function classifyLogout(status, body) {
   }
   if (status === 409 && code === 'session_request_conflict') {
     return frozen('rejected', { reason: 'conflict' });
+  }
+  return frozen('rejected', { reason: 'internal_error' });
+}
+
+function classifyAuthentication(status, body) {
+  const code = exactPublicCode(body);
+  if (status === 401 && code === 'session_invalid') {
+    return frozen('rejected', { reason: 'invalid' });
   }
   return frozen('rejected', { reason: 'internal_error' });
 }
@@ -258,16 +293,28 @@ export function createBackendSessionClient(dependencies = {}) {
     }, requestTimeoutMs);
 
     try {
+      const isAuthentication = operation === 'authenticate';
       const response = await fetchImpl(
-        operation === 'refresh' ? REFRESH_PATH : LOGOUT_PATH,
+        operation === 'refresh'
+          ? REFRESH_PATH
+          : operation === 'logout'
+            ? LOGOUT_PATH
+            : AUTHENTICATE_PATH,
         {
-          method: 'POST',
-          headers: {
-            Accept: 'application/json',
-            Authorization: `Bearer ${credential}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ requestKey }),
+          method: isAuthentication ? 'GET' : 'POST',
+          headers: isAuthentication
+            ? {
+                Accept: 'application/json',
+                Authorization: `Bearer ${credential}`,
+              }
+            : {
+                Accept: 'application/json',
+                Authorization: `Bearer ${credential}`,
+                'Content-Type': 'application/json',
+              },
+          ...(isAuthentication
+            ? {}
+            : { body: JSON.stringify({ requestKey }) }),
           cache: 'no-store',
           credentials: 'omit',
           redirect: 'error',
@@ -280,6 +327,12 @@ export function createBackendSessionClient(dependencies = {}) {
       }
 
       const body = await readBoundedJson(response, controller.signal);
+      if (operation === 'authenticate' && response.status === 200) {
+        const result = authenticationSuccess(body);
+        return result
+          ? frozen('success', { result })
+          : frozen('malformed_response');
+      }
       if (operation === 'refresh' && response.status === 200) {
         const result = refreshSuccess(body);
         return result
@@ -293,9 +346,12 @@ export function createBackendSessionClient(dependencies = {}) {
         return frozen('retryable_unavailable');
       }
       return frozen('success', {
-        result: operation === 'refresh'
-          ? classifyRefresh(response.status, body)
-          : classifyLogout(response.status, body),
+        result:
+          operation === 'refresh'
+            ? classifyRefresh(response.status, body)
+            : operation === 'logout'
+              ? classifyLogout(response.status, body)
+              : classifyAuthentication(response.status, body),
       });
     } catch (error) {
       if (externalSignal?.aborted) return frozen('cancelled');
@@ -316,8 +372,9 @@ export function createBackendSessionClient(dependencies = {}) {
     }
     if (externalSignal?.aborted) return frozen('cancelled');
 
-    const requestKey = createRequestKey(cryptoImpl);
-    if (!requestKey) {
+    const requestKey =
+      operation === 'authenticate' ? null : createRequestKey(cryptoImpl);
+    if (operation !== 'authenticate' && !requestKey) {
       return frozen('rejected', { reason: 'internal_error' });
     }
 
@@ -365,6 +422,8 @@ export function createBackendSessionClient(dependencies = {}) {
   }
 
   return Object.freeze({
+    authenticate: (credential, options) =>
+      execute('authenticate', credential, options),
     refresh: (credential, options) =>
       execute('refresh', credential, options),
     logout: (credential, options) =>

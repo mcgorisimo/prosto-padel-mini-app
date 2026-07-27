@@ -4,8 +4,10 @@ const FEATURE_ENABLED =
   process.env.VITE_TELEGRAM_BACKEND_LOGIN_ENABLED === 'true';
 const LOGIN_ROUTE = '**/api/v1/auth/telegram/login';
 const REFRESH_ROUTE = '**/api/v1/auth/session/refresh';
+const SESSION_ME_ROUTE = '**/api/v1/auth/session/me';
 const SYNTHETIC_INIT_DATA =
   'query_id=session-lifecycle&auth_date=1700000000&hash=synthetic';
+const SYNTHETIC_ACCOUNT_ID = '11111111-1111-4111-8111-111111111111';
 const CURRENT_CREDENTIAL = Buffer.alloc(32, 0x41).toString('base64url');
 const NEXT_CREDENTIAL = Buffer.alloc(32, 0x42).toString('base64url');
 const LOGIN_CREDENTIAL = Buffer.alloc(32, 0x43).toString('base64url');
@@ -78,12 +80,24 @@ test.describe('backend session credential lifecycle', () => {
     'This regression requires VITE_TELEGRAM_BACKEND_LOGIN_ENABLED=true.',
   );
 
+  test.beforeEach(async ({ page }) => {
+    await page.route(SESSION_ME_ROUTE, async (route) => {
+      await fulfillJson(route, 200, {
+        accountId: SYNTHETIC_ACCOUNT_ID,
+        role: 'player',
+        expiresAt: futureExpiry(),
+      });
+    });
+  });
+
   test('restores through refresh, replaces SecureStorage and skips Telegram login', async ({
     page,
   }) => {
     let refreshCalls = 0;
+    let authenticationCalls = 0;
     let loginCalls = 0;
     let safeRequestContract = null;
+    let safeAuthenticationContract = null;
     let consoleLeakDetected = false;
 
     page.on('console', (message) => {
@@ -115,6 +129,25 @@ test.describe('backend session credential lifecycle', () => {
       };
       await fulfillJson(route, 200, {
         credential: NEXT_CREDENTIAL,
+        expiresAt: futureExpiry(),
+      });
+    });
+    await page.unroute(SESSION_ME_ROUTE);
+    await page.route(SESSION_ME_ROUTE, async (route) => {
+      authenticationCalls += 1;
+      const request = route.request();
+      const headers = request.headers();
+      safeAuthenticationContract = {
+        method: request.method(),
+        bearerMatches:
+          headers.authorization === `Bearer ${NEXT_CREDENTIAL}`,
+        noBody: request.postData() === null,
+        noCookie:
+          !Object.prototype.hasOwnProperty.call(headers, 'cookie'),
+      };
+      await fulfillJson(route, 200, {
+        accountId: SYNTHETIC_ACCOUNT_ID,
+        role: 'player',
         expiresAt: futureExpiry(),
       });
     });
@@ -167,17 +200,26 @@ test.describe('backend session credential lifecycle', () => {
 
     expect({
       refreshCalls,
+      authenticationCalls,
       loginCalls,
       safeRequestContract,
+      safeAuthenticationContract,
       consoleLeakDetected,
       storageSummary,
     }).toEqual({
       refreshCalls: 1,
+      authenticationCalls: 1,
       loginCalls: 0,
       safeRequestContract: {
         exactBody: true,
         requestKeyIsUuid: true,
         bearerMatches: true,
+        noCookie: true,
+      },
+      safeAuthenticationContract: {
+        method: 'GET',
+        bearerMatches: true,
+        noBody: true,
         noCookie: true,
       },
       consoleLeakDetected: false,
@@ -231,6 +273,74 @@ test.describe('backend session credential lifecycle', () => {
 
     expect({ refreshCalls, loginCalls, replacementStored }).toEqual({
       refreshCalls: 1,
+      loginCalls: 1,
+      replacementStored: true,
+    });
+  });
+
+  test('discards a rotated credential rejected by session me before a fresh Telegram login', async ({
+    page,
+  }) => {
+    let refreshCalls = 0;
+    let authenticationCalls = 0;
+    let loginCalls = 0;
+
+    await prepareTelegramWithSecureStorage(page, CURRENT_CREDENTIAL);
+    await page.route(REFRESH_ROUTE, async (route) => {
+      refreshCalls += 1;
+      await fulfillJson(route, 200, {
+        credential: NEXT_CREDENTIAL,
+        expiresAt: futureExpiry(),
+      });
+    });
+    await page.unroute(SESSION_ME_ROUTE);
+    await page.route(SESSION_ME_ROUTE, async (route) => {
+      authenticationCalls += 1;
+      const authorization = route.request().headers().authorization;
+      if (authorization === `Bearer ${NEXT_CREDENTIAL}`) {
+        await fulfillJson(route, 401, {
+          statusCode: 401,
+          code: 'session_invalid',
+          message: 'Session is invalid',
+        });
+        return;
+      }
+      await fulfillJson(route, 200, {
+        accountId: SYNTHETIC_ACCOUNT_ID,
+        role: 'player',
+        expiresAt: futureExpiry(),
+      });
+    });
+    await page.route(LOGIN_ROUTE, async (route) => {
+      loginCalls += 1;
+      await fulfillJson(route, 200, {
+        credential: LOGIN_CREDENTIAL,
+        expiresAt: futureExpiry(),
+        accountKind: 'existing',
+      });
+    });
+
+    await page.goto('/');
+    await expect(
+      page.getByTestId('telegram-backend-login-status'),
+    ).toHaveAttribute('data-status', 'authenticated');
+
+    const replacementStored = await page.evaluate((expected) =>
+      new Promise((resolve) => {
+        window.Telegram.WebApp.SecureStorage.getItem(
+          'prosto_padel_backend_session_v1',
+          (_error, value) => resolve(value === expected),
+        );
+      }), LOGIN_CREDENTIAL);
+
+    expect({
+      refreshCalls,
+      authenticationCalls,
+      loginCalls,
+      replacementStored,
+    }).toEqual({
+      refreshCalls: 1,
+      authenticationCalls: 2,
       loginCalls: 1,
       replacementStored: true,
     });
@@ -301,6 +411,19 @@ test.describe('backend session credential lifecycle', () => {
               outcome: 'refreshed',
               credential: parameters.next,
               expiresAt: Math.floor(Date.now() / 1_000) + 3_600,
+            };
+          },
+          async authenticate(credential) {
+            if (credential !== parameters.next) {
+              return { outcome: 'rejected', reason: 'internal_error' };
+            }
+            return {
+              outcome: 'authenticated',
+              principal: {
+                accountId: '11111111-1111-4111-8111-111111111111',
+                role: 'player',
+                expiresAt: Math.floor(Date.now() / 1_000) + 3_600,
+              },
             };
           },
         },
@@ -469,6 +592,102 @@ test.describe('backend session credential lifecycle', () => {
     });
   });
 
+  test('authenticates the rotated credential with an exact no-store GET and rejects extra fields', async ({
+    page,
+  }) => {
+    await prepareTelegramWithSecureStorage(page, null, '');
+    await page.goto('/');
+
+    const summary = await page.evaluate(async (parameters) => {
+      const { createBackendSessionClient } = await import(
+        '/src/lib/backendSessionClient.js'
+      );
+      const contracts = [];
+      let calls = 0;
+      const client = createBackendSessionClient({
+        fetchImpl: async (url, options) => {
+          calls += 1;
+          contracts.push({
+            pathMatches: url === '/api/v1/auth/session/me',
+            method: options.method,
+            bearerMatches:
+              options.headers.Authorization ===
+              `Bearer ${parameters.credential}`,
+            noBody:
+              !Object.prototype.hasOwnProperty.call(options, 'body'),
+            cache: options.cache,
+            credentials: options.credentials,
+            redirect: options.redirect,
+          });
+          const body = {
+            accountId: parameters.accountId,
+            role: 'player',
+            expiresAt: Math.floor(Date.now() / 1_000) + 3_600,
+          };
+          if (calls === 2) {
+            body.sessionId = '22222222-2222-4222-8222-222222222222';
+          }
+          return new Response(JSON.stringify(body), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        },
+      });
+
+      const accepted = await client.authenticate(parameters.credential);
+      const malformed = await client.authenticate(parameters.credential);
+      return {
+        calls,
+        contracts,
+        acceptedOutcome: accepted.outcome,
+        acceptedRole: accepted.principal?.role ?? null,
+        acceptedExpiresAtIsFuture:
+          accepted.principal?.expiresAt >
+          Math.floor(Date.now() / 1_000),
+        acceptedExposesCredential:
+          Object.prototype.hasOwnProperty.call(accepted, 'credential'),
+        malformedOutcome: malformed.outcome,
+        malformedReason: malformed.reason,
+        malformedExposesPrincipal:
+          Object.prototype.hasOwnProperty.call(malformed, 'principal'),
+      };
+    }, {
+      credential: NEXT_CREDENTIAL,
+      accountId: SYNTHETIC_ACCOUNT_ID,
+    });
+
+    expect(summary).toEqual({
+      calls: 2,
+      contracts: [
+        {
+          pathMatches: true,
+          method: 'GET',
+          bearerMatches: true,
+          noBody: true,
+          cache: 'no-store',
+          credentials: 'omit',
+          redirect: 'error',
+        },
+        {
+          pathMatches: true,
+          method: 'GET',
+          bearerMatches: true,
+          noBody: true,
+          cache: 'no-store',
+          credentials: 'omit',
+          redirect: 'error',
+        },
+      ],
+      acceptedOutcome: 'authenticated',
+      acceptedRole: 'player',
+      acceptedExpiresAtIsFuture: true,
+      acceptedExposesCredential: false,
+      malformedOutcome: 'rejected',
+      malformedReason: 'internal_error',
+      malformedExposesPrincipal: false,
+    });
+  });
+
   test('logout client sends an exact credential-bound request and accepts only 204', async ({
     page,
   }) => {
@@ -571,6 +790,19 @@ test.describe('backend session credential lifecycle', () => {
               credential === parameters.credential;
             return { outcome: 'logged_out' };
           },
+          async authenticate(credential) {
+            if (credential !== parameters.credential) {
+              return { outcome: 'rejected', reason: 'internal_error' };
+            }
+            return {
+              outcome: 'authenticated',
+              principal: {
+                accountId: '11111111-1111-4111-8111-111111111111',
+                role: 'player',
+                expiresAt: Math.floor(Date.now() / 1_000) + 3_600,
+              },
+            };
+          },
         },
         credentialStorage: {
           async read() {
@@ -590,7 +822,7 @@ test.describe('backend session credential lifecycle', () => {
       const waitFor = async (predicate) => {
         for (let index = 0; index < 100; index += 1) {
           if (predicate()) return true;
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
         }
         return false;
       };
@@ -598,7 +830,8 @@ test.describe('backend session credential lifecycle', () => {
         'synthetic-logout-init-data',
         () => {},
       );
-      await waitFor(() => lifecycle.hasCredential());
+      await waitFor(() => lifecycle.hasPrincipal());
+      const principalBeforeLogout = lifecycle.hasPrincipal();
       const result = await lifecycle.logout();
 
       return {
@@ -609,6 +842,8 @@ test.describe('backend session credential lifecycle', () => {
         removeCalls,
         storageEmpty: stored === null,
         memoryEmpty: !lifecycle.hasCredential(),
+        principalBeforeLogout,
+        principalEmpty: !lifecycle.hasPrincipal(),
         resultExposesCredential:
           Object.prototype.hasOwnProperty.call(result, 'credential'),
       };
@@ -622,6 +857,8 @@ test.describe('backend session credential lifecycle', () => {
       removeCalls: 1,
       storageEmpty: true,
       memoryEmpty: true,
+      principalBeforeLogout: true,
+      principalEmpty: true,
       resultExposesCredential: false,
     });
   });
@@ -674,7 +911,7 @@ test.describe('backend session credential lifecycle', () => {
       const waitFor = async (predicate) => {
         for (let index = 0; index < 100; index += 1) {
           if (predicate()) return true;
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
         }
         return false;
       };
@@ -682,12 +919,13 @@ test.describe('backend session credential lifecycle', () => {
         'synthetic-persistence-init-data',
         () => {},
       );
-      await waitFor(() => lifecycle.hasCredential());
+      await waitFor(() => lifecycle.hasPrincipal());
       detach();
       const teardown = timers.find((timer) => timer.delay === 0);
       teardown.callback();
       const afterUnmount = {
         memoryEmpty: !lifecycle.hasCredential(),
+        principalEmpty: !lifecycle.hasPrincipal(),
         storageRetained: stored === credential,
         removeCalls,
       };
@@ -698,6 +936,7 @@ test.describe('backend session credential lifecycle', () => {
         afterUnmount,
         afterClear: {
           memoryEmpty: !lifecycle.hasCredential(),
+          principalEmpty: !lifecycle.hasPrincipal(),
           storageEmpty: stored === null,
           removeCalls,
         },
@@ -707,11 +946,13 @@ test.describe('backend session credential lifecycle', () => {
     expect(summary).toEqual({
       afterUnmount: {
         memoryEmpty: true,
+        principalEmpty: true,
         storageRetained: true,
         removeCalls: 0,
       },
       afterClear: {
         memoryEmpty: true,
+        principalEmpty: true,
         storageEmpty: true,
         removeCalls: 1,
       },
@@ -768,7 +1009,7 @@ test.describe('backend session credential lifecycle', () => {
       const waitFor = async (predicate) => {
         for (let index = 0; index < 100; index += 1) {
           if (predicate()) return true;
-          await Promise.resolve();
+          await new Promise((resolve) => setTimeout(resolve, 0));
         }
         return false;
       };
@@ -792,6 +1033,7 @@ test.describe('backend session credential lifecycle', () => {
         () =>
           stored === parameters.next &&
           lifecycle.hasCredential() &&
+          lifecycle.hasPrincipal() &&
           statuses.at(-1) === 'authenticated',
       );
 
