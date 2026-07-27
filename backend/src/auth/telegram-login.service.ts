@@ -15,6 +15,7 @@ import {
   validatePlayerAccountWithProfileCreation,
 } from '../accounts/player-profile.types';
 import {
+  AuthenticationOperationId,
   TelegramProofVerificationOutcome,
   VerifiedTelegramProof,
   isAuthenticationCommandId,
@@ -66,6 +67,7 @@ import {
 import {
   AuthenticationOperationTerminalPersistenceError,
   AuthenticationOperationTerminalRepository,
+  TelegramProofBindingDiagnosticCheck,
 } from '../database/authentication-operation-terminal.repository';
 import {
   TelegramAuthenticationOperationPersistenceError,
@@ -120,6 +122,9 @@ export type TelegramLoginDiagnosticEvent =
     }>
   | Readonly<{
       readonly checkpoint: TelegramLoginDiagnosticCheckpoint;
+    }>
+  | Readonly<{
+      readonly proofBindingCheck: TelegramProofBindingDiagnosticCheck;
     }>;
 
 export type TelegramLoginDiagnosticObserver = (
@@ -538,6 +543,10 @@ export class TelegramLoginService {
           accountStage,
         );
         if (accountStage.stage === 'terminal_operation') {
+          await this.reportProofBindingCheck(
+            transaction,
+            prepared.bindings.operationId,
+          );
           accountStage.checkpoint = 'account_transaction_commit';
         }
         return result;
@@ -915,6 +924,51 @@ export class TelegramLoginService {
       return 'internal_failure';
     }
     return undefined;
+  }
+
+  private async reportProofBindingCheck(
+    transaction: PostgresTransaction,
+    operationId: AuthenticationOperationId,
+  ): Promise<void> {
+    if (this.diagnosticObserver === undefined) {
+      return;
+    }
+
+    let check;
+    try {
+      check =
+        await this.dependencies.terminalOperations.inspectTelegramProofBinding(
+          transaction,
+          operationId,
+        );
+    } catch {
+      return;
+    }
+
+    if (
+      typeof check.operationExists !== 'boolean' ||
+      typeof check.consumptionExists !== 'boolean' ||
+      typeof check.operationIdMatch !== 'boolean' ||
+      typeof check.intentMatch !== 'boolean' ||
+      typeof check.idempotencyKeyMatch !== 'boolean' ||
+      typeof check.requestDigestMatch !== 'boolean'
+    ) {
+      return;
+    }
+
+    notifyDiagnosticObserver(
+      this.diagnosticObserver,
+      Object.freeze({
+        proofBindingCheck: Object.freeze({
+          operationExists: check.operationExists,
+          consumptionExists: check.consumptionExists,
+          operationIdMatch: check.operationIdMatch,
+          intentMatch: check.intentMatch,
+          idempotencyKeyMatch: check.idempotencyKeyMatch,
+          requestDigestMatch: check.requestDigestMatch,
+        }),
+      }),
+    );
   }
 
   private internalFailure(

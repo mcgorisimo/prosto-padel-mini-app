@@ -54,6 +54,7 @@ import {
   ApplyAuthenticationOperationTerminalInput,
   AuthenticationOperationTerminalRepository,
   AuthenticationOperationTerminalResult,
+  TelegramProofBindingDiagnosticCheck,
 } from '../database/authentication-operation-terminal.repository';
 import {
   PersistPendingTelegramAuthenticationInput,
@@ -420,6 +421,19 @@ class FakeTerminalOperations
     status: 'completed',
   };
   error: unknown;
+  bindingCheck: TelegramProofBindingDiagnosticCheck = Object.freeze({
+    operationExists: true,
+    consumptionExists: true,
+    operationIdMatch: true,
+    intentMatch: true,
+    idempotencyKeyMatch: true,
+    requestDigestMatch: true,
+  });
+  bindingCheckError: unknown;
+  readonly bindingCheckCalls: Array<{
+    transaction: PostgresTransaction;
+    operationId: AuthenticationOperationId;
+  }> = [];
 
   constructor(private readonly timeline: string[]) {}
 
@@ -433,6 +447,18 @@ class FakeTerminalOperations
       throw this.error;
     }
     return this.result;
+  }
+
+  async inspectTelegramProofBinding(
+    transaction: PostgresTransaction,
+    operationId: AuthenticationOperationId,
+  ): Promise<TelegramProofBindingDiagnosticCheck> {
+    this.timeline.push('proof-binding-check');
+    this.bindingCheckCalls.push({ transaction, operationId });
+    if (this.bindingCheckError !== undefined) {
+      throw this.bindingCheckError;
+    }
+    return this.bindingCheck;
   }
 }
 
@@ -677,7 +703,32 @@ describe('TelegramLoginService', () => {
               { stage },
               { checkpoint: 'terminal_repository_call' },
             ]
-          : [{ stage }],
+          : (
+                [
+                  'credential_issue',
+                  'session_creation',
+                  'initial_session_persistence',
+                ] as const
+              ).includes(
+                stage as
+                  | 'credential_issue'
+                  | 'session_creation'
+                  | 'initial_session_persistence',
+              )
+            ? [
+                {
+                  proofBindingCheck: {
+                    operationExists: true,
+                    consumptionExists: true,
+                    operationIdMatch: true,
+                    intentMatch: true,
+                    idempotencyKeyMatch: true,
+                    requestDigestMatch: true,
+                  },
+                },
+                { stage },
+              ]
+            : [{ stage }],
       );
       for (const event of events) {
         expect(Object.keys(event)).toHaveLength(1);
@@ -727,6 +778,16 @@ describe('TelegramLoginService', () => {
     expect(events).toEqual([
       { stage: 'terminal_operation' },
       { checkpoint: 'terminal_result_validation' },
+      {
+        proofBindingCheck: {
+          operationExists: true,
+          consumptionExists: true,
+          operationIdMatch: true,
+          intentMatch: true,
+          idempotencyKeyMatch: true,
+          requestDigestMatch: true,
+        },
+      },
     ]);
     expect(subject.terminal.calls).toHaveLength(1);
     expect(subject.issuer.issued).toHaveLength(0);
@@ -767,6 +828,16 @@ describe('TelegramLoginService', () => {
       reason: 'internal_failure',
     });
     expect(events).toEqual([
+      {
+        proofBindingCheck: {
+          operationExists: true,
+          consumptionExists: true,
+          operationIdMatch: true,
+          intentMatch: true,
+          idempotencyKeyMatch: true,
+          requestDigestMatch: true,
+        },
+      },
       { stage: 'terminal_operation' },
       { checkpoint: 'account_transaction_commit' },
       { checkpoint: 'transaction_before_commit' },
@@ -815,11 +886,11 @@ describe('TelegramLoginService', () => {
       outcome: 'rejected',
       reason: 'internal_failure',
     });
-    expect(observerCalls).toBe(4);
+    expect(observerCalls).toBe(5);
     expect(subject.issuer.issued).toHaveLength(0);
   });
 
-  it('does not publish commit checkpoints for a successful login', async () => {
+  it('publishes only the proof binding check before a successful account commit', async () => {
     const events: TelegramLoginDiagnosticEvent[] = [];
     const subject = harness((event) => events.push(event));
 
@@ -829,7 +900,116 @@ describe('TelegramLoginService', () => {
       outcome: 'authenticated',
       accountKind: 'existing',
     });
+    expect(events).toEqual([
+      {
+        proofBindingCheck: {
+          operationExists: true,
+          consumptionExists: true,
+          operationIdMatch: true,
+          intentMatch: true,
+          idempotencyKeyMatch: true,
+          requestDigestMatch: true,
+        },
+      },
+    ]);
+    expect(subject.terminal.bindingCheckCalls).toEqual([
+      {
+        transaction: subject.transactions.transactions[1],
+        operationId: OPERATION_ID,
+      },
+    ]);
+    expect(subject.timeline.indexOf('proof-binding-check')).toBeLessThan(
+      subject.timeline.indexOf('tx2:commit'),
+    );
+  });
+
+  it.each([
+    'operationExists',
+    'consumptionExists',
+    'operationIdMatch',
+    'intentMatch',
+    'idempotencyKeyMatch',
+    'requestDigestMatch',
+  ] as const)(
+    'publishes an exact boolean-only proof binding check when %s is false',
+    async (falseField) => {
+      const events: TelegramLoginDiagnosticEvent[] = [];
+      const subject = harness((event) => events.push(event));
+      subject.terminal.bindingCheck = Object.freeze({
+        operationExists: true,
+        consumptionExists: true,
+        operationIdMatch: true,
+        intentMatch: true,
+        idempotencyKeyMatch: true,
+        requestDigestMatch: true,
+        [falseField]: false,
+      });
+
+      await expect(
+        subject.service.authenticateWithTelegram(input()),
+      ).resolves.toMatchObject({
+        outcome: 'authenticated',
+        accountKind: 'existing',
+      });
+      expect(events).toEqual([
+        {
+          proofBindingCheck: {
+            operationExists: falseField !== 'operationExists',
+            consumptionExists: falseField !== 'consumptionExists',
+            operationIdMatch: falseField !== 'operationIdMatch',
+            intentMatch: falseField !== 'intentMatch',
+            idempotencyKeyMatch: falseField !== 'idempotencyKeyMatch',
+            requestDigestMatch: falseField !== 'requestDigestMatch',
+          },
+        },
+      ]);
+      const serialized = [JSON.stringify(events), inspect(events)].join('\n');
+      for (const marker of [
+        RAW_INIT_DATA,
+        '123456789',
+        ACCOUNT_ID,
+        IDENTITY_ID,
+        OPERATION_ID,
+        SESSION_ID,
+        REQUEST_KEY,
+        PLAINTEXT,
+        PROOF_FINGERPRINT,
+        BINDINGS.requestDigest,
+        LOOKUP_DIGEST,
+        SYNTHETIC_INTERNAL_ERROR_MARKER,
+      ]) {
+        expect(serialized).not.toContain(marker);
+      }
+      expect(Object.keys(events[0] ?? {})).toEqual(['proofBindingCheck']);
+      if (events[0] !== undefined && 'proofBindingCheck' in events[0]) {
+        expect(Object.keys(events[0].proofBindingCheck).sort()).toEqual([
+          'consumptionExists',
+          'idempotencyKeyMatch',
+          'intentMatch',
+          'operationExists',
+          'operationIdMatch',
+          'requestDigestMatch',
+        ]);
+        expect(Object.isFrozen(events[0].proofBindingCheck)).toBe(true);
+      }
+    },
+  );
+
+  it('ignores proof binding diagnostic failures without changing the workflow', async () => {
+    const events: TelegramLoginDiagnosticEvent[] = [];
+    const subject = harness((event) => events.push(event));
+    subject.terminal.bindingCheckError = new Error(
+      SYNTHETIC_INTERNAL_ERROR_MARKER,
+    );
+
+    await expect(
+      subject.service.authenticateWithTelegram(input()),
+    ).resolves.toMatchObject({
+      outcome: 'authenticated',
+      accountKind: 'existing',
+    });
     expect(events).toEqual([]);
+    expect(subject.terminal.bindingCheckCalls).toHaveLength(1);
   });
 
   it('authenticates a new Telegram user', async () => {

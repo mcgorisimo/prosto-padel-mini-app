@@ -64,9 +64,23 @@ export class AuthenticationOperationTerminalPersistenceError extends Error {
   }
 }
 
+export interface TelegramProofBindingDiagnosticCheck {
+  readonly operationExists: boolean;
+  readonly consumptionExists: boolean;
+  readonly operationIdMatch: boolean;
+  readonly intentMatch: boolean;
+  readonly idempotencyKeyMatch: boolean;
+  readonly requestDigestMatch: boolean;
+}
+
 export interface AuthenticationOperationTerminalRepository {
   applyTerminalCommand(
     transaction: PostgresTransaction,
     input: ApplyAuthenticationOperationTerminalInput,
   ): Promise<AuthenticationOperationTerminalResult>;
+
+  inspectTelegramProofBinding(
+    transaction: PostgresTransaction,
+    operationId: AuthenticationOperationId,
+  ): Promise<TelegramProofBindingDiagnosticCheck>;
 }

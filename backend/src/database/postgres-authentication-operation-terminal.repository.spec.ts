@@ -371,6 +371,129 @@ function expectPersistenceFailure(
   expect(error).toMatchObject({ reason });
 }
 
+describe('PostgresAuthenticationOperationTerminalRepository proof binding diagnostics', () => {
+  const allTrueRow = Object.freeze({
+    operation_exists: true,
+    consumption_exists: true,
+    operation_id_match: true,
+    intent_match: true,
+    idempotency_key_match: true,
+    request_digest_match: true,
+  });
+
+  it('returns only the six allowlisted booleans when every binding matches', async () => {
+    const transaction = new FakeTransaction([
+      queryResult([]),
+      queryResult([allTrueRow]),
+      queryResult([]),
+    ]);
+    const { repository: subject } = repository();
+
+    await expect(
+      subject.inspectTelegramProofBinding(transaction, OPERATION_ID),
+    ).resolves.toEqual({
+      operationExists: true,
+      consumptionExists: true,
+      operationIdMatch: true,
+      intentMatch: true,
+      idempotencyKeyMatch: true,
+      requestDigestMatch: true,
+    });
+    expect(transaction.calls).toHaveLength(3);
+    expect(transaction.calls[0].text).toBe(
+      'SAVEPOINT telegram_proof_binding_diagnostic',
+    );
+    expect(transaction.calls[1].values).toEqual([OPERATION_ID]);
+    expect(transaction.calls[1].text).toContain(
+      'backend_auth.authentication_operations',
+    );
+    expect(transaction.calls[1].text).toContain(
+      'backend_auth.telegram_proof_consumptions',
+    );
+    expect(transaction.calls[2].text).toBe(
+      'RELEASE SAVEPOINT telegram_proof_binding_diagnostic',
+    );
+  });
+
+  it.each([
+    ['operation_exists', 'operationExists'],
+    ['consumption_exists', 'consumptionExists'],
+    ['operation_id_match', 'operationIdMatch'],
+    ['intent_match', 'intentMatch'],
+    ['idempotency_key_match', 'idempotencyKeyMatch'],
+    ['request_digest_match', 'requestDigestMatch'],
+  ] as const)(
+    'preserves a false %s result without exposing compared values',
+    async (rowField, resultField) => {
+      const transaction = new FakeTransaction([
+        queryResult([]),
+        queryResult([{ ...allTrueRow, [rowField]: false }]),
+        queryResult([]),
+      ]);
+      const { repository: subject } = repository();
+
+      const result = await subject.inspectTelegramProofBinding(
+        transaction,
+        OPERATION_ID,
+      );
+
+      expect(result[resultField]).toBe(false);
+      expect(Object.values(result).filter((value) => value === false)).toHaveLength(
+        1,
+      );
+      expect(Object.keys(result).sort()).toEqual([
+        'consumptionExists',
+        'idempotencyKeyMatch',
+        'intentMatch',
+        'operationExists',
+        'operationIdMatch',
+        'requestDigestMatch',
+      ]);
+      expect(Object.isFrozen(result)).toBe(true);
+      const serialized = JSON.stringify(result);
+      for (const marker of SENSITIVE_AUDIT_VALUES) {
+        expect(serialized).not.toContain(marker);
+      }
+      expect(serialized).not.toContain(OPERATION_ID);
+    },
+  );
+
+  it('replaces query failures with a fixed non-leaking diagnostic error', async () => {
+    const sensitiveMarker = 'SYNTHETIC_PROOF_BINDING_QUERY_FAILURE';
+    const transaction = new FakeTransaction([
+      queryResult([]),
+      new Error(sensitiveMarker, { cause: sensitiveMarker }),
+      queryResult([]),
+      queryResult([]),
+    ]);
+    const { repository: subject } = repository();
+
+    let caught: unknown;
+    try {
+      await subject.inspectTelegramProofBinding(transaction, OPERATION_ID);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(Error);
+    const diagnosticError = caught as Error;
+    expect(diagnosticError.message).toBe(
+      'Telegram proof binding diagnostic failed',
+    );
+    expect(diagnosticError.cause).toBeUndefined();
+    expect(JSON.stringify(diagnosticError)).not.toContain(sensitiveMarker);
+    expect(diagnosticError.stack).not.toContain(sensitiveMarker);
+    expect(transaction.calls.map((call) => call.text)).toEqual([
+      'SAVEPOINT telegram_proof_binding_diagnostic',
+      expect.stringContaining(
+        'backend_auth.telegram_proof_consumptions',
+      ),
+      'ROLLBACK TO SAVEPOINT telegram_proof_binding_diagnostic',
+      'RELEASE SAVEPOINT telegram_proof_binding_diagnostic',
+    ]);
+  });
+});
+
 describe('PostgresAuthenticationOperationTerminalRepository input validation', () => {
   it.each([
     ['non-object input', null],
