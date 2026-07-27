@@ -1,6 +1,8 @@
-import { DynamicModule, Module, Type } from '@nestjs/common';
+import { DynamicModule, Logger, Module, Type } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
+import { createHmac } from 'node:crypto';
+import { inspect } from 'node:util';
 import {
   externalIdentityNamespace,
   trustProviderCanonicalizedExternalIdentitySubject,
@@ -46,6 +48,8 @@ class TestConfigModule {}
 const TEST_LOOKUP_PEPPER = Buffer.alloc(32, 0x31).toString('base64');
 const TEST_WORKFLOW_SECRET = Buffer.alloc(32, 0x42).toString('base64');
 const TEST_UUID_NAMESPACE = '12345678-1234-5678-9234-567812345678';
+const TEST_BOT_TOKEN =
+  '123456789:AA_TEST_ONLY_FAKE_TELEGRAM_BOT_TOKEN';
 const NOW = unixEpochSeconds(1_800_000_000);
 const FINGERPRINT = '55'.repeat(32) as AuthenticationProofFingerprint;
 
@@ -68,8 +72,7 @@ function enabledConfiguration(): Record<string, unknown> {
     DATABASE_ENABLED: true,
     DATABASE_URL: 'postgresql://test-only.invalid/prosto_padel',
     TELEGRAM_AUTH_ENABLED: true,
-    TELEGRAM_BOT_TOKEN:
-      '123456789:AA_TEST_ONLY_FAKE_TELEGRAM_BOT_TOKEN',
+    TELEGRAM_BOT_TOKEN: TEST_BOT_TOKEN,
     TELEGRAM_INIT_DATA_MAX_AGE_SECONDS: 300,
     [TELEGRAM_LOGIN_CONFIG_KEYS.lookupPepperBase64]: TEST_LOOKUP_PEPPER,
     [TELEGRAM_LOGIN_CONFIG_KEYS.workflowHmacSecretBase64]:
@@ -103,6 +106,28 @@ function verifiedProof(): VerifiedTelegramProof {
     expiresAt: unixEpochSeconds(1_800_001_000),
     proofFingerprint: FINGERPRINT,
   };
+}
+
+function signedInitData(
+  parameters: ReadonlyArray<readonly [string, string]>,
+): string {
+  const dataCheckString = [...parameters]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([name, value]) => `${name}=${value}`)
+    .join('\n');
+  const secretKey = createHmac('sha256', 'WebAppData')
+    .update(TEST_BOT_TOKEN, 'utf8')
+    .digest();
+  const hash = createHmac('sha256', secretKey)
+    .update(dataCheckString, 'utf8')
+    .digest('hex');
+
+  return [...parameters, ['hash', hash] as const]
+    .map(
+      ([name, value]) =>
+        `${encodeURIComponent(name)}=${encodeURIComponent(value)}`,
+    )
+    .join('&');
 }
 
 async function compileAuthModule(
@@ -151,6 +176,9 @@ describe('AuthModule Telegram login wiring', () => {
 
   it('compiles with database and Telegram workflow disabled without touching the pool', async () => {
     const getPool = jest.spyOn(PostgresService.prototype, 'getPool');
+    const warn = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
     const moduleRef = await compileAuthModule({
       DATABASE_ENABLED: false,
       DATABASE_URL: '',
@@ -172,6 +200,7 @@ describe('AuthModule Telegram login wiring', () => {
       expectProviderNotRegistered(moduleRef, token);
     }
     expect(getPool).not.toHaveBeenCalled();
+    expect(warn).not.toHaveBeenCalled();
     await moduleRef.close();
     expect(getPool).not.toHaveBeenCalled();
   });
@@ -258,6 +287,133 @@ describe('AuthModule Telegram login wiring', () => {
     expect(bindings.timestamps.sessionExpiresAt).toBe(
       NOW + TELEGRAM_SESSION_TTL_SECONDS,
     );
+    await moduleRef.close();
+  });
+
+  it('logs a fixed reason-only diagnostic through the wired verifier', async () => {
+    const warn = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+    const moduleRef = await compileAuthModule(enabledConfiguration());
+    warn.mockClear();
+    const feature = getFeature(moduleRef);
+    if (!feature.enabled) {
+      throw new Error('Expected enabled Telegram login feature');
+    }
+    const verifier = getServiceDependencies(feature.service).verifier;
+    const rawMarker = 'SYNTHETIC_RAW_INIT_DATA_MARKER';
+    const userIdMarker = '987654321';
+    const rawAuthDateMarker = '1800000000';
+    const rawInitData = [
+      `auth_date=${rawAuthDateMarker}`,
+      `user=${encodeURIComponent(
+        JSON.stringify({
+          id: Number(userIdMarker),
+          first_name: rawMarker,
+        }),
+      )}`,
+      `hash=${'0'.repeat(64)}`,
+    ].join('&');
+
+    expect(verifier.verifyProof(rawInitData)).toEqual({
+      status: 'invalid',
+      reason: 'invalid_proof',
+    });
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      'Telegram initData verification rejected reason=hash_mismatch',
+    );
+    const logged = inspect(warn.mock.calls);
+    for (const marker of [
+      rawInitData,
+      rawMarker,
+      userIdMarker,
+      rawAuthDateMarker,
+      '0'.repeat(64),
+      TEST_BOT_TOKEN,
+      'requestKey',
+      'credential',
+      'proofFingerprint',
+      'lookupDigest',
+      'cause',
+    ]) {
+      expect(logged.includes(marker)).toBe(false);
+    }
+    expect(warn.mock.calls[0]).toHaveLength(1);
+    expect(warn.mock.calls[0]?.[0]).not.toBeInstanceOf(Error);
+
+    await moduleRef.close();
+  });
+
+  it('logs an expired diagnostic with only its safe bucket', async () => {
+    const warn = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+    const moduleRef = await compileAuthModule(enabledConfiguration());
+    warn.mockClear();
+    const feature = getFeature(moduleRef);
+    if (!feature.enabled) {
+      throw new Error('Expected enabled Telegram login feature');
+    }
+    const verifier = getServiceDependencies(feature.service).verifier;
+    const userMarker = 'SYNTHETIC_EXPIRED_USER_MARKER';
+    const rawAuthDate = '1';
+    const rawInitData = signedInitData([
+      ['auth_date', rawAuthDate],
+      [
+        'user',
+        JSON.stringify({
+          id: 123456789,
+          first_name: userMarker,
+        }),
+      ],
+    ]);
+
+    expect(verifier.verifyProof(rawInitData)).toMatchObject({
+      status: 'expired',
+      reason: 'expired_proof',
+    });
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      'Telegram initData verification rejected reason=auth_date_expired bucket=expired_by_over_3600s',
+    );
+    const logged = inspect(warn.mock.calls);
+    for (const marker of [
+      rawInitData,
+      userMarker,
+      rawAuthDate,
+      '123456789',
+      TEST_BOT_TOKEN,
+    ]) {
+      expect(logged.includes(marker)).toBe(false);
+    }
+    expect(warn.mock.calls[0]).toHaveLength(1);
+    expect(warn.mock.calls[0]?.[0]).not.toBeInstanceOf(Error);
+
+    await moduleRef.close();
+  });
+
+  it('keeps verifier outcomes unchanged when the Logger throws', async () => {
+    const warn = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => {
+        throw new Error('SYNTHETIC_LOGGER_FAILURE');
+      });
+    const moduleRef = await compileAuthModule(enabledConfiguration());
+    warn.mockClear();
+    const feature = getFeature(moduleRef);
+    if (!feature.enabled) {
+      throw new Error('Expected enabled Telegram login feature');
+    }
+    const verifier = getServiceDependencies(feature.service).verifier;
+    const rawInitData = `hash=${'0'.repeat(64)}`;
+
+    expect(verifier.verifyProof(rawInitData)).toEqual({
+      status: 'invalid',
+      reason: 'invalid_proof',
+    });
+    expect(warn).toHaveBeenCalledTimes(1);
+
     await moduleRef.close();
   });
 

@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Logger, Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   externalIdentityLookupDigestPepperVersion,
@@ -17,7 +17,10 @@ import { PostgresPlayerAccountProvisioningRepository } from '../database/postgre
 import { PostgresTelegramAuthenticationOperationRepository } from '../database/postgres-telegram-authentication-operation.repository';
 import { PostgresTransactionExecutorAdapter } from '../database/postgres-transaction-executor.adapter';
 import { NodeSessionCredentialIssuer } from './session-credential-issuer.adapter';
-import { TelegramInitDataVerifier } from './telegram-init-data.verifier';
+import {
+  TelegramInitDataDiagnosticEvent,
+  TelegramInitDataVerifier,
+} from './telegram-init-data.verifier';
 import {
   TELEGRAM_LOGIN_HTTP_CLOCK_PROVIDER,
   TelegramLoginController,
@@ -38,6 +41,22 @@ const DISABLED_TELEGRAM_LOGIN_FEATURE: TelegramLoginFeature = Object.freeze({
   enabled: false,
 });
 
+function logTelegramInitDataDiagnostic(
+  logger: Logger,
+  event: TelegramInitDataDiagnosticEvent,
+): void {
+  if (event.reason === 'auth_date_expired') {
+    logger.warn(
+      `Telegram initData verification rejected reason=auth_date_expired bucket=${event.ageBucket}`,
+    );
+    return;
+  }
+
+  logger.warn(
+    `Telegram initData verification rejected reason=${event.reason}`,
+  );
+}
+
 function createTelegramLoginFeature(
   config: ConfigService,
   transactions: PostgresTransactionExecutorAdapter,
@@ -52,6 +71,9 @@ function createTelegramLoginFeature(
     return DISABLED_TELEGRAM_LOGIN_FEATURE;
   }
 
+  const telegramInitDataLogger = new Logger(
+    TelegramInitDataVerifier.name,
+  );
   const pepper = decodeTelegramCryptoSecret(
     config.getOrThrow<string>(
       TELEGRAM_LOGIN_CONFIG_KEYS.lookupPepperBase64,
@@ -64,13 +86,19 @@ function createTelegramLoginFeature(
       ),
     );
     try {
-      const verifier = new TelegramInitDataVerifier({
-        enabled: true,
-        botToken: config.getOrThrow<string>('TELEGRAM_BOT_TOKEN'),
-        maxAgeSeconds: config.getOrThrow<number>(
-          'TELEGRAM_INIT_DATA_MAX_AGE_SECONDS',
-        ),
-      });
+      const verifier = new TelegramInitDataVerifier(
+        {
+          enabled: true,
+          botToken: config.getOrThrow<string>('TELEGRAM_BOT_TOKEN'),
+          maxAgeSeconds: config.getOrThrow<number>(
+            'TELEGRAM_INIT_DATA_MAX_AGE_SECONDS',
+          ),
+        },
+        undefined,
+        (event) => {
+          logTelegramInitDataDiagnostic(telegramInitDataLogger, event);
+        },
+      );
       const lookupDigests = new TelegramLookupDigestCandidatesAdapter({
         digestVersion: externalIdentityLookupDigestVersion(
           config.getOrThrow<number>(

@@ -1,5 +1,8 @@
 import * as crypto from 'node:crypto';
+import { inspect } from 'node:util';
 import {
+  TelegramInitDataDiagnosticEvent,
+  TelegramInitDataDiagnosticObserver,
   TelegramInitDataVerificationError,
   TelegramInitDataVerifier,
   TelegramInitDataVerifierSettings,
@@ -73,8 +76,13 @@ function makeVerifier(
     maxAgeSeconds: MAX_AGE_SECONDS,
   },
   clock: () => Date = () => FIXED_NOW,
+  diagnosticObserver?: TelegramInitDataDiagnosticObserver,
 ): TelegramInitDataVerifier {
-  return new TelegramInitDataVerifier(settings, clock);
+  return new TelegramInitDataVerifier(
+    settings,
+    clock,
+    diagnosticObserver,
+  );
 }
 
 function captureVerificationError(action: () => unknown): Error {
@@ -658,6 +666,397 @@ describe('TelegramInitDataVerifier', () => {
         expectInvalid(rawInitData);
       },
     );
+  });
+
+  describe('diagnostic observer', () => {
+    function verifierWithEvents(
+      events: TelegramInitDataDiagnosticEvent[],
+      clock: () => Date = () => FIXED_NOW,
+    ): TelegramInitDataVerifier {
+      return makeVerifier(
+        undefined,
+        clock,
+        (event) => events.push(event),
+      );
+    }
+
+    it('keeps invalid and expired public outcomes unchanged without an observer', () => {
+      const invalid = makeVerifier().verifyProof(
+        FIXED_MINIMAL_VECTOR.replace(
+          /hash=[0-9a-f]+$/,
+          `hash=${'0'.repeat(64)}`,
+        ),
+      );
+      const expiredAuthDate =
+        FIXED_NOW_SECONDS - MAX_AGE_SECONDS - 1;
+      const expired = makeVerifier().verifyProof(
+        signParameters(
+          userParameters(
+            { id: 91, first_name: 'Expired without observer' },
+            expiredAuthDate,
+          ),
+        ),
+      );
+
+      expect(invalid).toEqual({
+        status: 'invalid',
+        reason: 'invalid_proof',
+      });
+      expect(expired).toMatchObject({
+        status: 'expired',
+        reason: 'expired_proof',
+        expiresAt: expiredAuthDate + MAX_AGE_SECONDS,
+      });
+    });
+
+    it('does not notify the observer for a valid payload', () => {
+      const events: TelegramInitDataDiagnosticEvent[] = [];
+
+      expect(
+        verifierWithEvents(events).verifyProof(FIXED_MINIMAL_VECTOR)
+          .status,
+      ).toBe('verified');
+      expect(events).toEqual([]);
+    });
+
+    it('reports hash_mismatch for a well-formed incorrect hash', () => {
+      const events: TelegramInitDataDiagnosticEvent[] = [];
+      const rawInitData = FIXED_MINIMAL_VECTOR.replace(
+        /hash=[0-9a-f]+$/,
+        `hash=${'0'.repeat(64)}`,
+      );
+
+      expect(verifierWithEvents(events).verifyProof(rawInitData)).toEqual({
+        status: 'invalid',
+        reason: 'invalid_proof',
+      });
+      expect(events).toEqual([{ reason: 'hash_mismatch' }]);
+    });
+
+    it.each([
+      [
+        'missing',
+        serializeParameters(
+          userParameters({ id: 92, first_name: 'Missing hash' }),
+        ),
+      ],
+      [
+        'malformed',
+        serializeParameters([
+          ...userParameters({ id: 93, first_name: 'Malformed hash' }),
+          ['hash', 'not-a-canonical-hash'],
+        ]),
+      ],
+    ])('reports malformed_payload for a %s hash', (_case, rawInitData) => {
+      const events: TelegramInitDataDiagnosticEvent[] = [];
+
+      expect(verifierWithEvents(events).verifyProof(rawInitData)).toEqual({
+        status: 'invalid',
+        reason: 'invalid_proof',
+      });
+      expect(events).toEqual([{ reason: 'malformed_payload' }]);
+    });
+
+    it('classifies malformed payload before internal configuration failures', () => {
+      const events: TelegramInitDataDiagnosticEvent[] = [];
+      const verifier = makeVerifier(
+        {
+          enabled: true,
+          botToken: 'synthetic-invalid-token',
+          maxAgeSeconds: MAX_AGE_SECONDS,
+        },
+        () => FIXED_NOW,
+        (event) => events.push(event),
+      );
+
+      expect(verifier.verifyProof('synthetic-malformed-payload')).toEqual({
+        status: 'invalid',
+        reason: 'invalid_proof',
+      });
+      expect(events).toEqual([{ reason: 'malformed_payload' }]);
+    });
+
+    it.each([
+      [0, 'expired_by_0_60s'],
+      [60, 'expired_by_0_60s'],
+      [61, 'expired_by_61_300s'],
+      [300, 'expired_by_61_300s'],
+      [301, 'expired_by_301_3600s'],
+      [3_600, 'expired_by_301_3600s'],
+      [3_601, 'expired_by_over_3600s'],
+    ] as const)(
+      'reports only the safe expiry bucket when expired by %i seconds',
+      (expiredBySeconds, ageBucket) => {
+        const events: TelegramInitDataDiagnosticEvent[] = [];
+        const authDate =
+          FIXED_NOW_SECONDS - MAX_AGE_SECONDS - expiredBySeconds;
+        const rawInitData = signParameters(
+          userParameters(
+            { id: 94, first_name: 'Expiry bucket' },
+            authDate,
+          ),
+        );
+
+        expect(
+          verifierWithEvents(events).verifyProof(rawInitData),
+        ).toMatchObject({
+          status: 'expired',
+          reason: 'expired_proof',
+          expiresAt: authDate + MAX_AGE_SECONDS,
+        });
+        expect(events).toEqual([
+          {
+            reason: 'auth_date_expired',
+            ageBucket,
+          },
+        ]);
+      },
+    );
+
+    it('reports auth_date_in_future only after a valid signature', () => {
+      const events: TelegramInitDataDiagnosticEvent[] = [];
+      const rawInitData = signParameters(
+        userParameters(
+          { id: 95, first_name: 'Future' },
+          FIXED_NOW_SECONDS + 31,
+        ),
+      );
+
+      expect(verifierWithEvents(events).verifyProof(rawInitData)).toEqual({
+        status: 'invalid',
+        reason: 'invalid_proof',
+      });
+      expect(events).toEqual([{ reason: 'auth_date_in_future' }]);
+    });
+
+    it('reports auth_date_missing_or_invalid for signed invalid auth_date', () => {
+      const events: TelegramInitDataDiagnosticEvent[] = [];
+      const rawInitData = signParameters([
+        ['auth_date', 'not-an-epoch'],
+        ['user', JSON.stringify({ id: 96, first_name: 'Auth date' })],
+      ]);
+
+      expect(verifierWithEvents(events).verifyProof(rawInitData)).toEqual({
+        status: 'invalid',
+        reason: 'invalid_proof',
+      });
+      expect(events).toEqual([
+        { reason: 'auth_date_missing_or_invalid' },
+      ]);
+    });
+
+    it.each([
+      [
+        'missing user',
+        signParameters([
+          ['auth_date', String(FIXED_NOW_SECONDS)],
+        ]),
+      ],
+      [
+        'invalid user JSON',
+        signParameters([
+          ['auth_date', String(FIXED_NOW_SECONDS)],
+          ['user', '{synthetic-invalid-json'],
+        ]),
+      ],
+    ])(
+      'reports user_missing_or_invalid for %s',
+      (_case, rawInitData) => {
+        const events: TelegramInitDataDiagnosticEvent[] = [];
+
+        expect(
+          verifierWithEvents(events).verifyProof(rawInitData),
+        ).toEqual({
+          status: 'invalid',
+          reason: 'invalid_proof',
+        });
+        expect(events).toEqual([
+          { reason: 'user_missing_or_invalid' },
+        ]);
+      },
+    );
+
+    it('reports user_id_invalid for a signed invalid id', () => {
+      const events: TelegramInitDataDiagnosticEvent[] = [];
+      const rawInitData = signParameters(
+        userParameters({ id: '97', first_name: 'Invalid ID' }),
+      );
+
+      expect(verifierWithEvents(events).verifyProof(rawInitData)).toEqual({
+        status: 'invalid',
+        reason: 'invalid_proof',
+      });
+      expect(events).toEqual([{ reason: 'user_id_invalid' }]);
+    });
+
+    it('reports required_name_invalid for a missing first_name', () => {
+      const events: TelegramInitDataDiagnosticEvent[] = [];
+      const rawInitData = signParameters(userParameters({ id: 98 }));
+
+      expect(verifierWithEvents(events).verifyProof(rawInitData)).toEqual({
+        status: 'invalid',
+        reason: 'invalid_proof',
+      });
+      expect(events).toEqual([{ reason: 'required_name_invalid' }]);
+    });
+
+    it('reports optional_field_invalid for an invalid optional field', () => {
+      const events: TelegramInitDataDiagnosticEvent[] = [];
+      const rawInitData = signParameters(
+        userParameters({
+          id: 99,
+          first_name: 'Optional',
+          photo_url: 'synthetic-invalid-photo-url',
+        }),
+      );
+
+      expect(verifierWithEvents(events).verifyProof(rawInitData)).toEqual({
+        status: 'invalid',
+        reason: 'invalid_proof',
+      });
+      expect(events).toEqual([{ reason: 'optional_field_invalid' }]);
+    });
+
+    it('reports unexpected_internal_failure without exposing the exception', () => {
+      const events: TelegramInitDataDiagnosticEvent[] = [];
+      const sensitiveInternalMarker =
+        'SYNTHETIC_INTERNAL_EXCEPTION_MARKER';
+      const verifier = verifierWithEvents(events, () => {
+        throw new Error(sensitiveInternalMarker);
+      });
+
+      expect(verifier.verifyProof(FIXED_MINIMAL_VECTOR)).toEqual({
+        status: 'invalid',
+        reason: 'invalid_proof',
+      });
+      expect(events).toEqual([
+        { reason: 'unexpected_internal_failure' },
+      ]);
+      expect(JSON.stringify(events)).not.toContain(
+        sensitiveInternalMarker,
+      );
+    });
+
+    it('ignores observer exceptions without changing invalid or expired outcomes', () => {
+      const observer: TelegramInitDataDiagnosticObserver = () => {
+        throw new Error('SYNTHETIC_OBSERVER_FAILURE');
+      };
+      const verifier = makeVerifier(
+        undefined,
+        () => FIXED_NOW,
+        observer,
+      );
+      const invalid = verifier.verifyProof(
+        FIXED_MINIMAL_VECTOR.replace(
+          /hash=[0-9a-f]+$/,
+          `hash=${'0'.repeat(64)}`,
+        ),
+      );
+      const authDate = FIXED_NOW_SECONDS - MAX_AGE_SECONDS - 1;
+      const expired = verifier.verifyProof(
+        signParameters(
+          userParameters(
+            { id: 100, first_name: 'Observer failure' },
+            authDate,
+          ),
+        ),
+      );
+
+      expect(invalid).toEqual({
+        status: 'invalid',
+        reason: 'invalid_proof',
+      });
+      expect(expired).toMatchObject({
+        status: 'expired',
+        reason: 'expired_proof',
+        expiresAt: authDate + MAX_AGE_SECONDS,
+      });
+    });
+
+    it('emits frozen events with only allowlisted keys', () => {
+      const events: TelegramInitDataDiagnosticEvent[] = [];
+      const verifier = verifierWithEvents(events);
+      verifier.verifyProof(
+        FIXED_MINIMAL_VECTOR.replace(
+          /hash=[0-9a-f]+$/,
+          `hash=${'0'.repeat(64)}`,
+        ),
+      );
+      const authDate = FIXED_NOW_SECONDS - MAX_AGE_SECONDS - 1;
+      verifier.verifyProof(
+        signParameters(
+          userParameters(
+            { id: 101, first_name: 'Exact event' },
+            authDate,
+          ),
+        ),
+      );
+
+      expect(events).toHaveLength(2);
+      expect(Object.keys(events[0]).sort()).toEqual(['reason']);
+      expect(Object.keys(events[1]).sort()).toEqual([
+        'ageBucket',
+        'reason',
+      ]);
+      expect(events.every(Object.isFrozen)).toBe(true);
+    });
+
+    it('does not expose synthetic authentication markers through diagnostics or errors', () => {
+      const initDataMarker = 'SYNTHETIC_INIT_DATA_MARKER';
+      const signatureMarker = 'SYNTHETIC_SIGNATURE_MARKER';
+      const requestKeyMarker = 'SYNTHETIC_REQUEST_KEY_MARKER';
+      const credentialMarker = 'SYNTHETIC_CREDENTIAL_MARKER';
+      const userIdMarker = '1020304050';
+      const rawAuthDate = String(FIXED_NOW_SECONDS);
+      const rawHash = '0'.repeat(64);
+      const rawInitData = serializeParameters([
+        ['auth_date', rawAuthDate],
+        ['request_key_marker', requestKeyMarker],
+        ['credential_marker', credentialMarker],
+        ['init_data_marker', initDataMarker],
+        ['signature', signatureMarker],
+        [
+          'user',
+          JSON.stringify({
+            id: Number(userIdMarker),
+            first_name: 'Synthetic leakage fixture',
+          }),
+        ],
+        ['hash', rawHash],
+      ]);
+      const events: TelegramInitDataDiagnosticEvent[] = [];
+      const verifier = verifierWithEvents(events);
+      const error = captureVerificationError(() =>
+        verifier.verify(rawInitData),
+      );
+      const errorWithCause = error as Error & { cause?: unknown };
+      const exposedSurfaces = [
+        JSON.stringify(events),
+        inspect(events),
+        error.message,
+        error.stack ?? '',
+        String(errorWithCause.cause ?? ''),
+        JSON.stringify(error),
+        inspect(error),
+      ].join('\n');
+
+      expect(events).toEqual([{ reason: 'hash_mismatch' }]);
+      expect(error).toBeInstanceOf(TelegramInitDataVerificationError);
+      expect(errorWithCause.cause).toBeUndefined();
+      for (const marker of [
+        rawInitData,
+        initDataMarker,
+        rawHash,
+        signatureMarker,
+        requestKeyMarker,
+        credentialMarker,
+        FAKE_BOT_TOKEN,
+        userIdMarker,
+        rawAuthDate,
+      ]) {
+        expect(exposedSurfaces.includes(marker)).toBe(false);
+      }
+    });
   });
 
   describe('safe isolation', () => {
