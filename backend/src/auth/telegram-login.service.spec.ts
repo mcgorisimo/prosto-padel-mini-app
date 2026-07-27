@@ -1,4 +1,5 @@
 import { QueryResult, QueryResultRow } from 'pg';
+import { inspect } from 'node:util';
 import {
   AccountId,
   AccountStatus,
@@ -33,6 +34,7 @@ import {
   SessionCredentialDigest,
   SessionId,
 } from './session.types';
+import * as sessionStateMachine from './session.state-machine';
 import {
   ExternalIdentityResolutionRepository,
   ExternalIdentityResolutionResult,
@@ -69,6 +71,8 @@ import {
   TransactionExecutor,
 } from './telegram-login.ports';
 import {
+  TelegramLoginDiagnosticEvent,
+  TelegramLoginDiagnosticObserver,
   TelegramLoginService,
   TelegramLoginServiceDependencies,
 } from './telegram-login.service';
@@ -83,6 +87,8 @@ const LOOKUP_DIGEST = externalIdentityLookupDigest('11'.repeat(32));
 const PROOF_FINGERPRINT = '22'.repeat(32) as AuthenticationProofFingerprint;
 const CREDENTIAL_DIGEST = '33'.repeat(32) as SessionCredentialDigest;
 const OTHER_CREDENTIAL_DIGEST = '44'.repeat(32) as SessionCredentialDigest;
+const SYNTHETIC_INTERNAL_ERROR_MARKER =
+  'SYNTHETIC_INTERNAL_ERROR_MARKER';
 
 const OPERATION_ID =
   '11111111-1111-4111-8111-111111111111' as AuthenticationOperationId;
@@ -239,9 +245,13 @@ class FakeVerifier implements TelegramProofVerifier {
 
 class FakeLookupDigests implements TelegramLookupDigestCandidatesPort {
   readonly calls: unknown[] = [];
+  error: unknown;
 
   async computeCandidates(proof: unknown) {
     this.calls.push(proof);
+    if (this.error !== undefined) {
+      throw this.error;
+    }
     return { primary: DIGEST_CANDIDATE, all: [DIGEST_CANDIDATE] };
   }
 }
@@ -298,6 +308,7 @@ class FakeExternalIdentities implements ExternalIdentityResolutionRepository {
       isPrimary: true,
     },
   };
+  error: unknown;
 
   constructor(private readonly timeline: string[]) {}
 
@@ -307,6 +318,9 @@ class FakeExternalIdentities implements ExternalIdentityResolutionRepository {
   ): Promise<ExternalIdentityResolutionResult> {
     this.timeline.push('resolve');
     this.calls.push({ transaction, candidates });
+    if (this.error !== undefined) {
+      throw this.error;
+    }
     return this.result;
   }
 }
@@ -377,6 +391,7 @@ class FakeTerminalOperations
     operationId: OPERATION_ID,
     status: 'completed',
   };
+  error: unknown;
 
   constructor(private readonly timeline: string[]) {}
 
@@ -386,6 +401,9 @@ class FakeTerminalOperations
   ): Promise<AuthenticationOperationTerminalResult> {
     this.timeline.push('terminal');
     this.calls.push({ transaction, input: inputValue });
+    if (this.error !== undefined) {
+      throw this.error;
+    }
     return this.result;
   }
 }
@@ -399,11 +417,15 @@ class FakeCredentialIssuer implements SessionCredentialIssuer {
     { plaintext: PLAINTEXT, digest: CREDENTIAL_DIGEST },
     { plaintext: OTHER_PLAINTEXT, digest: OTHER_CREDENTIAL_DIGEST },
   ];
+  error: unknown;
 
   constructor(private readonly timeline: string[]) {}
 
   issue() {
     this.timeline.push('credential');
+    if (this.error !== undefined) {
+      throw this.error;
+    }
     const value = this.values[this.issued.length] ?? this.values[0];
     this.issued.push(value);
     return value;
@@ -421,6 +443,7 @@ class FakeInitialSessions implements InitialSessionRepository {
     generation: 1,
     expiresAt: SESSION_EXPIRES_AT,
   };
+  error: unknown;
 
   constructor(private readonly timeline: string[]) {}
 
@@ -430,6 +453,9 @@ class FakeInitialSessions implements InitialSessionRepository {
   ): Promise<CreateInitialSessionResult> {
     this.timeline.push('session');
     this.calls.push({ transaction, input: inputValue });
+    if (this.error !== undefined) {
+      throw this.error;
+    }
     return this.result;
   }
 }
@@ -450,7 +476,9 @@ interface Harness {
   readonly sessions: FakeInitialSessions;
 }
 
-function harness(): Harness {
+function harness(
+  diagnosticObserver?: TelegramLoginDiagnosticObserver,
+): Harness {
   const timeline: string[] = [];
   const subject = {
     timeline,
@@ -481,7 +509,7 @@ function harness(): Harness {
   };
   return {
     ...subject,
-    service: new TelegramLoginService(dependencies),
+    service: new TelegramLoginService(dependencies, diagnosticObserver),
   };
 }
 
@@ -506,6 +534,159 @@ function persistedPayloads(subject: Harness): string {
 }
 
 describe('TelegramLoginService', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it.each([
+    [
+      'proof_preparation',
+      (subject: Harness) => {
+        subject.lookupDigests.error = new Error(
+          SYNTHETIC_INTERNAL_ERROR_MARKER,
+        );
+        return input();
+      },
+    ],
+    [
+      'pending_operation_persistence',
+      (subject: Harness) => {
+        subject.transactions.commitFailures.set(
+          1,
+          new Error(SYNTHETIC_INTERNAL_ERROR_MARKER),
+        );
+        return input();
+      },
+    ],
+    [
+      'account_resolution',
+      (subject: Harness) => {
+        subject.identities.error = new Error(
+          SYNTHETIC_INTERNAL_ERROR_MARKER,
+        );
+        return input();
+      },
+    ],
+    [
+      'account_provisioning',
+      (subject: Harness) => {
+        subject.identities.result = { outcome: 'not_found' };
+        subject.playerAccounts.error = new Error(
+          SYNTHETIC_INTERNAL_ERROR_MARKER,
+        );
+        return input();
+      },
+    ],
+    [
+      'terminal_operation',
+      (subject: Harness) => {
+        subject.terminal.error = new Error(
+          SYNTHETIC_INTERNAL_ERROR_MARKER,
+        );
+        return input();
+      },
+    ],
+    [
+      'credential_issue',
+      (subject: Harness) => {
+        subject.issuer.error = new Error(
+          SYNTHETIC_INTERNAL_ERROR_MARKER,
+        );
+        return input();
+      },
+    ],
+    [
+      'session_creation',
+      (_subject: Harness) => {
+        jest
+          .spyOn(sessionStateMachine, 'createActiveSession')
+          .mockReturnValue({
+            outcome: 'rejected',
+            reason: 'invalid_session_binding',
+            bindingReason: 'invalid_account_id',
+          });
+        return input();
+      },
+    ],
+    [
+      'initial_session_persistence',
+      (subject: Harness) => {
+        subject.sessions.error = new Error(
+          SYNTHETIC_INTERNAL_ERROR_MARKER,
+        );
+        return input();
+      },
+    ],
+    [
+      'unexpected_internal_failure',
+      (_subject: Harness) =>
+        new Proxy(input(), {
+          get(target, property, receiver) {
+            if (property === 'rawInitData') {
+              throw new Error(SYNTHETIC_INTERNAL_ERROR_MARKER);
+            }
+            return Reflect.get(target, property, receiver) as unknown;
+          },
+        }),
+    ],
+  ] as const)(
+    'reports only the allowlisted %s diagnostic stage',
+    async (stage, configure) => {
+      const events: TelegramLoginDiagnosticEvent[] = [];
+      const subject = harness((event) => events.push(event));
+      const result = await subject.service.authenticateWithTelegram(
+        configure(subject),
+      );
+
+      expect(result).toEqual({
+        outcome: 'rejected',
+        reason: 'internal_failure',
+      });
+      expect(Object.keys(result).sort()).toEqual(['outcome', 'reason']);
+      expect(events).toEqual([{ stage }]);
+      expect(Object.keys(events[0])).toEqual(['stage']);
+      expect(Object.isFrozen(events[0])).toBe(true);
+
+      const exposedSurfaces = [
+        JSON.stringify(events),
+        inspect(events),
+        JSON.stringify(result),
+        inspect(result),
+      ].join('\n');
+      for (const marker of [
+        SYNTHETIC_INTERNAL_ERROR_MARKER,
+        RAW_INIT_DATA,
+        '123456789',
+        ACCOUNT_ID,
+        IDENTITY_ID,
+        REQUEST_KEY,
+        PLAINTEXT,
+        'SELECT ',
+        'raw postgres secret message',
+        'postgresql://',
+        PROOF_FINGERPRINT,
+        LOOKUP_DIGEST,
+      ]) {
+        expect(exposedSurfaces.includes(marker)).toBe(false);
+      }
+    },
+  );
+
+  it('isolates diagnostic observer exceptions from the public result', async () => {
+    const observer: TelegramLoginDiagnosticObserver = () => {
+      throw new Error(SYNTHETIC_INTERNAL_ERROR_MARKER);
+    };
+    const subject = harness(observer);
+    subject.issuer.error = new Error(SYNTHETIC_INTERNAL_ERROR_MARKER);
+
+    await expect(
+      subject.service.authenticateWithTelegram(input()),
+    ).resolves.toEqual({
+      outcome: 'rejected',
+      reason: 'internal_failure',
+    });
+  });
+
   it('authenticates a new Telegram user', async () => {
     const subject = harness();
     subject.identities.result = { outcome: 'not_found' };

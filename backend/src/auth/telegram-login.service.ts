@@ -93,6 +93,29 @@ const REQUEST_KEY_MAX_LENGTH = 256;
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f-\u009f]/u;
 const INTENT = 'sign_up' as const;
 
+export type TelegramLoginDiagnosticStage =
+  | 'proof_preparation'
+  | 'pending_operation_persistence'
+  | 'account_resolution'
+  | 'account_provisioning'
+  | 'terminal_operation'
+  | 'credential_issue'
+  | 'session_creation'
+  | 'initial_session_persistence'
+  | 'unexpected_internal_failure';
+
+export type TelegramLoginDiagnosticEvent = Readonly<{
+  readonly stage: TelegramLoginDiagnosticStage;
+}>;
+
+export type TelegramLoginDiagnosticObserver = (
+  event: TelegramLoginDiagnosticEvent,
+) => void;
+
+interface TelegramLoginDiagnosticStageTracker {
+  stage: TelegramLoginDiagnosticStage;
+}
+
 export interface TelegramLoginServiceDependencies {
   readonly verifier: TelegramProofVerifier;
   readonly lookupDigests: TelegramLookupDigestCandidatesPort;
@@ -149,6 +172,21 @@ class TelegramLoginTransactionAbort extends Error {
 
   constructor(readonly reason: TelegramLoginRejectionReason) {
     super('Telegram login transaction aborted');
+  }
+}
+
+function notifyDiagnosticObserver(
+  observer: TelegramLoginDiagnosticObserver | undefined,
+  event: TelegramLoginDiagnosticEvent,
+): void {
+  if (observer === undefined) {
+    return;
+  }
+
+  try {
+    observer(Object.freeze(event));
+  } catch {
+    // Diagnostics are best-effort and never change authentication behavior.
   }
 }
 
@@ -419,9 +457,22 @@ function initialSessionRejection(
 }
 
 export class TelegramLoginService {
-  constructor(private readonly dependencies: TelegramLoginServiceDependencies) {}
+  constructor(
+    private readonly dependencies: TelegramLoginServiceDependencies,
+    private readonly diagnosticObserver?: TelegramLoginDiagnosticObserver,
+  ) {}
 
   async authenticateWithTelegram(
+    input: TelegramLoginInput,
+  ): Promise<TelegramLoginResult> {
+    try {
+      return await this.runAuthenticationWorkflow(input);
+    } catch {
+      return this.internalFailure('unexpected_internal_failure');
+    }
+  }
+
+  private async runAuthenticationWorkflow(
     input: TelegramLoginInput,
   ): Promise<TelegramLoginResult> {
     if (!validInput(input)) {
@@ -433,14 +484,16 @@ export class TelegramLoginService {
       return prepared;
     }
 
-    const pendingAttempt = await this.runTransaction((transaction) =>
-      this.dependencies.pendingOperations.persistPending(transaction, {
-        operation: prepared.operation,
-        consumption: prepared.consumption,
-        audit: {
-          eventId: prepared.bindings.auditEventIds.proofConsumption,
-        },
-      }),
+    const pendingAttempt = await this.runTransaction(
+      'pending_operation_persistence',
+      (transaction) =>
+        this.dependencies.pendingOperations.persistPending(transaction, {
+          operation: prepared.operation,
+          consumption: prepared.consumption,
+          audit: {
+            eventId: prepared.bindings.auditEventIds.proofConsumption,
+          },
+        }),
     );
     if (!pendingAttempt.succeeded) {
       return pendingAttempt.rejection;
@@ -453,11 +506,16 @@ export class TelegramLoginService {
       return rejected('proof_replayed');
     }
     if (pending.operationId !== prepared.bindings.operationId) {
-      return rejected('internal_failure');
+      return this.internalFailure('pending_operation_persistence');
     }
 
-    const accountAttempt = await this.runTransaction((transaction) =>
-      this.resolveAndComplete(transaction, prepared),
+    const accountStage: TelegramLoginDiagnosticStageTracker = {
+      stage: 'account_resolution',
+    };
+    const accountAttempt = await this.runTransaction(
+      () => accountStage.stage,
+      (transaction) =>
+        this.resolveAndComplete(transaction, prepared, accountStage),
     );
     if (!accountAttempt.succeeded) {
       return accountAttempt.rejection;
@@ -471,7 +529,7 @@ export class TelegramLoginService {
     try {
       issued = this.dependencies.credentialIssuer.issue();
     } catch {
-      return rejected('internal_failure');
+      return this.internalFailure('credential_issue');
     }
     if (
       !isRecord(issued) ||
@@ -480,7 +538,7 @@ export class TelegramLoginService {
       issued.plaintext.length === 0 ||
       !isSessionCredentialDigest(issued.digest)
     ) {
-      return rejected('internal_failure');
+      return this.internalFailure('credential_issue');
     }
 
     const sessionBinding: CreateActiveSessionBinding = {
@@ -497,16 +555,18 @@ export class TelegramLoginService {
     };
     const sessionState = createActiveSession(sessionBinding);
     if (sessionState.outcome !== 'created') {
-      return rejected('internal_failure');
+      return this.internalFailure('session_creation');
     }
 
-    const sessionAttempt = await this.runTransaction((transaction) =>
-      this.dependencies.initialSessions.createInitialSession(transaction, {
-        binding: sessionBinding,
-        audit: {
-          eventId: prepared.bindings.auditEventIds.sessionCreated,
-        },
-      }),
+    const sessionAttempt = await this.runTransaction(
+      'initial_session_persistence',
+      (transaction) =>
+        this.dependencies.initialSessions.createInitialSession(transaction, {
+          binding: sessionBinding,
+          audit: {
+            eventId: prepared.bindings.auditEventIds.sessionCreated,
+          },
+        }),
     );
     if (!sessionAttempt.succeeded) {
       return sessionAttempt.rejection;
@@ -523,7 +583,7 @@ export class TelegramLoginService {
       session.generation !== 1 ||
       session.expiresAt !== prepared.bindings.timestamps.sessionExpiresAt
     ) {
-      return rejected('internal_failure');
+      return this.internalFailure('initial_session_persistence');
     }
 
     return Object.freeze({
@@ -569,13 +629,13 @@ export class TelegramLoginService {
         input.now,
       );
     } catch {
-      return rejected('internal_failure');
+      return this.internalFailure('proof_preparation');
     }
     if (
       !computedDigestsAreValid(digests, proof) ||
       !validWorkflowBindings(bindings, proof)
     ) {
-      return rejected('internal_failure');
+      return this.internalFailure('proof_preparation');
     }
 
     const identityKey = Object.freeze({
@@ -599,7 +659,7 @@ export class TelegramLoginService {
       requestDigest: bindings.requestDigest,
     });
     if (created.outcome !== 'created') {
-      return rejected('internal_failure');
+      return this.internalFailure('proof_preparation');
     }
 
     const consumed = consumeTelegramProof(
@@ -617,7 +677,7 @@ export class TelegramLoginService {
       return rejected('telegram_proof_expired');
     }
     if (consumed.outcome !== 'first_use') {
-      return rejected('internal_failure');
+      return this.internalFailure('proof_preparation');
     }
 
     return {
@@ -632,7 +692,9 @@ export class TelegramLoginService {
   private async resolveAndComplete(
     transaction: PostgresTransaction,
     prepared: PreparedWorkflow,
+    diagnostic: TelegramLoginDiagnosticStageTracker,
   ): Promise<ResolvedAccount | RejectedTelegramLoginResult> {
+    diagnostic.stage = 'account_resolution';
     const resolution =
       await this.dependencies.externalIdentities.resolveByLookupDigests(
         transaction,
@@ -644,7 +706,11 @@ export class TelegramLoginService {
       case 'conflict':
         return rejected('request_conflict');
       case 'not_found':
-        return this.provisionAndComplete(transaction, prepared);
+        return this.provisionAndComplete(
+          transaction,
+          prepared,
+          diagnostic,
+        );
       case 'linked':
         break;
     }
@@ -656,6 +722,7 @@ export class TelegramLoginService {
       return rejected('request_conflict');
     }
 
+    diagnostic.stage = 'account_resolution';
     const account = await this.dependencies.accounts.findById(
       transaction,
       resolution.identity.accountId,
@@ -668,7 +735,7 @@ export class TelegramLoginService {
       !(USER_ROLES as readonly string[]).includes(account.role) ||
       !(ACCOUNT_STATUSES as readonly string[]).includes(account.status)
     ) {
-      return rejected('internal_failure');
+      return this.internalFailure('account_resolution');
     }
 
     const accountResolution =
@@ -686,9 +753,12 @@ export class TelegramLoginService {
       transaction,
       prepared,
       accountResolution,
+      diagnostic,
     );
     if (terminal !== undefined) {
-      return rejected(terminal);
+      return terminal === 'internal_failure'
+        ? this.internalFailure('terminal_operation')
+        : rejected(terminal);
     }
     if (account.status !== 'active') {
       return rejected('account_unavailable');
@@ -703,7 +773,9 @@ export class TelegramLoginService {
   private async provisionAndComplete(
     transaction: PostgresTransaction,
     prepared: PreparedWorkflow,
+    diagnostic: TelegramLoginDiagnosticStageTracker,
   ): Promise<ResolvedAccount> {
+    diagnostic.stage = 'account_provisioning';
     const playerBinding = createPlayerBinding(prepared.bindings.accountId);
     if (playerBinding === undefined) {
       throw new TelegramLoginTransactionAbort('internal_failure');
@@ -761,6 +833,7 @@ export class TelegramLoginService {
       transaction,
       prepared,
       newAccountRequired(prepared.operation.identityKey),
+      diagnostic,
     );
     if (terminalFailure !== undefined) {
       throw new TelegramLoginTransactionAbort(terminalFailure);
@@ -776,7 +849,9 @@ export class TelegramLoginService {
     transaction: PostgresTransaction,
     prepared: PreparedWorkflow,
     resolution: AccountResolutionOutcome,
+    diagnostic: TelegramLoginDiagnosticStageTracker,
   ): Promise<TelegramLoginRejectionReason | undefined> {
+    diagnostic.stage = 'terminal_operation';
     const terminal =
       await this.dependencies.terminalOperations.applyTerminalCommand(
         transaction,
@@ -808,7 +883,20 @@ export class TelegramLoginService {
     return undefined;
   }
 
+  private internalFailure(
+    stage: TelegramLoginDiagnosticStage,
+  ): RejectedTelegramLoginResult {
+    notifyDiagnosticObserver(
+      this.diagnosticObserver,
+      Object.freeze({ stage }),
+    );
+    return rejected('internal_failure');
+  }
+
   private async runTransaction<T>(
+    diagnosticStage:
+      | TelegramLoginDiagnosticStage
+      | (() => TelegramLoginDiagnosticStage),
     operation: (transaction: PostgresTransaction) => Promise<T>,
   ): Promise<TransactionAttempt<T>> {
     try {
@@ -817,9 +905,17 @@ export class TelegramLoginService {
         value: await this.dependencies.transactions.run(operation),
       };
     } catch (error) {
+      const reason = mapFailure(error);
+      const failedStage =
+        typeof diagnosticStage === 'function'
+          ? diagnosticStage()
+          : diagnosticStage;
       return {
         succeeded: false,
-        rejection: rejected(mapFailure(error)),
+        rejection:
+          reason === 'internal_failure'
+            ? this.internalFailure(failedStage)
+            : rejected(reason),
       };
     }
   }

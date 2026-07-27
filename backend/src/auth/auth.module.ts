@@ -29,7 +29,10 @@ import {
   TELEGRAM_LOGIN_FEATURE,
   TelegramLoginFeature,
 } from './telegram-login.feature';
-import { TelegramLoginService } from './telegram-login.service';
+import {
+  TelegramLoginDiagnosticEvent,
+  TelegramLoginService,
+} from './telegram-login.service';
 import { DeterministicTelegramLoginWorkflowBindingsAdapter } from './telegram-login-workflow-bindings.adapter';
 import { TelegramLookupDigestCandidatesAdapter } from './telegram-lookup-digest.adapter';
 
@@ -63,6 +66,13 @@ function logTelegramInitDataDiagnostic(
   );
 }
 
+function logTelegramLoginDiagnostic(
+  logger: Logger,
+  event: TelegramLoginDiagnosticEvent,
+): void {
+  logger.warn(`Telegram login failed stage=${event.stage}`);
+}
+
 function createTelegramLoginFeature(
   config: ConfigService,
   transactions: PostgresTransactionExecutorAdapter,
@@ -80,6 +90,7 @@ function createTelegramLoginFeature(
   const telegramInitDataLogger = new Logger(
     TelegramInitDataVerifier.name,
   );
+  const telegramLoginLogger = new Logger(TelegramLoginService.name);
   const pepper = decodeTelegramCryptoSecret(
     config.getOrThrow<string>(
       TELEGRAM_LOGIN_CONFIG_KEYS.lookupPepperBase64,
@@ -131,19 +142,24 @@ function createTelegramLoginFeature(
             TELEGRAM_LOGIN_CONFIG_KEYS.sessionTtlSeconds,
           ),
         });
-      const service = new TelegramLoginService({
-        verifier,
-        lookupDigests,
-        transactions,
-        pendingOperations,
-        externalIdentities,
-        accounts,
-        playerAccounts,
-        terminalOperations,
-        credentialIssuer: new NodeSessionCredentialIssuer(),
-        initialSessions,
-        workflowBindings,
-      });
+      const service = new TelegramLoginService(
+        {
+          verifier,
+          lookupDigests,
+          transactions,
+          pendingOperations,
+          externalIdentities,
+          accounts,
+          playerAccounts,
+          terminalOperations,
+          credentialIssuer: new NodeSessionCredentialIssuer(),
+          initialSessions,
+          workflowBindings,
+        },
+        (event) => {
+          logTelegramLoginDiagnostic(telegramLoginLogger, event);
+        },
+      );
 
       return Object.freeze({
         enabled: true,

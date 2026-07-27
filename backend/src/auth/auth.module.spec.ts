@@ -36,6 +36,7 @@ import {
   TelegramLoginFeature,
 } from './telegram-login.feature';
 import {
+  TelegramLoginDiagnosticObserver,
   TelegramLoginService,
   TelegramLoginServiceDependencies,
 } from './telegram-login.service';
@@ -150,6 +151,16 @@ function getServiceDependencies(
       readonly dependencies: TelegramLoginServiceDependencies;
     }
   ).dependencies;
+}
+
+function getServiceDiagnosticObserver(
+  service: TelegramLoginService,
+): TelegramLoginDiagnosticObserver | undefined {
+  return (
+    service as unknown as {
+      readonly diagnosticObserver?: TelegramLoginDiagnosticObserver;
+    }
+  ).diagnosticObserver;
 }
 
 function getControllerFeature(
@@ -440,6 +451,86 @@ describe('AuthModule Telegram login wiring', () => {
     expect(warn.mock.calls[0]?.[0]).not.toBeInstanceOf(Error);
 
     await moduleRef.close();
+  });
+
+  it('wires Telegram login stages to a fixed Logger message', async () => {
+    const warn = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+    const moduleRef = await compileAuthModule(enabledConfiguration());
+    warn.mockClear();
+    const feature = getFeature(moduleRef);
+    if (!feature.enabled) {
+      throw new Error('Expected enabled Telegram login feature');
+    }
+    const observer = getServiceDiagnosticObserver(feature.service);
+    expect(observer).toBeDefined();
+    const sensitiveMarker = 'SYNTHETIC_WORKFLOW_SECRET_MARKER';
+
+    observer?.(
+      Object.freeze({
+        stage: 'initial_session_persistence',
+        rawInitData: sensitiveMarker,
+        requestKey: sensitiveMarker,
+        credential: sensitiveMarker,
+        error: new Error(sensitiveMarker),
+      }) as unknown as Parameters<TelegramLoginDiagnosticObserver>[0],
+    );
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      'Telegram login failed stage=initial_session_persistence',
+    );
+    const logged = inspect(warn.mock.calls);
+    expect(logged).not.toContain(sensitiveMarker);
+    expect(warn.mock.calls[0]).toHaveLength(1);
+    expect(warn.mock.calls[0]?.[0]).not.toBeInstanceOf(Error);
+
+    await moduleRef.close();
+  });
+
+  it('keeps the public service result unchanged when the workflow Logger throws', async () => {
+    const sensitiveMarker = 'SYNTHETIC_WORKFLOW_LOGGER_FAILURE';
+    const warn = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => {
+        throw new Error(sensitiveMarker);
+      });
+    const getPool = jest.spyOn(PostgresService.prototype, 'getPool');
+    const moduleRef = await compileAuthModule(enabledConfiguration());
+    const feature = getFeature(moduleRef);
+    if (!feature.enabled) {
+      throw new Error('Expected enabled Telegram login feature');
+    }
+    const dependencies = getServiceDependencies(feature.service);
+    jest.spyOn(dependencies.verifier, 'verifyProof').mockReturnValue({
+      status: 'verified',
+      proof: verifiedProof(),
+    });
+    jest
+      .spyOn(dependencies.lookupDigests, 'computeCandidates')
+      .mockRejectedValue(new Error(sensitiveMarker));
+    warn.mockClear();
+
+    await expect(
+      feature.service.authenticateWithTelegram({
+        rawInitData: sensitiveMarker,
+        requestKey: sensitiveMarker,
+        now: NOW,
+      }),
+    ).resolves.toEqual({
+      outcome: 'rejected',
+      reason: 'internal_failure',
+    });
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      'Telegram login failed stage=proof_preparation',
+    );
+    expect(inspect(warn.mock.calls)).not.toContain(sensitiveMarker);
+    expect(getPool).not.toHaveBeenCalled();
+
+    await moduleRef.close();
+    expect(getPool).not.toHaveBeenCalled();
   });
 
   it('keeps verifier outcomes unchanged when the Logger throws', async () => {
