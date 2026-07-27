@@ -86,6 +86,55 @@ async function fulfillJson(route, status, body) {
   });
 }
 
+async function establishSyntheticSupabaseSession(page) {
+  const user = {
+    id: '11111111-1111-4111-8111-111111111111',
+    aud: 'authenticated',
+    role: 'authenticated',
+    email: 'telegram-lifecycle@prostopadel.test',
+    app_metadata: {
+      provider: 'email',
+      providers: ['email'],
+    },
+    user_metadata: {},
+    identities: [],
+    created_at: '2026-01-01T00:00:00.000Z',
+  };
+
+  await page.route('**/auth/v1/user', async (route) => {
+    await fulfillJson(route, 200, user);
+  });
+
+  return page.evaluate(async (syntheticUser) => {
+    const encode = (value) => btoa(JSON.stringify(value))
+      .replaceAll('+', '-')
+      .replaceAll('/', '_')
+      .replaceAll('=', '');
+    const expiresAt = Math.floor(Date.now() / 1_000) + 3_600;
+    const accessToken = [
+      encode({ alg: 'HS256', typ: 'JWT' }),
+      encode({
+        aud: syntheticUser.aud,
+        exp: expiresAt,
+        sub: syntheticUser.id,
+        email: syntheticUser.email,
+        role: syntheticUser.role,
+      }),
+      'synthetic-signature',
+    ].join('.');
+    const { supabase } = await import('/src/lib/supabaseClient.js');
+    const { data, error } = await supabase.auth.setSession({
+      access_token: accessToken,
+      refresh_token: 'synthetic-refresh-token',
+    });
+
+    return {
+      hasSession: data.session !== null,
+      hasError: error !== null,
+    };
+  }, user);
+}
+
 async function expectExistingSupabaseWelcome(page) {
   await expect(page.locator('button')).toHaveCount(2);
 }
@@ -246,6 +295,237 @@ test.describe('Telegram backend login feature enabled', () => {
     await expect(status).toHaveAttribute('data-status', 'authenticated');
     await expect(status).toContainText('аккаунт найден');
     expect(calls).toBe(1);
+  });
+
+  test('shows a success status briefly and removes its accessible element within three seconds', async ({
+    page,
+  }) => {
+    await page.clock.install();
+    await prepareBrowser(page);
+    await page.route(LOGIN_ROUTE, async (route) => {
+      await fulfillJson(route, 200, successBody('new'));
+    });
+
+    await page.goto('/');
+
+    const status = page.getByTestId('telegram-backend-login-status');
+    await expect(status).toHaveAttribute('data-status', 'authenticated');
+    await expect(status).toHaveAttribute('role', 'status');
+    await expect(status).toHaveAttribute('aria-live', 'polite');
+    await page.clock.fastForward(3_000);
+    await expect(status).toHaveCount(0);
+  });
+
+  for (const action of [
+    { name: 'Создать профиль' },
+    { name: 'У меня есть аккаунт' },
+  ]) {
+    test(`hides a success status when the user selects "${action.name}"`, async ({
+      page,
+    }) => {
+      await prepareBrowser(page);
+      await page.route(LOGIN_ROUTE, async (route) => {
+        await fulfillJson(route, 200, successBody('new'));
+      });
+
+      await page.goto('/');
+      const status = page.getByTestId('telegram-backend-login-status');
+      await expect(status).toHaveAttribute('data-status', 'authenticated');
+
+      await page.getByRole('button', { name: action.name, exact: true }).click();
+
+      await expect(status).toHaveCount(0);
+    });
+  }
+
+  test('hides a success status when the primary Supabase session appears', async ({
+    page,
+  }) => {
+    await prepareBrowser(page);
+    await page.route(LOGIN_ROUTE, async (route) => {
+      await fulfillJson(route, 200, successBody('existing'));
+    });
+
+    await page.goto('/');
+    const status = page.getByTestId('telegram-backend-login-status');
+    await expect(status).toHaveAttribute('data-status', 'authenticated');
+
+    const sessionResult = await establishSyntheticSupabaseSession(page);
+
+    expect(sessionResult).toEqual({
+      hasSession: true,
+      hasError: false,
+    });
+    await expect(status).toHaveCount(0);
+  });
+
+  test('keeps a Telegram login error visible beyond the success timeout', async ({
+    page,
+  }) => {
+    await page.clock.install();
+    await prepareBrowser(page);
+    await page.route(LOGIN_ROUTE, async (route) => {
+      await fulfillJson(route, 401, {
+        statusCode: 401,
+        code: 'telegram_authentication_failed',
+        message: 'Synthetic public error',
+      });
+    });
+
+    await page.goto('/');
+    const status = page.getByTestId('telegram-backend-login-status');
+    await expect(status).toHaveAttribute(
+      'data-status',
+      'invalid_telegram_data',
+    );
+    await page.clock.fastForward(3_100);
+    await expect(status).toHaveAttribute(
+      'data-status',
+      'invalid_telegram_data',
+    );
+  });
+
+  test('cleans success timers and does not replay a dismissed success on remount', async ({
+    page,
+  }) => {
+    await prepareBrowser(page, { initData: '' });
+    await page.goto('/');
+
+    const summary = await page.evaluate(async () => {
+      const { createTelegramBackendLoginLifecycle } = await import(
+        '/src/hooks/useTelegramBackendLogin.js'
+      );
+      const waitFor = async (predicate) => {
+        for (let index = 0; index < 100; index += 1) {
+          if (predicate()) return true;
+          await Promise.resolve();
+        }
+        return false;
+      };
+      const createTimers = () => {
+        let nextId = 1;
+        const active = new Map();
+        const cleared = new Set();
+        return {
+          active,
+          cleared,
+          setTimer(callback, delay) {
+            const id = nextId;
+            nextId += 1;
+            active.set(id, { callback, delay });
+            return id;
+          },
+          clearTimer(id) {
+            active.delete(id);
+            cleared.add(id);
+          },
+          run(id) {
+            const timer = active.get(id);
+            active.delete(id);
+            timer?.callback();
+          },
+          idForDelay(delay) {
+            return [...active.entries()]
+              .find(([, timer]) => timer.delay === delay)?.[0] ?? null;
+          },
+        };
+      };
+      const authenticated = {
+        outcome: 'authenticated',
+        credential: 'synthetic-private-success-lifecycle-credential',
+        expiresAt: Math.floor(Date.now() / 1_000) + 3_600,
+        accountKind: 'new',
+      };
+
+      const replacementTimers = createTimers();
+      let replacementCalls = 0;
+      const replacementStatuses = [];
+      const replacementLifecycle = createTelegramBackendLoginLifecycle({
+        fingerprint: async () => 'synthetic-success-fingerprint',
+        setTimer: replacementTimers.setTimer,
+        clearTimer: replacementTimers.clearTimer,
+        client: {
+          async login() {
+            replacementCalls += 1;
+            return authenticated;
+          },
+        },
+      });
+      const detachFirst = replacementLifecycle.attach(
+        'synthetic-success-init-data',
+        (snapshot) => replacementStatuses.push(snapshot.status),
+      );
+      await waitFor(() =>
+        replacementStatuses.at(-1) === 'authenticated');
+      const replacementSuccessTimer =
+        replacementTimers.idForDelay(3_000);
+      replacementLifecycle.dismissSuccess();
+      const dismissedCredentialRetained =
+        replacementLifecycle.hasCredential();
+      detachFirst();
+
+      const remountStatuses = [];
+      const detachRemount = replacementLifecycle.attach(
+        'synthetic-success-init-data',
+        (snapshot) => remountStatuses.push(snapshot.status),
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+      const dismissedSuccessNotReplayed =
+        replacementCalls === 1 &&
+        !remountStatuses.includes('authenticated');
+      detachRemount();
+      const replacementTeardownTimer =
+        replacementTimers.idForDelay(0);
+      replacementTimers.run(replacementTeardownTimer);
+
+      const unmountTimers = createTimers();
+      const unmountStatuses = [];
+      const unmountLifecycle = createTelegramBackendLoginLifecycle({
+        fingerprint: async () => 'synthetic-unmount-success-fingerprint',
+        setTimer: unmountTimers.setTimer,
+        clearTimer: unmountTimers.clearTimer,
+        client: {
+          async login() {
+            return authenticated;
+          },
+        },
+      });
+      const detachUnmount = unmountLifecycle.attach(
+        'synthetic-unmount-success-init-data',
+        (snapshot) => unmountStatuses.push(snapshot.status),
+      );
+      await waitFor(() => unmountStatuses.at(-1) === 'authenticated');
+      const unmountSuccessTimer = unmountTimers.idForDelay(3_000);
+      detachUnmount();
+      const unmountTeardownTimer = unmountTimers.idForDelay(0);
+      unmountTimers.run(unmountTeardownTimer);
+
+      return {
+        successDelayIsExact:
+          replacementSuccessTimer !== null,
+        replacementTimerCleared:
+          replacementTimers.cleared.has(replacementSuccessTimer),
+        dismissedCredentialRetained,
+        dismissedSuccessNotReplayed,
+        replacementClearedAfterFinalUnmount:
+          !replacementLifecycle.hasCredential(),
+        unmountTimerCleared:
+          unmountTimers.cleared.has(unmountSuccessTimer),
+        unmountCredentialCleared:
+          !unmountLifecycle.hasCredential(),
+      };
+    });
+
+    expect(summary).toEqual({
+      successDelayIsExact: true,
+      replacementTimerCleared: true,
+      dismissedCredentialRetained: true,
+      dismissedSuccessNotReplayed: true,
+      replacementClearedAfterFinalUnmount: true,
+      unmountTimerCleared: true,
+      unmountCredentialCleared: true,
+    });
   });
 
   test('retries an exact public 503 twice with one request key', async ({

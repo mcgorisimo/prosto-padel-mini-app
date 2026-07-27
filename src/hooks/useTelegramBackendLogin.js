@@ -4,6 +4,7 @@ import { telegramBackendLoginClient } from '../lib/telegramBackendLogin';
 const FEATURE_ENABLED =
   import.meta.env.VITE_TELEGRAM_BACKEND_LOGIN_ENABLED === 'true';
 const MAX_TIMER_DELAY_MS = 2_147_000_000;
+const SUCCESS_MESSAGE_DURATION_MS = 3_000;
 
 const IDLE_SNAPSHOT = Object.freeze({
   status: 'idle',
@@ -58,6 +59,7 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
   let consumerCount = 0;
   let teardownTimer = null;
   let expirationTimer = null;
+  let successMessageTimer = null;
   let generation = 0;
   let identityToken = 0;
   let currentIdentityFingerprint = null;
@@ -67,6 +69,9 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
   let publicSnapshot = IDLE_SNAPSHOT;
 
   function publish(snapshot) {
+    if (snapshot.status !== 'authenticated') {
+      clearSuccessMessageTimer();
+    }
     publicSnapshot = normalizeSnapshot(snapshot);
     for (const listener of listeners) {
       listener(publicSnapshot);
@@ -77,6 +82,20 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
     if (expirationTimer !== null) {
       clearTimer(expirationTimer);
       expirationTimer = null;
+    }
+  }
+
+  function clearSuccessMessageTimer() {
+    if (successMessageTimer !== null) {
+      clearTimer(successMessageTimer);
+      successMessageTimer = null;
+    }
+  }
+
+  function dismissSuccess() {
+    clearSuccessMessageTimer();
+    if (publicSnapshot.status === 'authenticated') {
+      publish(IDLE_SNAPSHOT);
     }
   }
 
@@ -104,6 +123,7 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
     currentIdentityFingerprint = null;
     privateCredential = null;
     clearExpirationTimer();
+    clearSuccessMessageTimer();
     publish(IDLE_SNAPSHOT);
   }
 
@@ -113,7 +133,21 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
     currentIdentityFingerprint = null;
     privateCredential = null;
     clearExpirationTimer();
+    clearSuccessMessageTimer();
     publish(IDLE_SNAPSHOT);
+  }
+
+  function scheduleSuccessMessageDismissal(attemptGeneration) {
+    clearSuccessMessageTimer();
+    successMessageTimer = setTimer(() => {
+      successMessageTimer = null;
+      if (
+        attemptGeneration === generation &&
+        publicSnapshot.status === 'authenticated'
+      ) {
+        publish(IDLE_SNAPSHOT);
+      }
+    }, SUCCESS_MESSAGE_DURATION_MS);
   }
 
   function scheduleExpiration(expiresAt, attemptGeneration) {
@@ -247,6 +281,7 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
             accountKind: result.accountKind,
             expiresAt: result.expiresAt,
           });
+          scheduleSuccessMessageDismissal(attemptGeneration);
           scheduleExpiration(result.expiresAt, attemptGeneration);
           return;
         }
@@ -343,6 +378,7 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
   return Object.freeze({
     attach,
     clear: clearBoundary,
+    dismissSuccess,
     hasCredential: () => privateCredential !== null,
   });
 }
@@ -358,6 +394,12 @@ export function useTelegramBackendLogin() {
   const clear = useCallback(() => {
     if (FEATURE_ENABLED) {
       telegramBackendLoginLifecycle.clear();
+    }
+  }, []);
+
+  const dismissSuccess = useCallback(() => {
+    if (FEATURE_ENABLED) {
+      telegramBackendLoginLifecycle.dismissSuccess();
     }
   }, []);
 
@@ -379,5 +421,6 @@ export function useTelegramBackendLogin() {
     expiresAt: snapshot.expiresAt,
     errorKind: snapshot.errorKind,
     clear,
+    dismissSuccess,
   });
 }

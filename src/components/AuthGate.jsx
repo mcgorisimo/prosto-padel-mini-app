@@ -44,6 +44,20 @@ export default function AuthGate() {
     return () => subscription.unsubscribe();
   }, [telegramBackendLogin.clear]);
 
+  useEffect(() => {
+    if (
+      (session || authView !== 'welcome') &&
+      telegramBackendLogin.status === 'authenticated'
+    ) {
+      telegramBackendLogin.dismissSuccess();
+    }
+  }, [
+    authView,
+    session,
+    telegramBackendLogin.dismissSuccess,
+    telegramBackendLogin.status,
+  ]);
+
   const showToast = (message, variant = 'info') => {
     setToastMessage({ message, variant });
     setTimeout(() => setToastMessage(null), 3000);
@@ -115,10 +129,20 @@ const handleSignUp = async ({ email, password, options }) => {
   // 1. Показываем лоадер (если ты сделал BallLoader, используй его тут!)
   const telegramBackendStatus = (
     <TelegramBackendLoginStatus
-      status={telegramBackendLogin.status}
+      status={
+        (session || authView !== 'welcome') &&
+        telegramBackendLogin.status === 'authenticated'
+          ? 'idle'
+          : telegramBackendLogin.status
+      }
       accountKind={telegramBackendLogin.accountKind}
     />
   );
+
+  const showAuthView = (nextView) => {
+    telegramBackendLogin.dismissSuccess();
+    setAuthView(nextView);
+  };
 
   if (loading) {
     return (
@@ -156,8 +180,8 @@ const handleSignUp = async ({ email, password, options }) => {
     <>
       {authView === 'welcome' && (
         <WelcomeScreen 
-          onLogin={() => setAuthView('login')} 
-          onSignUp={() => setAuthView('signup')}
+          onLogin={() => showAuthView('login')}
+          onSignUp={() => showAuthView('signup')}
           showToast={showToast} // Pass showToast to WelcomeScreen
         />
       )}
