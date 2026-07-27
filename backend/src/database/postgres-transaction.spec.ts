@@ -102,6 +102,35 @@ describe('PostgresTransactionRunner', () => {
     expect(context.release).toHaveBeenCalledTimes(1);
   });
 
+  it('reports successful COMMIT checkpoints in exact order', async () => {
+    const context = createTestContext();
+    const checkpoints: string[] = [];
+
+    await context.runner.runInTransaction(
+      async () => {
+        context.events.push('operation');
+      },
+      (checkpoint) => {
+        checkpoints.push(checkpoint);
+        context.events.push(checkpoint);
+      },
+    );
+
+    expect(checkpoints).toEqual([
+      'transaction_before_commit',
+      'transaction_commit_success',
+    ]);
+    expect(context.events).toEqual([
+      'connect',
+      'BEGIN',
+      'operation',
+      'transaction_before_commit',
+      'COMMIT',
+      'transaction_commit_success',
+      'release',
+    ]);
+  });
+
   it('rolls back an operation error without committing', async () => {
     const context = createTestContext();
     const operationError = new Error('operation failed');
@@ -174,7 +203,9 @@ describe('PostgresTransactionRunner', () => {
   });
 
   it('attempts rollback and releases the client when COMMIT fails', async () => {
-    const commitError = new Error('COMMIT failed');
+    const sensitiveMarker = 'SYNTHETIC_COMMIT_FAILURE_SECRET';
+    const commitError = new Error(sensitiveMarker);
+    const checkpoints: string[] = [];
     const context = createTestContext(async (text) => {
       if (text === 'COMMIT') {
         throw commitError;
@@ -183,9 +214,31 @@ describe('PostgresTransactionRunner', () => {
     });
 
     await expect(
-      context.runner.runInTransaction(async () => 'result'),
+      context.runner.runInTransaction(
+        async () => 'result',
+        (checkpoint) => {
+          checkpoints.push(checkpoint);
+        },
+      ),
     ).rejects.toBe(commitError);
 
+    expect(checkpoints).toEqual([
+      'transaction_before_commit',
+      'transaction_commit_failed',
+    ]);
+    const exposed = JSON.stringify(checkpoints);
+    for (const marker of [
+      sensitiveMarker,
+      'COMMIT',
+      'SQLSTATE',
+      '23514',
+      'constraint',
+      'account',
+      'operation',
+      'credential',
+    ]) {
+      expect(exposed.includes(marker)).toBe(false);
+    }
     expect(context.events).toEqual([
       'connect',
       'BEGIN',
@@ -194,6 +247,32 @@ describe('PostgresTransactionRunner', () => {
       'release',
     ]);
     expect(context.release).toHaveBeenCalledTimes(1);
+  });
+
+  it('isolates commit observer exceptions from success and failure', async () => {
+    const successful = createTestContext();
+    const observer = jest.fn(() => {
+      throw new Error('SYNTHETIC_OBSERVER_FAILURE');
+    });
+
+    await expect(
+      successful.runner.runInTransaction(async () => 'result', observer),
+    ).resolves.toBe('result');
+    expect(observer).toHaveBeenCalledTimes(2);
+    expect(successful.query).toHaveBeenCalledWith('COMMIT');
+
+    const commitError = new Error('SYNTHETIC_COMMIT_ERROR');
+    const failing = createTestContext(async (text) => {
+      if (text === 'COMMIT') {
+        throw commitError;
+      }
+      return emptyQueryResult();
+    });
+
+    await expect(
+      failing.runner.runInTransaction(async () => 'result', observer),
+    ).rejects.toBe(commitError);
+    expect(observer).toHaveBeenCalledTimes(4);
   });
 
   it('preserves a COMMIT error when the following ROLLBACK also fails', async () => {

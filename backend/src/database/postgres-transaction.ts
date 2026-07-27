@@ -13,6 +13,30 @@ export interface PostgresTransaction {
   ): Promise<QueryResult<Row>>;
 }
 
+export type PostgresTransactionCommitCheckpoint =
+  | 'transaction_before_commit'
+  | 'transaction_commit_success'
+  | 'transaction_commit_failed';
+
+export type PostgresTransactionCommitObserver = (
+  checkpoint: PostgresTransactionCommitCheckpoint,
+) => void;
+
+function notifyCommitObserver(
+  observer: PostgresTransactionCommitObserver | undefined,
+  checkpoint: PostgresTransactionCommitCheckpoint,
+): void {
+  if (observer === undefined) {
+    return;
+  }
+
+  try {
+    observer(checkpoint);
+  } catch {
+    // Transaction diagnostics are best-effort and never alter persistence.
+  }
+}
+
 class PoolClientPostgresTransaction implements PostgresTransaction {
   constructor(private readonly client: PoolClient) {}
 
@@ -30,6 +54,7 @@ export class PostgresTransactionRunner {
 
   async runInTransaction<T>(
     operation: (transaction: PostgresTransaction) => Promise<T>,
+    commitObserver?: PostgresTransactionCommitObserver,
   ): Promise<T> {
     const client = await this.postgres.getPool().connect();
     let releaseError: Error | undefined;
@@ -40,7 +65,14 @@ export class PostgresTransactionRunner {
       try {
         const transaction = new PoolClientPostgresTransaction(client);
         const result = await operation(transaction);
-        await client.query('COMMIT');
+        notifyCommitObserver(commitObserver, 'transaction_before_commit');
+        try {
+          await client.query('COMMIT');
+        } catch (error) {
+          notifyCommitObserver(commitObserver, 'transaction_commit_failed');
+          throw error;
+        }
+        notifyCommitObserver(commitObserver, 'transaction_commit_success');
         return result;
       } catch (error) {
         try {

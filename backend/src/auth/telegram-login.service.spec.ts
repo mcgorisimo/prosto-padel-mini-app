@@ -60,7 +60,11 @@ import {
   TelegramAuthenticationOperationRepository,
   TelegramAuthenticationOperationResult,
 } from '../database/telegram-authentication-operation.repository';
-import { PostgresTransaction } from '../database/postgres-transaction';
+import {
+  PostgresTransaction,
+  PostgresTransactionCommitCheckpoint,
+  PostgresTransactionCommitObserver,
+} from '../database/postgres-transaction';
 import {
   AccountStatusReader,
   SessionCredentialIssuer,
@@ -203,6 +207,7 @@ class FakeTransactionExecutor implements TransactionExecutor {
 
   async run<T>(
     operation: (transaction: PostgresTransaction) => Promise<T>,
+    commitObserver?: PostgresTransactionCommitObserver,
   ): Promise<T> {
     const number = this.transactions.length + 1;
     const transaction = new FakeTransaction(number);
@@ -215,17 +220,40 @@ class FakeTransactionExecutor implements TransactionExecutor {
 
     try {
       const result = await operation(transaction);
+      this.notifyCommitObserver(
+        commitObserver,
+        'transaction_before_commit',
+      );
       if (this.commitFailures.has(number)) {
         this.timeline.push(`tx${number}:commit-failed`);
+        this.notifyCommitObserver(
+          commitObserver,
+          'transaction_commit_failed',
+        );
         throw this.commitFailures.get(number);
       }
       this.timeline.push(`tx${number}:commit`);
+      this.notifyCommitObserver(
+        commitObserver,
+        'transaction_commit_success',
+      );
       return result;
     } catch (error) {
       if (!this.commitFailures.has(number)) {
         this.timeline.push(`tx${number}:rollback`);
       }
       throw error;
+    }
+  }
+
+  private notifyCommitObserver(
+    observer: PostgresTransactionCommitObserver | undefined,
+    checkpoint: PostgresTransactionCommitCheckpoint,
+  ): void {
+    try {
+      observer?.(checkpoint);
+    } catch {
+      // Mirrors the production runner's best-effort diagnostic boundary.
     }
   }
 }
@@ -741,6 +769,8 @@ describe('TelegramLoginService', () => {
     expect(events).toEqual([
       { stage: 'terminal_operation' },
       { checkpoint: 'account_transaction_commit' },
+      { checkpoint: 'transaction_before_commit' },
+      { checkpoint: 'transaction_commit_failed' },
     ]);
     expect(subject.terminal.calls).toHaveLength(1);
     expect(subject.issuer.issued).toHaveLength(0);
@@ -774,7 +804,10 @@ describe('TelegramLoginService', () => {
       throw new Error(SYNTHETIC_INTERNAL_ERROR_MARKER);
     };
     const subject = harness(observer);
-    subject.terminal.error = new Error(SYNTHETIC_INTERNAL_ERROR_MARKER);
+    subject.transactions.commitFailures.set(
+      2,
+      new Error(SYNTHETIC_INTERNAL_ERROR_MARKER),
+    );
 
     await expect(
       subject.service.authenticateWithTelegram(input()),
@@ -782,8 +815,21 @@ describe('TelegramLoginService', () => {
       outcome: 'rejected',
       reason: 'internal_failure',
     });
-    expect(observerCalls).toBe(2);
+    expect(observerCalls).toBe(4);
     expect(subject.issuer.issued).toHaveLength(0);
+  });
+
+  it('does not publish commit checkpoints for a successful login', async () => {
+    const events: TelegramLoginDiagnosticEvent[] = [];
+    const subject = harness((event) => events.push(event));
+
+    await expect(
+      subject.service.authenticateWithTelegram(input()),
+    ).resolves.toMatchObject({
+      outcome: 'authenticated',
+      accountKind: 'existing',
+    });
+    expect(events).toEqual([]);
   });
 
   it('authenticates a new Telegram user', async () => {

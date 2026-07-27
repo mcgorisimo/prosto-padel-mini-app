@@ -54,15 +54,25 @@ describe('PostgresTransactionExecutorAdapter', () => {
     const test = context();
     const expected = Object.freeze({ outcome: 'completed' });
     let received: PostgresTransaction | undefined;
+    const checkpoints: string[] = [];
 
-    const result = await test.executor.run(async (transaction) => {
-      received = transaction;
-      test.events.push('callback');
-      return expected;
-    });
+    const result = await test.executor.run(
+      async (transaction) => {
+        received = transaction;
+        test.events.push('callback');
+        return expected;
+      },
+      (checkpoint) => {
+        checkpoints.push(checkpoint);
+      },
+    );
 
     expect(result).toBe(expected);
     expect(received).toBeDefined();
+    expect(checkpoints).toEqual([
+      'transaction_before_commit',
+      'transaction_commit_success',
+    ]);
     expect(test.events).toEqual([
       'connect',
       'BEGIN',

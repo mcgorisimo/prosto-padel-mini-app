@@ -72,7 +72,11 @@ import {
   TelegramAuthenticationOperationRepository,
 } from '../database/telegram-authentication-operation.repository';
 import { classifyPostgresError } from '../database/postgres-error-classifier';
-import { PostgresTransaction } from '../database/postgres-transaction';
+import {
+  PostgresTransaction,
+  PostgresTransactionCommitCheckpoint,
+  PostgresTransactionCommitObserver,
+} from '../database/postgres-transaction';
 import {
   AccountStatusReader,
   SessionCredentialIssuer,
@@ -107,7 +111,8 @@ export type TelegramLoginDiagnosticStage =
 export type TelegramLoginDiagnosticCheckpoint =
   | 'terminal_repository_call'
   | 'terminal_result_validation'
-  | 'account_transaction_commit';
+  | 'account_transaction_commit'
+  | PostgresTransactionCommitCheckpoint;
 
 export type TelegramLoginDiagnosticEvent =
   | Readonly<{
@@ -124,6 +129,7 @@ export type TelegramLoginDiagnosticObserver = (
 interface TelegramLoginDiagnosticStageTracker {
   stage: TelegramLoginDiagnosticStage;
   checkpoint?: TelegramLoginDiagnosticCheckpoint;
+  transactionCheckpoints?: PostgresTransactionCommitCheckpoint[];
 }
 
 export interface TelegramLoginServiceDependencies {
@@ -521,6 +527,7 @@ export class TelegramLoginService {
 
     const accountStage: TelegramLoginDiagnosticStageTracker = {
       stage: 'account_resolution',
+      transactionCheckpoints: [],
     };
     const accountAttempt = await this.runTransaction(
       () => accountStage,
@@ -534,6 +541,9 @@ export class TelegramLoginService {
           accountStage.checkpoint = 'account_transaction_commit';
         }
         return result;
+      },
+      (checkpoint) => {
+        accountStage.transactionCheckpoints?.push(checkpoint);
       },
     );
     if (!accountAttempt.succeeded) {
@@ -910,6 +920,7 @@ export class TelegramLoginService {
   private internalFailure(
     stage: TelegramLoginDiagnosticStage,
     checkpoint?: TelegramLoginDiagnosticCheckpoint,
+    transactionCheckpoints: readonly PostgresTransactionCommitCheckpoint[] = [],
   ): RejectedTelegramLoginResult {
     notifyDiagnosticObserver(
       this.diagnosticObserver,
@@ -921,6 +932,12 @@ export class TelegramLoginService {
         Object.freeze({ checkpoint }),
       );
     }
+    for (const transactionCheckpoint of transactionCheckpoints) {
+      notifyDiagnosticObserver(
+        this.diagnosticObserver,
+        Object.freeze({ checkpoint: transactionCheckpoint }),
+      );
+    }
     return rejected('internal_failure');
   }
 
@@ -929,11 +946,15 @@ export class TelegramLoginService {
       | TelegramLoginDiagnosticStage
       | (() => TelegramLoginDiagnosticStageTracker),
     operation: (transaction: PostgresTransaction) => Promise<T>,
+    commitObserver?: PostgresTransactionCommitObserver,
   ): Promise<TransactionAttempt<T>> {
     try {
       return {
         succeeded: true,
-        value: await this.dependencies.transactions.run(operation),
+        value: await this.dependencies.transactions.run(
+          operation,
+          commitObserver,
+        ),
       };
     } catch (error) {
       const reason = mapFailure(error);
@@ -948,6 +969,7 @@ export class TelegramLoginService {
             ? this.internalFailure(
                 failedDiagnostic.stage,
                 failedDiagnostic.checkpoint,
+                failedDiagnostic.transactionCheckpoints,
               )
             : rejected(reason),
       };

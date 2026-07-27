@@ -21,7 +21,10 @@ import {
   SessionCredentialDigest,
   SessionId,
 } from './session.types';
-import { PostgresTransaction } from '../database/postgres-transaction';
+import {
+  PostgresTransaction,
+  PostgresTransactionCommitObserver,
+} from '../database/postgres-transaction';
 
 export interface TelegramProofVerifier {
   verifyProof(rawInitData: string): TelegramProofVerificationOutcome;
@@ -41,6 +44,7 @@ export interface TelegramLookupDigestCandidatesPort {
 export interface TransactionExecutor {
   run<T>(
     operation: (transaction: PostgresTransaction) => Promise<T>,
+    commitObserver?: PostgresTransactionCommitObserver,
   ): Promise<T>;
 }
 
