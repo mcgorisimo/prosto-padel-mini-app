@@ -104,9 +104,18 @@ export type TelegramLoginDiagnosticStage =
   | 'initial_session_persistence'
   | 'unexpected_internal_failure';
 
-export type TelegramLoginDiagnosticEvent = Readonly<{
-  readonly stage: TelegramLoginDiagnosticStage;
-}>;
+export type TelegramLoginDiagnosticCheckpoint =
+  | 'terminal_repository_call'
+  | 'terminal_result_validation'
+  | 'account_transaction_commit';
+
+export type TelegramLoginDiagnosticEvent =
+  | Readonly<{
+      readonly stage: TelegramLoginDiagnosticStage;
+    }>
+  | Readonly<{
+      readonly checkpoint: TelegramLoginDiagnosticCheckpoint;
+    }>;
 
 export type TelegramLoginDiagnosticObserver = (
   event: TelegramLoginDiagnosticEvent,
@@ -114,6 +123,7 @@ export type TelegramLoginDiagnosticObserver = (
 
 interface TelegramLoginDiagnosticStageTracker {
   stage: TelegramLoginDiagnosticStage;
+  checkpoint?: TelegramLoginDiagnosticCheckpoint;
 }
 
 export interface TelegramLoginServiceDependencies {
@@ -513,9 +523,18 @@ export class TelegramLoginService {
       stage: 'account_resolution',
     };
     const accountAttempt = await this.runTransaction(
-      () => accountStage.stage,
-      (transaction) =>
-        this.resolveAndComplete(transaction, prepared, accountStage),
+      () => accountStage,
+      async (transaction) => {
+        const result = await this.resolveAndComplete(
+          transaction,
+          prepared,
+          accountStage,
+        );
+        if (accountStage.stage === 'terminal_operation') {
+          accountStage.checkpoint = 'account_transaction_commit';
+        }
+        return result;
+      },
     );
     if (!accountAttempt.succeeded) {
       return accountAttempt.rejection;
@@ -757,7 +776,10 @@ export class TelegramLoginService {
     );
     if (terminal !== undefined) {
       return terminal === 'internal_failure'
-        ? this.internalFailure('terminal_operation')
+        ? this.internalFailure(
+            'terminal_operation',
+            diagnostic.checkpoint,
+          )
         : rejected(terminal);
     }
     if (account.status !== 'active') {
@@ -852,6 +874,7 @@ export class TelegramLoginService {
     diagnostic: TelegramLoginDiagnosticStageTracker,
   ): Promise<TelegramLoginRejectionReason | undefined> {
     diagnostic.stage = 'terminal_operation';
+    diagnostic.checkpoint = 'terminal_repository_call';
     const terminal =
       await this.dependencies.terminalOperations.applyTerminalCommand(
         transaction,
@@ -869,6 +892,7 @@ export class TelegramLoginService {
         },
       );
 
+    diagnostic.checkpoint = 'terminal_result_validation';
     if (terminal.outcome === 'rejected') {
       return terminal.reason === 'operation_expired'
         ? 'telegram_proof_expired'
@@ -885,18 +909,25 @@ export class TelegramLoginService {
 
   private internalFailure(
     stage: TelegramLoginDiagnosticStage,
+    checkpoint?: TelegramLoginDiagnosticCheckpoint,
   ): RejectedTelegramLoginResult {
     notifyDiagnosticObserver(
       this.diagnosticObserver,
       Object.freeze({ stage }),
     );
+    if (checkpoint !== undefined) {
+      notifyDiagnosticObserver(
+        this.diagnosticObserver,
+        Object.freeze({ checkpoint }),
+      );
+    }
     return rejected('internal_failure');
   }
 
   private async runTransaction<T>(
     diagnosticStage:
       | TelegramLoginDiagnosticStage
-      | (() => TelegramLoginDiagnosticStage),
+      | (() => TelegramLoginDiagnosticStageTracker),
     operation: (transaction: PostgresTransaction) => Promise<T>,
   ): Promise<TransactionAttempt<T>> {
     try {
@@ -906,15 +937,18 @@ export class TelegramLoginService {
       };
     } catch (error) {
       const reason = mapFailure(error);
-      const failedStage =
+      const failedDiagnostic =
         typeof diagnosticStage === 'function'
           ? diagnosticStage()
-          : diagnosticStage;
+          : { stage: diagnosticStage };
       return {
         succeeded: false,
         rejection:
           reason === 'internal_failure'
-            ? this.internalFailure(failedStage)
+            ? this.internalFailure(
+                failedDiagnostic.stage,
+                failedDiagnostic.checkpoint,
+              )
             : rejected(reason),
       };
     }

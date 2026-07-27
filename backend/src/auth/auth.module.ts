@@ -70,6 +70,10 @@ function logTelegramLoginDiagnostic(
   logger: Logger,
   event: TelegramLoginDiagnosticEvent,
 ): void {
+  if ('checkpoint' in event) {
+    logger.warn(`Telegram login failed checkpoint=${event.checkpoint}`);
+    return;
+  }
   logger.warn(`Telegram login failed stage=${event.stage}`);
 }
 

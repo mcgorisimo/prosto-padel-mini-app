@@ -489,6 +489,43 @@ describe('AuthModule Telegram login wiring', () => {
     await moduleRef.close();
   });
 
+  it('wires Telegram login checkpoints to a fixed Logger message', async () => {
+    const warn = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+    const moduleRef = await compileAuthModule(enabledConfiguration());
+    warn.mockClear();
+    const feature = getFeature(moduleRef);
+    if (!feature.enabled) {
+      throw new Error('Expected enabled Telegram login feature');
+    }
+    const observer = getServiceDiagnosticObserver(feature.service);
+    expect(observer).toBeDefined();
+    const sensitiveMarker = 'SYNTHETIC_TERMINAL_CHECKPOINT_SECRET';
+
+    observer?.(
+      Object.freeze({
+        checkpoint: 'terminal_result_validation',
+        rawInitData: sensitiveMarker,
+        operationId: sensitiveMarker,
+        sqlState: sensitiveMarker,
+        constraint: sensitiveMarker,
+        error: new Error(sensitiveMarker),
+      }) as unknown as Parameters<TelegramLoginDiagnosticObserver>[0],
+    );
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      'Telegram login failed checkpoint=terminal_result_validation',
+    );
+    const logged = inspect(warn.mock.calls);
+    expect(logged).not.toContain(sensitiveMarker);
+    expect(warn.mock.calls[0]).toHaveLength(1);
+    expect(warn.mock.calls[0]?.[0]).not.toBeInstanceOf(Error);
+
+    await moduleRef.close();
+  });
+
   it('keeps the public service result unchanged when the workflow Logger throws', async () => {
     const sensitiveMarker = 'SYNTHETIC_WORKFLOW_LOGGER_FAILURE';
     const warn = jest

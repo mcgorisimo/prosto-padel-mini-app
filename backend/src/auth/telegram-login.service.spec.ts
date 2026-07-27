@@ -643,9 +643,18 @@ describe('TelegramLoginService', () => {
         reason: 'internal_failure',
       });
       expect(Object.keys(result).sort()).toEqual(['outcome', 'reason']);
-      expect(events).toEqual([{ stage }]);
-      expect(Object.keys(events[0])).toEqual(['stage']);
-      expect(Object.isFrozen(events[0])).toBe(true);
+      expect(events).toEqual(
+        stage === 'terminal_operation'
+          ? [
+              { stage },
+              { checkpoint: 'terminal_repository_call' },
+            ]
+          : [{ stage }],
+      );
+      for (const event of events) {
+        expect(Object.keys(event)).toHaveLength(1);
+        expect(Object.isFrozen(event)).toBe(true);
+      }
 
       const exposedSurfaces = [
         JSON.stringify(events),
@@ -672,12 +681,14 @@ describe('TelegramLoginService', () => {
     },
   );
 
-  it('isolates diagnostic observer exceptions from the public result', async () => {
-    const observer: TelegramLoginDiagnosticObserver = () => {
-      throw new Error(SYNTHETIC_INTERNAL_ERROR_MARKER);
+  it('reports terminal result validation without changing the public result', async () => {
+    const events: TelegramLoginDiagnosticEvent[] = [];
+    const subject = harness((event) => events.push(event));
+    subject.terminal.result = {
+      outcome: 'transitioned',
+      operationId: OPERATION_ID,
+      status: 'failed',
     };
-    const subject = harness(observer);
-    subject.issuer.error = new Error(SYNTHETIC_INTERNAL_ERROR_MARKER);
 
     await expect(
       subject.service.authenticateWithTelegram(input()),
@@ -685,6 +696,94 @@ describe('TelegramLoginService', () => {
       outcome: 'rejected',
       reason: 'internal_failure',
     });
+    expect(events).toEqual([
+      { stage: 'terminal_operation' },
+      { checkpoint: 'terminal_result_validation' },
+    ]);
+    expect(subject.terminal.calls).toHaveLength(1);
+    expect(subject.issuer.issued).toHaveLength(0);
+
+    const exposedSurfaces = [JSON.stringify(events), inspect(events)].join(
+      '\n',
+    );
+    for (const marker of [
+      RAW_INIT_DATA,
+      '123456789',
+      ACCOUNT_ID,
+      IDENTITY_ID,
+      OPERATION_ID,
+      SESSION_ID,
+      REQUEST_KEY,
+      PLAINTEXT,
+      'SELECT ',
+      '23514',
+      PROOF_FINGERPRINT,
+      LOOKUP_DIGEST,
+    ]) {
+      expect(exposedSurfaces.includes(marker)).toBe(false);
+    }
+  });
+
+  it('reports account transaction commit after terminal validation', async () => {
+    const events: TelegramLoginDiagnosticEvent[] = [];
+    const subject = harness((event) => events.push(event));
+    subject.transactions.commitFailures.set(
+      2,
+      new Error(SYNTHETIC_INTERNAL_ERROR_MARKER),
+    );
+
+    await expect(
+      subject.service.authenticateWithTelegram(input()),
+    ).resolves.toEqual({
+      outcome: 'rejected',
+      reason: 'internal_failure',
+    });
+    expect(events).toEqual([
+      { stage: 'terminal_operation' },
+      { checkpoint: 'account_transaction_commit' },
+    ]);
+    expect(subject.terminal.calls).toHaveLength(1);
+    expect(subject.issuer.issued).toHaveLength(0);
+
+    const exposedSurfaces = [JSON.stringify(events), inspect(events)].join(
+      '\n',
+    );
+    for (const marker of [
+      SYNTHETIC_INTERNAL_ERROR_MARKER,
+      RAW_INIT_DATA,
+      '123456789',
+      ACCOUNT_ID,
+      IDENTITY_ID,
+      OPERATION_ID,
+      SESSION_ID,
+      REQUEST_KEY,
+      PLAINTEXT,
+      'COMMIT',
+      '40001',
+      PROOF_FINGERPRINT,
+      LOOKUP_DIGEST,
+    ]) {
+      expect(exposedSurfaces.includes(marker)).toBe(false);
+    }
+  });
+
+  it('isolates diagnostic observer exceptions from the public result', async () => {
+    let observerCalls = 0;
+    const observer: TelegramLoginDiagnosticObserver = () => {
+      observerCalls += 1;
+      throw new Error(SYNTHETIC_INTERNAL_ERROR_MARKER);
+    };
+    const subject = harness(observer);
+    subject.terminal.error = new Error(SYNTHETIC_INTERNAL_ERROR_MARKER);
+
+    await expect(
+      subject.service.authenticateWithTelegram(input()),
+    ).resolves.toEqual({
+      outcome: 'rejected',
+      reason: 'internal_failure',
+    });
+    expect(observerCalls).toBe(2);
+    expect(subject.issuer.issued).toHaveLength(0);
   });
 
   it('authenticates a new Telegram user', async () => {
