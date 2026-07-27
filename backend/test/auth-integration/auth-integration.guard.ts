@@ -31,7 +31,7 @@ import {
 const MINIMUM_POSTGRES_VERSION = 140000;
 const EXPECTED_APPLICATION_ROLE = 'backend_auth_app';
 const NOT_PROVISIONED_MESSAGE =
-  'Auth integration database is not provisioned with migration 015';
+  'Auth integration database is not provisioned with migrations 015 and 017';
 
 export const AUTH_INTEGRATION_JEST_TIMEOUT_MILLIS = 60_000;
 export const AUTH_INTEGRATION_POOL_LIMITS = Object.freeze({
@@ -205,7 +205,11 @@ async function readCatalogEvidence(
     SELECT
       rel.relname AS name,
       pg_catalog.obj_description(rel.oid, 'pg_class') =
-        '015_backend_auth_foundation:' ||
+        CASE rel.relname
+          WHEN 'player_profile_details'
+            THEN '017_backend_auth_player_profile_details:'
+          ELSE '015_backend_auth_foundation:'
+        END ||
         pg_catalog.md5(pg_catalog.jsonb_build_object(
           'relation', pg_catalog.jsonb_build_object(
             'name', rel.oid::pg_catalog.regclass::text,

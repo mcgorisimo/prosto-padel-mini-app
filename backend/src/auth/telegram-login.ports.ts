@@ -10,7 +10,7 @@ import {
   AuthenticationIdempotencyKey,
   AuthenticationOperationId,
   AuthenticationRequestDigest,
-  TelegramProofVerificationOutcome,
+  TelegramLoginProofVerificationOutcome,
   UnixEpochSeconds,
   VerifiedTelegramProof,
 } from './auth.types';
@@ -28,7 +28,9 @@ import {
 } from '../database/postgres-transaction';
 
 export interface TelegramProofVerifier {
-  verifyProof(rawInitData: string): TelegramProofVerificationOutcome;
+  verifyLoginProof(
+    rawInitData: string,
+  ): TelegramLoginProofVerificationOutcome;
 }
 
 export interface TelegramLookupDigestCandidates {

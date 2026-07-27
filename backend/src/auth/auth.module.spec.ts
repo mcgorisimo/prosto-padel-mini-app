@@ -17,6 +17,7 @@ import { PostgresAuthenticationOperationTerminalRepository } from '../database/p
 import { PostgresExternalIdentityResolutionRepository } from '../database/postgres-external-identity.repository';
 import { PostgresInitialSessionRepository } from '../database/postgres-initial-session.repository';
 import { PostgresPlayerAccountProvisioningRepository } from '../database/postgres-player-account-provisioning.repository';
+import { PostgresPlayerProfileDetailsRepository } from '../database/postgres-player-profile-details.repository';
 import { PostgresSecurityAuditRepository } from '../database/postgres-security-audit.repository';
 import { PostgresSessionAuthenticationRepository } from '../database/postgres-session-authentication.repository';
 import { PostgresSessionCredentialLifecycleRepository } from '../database/postgres-session-credential-lifecycle.repository';
@@ -317,6 +318,9 @@ describe('AuthModule Telegram login wiring', () => {
     expect(dependencies.playerAccounts).toBe(
       moduleRef.get(PostgresPlayerAccountProvisioningRepository),
     );
+    expect(dependencies.profileDetails).toBe(
+      moduleRef.get(PostgresPlayerProfileDetailsRepository),
+    );
     expect(dependencies.terminalOperations).toBe(
       moduleRef.get(PostgresAuthenticationOperationTerminalRepository),
     );
@@ -387,7 +391,7 @@ describe('AuthModule Telegram login wiring', () => {
       `hash=${'0'.repeat(64)}`,
     ].join('&');
 
-    expect(verifier.verifyProof(rawInitData)).toEqual({
+    expect(verifier.verifyLoginProof(rawInitData)).toEqual({
       status: 'invalid',
       reason: 'invalid_proof',
     });
@@ -441,7 +445,7 @@ describe('AuthModule Telegram login wiring', () => {
       ],
     ]);
 
-    expect(verifier.verifyProof(rawInitData)).toMatchObject({
+    expect(verifier.verifyLoginProof(rawInitData)).toMatchObject({
       status: 'expired',
       reason: 'expired_proof',
     });
@@ -490,7 +494,7 @@ describe('AuthModule Telegram login wiring', () => {
       ],
     ]);
 
-    expect(verifier.verifyProof(rawInitData)).toEqual({
+    expect(verifier.verifyLoginProof(rawInitData)).toEqual({
       status: 'invalid',
       reason: 'invalid_proof',
     });
@@ -601,10 +605,13 @@ describe('AuthModule Telegram login wiring', () => {
       throw new Error('Expected enabled Telegram login feature');
     }
     const dependencies = getServiceDependencies(feature.service);
-    jest.spyOn(dependencies.verifier, 'verifyProof').mockReturnValue({
-      status: 'verified',
-      proof: verifiedProof(),
-    });
+    jest
+      .spyOn(dependencies.verifier, 'verifyLoginProof')
+      .mockReturnValue({
+        status: 'verified',
+        proof: verifiedProof(),
+        profile: Object.freeze({ firstName: 'Synthetic' }),
+      });
     jest
       .spyOn(dependencies.lookupDigests, 'computeCandidates')
       .mockRejectedValue(new Error(sensitiveMarker));
@@ -658,7 +665,7 @@ describe('AuthModule Telegram login wiring', () => {
       ],
     ]);
 
-    expect(verifier.verifyProof(rawInitData)).toEqual({
+    expect(verifier.verifyLoginProof(rawInitData)).toEqual({
       status: 'invalid',
       reason: 'invalid_proof',
     });

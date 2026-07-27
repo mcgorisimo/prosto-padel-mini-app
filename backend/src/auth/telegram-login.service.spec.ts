@@ -25,8 +25,9 @@ import {
   AuthenticationOperationId,
   AuthenticationProofFingerprint,
   AuthenticationRequestDigest,
-  TelegramProofVerificationOutcome,
+  TelegramLoginProofVerificationOutcome,
   UnixEpochSeconds,
+  VerifiedTelegramProfileDetails,
   unixEpochSeconds,
 } from './auth.types';
 import { SecurityAuditEventId } from './security-audit.types';
@@ -50,6 +51,12 @@ import {
   PlayerAccountProvisioningResult,
   ProvisionPlayerAccountInput,
 } from '../database/player-account-provisioning.repository';
+import {
+  CreatePlayerProfileDetailsInput,
+  CreatePlayerProfileDetailsResult,
+  PlayerProfileDetailsPersistenceError,
+  PlayerProfileDetailsRepository,
+} from '../database/player-profile-details.repository';
 import {
   ApplyAuthenticationOperationTerminalInput,
   AuthenticationOperationTerminalRepository,
@@ -109,6 +116,13 @@ const NOW = unixEpochSeconds(1_800_000_100);
 const OPERATION_CREATED_AT = unixEpochSeconds(1_800_000_000);
 const OPERATION_EXPIRES_AT = unixEpochSeconds(1_800_000_600);
 const SESSION_EXPIRES_AT = unixEpochSeconds(1_802_592_000);
+const VERIFIED_PROFILE: VerifiedTelegramProfileDetails = Object.freeze({
+  firstName: 'Verified',
+  lastName: 'Telegram',
+  username: 'verified_player',
+  languageCode: 'ru',
+  photoUrl: 'https://example.test/avatar.svg',
+});
 
 function auditId(value: string): SecurityAuditEventId {
   return value as SecurityAuditEventId;
@@ -154,7 +168,7 @@ const DIGEST_CANDIDATE: ComputedExternalIdentityLookupDigest = Object.freeze({
 });
 
 function verifiedProof(): Extract<
-  TelegramProofVerificationOutcome,
+  TelegramLoginProofVerificationOutcome,
   { readonly status: 'verified' }
 > {
   return {
@@ -177,6 +191,7 @@ function verifiedProof(): Extract<
       expiresAt: OPERATION_EXPIRES_AT,
       proofFingerprint: PROOF_FINGERPRINT,
     },
+    profile: VERIFIED_PROFILE,
   };
 }
 
@@ -262,10 +277,12 @@ class FakeVerifier implements TelegramProofVerifier {
   readonly calls: string[] = [];
 
   constructor(
-    public outcome: TelegramProofVerificationOutcome = verifiedProof(),
+    public outcome: TelegramLoginProofVerificationOutcome = verifiedProof(),
   ) {}
 
-  verifyProof(rawInitData: string): TelegramProofVerificationOutcome {
+  verifyLoginProof(
+    rawInitData: string,
+  ): TelegramLoginProofVerificationOutcome {
     this.calls.push(rawInitData);
     return this.outcome;
   }
@@ -407,6 +424,32 @@ class FakePlayerAccounts implements PlayerAccountProvisioningRepository {
   }
 }
 
+class FakePlayerProfileDetails implements PlayerProfileDetailsRepository {
+  readonly calls: Array<{
+    transaction: PostgresTransaction;
+    input: CreatePlayerProfileDetailsInput;
+  }> = [];
+  result: CreatePlayerProfileDetailsResult = {
+    outcome: 'created',
+    accountId: ACCOUNT_ID,
+  };
+  error: unknown;
+
+  constructor(private readonly timeline: string[]) {}
+
+  async createIfAbsent(
+    transaction: PostgresTransaction,
+    inputValue: CreatePlayerProfileDetailsInput,
+  ): Promise<CreatePlayerProfileDetailsResult> {
+    this.timeline.push('profile-details');
+    this.calls.push({ transaction, input: inputValue });
+    if (this.error !== undefined) {
+      throw this.error;
+    }
+    return this.result;
+  }
+}
+
 class FakeTerminalOperations
   implements AuthenticationOperationTerminalRepository
 {
@@ -499,6 +542,7 @@ interface Harness {
   readonly identities: FakeExternalIdentities;
   readonly accounts: FakeAccounts;
   readonly playerAccounts: FakePlayerAccounts;
+  readonly profileDetails: FakePlayerProfileDetails;
   readonly terminal: FakeTerminalOperations;
   readonly issuer: FakeCredentialIssuer;
   readonly sessions: FakeInitialSessions;
@@ -518,6 +562,7 @@ function harness(
     identities: new FakeExternalIdentities(timeline),
     accounts: new FakeAccounts(timeline),
     playerAccounts: new FakePlayerAccounts(timeline),
+    profileDetails: new FakePlayerProfileDetails(timeline),
     terminal: new FakeTerminalOperations(timeline),
     issuer: new FakeCredentialIssuer(timeline),
     sessions: new FakeInitialSessions(timeline),
@@ -530,6 +575,7 @@ function harness(
     externalIdentities: subject.identities,
     accounts: subject.accounts,
     playerAccounts: subject.playerAccounts,
+    profileDetails: subject.profileDetails,
     terminalOperations: subject.terminal,
     credentialIssuer: subject.issuer,
     initialSessions: subject.sessions,
@@ -556,6 +602,7 @@ function persistedPayloads(subject: Harness): string {
     identities: subject.identities.calls,
     accounts: subject.accounts.calls,
     provisioning: subject.playerAccounts.calls,
+    profileDetails: subject.profileDetails.calls,
     terminal: subject.terminal.calls,
     sessions: subject.sessions.calls,
   });
@@ -609,6 +656,15 @@ describe('TelegramLoginService', () => {
       'terminal_operation',
       (subject: Harness) => {
         subject.terminal.error = new Error(
+          SYNTHETIC_INTERNAL_ERROR_MARKER,
+        );
+        return input();
+      },
+    ],
+    [
+      'profile_details_persistence',
+      (subject: Harness) => {
+        subject.profileDetails.error = new Error(
           SYNTHETIC_INTERNAL_ERROR_MARKER,
         );
         return input();
@@ -853,6 +909,85 @@ describe('TelegramLoginService', () => {
       expiresAt: SESSION_EXPIRES_AT,
       accountKind: 'existing',
     });
+  });
+
+  it('does not persist player profile details for an active club admin', async () => {
+    const subject = harness();
+    subject.accounts.result = {
+      outcome: 'found',
+      accountId: ACCOUNT_ID,
+      role: 'club_admin',
+      status: 'active',
+    };
+
+    await expect(
+      subject.service.authenticateWithTelegram(input()),
+    ).resolves.toEqual({
+      outcome: 'authenticated',
+      credential: PLAINTEXT,
+      expiresAt: SESSION_EXPIRES_AT,
+      accountKind: 'existing',
+    });
+    expect(subject.profileDetails.calls).toHaveLength(0);
+  });
+
+  it.each([
+    ['new', { outcome: 'not_found' } as const],
+    ['existing', undefined],
+  ] as const)(
+    'persists verified Telegram profile details for a %s account',
+    async (_accountKind, identityResult) => {
+      const subject = harness();
+      if (identityResult !== undefined) {
+        subject.identities.result = identityResult;
+      }
+
+      await subject.service.authenticateWithTelegram(input());
+
+      expect(subject.profileDetails.calls).toHaveLength(1);
+      expect(subject.profileDetails.calls[0].input).toEqual({
+        accountId: ACCOUNT_ID,
+        profile: VERIFIED_PROFILE,
+        observedAt: NOW,
+      });
+      expect(subject.profileDetails.calls[0].transaction).toBe(
+        subject.transactions.transactions[1],
+      );
+      expect(subject.timeline.indexOf('terminal')).toBeLessThan(
+        subject.timeline.indexOf('profile-details'),
+      );
+    },
+  );
+
+  it('accepts an already existing profile snapshot without overwriting it', async () => {
+    const subject = harness();
+    subject.profileDetails.result = {
+      outcome: 'existing',
+      accountId: ACCOUNT_ID,
+    };
+
+    await expect(
+      subject.service.authenticateWithTelegram(input()),
+    ).resolves.toMatchObject({
+      outcome: 'authenticated',
+      accountKind: 'existing',
+    });
+    expect(subject.profileDetails.calls).toHaveLength(1);
+  });
+
+  it('rolls back the account transaction when profile details persistence fails', async () => {
+    const subject = harness();
+    subject.profileDetails.error =
+      new PlayerProfileDetailsPersistenceError('permission_denied');
+
+    await expect(
+      subject.service.authenticateWithTelegram(input()),
+    ).resolves.toEqual({
+      outcome: 'rejected',
+      reason: 'dependency_unavailable',
+    });
+    expect(subject.timeline).toContain('tx2:rollback');
+    expect(subject.issuer.issued).toHaveLength(0);
   });
 
   it('allows the accepted server operation to outlive a still-valid Telegram proof', async () => {
@@ -1150,6 +1285,9 @@ describe('TelegramLoginService', () => {
       subject.terminal.calls[0].transaction,
     );
     expect(subject.playerAccounts.calls[0].transaction).toBe(
+      subject.profileDetails.calls[0].transaction,
+    );
+    expect(subject.playerAccounts.calls[0].transaction).toBe(
       subject.transactions.transactions[1],
     );
     expect(subject.timeline.indexOf('provision')).toBeLessThan(
@@ -1163,6 +1301,9 @@ describe('TelegramLoginService', () => {
 
     expect(subject.accounts.calls[0].transaction).toBe(
       subject.terminal.calls[0].transaction,
+    );
+    expect(subject.accounts.calls[0].transaction).toBe(
+      subject.profileDetails.calls[0].transaction,
     );
     expect(subject.accounts.calls[0].transaction).toBe(
       subject.transactions.transactions[1],
@@ -1181,6 +1322,7 @@ describe('TelegramLoginService', () => {
       'resolve',
       'account',
       'terminal',
+      'profile-details',
       'tx2:commit',
       'credential',
       'tx3:begin',

@@ -14,6 +14,7 @@ import { PostgresAuthenticationOperationTerminalRepository } from '../database/p
 import { PostgresExternalIdentityResolutionRepository } from '../database/postgres-external-identity.repository';
 import { PostgresInitialSessionRepository } from '../database/postgres-initial-session.repository';
 import { PostgresPlayerAccountProvisioningRepository } from '../database/postgres-player-account-provisioning.repository';
+import { PostgresPlayerProfileDetailsRepository } from '../database/postgres-player-profile-details.repository';
 import { PostgresSessionAuthenticationRepository } from '../database/postgres-session-authentication.repository';
 import { PostgresSessionCredentialLifecycleRepository } from '../database/postgres-session-credential-lifecycle.repository';
 import { PostgresTelegramAuthenticationOperationRepository } from '../database/postgres-telegram-authentication-operation.repository';
@@ -97,6 +98,7 @@ function createTelegramLoginFeature(
   externalIdentities: PostgresExternalIdentityResolutionRepository,
   accounts: PostgresAccountStatusReader,
   playerAccounts: PostgresPlayerAccountProvisioningRepository,
+  profileDetails: PostgresPlayerProfileDetailsRepository,
   terminalOperations: PostgresAuthenticationOperationTerminalRepository,
   initialSessions: PostgresInitialSessionRepository,
 ): TelegramLoginFeature {
@@ -168,6 +170,7 @@ function createTelegramLoginFeature(
           externalIdentities,
           accounts,
           playerAccounts,
+          profileDetails,
           terminalOperations,
           credentialIssuer: new NodeSessionCredentialIssuer(),
           initialSessions,
@@ -248,6 +251,7 @@ function createSessionAuthenticationService(
         PostgresExternalIdentityResolutionRepository,
         PostgresAccountStatusReader,
         PostgresPlayerAccountProvisioningRepository,
+        PostgresPlayerProfileDetailsRepository,
         PostgresAuthenticationOperationTerminalRepository,
         PostgresInitialSessionRepository,
       ],

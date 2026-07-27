@@ -260,16 +260,65 @@ describe('auth integration migration inventory', () => {
       foreignKeys: evidence.foreignKeys.length,
       columnAclEntries: evidence.columnAcl.length,
     }).toEqual({
-      tables: 14,
-      columns: 154,
+      tables: 15,
+      columns: 162,
       functions: 20,
       triggers: 33,
       indexes: 11,
-      constraints: 131,
-      keys: 29,
-      foreignKeys: 27,
-      columnAclEntries: 157,
+      constraints: 139,
+      keys: 30,
+      foreignKeys: 28,
+      columnAclEntries: 165,
     });
+  });
+
+  it('requires the migration 017 table, foreign key, and insert-only ACL', () => {
+    const evidence = validAuthIntegrationCatalogEvidenceFixture();
+
+    expect(
+      evidence.tables.find(
+        (table) => table.name === 'player_profile_details',
+      ),
+    ).toEqual({
+      name: 'player_profile_details',
+      fingerprintMatches: true,
+    });
+    expect(
+      evidence.foreignKeys.find(
+        (foreignKey) =>
+          foreignKey.name ===
+          'player_profile_details_account_id_fkey',
+      ),
+    ).toMatchObject({
+      tableName: 'player_profile_details',
+      sourceColumns: 'account_id',
+      targetTable: 'player_profiles',
+      targetColumns: 'account_id',
+      onUpdate: 'a',
+      onDelete: 'a',
+      isDeferrable: false,
+      isDeferred: false,
+      isValidated: true,
+    });
+    expect(
+      evidence.columnAcl.filter(
+        (entry) =>
+          entry.tableName === 'player_profile_details',
+      ),
+    ).toHaveLength(8);
+    expect(
+      evidence.columnAcl
+        .filter(
+          (entry) =>
+            entry.tableName === 'player_profile_details',
+        )
+        .every(
+          (entry) =>
+            entry.grantee === 'backend_auth_app' &&
+            entry.privilegeType === 'INSERT' &&
+            entry.isGrantable === false,
+        ),
+    ).toBe(true);
   });
 
   it('rejects a stale table marker with a mismatched relation fingerprint', () => {

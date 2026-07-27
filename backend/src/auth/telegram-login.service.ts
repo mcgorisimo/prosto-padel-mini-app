@@ -16,7 +16,9 @@ import {
 } from '../accounts/player-profile.types';
 import {
   TelegramProofVerificationOutcome,
+  TelegramLoginProofVerificationOutcome,
   VerifiedTelegramProof,
+  VerifiedTelegramProfileDetails,
   isAuthenticationCommandId,
   isAuthenticationIdempotencyKey,
   isAuthenticationOperationId,
@@ -64,6 +66,10 @@ import {
   PlayerAccountProvisioningRepository,
 } from '../database/player-account-provisioning.repository';
 import {
+  PlayerProfileDetailsPersistenceError,
+  PlayerProfileDetailsRepository,
+} from '../database/player-profile-details.repository';
+import {
   AuthenticationOperationTerminalPersistenceError,
   AuthenticationOperationTerminalRepository,
 } from '../database/authentication-operation-terminal.repository';
@@ -103,6 +109,7 @@ export type TelegramLoginDiagnosticStage =
   | 'account_resolution'
   | 'account_provisioning'
   | 'terminal_operation'
+  | 'profile_details_persistence'
   | 'credential_issue'
   | 'session_creation'
   | 'initial_session_persistence'
@@ -140,6 +147,7 @@ export interface TelegramLoginServiceDependencies {
   readonly externalIdentities: ExternalIdentityResolutionRepository;
   readonly accounts: AccountStatusReader;
   readonly playerAccounts: PlayerAccountProvisioningRepository;
+  readonly profileDetails: PlayerProfileDetailsRepository;
   readonly terminalOperations: AuthenticationOperationTerminalRepository;
   readonly credentialIssuer: SessionCredentialIssuer;
   readonly initialSessions: InitialSessionRepository;
@@ -148,6 +156,7 @@ export interface TelegramLoginServiceDependencies {
 
 interface PreparedWorkflow {
   readonly proof: VerifiedTelegramProof;
+  readonly profile: VerifiedTelegramProfileDetails;
   readonly digests: TelegramLookupDigestCandidates;
   readonly bindings: TelegramLoginWorkflowBindings;
   readonly operation: PendingAuthenticationOperation & {
@@ -410,6 +419,7 @@ function mapFailure(error: unknown): TelegramLoginRejectionReason {
     error instanceof TelegramAuthenticationOperationPersistenceError ||
     error instanceof ExternalIdentityPersistenceError ||
     error instanceof PlayerAccountProvisioningPersistenceError ||
+    error instanceof PlayerProfileDetailsPersistenceError ||
     error instanceof AuthenticationOperationTerminalPersistenceError ||
     error instanceof InitialSessionPersistenceError
   ) {
@@ -626,9 +636,10 @@ export class TelegramLoginService {
   private async prepare(
     input: TelegramLoginInput,
   ): Promise<PreparedWorkflow | RejectedTelegramLoginResult> {
-    let proofOutcome: TelegramProofVerificationOutcome;
+    let proofOutcome: TelegramLoginProofVerificationOutcome;
     try {
-      proofOutcome = this.dependencies.verifier.verifyProof(input.rawInitData);
+      proofOutcome =
+        this.dependencies.verifier.verifyLoginProof(input.rawInitData);
     } catch {
       return rejected('invalid_telegram_data');
     }
@@ -691,10 +702,15 @@ export class TelegramLoginService {
       return this.internalFailure('proof_preparation');
     }
 
+    const proofForConsumption: TelegramProofVerificationOutcome =
+      Object.freeze({
+        status: 'verified',
+        proof,
+      });
     const consumed = consumeTelegramProof(
       EMPTY_TELEGRAM_PROOF_CONSUMPTION_STATE,
       {
-        proof: proofOutcome,
+        proof: proofForConsumption,
         intent: INTENT,
         idempotencyKey: bindings.idempotencyKey,
         requestDigest: bindings.requestDigest,
@@ -711,6 +727,7 @@ export class TelegramLoginService {
 
     return {
       proof,
+      profile: proofOutcome.profile,
       digests,
       bindings,
       operation: created.state as PreparedWorkflow['operation'],
@@ -796,6 +813,15 @@ export class TelegramLoginService {
       return rejected('account_unavailable');
     }
 
+    if (account.role === 'player') {
+      await this.persistProfileDetails(
+        transaction,
+        prepared,
+        account.accountId,
+        diagnostic,
+      );
+    }
+
     return {
       accountKind: 'existing',
       accountId: account.accountId,
@@ -871,10 +897,42 @@ export class TelegramLoginService {
       throw new TelegramLoginTransactionAbort(terminalFailure);
     }
 
+    await this.persistProfileDetails(
+      transaction,
+      prepared,
+      prepared.bindings.accountId,
+      diagnostic,
+    );
+
     return {
       accountKind: 'new',
       accountId: prepared.bindings.accountId,
     };
+  }
+
+  private async persistProfileDetails(
+    transaction: PostgresTransaction,
+    prepared: PreparedWorkflow,
+    accountId: AccountId,
+    diagnostic: TelegramLoginDiagnosticStageTracker,
+  ): Promise<void> {
+    diagnostic.stage = 'profile_details_persistence';
+    diagnostic.checkpoint = undefined;
+    const result = await this.dependencies.profileDetails.createIfAbsent(
+      transaction,
+      {
+        accountId,
+        profile: prepared.profile,
+        observedAt: prepared.proof.verifiedAt,
+      },
+    );
+    if (
+      result.accountId !== accountId ||
+      (result.outcome !== 'created' && result.outcome !== 'existing')
+    ) {
+      throw new TelegramLoginTransactionAbort('internal_failure');
+    }
+    diagnostic.stage = 'terminal_operation';
   }
 
   private async completeOperation(

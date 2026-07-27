@@ -52,6 +52,16 @@ interface AuditRow extends QueryResultRow {
   readonly outcome: string;
 }
 
+interface PlayerProfileDetailsRow extends QueryResultRow {
+  readonly first_name: string;
+  readonly last_name: string | null;
+  readonly username: string | null;
+  readonly photo_url: string | null;
+  readonly language_code: string | null;
+  readonly created_at: string;
+  readonly updated_at: string;
+}
+
 function safeLoginResult(
   result: TelegramLoginResult,
 ): Readonly<Record<string, unknown>> {
@@ -98,6 +108,7 @@ describe('Telegram login PostgreSQL integration', () => {
     const prepared = await harness.prepareLogin({
       subjectLabel: 'new-user',
       proofLabel: 'new-user-proof',
+      firstName: 'Initial Profile',
     });
 
     const result =
@@ -140,6 +151,34 @@ describe('Telegram login PostgreSQL integration', () => {
         account_id: prepared.bindings.accountId,
         account_status: 'active',
         profile_account_id: prepared.bindings.accountId,
+      },
+    ]);
+
+    const profileDetails =
+      await harness.query<PlayerProfileDetailsRow>(
+        `
+          SELECT
+            first_name,
+            last_name,
+            username,
+            photo_url,
+            language_code,
+            created_at::text,
+            updated_at::text
+          FROM backend_auth.player_profile_details
+          WHERE account_id = $1
+        `,
+        [prepared.bindings.accountId],
+      );
+    expect(profileDetails.rows).toEqual([
+      {
+        first_name: 'Initial Profile',
+        last_name: null,
+        username: null,
+        photo_url: null,
+        language_code: null,
+        created_at: String(prepared.now),
+        updated_at: String(prepared.now),
       },
     ]);
 
@@ -248,6 +287,7 @@ describe('Telegram login PostgreSQL integration', () => {
     const first = await harness.prepareLogin({
       subjectLabel: 'existing-user',
       proofLabel: 'existing-user-first-proof',
+      firstName: 'Original Profile',
     });
     const firstResult =
       await harness.graph.service.authenticateWithTelegram({
@@ -264,6 +304,7 @@ describe('Telegram login PostgreSQL integration', () => {
     const second = await harness.prepareLogin({
       subjectLabel: 'existing-user',
       proofLabel: 'existing-user-second-proof',
+      firstName: 'Replacement Profile',
     });
     const secondResult =
       await harness.graph.service.authenticateWithTelegram({
@@ -302,6 +343,33 @@ describe('Telegram login PostgreSQL integration', () => {
     );
     expect(identity.rows).toHaveLength(1);
     expect(identity.rows[0].account_id).toBe(first.bindings.accountId);
+    const persistedProfile =
+      await harness.query<PlayerProfileDetailsRow>(
+        `
+          SELECT
+            first_name,
+            last_name,
+            username,
+            photo_url,
+            language_code,
+            created_at::text,
+            updated_at::text
+          FROM backend_auth.player_profile_details
+          WHERE account_id = $1
+        `,
+        [first.bindings.accountId],
+      );
+    expect(persistedProfile.rows).toEqual([
+      {
+        first_name: 'Original Profile',
+        last_name: null,
+        username: null,
+        photo_url: null,
+        language_code: null,
+        created_at: String(first.now),
+        updated_at: String(first.now),
+      },
+    ]);
     expect(
       await count(
         harness,

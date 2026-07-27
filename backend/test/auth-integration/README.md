@@ -11,15 +11,17 @@ that must be retained.
    `_auth_integration_test`.
 2. Apply `docs/migrations/015_backend_auth_foundation.sql` manually, including
    its roles, grants, comments, and migration fingerprints.
-3. Connect as the non-superuser `backend_auth_app` role.
-4. Set all four environment variables:
+3. Apply `docs/migrations/017_backend_auth_player_profile_details.sql`
+   manually after its PRECHECK, then require its POSTCHECK to pass.
+4. Connect as the non-superuser `backend_auth_app` role.
+5. Set all four environment variables:
 
    - `AUTH_INTEGRATION_TESTS_ENABLED=true`
    - `AUTH_INTEGRATION_DISPOSABLE_DATABASE=true`
    - `AUTH_INTEGRATION_DATABASE_URL=<URL of the disposable database>`
    - `AUTH_INTEGRATION_EXPECTED_DATABASE_NAME=<exact database name>`
 
-5. Use the one-shot Docker runner documented in
+6. Use the one-shot Docker runner documented in
    `infra/test/auth-integration/README.md`. It builds from the backend
    package lock, runs as the unprivileged `node` user, and connects only
    to the internal Compose network.
@@ -40,12 +42,13 @@ that must be retained.
    the four guarded integration environment values have been supplied.
    Do not run it as part of image discovery.
 
-The harness never creates a database or schema, applies migration 015, grants
-roles, repairs schema state, or rolls a migration back. Before the first data
-change it verifies the exact database name, disposable suffix, application
-role, non-superuser status, supported PostgreSQL version, migration schema,
-the exact table/function/trigger/constraint/index inventories, recomputed
-relation and function fingerprints, owners, and the runtime ACL boundary.
+The harness never creates a database or schema, applies migrations 015/017,
+grants roles, repairs schema state, or rolls a migration back. Before the
+first data change it verifies the exact database name, disposable suffix,
+application role, non-superuser status, supported PostgreSQL version,
+migration schema, the exact table/function/trigger/constraint/index
+inventories, recomputed relation and function fingerprints, owners, and the
+runtime ACL boundary.
 Stale migration comments do not pass without matching recomputed
 fingerprints. A mismatch stops the suite with a fixed safe error.
 

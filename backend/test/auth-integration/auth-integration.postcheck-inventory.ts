@@ -1,4 +1,4 @@
-// Fixed test-only semantic inventory copied from migration 015's official POSTCHECK.
+// Fixed test-only semantic inventory copied from migrations 015 and 017.
 // It is independent from database comments and is never loaded from SQL at runtime.
 
 export const AUTH_INTEGRATION_EXPECTED_COLUMNS = Object.freeze([
@@ -8,6 +8,14 @@ export const AUTH_INTEGRATION_EXPECTED_COLUMNS = Object.freeze([
   ["backend_auth","accounts",4,"created_at","bigint",true,null,""],
   ["backend_auth","accounts",5,"updated_at","bigint",true,null,""],
   ["backend_auth","player_profiles",1,"account_id","uuid",true,null,""],
+  ["backend_auth","player_profile_details",1,"account_id","uuid",true,null,""],
+  ["backend_auth","player_profile_details",2,"first_name","text",true,null,""],
+  ["backend_auth","player_profile_details",3,"last_name","text",false,null,""],
+  ["backend_auth","player_profile_details",4,"username","text",false,null,""],
+  ["backend_auth","player_profile_details",5,"photo_url","text",false,null,""],
+  ["backend_auth","player_profile_details",6,"language_code","text",false,null,""],
+  ["backend_auth","player_profile_details",7,"created_at","bigint",true,null,""],
+  ["backend_auth","player_profile_details",8,"updated_at","bigint",true,null,""],
   ["backend_auth","external_identities",1,"id","uuid",true,null,""],
   ["backend_auth","external_identities",2,"account_id","uuid",true,null,""],
   ["backend_auth","external_identities",3,"provider","text",true,null,""],
@@ -165,6 +173,14 @@ export const AUTH_INTEGRATION_EXPECTED_CONSTRAINTS = Object.freeze([
   ["backend_auth","accounts","accounts_time_check","c",false,false,true],
   ["backend_auth","player_profiles","player_profiles_pkey","p",false,false,true],
   ["backend_auth","player_profiles","player_profiles_account_id_fkey","f",false,false,true],
+  ["backend_auth","player_profile_details","player_profile_details_pkey","p",false,false,true],
+  ["backend_auth","player_profile_details","player_profile_details_account_id_fkey","f",false,false,true],
+  ["backend_auth","player_profile_details","player_profile_details_first_name_check","c",false,false,true],
+  ["backend_auth","player_profile_details","player_profile_details_last_name_check","c",false,false,true],
+  ["backend_auth","player_profile_details","player_profile_details_username_check","c",false,false,true],
+  ["backend_auth","player_profile_details","player_profile_details_photo_url_check","c",false,false,true],
+  ["backend_auth","player_profile_details","player_profile_details_language_code_check","c",false,false,true],
+  ["backend_auth","player_profile_details","player_profile_details_time_check","c",false,false,true],
   ["backend_auth","external_identities","external_identities_pkey","p",false,false,true],
   ["backend_auth","external_identities","external_identities_binding_key","u",false,false,true],
   ["backend_auth","external_identities","external_identities_account_id_fkey","f",false,false,true],
@@ -295,6 +311,7 @@ export const AUTH_INTEGRATION_EXPECTED_CONSTRAINTS = Object.freeze([
 export const AUTH_INTEGRATION_EXPECTED_KEYS = Object.freeze([
   ["backend_auth","accounts","accounts_pkey","p","id",false,false,true],
   ["backend_auth","player_profiles","player_profiles_pkey","p","account_id",false,false,true],
+  ["backend_auth","player_profile_details","player_profile_details_pkey","p","account_id",false,false,true],
   ["backend_auth","external_identities","external_identities_pkey","p","id",false,false,true],
   ["backend_auth","external_identities","external_identities_binding_key","u","id,provider,namespace",false,false,true],
   ["backend_auth","external_identity_lookup_digests","external_identity_lookup_digests_pkey","p","identity_id,digest_version,pepper_version",false,false,true],
@@ -326,6 +343,7 @@ export const AUTH_INTEGRATION_EXPECTED_KEYS = Object.freeze([
 
 export const AUTH_INTEGRATION_EXPECTED_FOREIGN_KEYS = Object.freeze([
   ["backend_auth","player_profiles","player_profiles_account_id_fkey","account_id","backend_auth","accounts","id","s","a","a",false,false,true],
+  ["backend_auth","player_profile_details","player_profile_details_account_id_fkey","account_id","backend_auth","player_profiles","account_id","s","a","a",false,false,true],
   ["backend_auth","external_identities","external_identities_account_id_fkey","account_id","backend_auth","accounts","id","s","a","a",false,false,true],
   ["backend_auth","external_identity_lookup_digests","external_identity_lookup_digests_identity_fkey","identity_id,provider,namespace","backend_auth","external_identities","id,provider,namespace","s","a","a",false,false,true],
   ["backend_auth","authentication_operations","authentication_operations_resolution_account_fkey","resolution_account_id","backend_auth","accounts","id","s","a","a",false,false,true],
@@ -361,6 +379,7 @@ export const AUTH_INTEGRATION_EXPECTED_SCHEMA_ACL = Object.freeze([
 export const AUTH_INTEGRATION_EXPECTED_TABLE_ACL = Object.freeze([
   ["backend_auth","accounts","backend_auth_app","SELECT",false],
   ["backend_auth","player_profiles","backend_auth_app","SELECT",false],
+  ["backend_auth","player_profile_details","backend_auth_app","SELECT",false],
   ["backend_auth","external_identities","backend_auth_app","SELECT",false],
   ["backend_auth","external_identity_lookup_digests","backend_auth_app","SELECT",false],
   ["backend_auth","authentication_operations","backend_auth_app","SELECT",false],
@@ -382,6 +401,14 @@ export const AUTH_INTEGRATION_EXPECTED_COLUMN_ACL = Object.freeze([
   ["backend_auth","accounts","status","backend_auth_app","UPDATE",false],
   ["backend_auth","accounts","updated_at","backend_auth_app","UPDATE",false],
   ["backend_auth","player_profiles","account_id","backend_auth_app","INSERT",false],
+  ["backend_auth","player_profile_details","account_id","backend_auth_app","INSERT",false],
+  ["backend_auth","player_profile_details","first_name","backend_auth_app","INSERT",false],
+  ["backend_auth","player_profile_details","last_name","backend_auth_app","INSERT",false],
+  ["backend_auth","player_profile_details","username","backend_auth_app","INSERT",false],
+  ["backend_auth","player_profile_details","photo_url","backend_auth_app","INSERT",false],
+  ["backend_auth","player_profile_details","language_code","backend_auth_app","INSERT",false],
+  ["backend_auth","player_profile_details","created_at","backend_auth_app","INSERT",false],
+  ["backend_auth","player_profile_details","updated_at","backend_auth_app","INSERT",false],
   ["backend_auth","external_identities","id","backend_auth_app","INSERT",false],
   ["backend_auth","external_identities","account_id","backend_auth_app","INSERT",false],
   ["backend_auth","external_identities","provider","backend_auth_app","INSERT",false],
@@ -540,4 +567,3 @@ export const AUTH_INTEGRATION_EXPECTED_SEQUENCE_ACL = Object.freeze([
 ] as const);
 
 export const AUTH_INTEGRATION_EXPECTED_FUNCTION_ACL = Object.freeze([] as const);
-

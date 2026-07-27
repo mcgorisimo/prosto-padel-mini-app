@@ -43,6 +43,7 @@ import { PostgresAuthenticationOperationTerminalRepository } from '../../src/dat
 import { PostgresExternalIdentityResolutionRepository } from '../../src/database/postgres-external-identity.repository';
 import { PostgresInitialSessionRepository } from '../../src/database/postgres-initial-session.repository';
 import { PostgresPlayerAccountProvisioningRepository } from '../../src/database/postgres-player-account-provisioning.repository';
+import { PostgresPlayerProfileDetailsRepository } from '../../src/database/postgres-player-profile-details.repository';
 import { PostgresSecurityAuditRepository } from '../../src/database/postgres-security-audit.repository';
 import { PostgresTelegramAuthenticationOperationRepository } from '../../src/database/postgres-telegram-authentication-operation.repository';
 import { PostgresTransactionExecutorAdapter } from '../../src/database/postgres-transaction-executor.adapter';
@@ -107,6 +108,7 @@ export interface AuthIntegrationGraph {
   readonly accountStatus: PostgresAccountStatusReader;
   readonly playerAccounts:
     PostgresPlayerAccountProvisioningRepository;
+  readonly profileDetails: PostgresPlayerProfileDetailsRepository;
   readonly terminalOperations:
     PostgresAuthenticationOperationTerminalRepository;
   readonly initialSessions: PostgresInitialSessionRepository;
@@ -123,6 +125,7 @@ export interface AuthIntegrationHarness {
     readonly proofLabel?: string;
     readonly requestKey?: string;
     readonly rawInitData?: string;
+    readonly firstName?: string;
   }): Promise<PreparedTelegramLogin>;
   persistPending(
     prepared: PreparedTelegramLogin,
@@ -164,6 +167,7 @@ function createGraph(
       externalIdentities,
       audit,
     );
+  const profileDetails = new PostgresPlayerProfileDetailsRepository();
   const terminalOperations =
     new PostgresAuthenticationOperationTerminalRepository(audit);
   const initialSessions =
@@ -207,6 +211,7 @@ function createGraph(
     externalIdentities,
     accounts: accountStatus,
     playerAccounts,
+    profileDetails,
     terminalOperations,
     credentialIssuer,
     initialSessions,
@@ -225,6 +230,7 @@ function createGraph(
     pendingOperations,
     accountStatus,
     playerAccounts,
+    profileDetails,
     terminalOperations,
     initialSessions,
     service,
@@ -246,6 +252,7 @@ function signedInitData(
   subject: string,
   now: number,
   proofLabel: string,
+  firstName: string,
 ): string {
   const parameters = new Map<string, string>([
     ['auth_date', now.toString(10)],
@@ -254,7 +261,7 @@ function signedInitData(
       'user',
       JSON.stringify({
         id: Number(subject),
-        first_name: 'Auth Integration',
+        first_name: firstName,
       }),
     ],
   ]);
@@ -418,6 +425,7 @@ export async function openAuthIntegrationHarness(): Promise<AuthIntegrationHarne
           subject,
           now,
           options.proofLabel ?? randomUUID(),
+          options.firstName ?? 'Auth Integration',
         );
       const proofOutcome = verifierResult(graph.verifier, rawInitData);
       const proof = proofOutcome.proof;

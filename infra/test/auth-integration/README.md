@@ -25,7 +25,10 @@ suite execution, manually:
 3. provision `backend_auth_owner` and `backend_auth_app`;
 4. run migration 015 PRECHECK;
 5. apply migration 015 with the guarded apply wrapper;
-6. run the standalone POSTCHECK.
+6. run migration 015 POSTCHECK;
+7. run migration 017 PRECHECK;
+8. apply migration 017 with the guarded apply wrapper;
+9. run migration 017 POSTCHECK.
 
 The runner does not create or delete databases, provision roles, apply
 SQL, repair schema state, or make backups. The integration harness keeps

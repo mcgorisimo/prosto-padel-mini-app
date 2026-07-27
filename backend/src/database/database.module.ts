@@ -4,6 +4,7 @@ import { PostgresAuthenticationOperationTerminalRepository } from './postgres-au
 import { PostgresExternalIdentityResolutionRepository } from './postgres-external-identity.repository';
 import { PostgresInitialSessionRepository } from './postgres-initial-session.repository';
 import { PostgresPlayerAccountProvisioningRepository } from './postgres-player-account-provisioning.repository';
+import { PostgresPlayerProfileDetailsRepository } from './postgres-player-profile-details.repository';
 import { PostgresSecurityAuditRepository } from './postgres-security-audit.repository';
 import { PostgresSessionAuthenticationRepository } from './postgres-session-authentication.repository';
 import { PostgresSessionCredentialLifecycleRepository } from './postgres-session-credential-lifecycle.repository';
@@ -16,6 +17,7 @@ const DATABASE_WORKFLOW_PROVIDERS: Provider[] = [
   PostgresSecurityAuditRepository,
   PostgresExternalIdentityResolutionRepository,
   PostgresAccountStatusReader,
+  PostgresPlayerProfileDetailsRepository,
   PostgresSessionAuthenticationRepository,
   {
     provide: PostgresTransactionExecutorAdapter,
@@ -83,6 +85,7 @@ const DATABASE_WORKFLOW_EXPORTS = [
   PostgresAccountStatusReader,
   PostgresSessionAuthenticationRepository,
   PostgresPlayerAccountProvisioningRepository,
+  PostgresPlayerProfileDetailsRepository,
   PostgresAuthenticationOperationTerminalRepository,
   PostgresInitialSessionRepository,
   PostgresSessionCredentialLifecycleRepository,

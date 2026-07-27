@@ -229,6 +229,14 @@ export interface VerifiedTelegramProof {
   readonly proofFingerprint: AuthenticationProofFingerprint;
 }
 
+export interface VerifiedTelegramProfileDetails {
+  readonly firstName: string;
+  readonly lastName?: string;
+  readonly username?: string;
+  readonly languageCode?: string;
+  readonly photoUrl?: string;
+}
+
 export type TelegramProofVerificationOutcome =
   | {
       readonly status: 'verified';
@@ -244,6 +252,14 @@ export type TelegramProofVerificationOutcome =
       readonly status: 'invalid';
       readonly reason: 'invalid_proof';
     };
+
+export type TelegramLoginProofVerificationOutcome =
+  | {
+      readonly status: 'verified';
+      readonly proof: VerifiedTelegramProof;
+      readonly profile: VerifiedTelegramProfileDetails;
+    }
+  | Exclude<TelegramProofVerificationOutcome, { readonly status: 'verified' }>;
 
 export interface SessionMetadata {
   readonly sessionId: string;

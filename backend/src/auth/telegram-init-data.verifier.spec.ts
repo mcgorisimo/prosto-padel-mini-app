@@ -247,6 +247,7 @@ describe('TelegramInitDataVerifier', () => {
           FIXED_NOW_SECONDS + MAX_AGE_SECONDS,
         );
         expect(outcome.proof).not.toHaveProperty('identity');
+        expect(outcome).not.toHaveProperty('profile');
       }
     });
 
@@ -418,6 +419,62 @@ describe('TelegramInitDataVerifier', () => {
         reason: 'invalid_proof',
       });
       expectInvalid(rawInitData, verifier);
+    });
+  });
+
+  describe('Telegram login proof envelope', () => {
+    it('returns only allowlisted verified profile fields beside the proof', () => {
+      const rawInitData = signParameters(
+        userParameters({
+          id: 4_503_599_627_370_495,
+          first_name: 'First',
+          last_name: 'Last',
+          username: 'fixture_user',
+          language_code: 'ru-RU',
+          photo_url: 'https://example.test/avatar.svg',
+          is_premium: true,
+          unknown_future_field: { ignored: true },
+        }),
+      );
+
+      const outcome = makeVerifier().verifyLoginProof(rawInitData);
+
+      expect(outcome.status).toBe('verified');
+      if (outcome.status === 'verified') {
+        expect(Object.keys(outcome).sort()).toEqual(
+          ['profile', 'proof', 'status'].sort(),
+        );
+        expect(outcome.profile).toEqual({
+          firstName: 'First',
+          lastName: 'Last',
+          username: 'fixture_user',
+          languageCode: 'ru-RU',
+          photoUrl: 'https://example.test/avatar.svg',
+        });
+        expect(Object.isFrozen(outcome.profile)).toBe(true);
+        expect(outcome.profile).not.toHaveProperty('subject');
+        expect(outcome.profile).not.toHaveProperty('id');
+        expect(outcome.profile).not.toHaveProperty('isPremium');
+        expect(outcome.profile).not.toHaveProperty('unknownFutureField');
+      }
+    });
+
+    it('preserves invalid and expired public proof outcomes', () => {
+      expect(
+        makeVerifier().verifyLoginProof('synthetic-malformed-payload'),
+      ).toEqual({
+        status: 'invalid',
+        reason: 'invalid_proof',
+      });
+
+      const expired = makeVerifier().verifyLoginProof(
+        signParameters(userParameters({ id: 41, first_name: 'Expired' }, 1)),
+      );
+      expect(expired).toMatchObject({
+        status: 'expired',
+        reason: 'expired_proof',
+      });
+      expect(expired).not.toHaveProperty('profile');
     });
   });
 

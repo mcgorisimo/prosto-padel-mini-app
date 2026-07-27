@@ -7,6 +7,7 @@ import {
 } from '../accounts/external-identity.types';
 import {
   AuthenticationProofFingerprint,
+  TelegramLoginProofVerificationOutcome,
   TelegramProofVerificationOutcome,
   UnixEpochSeconds,
   VerifiedTelegramIdentity,
@@ -517,6 +518,37 @@ export class TelegramInitDataVerifier {
       return {
         status: 'verified',
         proof: outcome.proof,
+      };
+    }
+
+    return outcome;
+  }
+
+  verifyLoginProof(
+    rawInitData: string,
+  ): TelegramLoginProofVerificationOutcome {
+    const outcome = this.verifyInternal(rawInitData);
+
+    if (outcome.status === 'verified') {
+      const identity = outcome.identity;
+      return {
+        status: 'verified',
+        proof: outcome.proof,
+        profile: Object.freeze({
+          firstName: identity.firstName,
+          ...(identity.lastName === undefined
+            ? {}
+            : { lastName: identity.lastName }),
+          ...(identity.username === undefined
+            ? {}
+            : { username: identity.username }),
+          ...(identity.languageCode === undefined
+            ? {}
+            : { languageCode: identity.languageCode }),
+          ...(identity.photoUrl === undefined
+            ? {}
+            : { photoUrl: identity.photoUrl }),
+        }),
       };
     }
 
