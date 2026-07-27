@@ -391,11 +391,16 @@ function readOptionalString(
   }
 
   const value = user[field];
-  if (
-    typeof value !== 'string' ||
-    value.length === 0 ||
-    [...value].length > maxCodePoints
-  ) {
+  if (typeof value !== 'string') {
+    return failOptionalFieldDiagnostic(field);
+  }
+  if (value.length === 0) {
+    if (field === 'photo_url') {
+      return failOptionalFieldDiagnostic(field);
+    }
+    return undefined;
+  }
+  if ([...value].length > maxCodePoints) {
     return failOptionalFieldDiagnostic(field);
   }
 

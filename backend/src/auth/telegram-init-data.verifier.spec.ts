@@ -149,6 +149,47 @@ describe('TelegramInitDataVerifier', () => {
       });
     });
 
+    it('accepts a missing last_name as absent', () => {
+      const identity = makeVerifier().verify(
+        signParameters(
+          userParameters({
+            id: 44,
+            first_name: 'Missing optional field',
+          }),
+        ),
+      );
+
+      expect(identity).not.toHaveProperty('lastName');
+    });
+
+    it.each([
+      ['last_name', 'lastName'],
+      ['username', 'username'],
+      ['language_code', 'languageCode'],
+    ] as const)(
+      'treats an empty optional %s as absent without diagnostics',
+      (field, identityField) => {
+        const observer = jest.fn();
+        const verifier = makeVerifier(
+          undefined,
+          () => FIXED_NOW,
+          observer,
+        );
+        const identity = verifier.verify(
+          signParameters(
+            userParameters({
+              id: 45,
+              first_name: 'Empty optional field',
+              [field]: '',
+            }),
+          ),
+        );
+
+        expect(identity).not.toHaveProperty(identityField);
+        expect(observer).not.toHaveBeenCalled();
+      },
+    );
+
     it('accepts parameters in a different input order', () => {
       const rawInitData = signParameters([
         ['user', JSON.stringify({ id: 42, first_name: 'Order' })],
@@ -900,6 +941,41 @@ describe('TelegramInitDataVerifier', () => {
       expect(events).toEqual([{ reason: 'required_name_invalid' }]);
     });
 
+    it('keeps an empty first_name invalid', () => {
+      const events: TelegramInitDataDiagnosticEvent[] = [];
+      const rawInitData = signParameters(
+        userParameters({ id: 98, first_name: '' }),
+      );
+
+      expect(verifierWithEvents(events).verifyProof(rawInitData)).toEqual({
+        status: 'invalid',
+        reason: 'invalid_proof',
+      });
+      expect(events).toEqual([{ reason: 'required_name_invalid' }]);
+    });
+
+    it('keeps an empty photo_url invalid', () => {
+      const events: TelegramInitDataDiagnosticEvent[] = [];
+      const rawInitData = signParameters(
+        userParameters({
+          id: 98,
+          first_name: 'Photo',
+          photo_url: '',
+        }),
+      );
+
+      expect(verifierWithEvents(events).verifyProof(rawInitData)).toEqual({
+        status: 'invalid',
+        reason: 'invalid_proof',
+      });
+      expect(events).toEqual([
+        {
+          reason: 'optional_field_invalid',
+          field: 'photo_url',
+        },
+      ]);
+    });
+
     it.each([
       [
         'last_name',
@@ -952,6 +1028,58 @@ describe('TelegramInitDataVerifier', () => {
         expect(Object.isFrozen(events[0])).toBe(true);
         expect(JSON.stringify(events)).not.toContain(valueMarker);
         expect(inspect(events)).not.toContain(valueMarker);
+      },
+    );
+
+    it.each([
+      [
+        'last_name',
+        `SYNTHETIC_OVERLONG_LAST_NAME_${'x'.repeat(257)}`,
+        'SYNTHETIC_OVERLONG_LAST_NAME',
+      ],
+      [
+        'username',
+        `SYNTHETIC_OVERLONG_USERNAME_${'x'.repeat(65)}`,
+        'SYNTHETIC_OVERLONG_USERNAME',
+      ],
+      [
+        'language_code',
+        `SYNTHETIC_OVERLONG_LANGUAGE_CODE_${'x'.repeat(65)}`,
+        'SYNTHETIC_OVERLONG_LANGUAGE_CODE',
+      ],
+    ] as const)(
+      'keeps an overlong optional %s invalid without leaking its value',
+      (field, value, valueMarker) => {
+        const events: TelegramInitDataDiagnosticEvent[] = [];
+        const rawInitData = signParameters(
+          userParameters({
+            id: 99,
+            first_name: 'Overlong optional',
+            [field]: value,
+          }),
+        );
+        const verifier = verifierWithEvents(events);
+
+        expect(verifier.verifyProof(rawInitData)).toEqual({
+          status: 'invalid',
+          reason: 'invalid_proof',
+        });
+        expect(events).toEqual([
+          {
+            reason: 'optional_field_invalid',
+            field,
+          },
+        ]);
+        const error = expectInvalid(rawInitData);
+        const exposedSurfaces = [
+          JSON.stringify(events),
+          inspect(events),
+          error.message,
+          error.stack ?? '',
+          JSON.stringify(error),
+          inspect(error),
+        ].join('\n');
+        expect(exposedSurfaces).not.toContain(valueMarker);
       },
     );
 
