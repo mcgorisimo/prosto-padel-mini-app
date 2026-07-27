@@ -1148,7 +1148,8 @@ const handleBookSlot = async (booking) => {
 
   // ── Logout ──
   const handleLogout = async () => {
-    if (typeof onLogout === 'function') {
+    const usesCoordinatedLogout = typeof onLogout === 'function';
+    if (usesCoordinatedLogout) {
       await onLogout();
     } else {
       const { error } = await supabase.auth.signOut();
@@ -1158,7 +1159,9 @@ const handleBookSlot = async (booking) => {
       }
     }
     localStorage.clear();
-    window.location.reload();
+    if (!usesCoordinatedLogout) {
+      window.location.reload();
+    }
   };
 
   const handleProfileSaved = (updatedProfile) => {

@@ -544,6 +544,7 @@ test.describe('backend session credential lifecycle', () => {
         '/src/hooks/useTelegramBackendLogin.js'
       );
       let stored = null;
+      let loginCalls = 0;
       let logoutCalls = 0;
       let presentedCredentialMatched = false;
       let removeCalls = 0;
@@ -551,6 +552,7 @@ test.describe('backend session credential lifecycle', () => {
         fingerprint: async () => 'synthetic-logout-fingerprint',
         client: {
           async login() {
+            loginCalls += 1;
             return {
               outcome: 'authenticated',
               credential: parameters.credential,
@@ -601,6 +603,7 @@ test.describe('backend session credential lifecycle', () => {
 
       return {
         result,
+        loginCalls,
         logoutCalls,
         presentedCredentialMatched,
         removeCalls,
@@ -613,6 +616,7 @@ test.describe('backend session credential lifecycle', () => {
 
     expect(summary).toEqual({
       result: { outcome: 'logged_out' },
+      loginCalls: 1,
       logoutCalls: 1,
       presentedCredentialMatched: true,
       removeCalls: 1,
