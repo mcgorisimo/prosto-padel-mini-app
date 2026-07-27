@@ -5,6 +5,7 @@ import { PostgresExternalIdentityResolutionRepository } from './postgres-externa
 import { PostgresInitialSessionRepository } from './postgres-initial-session.repository';
 import { PostgresPlayerAccountProvisioningRepository } from './postgres-player-account-provisioning.repository';
 import { PostgresSecurityAuditRepository } from './postgres-security-audit.repository';
+import { PostgresSessionCredentialLifecycleRepository } from './postgres-session-credential-lifecycle.repository';
 import { PostgresService } from './postgres.service';
 import { PostgresTelegramAuthenticationOperationRepository } from './postgres-telegram-authentication-operation.repository';
 import { PostgresTransactionRunner } from './postgres-transaction';
@@ -61,6 +62,14 @@ const DATABASE_WORKFLOW_PROVIDERS: Provider[] = [
     ): PostgresInitialSessionRepository =>
       new PostgresInitialSessionRepository(audit),
   },
+  {
+    provide: PostgresSessionCredentialLifecycleRepository,
+    inject: [PostgresSecurityAuditRepository],
+    useFactory: (
+      audit: PostgresSecurityAuditRepository,
+    ): PostgresSessionCredentialLifecycleRepository =>
+      new PostgresSessionCredentialLifecycleRepository(audit),
+  },
 ];
 
 const DATABASE_WORKFLOW_EXPORTS = [
@@ -73,6 +82,7 @@ const DATABASE_WORKFLOW_EXPORTS = [
   PostgresPlayerAccountProvisioningRepository,
   PostgresAuthenticationOperationTerminalRepository,
   PostgresInitialSessionRepository,
+  PostgresSessionCredentialLifecycleRepository,
 ] as const;
 
 @Module({
