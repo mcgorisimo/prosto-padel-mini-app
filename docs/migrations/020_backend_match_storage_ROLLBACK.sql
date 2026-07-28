@@ -1,5 +1,6 @@
 -- 020_backend_match_storage_ROLLBACK.sql
 -- Safe rollback is allowed only while every migration 020 table is empty.
+-- btree_gist is intentionally left installed because other objects may use it.
 
 begin;
 set local search_path = pg_catalog, pg_temp;
@@ -144,6 +145,17 @@ declare
 begin
   if pg_catalog.to_regnamespace('backend_match') is not null then
     raise exception 'ROLLBACK_ASSERTION_FAILED: backend_match schema still exists';
+  end if;
+
+  if not exists (
+    select 1
+    from pg_catalog.pg_extension extension_row
+    join pg_catalog.pg_namespace namespace
+      on namespace.oid = extension_row.extnamespace
+    where extension_row.extname = 'btree_gist'
+      and namespace.nspname = 'public'
+  ) then
+    raise exception 'ROLLBACK_ASSERTION_FAILED: canonical public.btree_gist must remain installed';
   end if;
 
   select pg_catalog.count(*) into v_count

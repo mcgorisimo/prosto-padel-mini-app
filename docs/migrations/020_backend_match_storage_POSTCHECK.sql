@@ -584,7 +584,35 @@ begin
   join pg_catalog.pg_namespace n on n.oid = e.extnamespace
   where e.extname = 'btree_gist';
 
-  if v_extension_schema is null
+  if v_extension_schema is distinct from 'public'
+     or not pg_catalog.has_schema_privilege(
+       'backend_auth_owner',
+       'public',
+       'USAGE'
+     )
+     or not exists (
+       select 1
+       from pg_catalog.pg_extension extension_row
+       join pg_catalog.pg_namespace namespace
+         on namespace.oid = extension_row.extnamespace
+       join pg_catalog.pg_opclass opclass
+         on opclass.opcnamespace = namespace.oid
+        and opclass.opcname = 'gist_text_ops'
+        and opclass.opcintype = 'pg_catalog.text'::pg_catalog.regtype
+       join pg_catalog.pg_am access_method
+         on access_method.oid = opclass.opcmethod
+        and access_method.amname = 'gist'
+       join pg_catalog.pg_depend dependency
+         on dependency.classid =
+           'pg_catalog.pg_opclass'::pg_catalog.regclass
+        and dependency.objid = opclass.oid
+        and dependency.refclassid =
+          'pg_catalog.pg_extension'::pg_catalog.regclass
+        and dependency.refobjid = extension_row.oid
+        and dependency.deptype = 'e'
+       where extension_row.extname = 'btree_gist'
+         and namespace.nspname = 'public'
+     )
      or not exists (
        select 1
        from pg_catalog.pg_constraint constraint_row
@@ -620,7 +648,7 @@ begin
              on opclass.oid = item.opclass_oid
            join pg_catalog.pg_namespace namespace
              on namespace.oid = opclass.opcnamespace
-         ) = array[v_extension_schema, 'pg_catalog']::text[]
+         ) = array['public', 'pg_catalog']::text[]
          and pg_catalog.btrim(
            pg_catalog.regexp_replace(
              pg_catalog.lower(
@@ -653,7 +681,7 @@ begin
          ) =
            'status = any (array[''open''::text, ''searching''::text, ''confirmed''::text, ''upcoming''::text])'
      ) then
-    raise exception 'POSTCHECK_FAILED: active court overlap exclusion differs';
+    raise exception 'POSTCHECK_FAILED: canonical btree_gist or active court overlap exclusion differs';
   end if;
 
   with expected(
@@ -1067,6 +1095,11 @@ backend_match_relation_state as (
 select pg_catalog.jsonb_build_object(
   'migration', '020_backend_match_storage',
   'ready', true,
+  'btree_gist', pg_catalog.jsonb_build_object(
+    'installed', true,
+    'schema', 'public',
+    'text_opclass', 'gist_text_ops'
+  ),
   'backend_auth_catalog_counts', pg_catalog.jsonb_build_object(
     'tables', 16,
     'constraints', 160,

@@ -12,6 +12,19 @@ declare
   v_owner pg_catalog.pg_roles%rowtype;
   v_app pg_catalog.pg_roles%rowtype;
 begin
+  if not exists (
+    select 1
+    from pg_catalog.pg_available_extensions available_extension
+    where available_extension.name = 'btree_gist'
+      and available_extension.default_version is not null
+  ) then
+    raise exception 'PRECHECK_FAILED: btree_gist extension is unavailable';
+  end if;
+
+  if pg_catalog.to_regnamespace('public') is null then
+    raise exception 'PRECHECK_FAILED: public schema is missing';
+  end if;
+
   if pg_catalog.current_setting('server_version_num')::integer < 140000 then
     raise exception 'PRECHECK_FAILED: PostgreSQL 14 or newer is required';
   end if;
@@ -63,6 +76,26 @@ begin
        'CREATE'
      ) then
     raise exception 'PRECHECK_FAILED: database CREATE privilege boundary differs';
+  end if;
+
+  if not exists (
+       select 1
+       from pg_catalog.pg_extension extension_row
+       where extension_row.extname = 'btree_gist'
+     )
+     and (
+       not pg_catalog.has_database_privilege(
+         current_user,
+         pg_catalog.current_database(),
+         'CREATE'
+       )
+       or not pg_catalog.has_schema_privilege(
+         current_user,
+         'public',
+         'CREATE'
+       )
+     ) then
+    raise exception 'PRECHECK_FAILED: migration principal cannot install btree_gist in public';
   end if;
 end;
 $role_precheck$;
@@ -176,23 +209,41 @@ begin
   join pg_catalog.pg_namespace n on n.oid = e.extnamespace
   where e.extname = 'btree_gist';
 
-  if v_extension_schema is null
-     or not pg_catalog.has_schema_privilege(
+  if not pg_catalog.has_schema_privilege(
        'backend_auth_owner',
-       v_extension_schema,
+       'public',
        'USAGE'
-     )
-     or not exists (
-       select 1
-       from pg_catalog.pg_opclass opc
-       join pg_catalog.pg_namespace n on n.oid = opc.opcnamespace
-       join pg_catalog.pg_am am on am.oid = opc.opcmethod
-       where n.nspname = v_extension_schema
-         and am.amname = 'gist'
-         and opc.opcname = 'gist_text_ops'
-         and opc.opcintype = 'pg_catalog.text'::pg_catalog.regtype
      ) then
-    raise exception 'PRECHECK_FAILED: canonical btree_gist text operator class is unavailable';
+    raise exception 'PRECHECK_FAILED: backend_auth_owner cannot use public schema';
+  end if;
+
+  if v_extension_schema is not null
+     and (
+       v_extension_schema <> 'public'
+       or not exists (
+         select 1
+         from pg_catalog.pg_opclass opc
+         join pg_catalog.pg_namespace n on n.oid = opc.opcnamespace
+         join pg_catalog.pg_am am on am.oid = opc.opcmethod
+         join pg_catalog.pg_depend dependency
+           on dependency.classid =
+             'pg_catalog.pg_opclass'::pg_catalog.regclass
+          and dependency.objid = opc.oid
+          and dependency.refclassid =
+            'pg_catalog.pg_extension'::pg_catalog.regclass
+          and dependency.refobjid = (
+            select extension_row.oid
+            from pg_catalog.pg_extension extension_row
+            where extension_row.extname = 'btree_gist'
+          )
+          and dependency.deptype = 'e'
+         where n.nspname = 'public'
+           and am.amname = 'gist'
+           and opc.opcname = 'gist_text_ops'
+           and opc.opcintype = 'pg_catalog.text'::pg_catalog.regtype
+       )
+     ) then
+    raise exception 'PRECHECK_FAILED: installed btree_gist is not canonical in public';
   end if;
 
   select pg_catalog.count(*) into v_count
@@ -262,6 +313,15 @@ relation_state as (
 select pg_catalog.jsonb_build_object(
   'migration', '020_backend_match_storage',
   'ready', true,
+  'btree_gist', pg_catalog.jsonb_build_object(
+    'available', true,
+    'installed', exists (
+      select 1
+      from pg_catalog.pg_extension extension_row
+      where extension_row.extname = 'btree_gist'
+    ),
+    'target_schema', 'public'
+  ),
   'backend_auth_catalog_counts', pg_catalog.jsonb_build_object(
     'tables', 16,
     'constraints', 160,

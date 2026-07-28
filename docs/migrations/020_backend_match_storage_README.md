@@ -55,7 +55,15 @@ backend-аккаунту.
 Активные интервалы одного `court_id` защищены
 `matches_no_active_court_overlap`. Constraint использует установленный
 `btree_gist` и не позволяет двум активным public/private aggregates занимать
-пересекающееся время. Migration не устанавливает и не перемещает extension.
+пересекающееся время.
+
+PRECHECK требует, чтобы trusted PostgreSQL contrib extension `btree_gist` был
+доступен в установленном PostgreSQL image. Если extension ещё отсутствует в
+целевой базе, основная migration атомарно выполняет
+`CREATE EXTENSION IF NOT EXISTS btree_gist WITH SCHEMA public` до создания
+`backend_match`. Уже установленный extension принимается только в канонической
+схеме `public` с принадлежащим ему `gist_text_ops` для `text`; установленный в
+другой схеме или повреждённый вариант отклоняется без перемещения.
 
 ### `backend_match.match_participants`
 
@@ -156,15 +164,18 @@ Migration:
 ## Файлы
 
 - `020_backend_match_storage_PRECHECK.sql` — read-only проверяет PostgreSQL,
-  роли, canonical migrations 015/018/019, `btree_gist`, catalog counts,
-  fingerprints и отсутствие целевой схемы;
-- `020_backend_match_storage.sql` — транзакционно создаёт только схему, три
-  пустые таблицы, их constraints/indexes, минимальные ACL и fingerprints;
+  роли, canonical migrations 015/018/019, доступность `btree_gist`, возможность
+  его установки в `public`, catalog counts, fingerprints и отсутствие целевой
+  схемы;
+- `020_backend_match_storage.sql` — при необходимости атомарно устанавливает
+  `btree_gist` в `public`, затем транзакционно создаёт только закрытую схему,
+  три пустые таблицы, их constraints/indexes, минимальные ACL и fingerprints;
 - `020_backend_match_storage_POSTCHECK.sql` — read-only проверяет точные
-  allowlists объектов, колонок, constraints, indexes, ACL, overlap constraint,
-  пустоту таблиц и неизменность `backend_auth`;
+  allowlists объектов, колонок, constraints, indexes, ACL, канонический
+  `public.gist_text_ops`, overlap constraint, пустоту таблиц и неизменность
+  `backend_auth`;
 - `020_backend_match_storage_ROLLBACK.sql` — fail-closed удаляет только пустой
-  canonical комплект 020;
+  canonical комплект 020 и намеренно оставляет `btree_gist` установленным;
 - `020_backend_match_storage_README.md` — этот runbook.
 
 ## Ручной порядок применения
@@ -184,6 +195,8 @@ test-базе после отдельного одобрения:
    - все `backend_auth_row_counts` совпадают;
    - все `backend_auth_relation_fingerprints` совпадают;
    - `backend_auth_catalog_counts` не изменились;
+   - `btree_gist.installed = true`, schema равна `public`, text opclass равен
+     `gist_text_ops`;
    - появились только 3 таблицы, 36 constraints и 13 indexes
      `backend_match`;
    - все три `backend_match_row_counts` равны `0`.
@@ -214,6 +227,10 @@ Rollback блокируется, если:
 Rollback удаляет таблицы в порядке зависимостей и затем удаляет пустую схему без
 `CASCADE`. После появления реальных match data нужен отдельный data-preserving
 fail-forward шаг; удалять заполненное backend-хранилище запрещено.
+
+`btree_gist` после rollback намеренно остаётся установленным в `public`.
+Автоматическое удаление shared extension запрещено: от него могут зависеть
+другие indexes или constraints, включая объекты вне `backend_match`.
 
 ## Следующий отдельный этап
 
