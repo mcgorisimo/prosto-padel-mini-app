@@ -8,7 +8,10 @@ import { deterministicUuid } from '../../test/deterministic-uuid';
 import { unixEpochSeconds } from './auth.types';
 import { PlayerProfileController } from './player-profile.controller';
 import { PlayerProfileService } from './player-profile.service';
-import { ReadOwnPlayerProfileResult } from './player-profile.types';
+import {
+  ReadOwnPlayerProfileResult,
+  UpdateOwnPlayerProfileResult,
+} from './player-profile.types';
 import {
   SESSION_AUTHENTICATION_CLOCK,
   SessionAuthenticationClock,
@@ -38,6 +41,14 @@ interface Harness {
   readonly readOwnProfile: jest.Mock<
     Promise<ReadOwnPlayerProfileResult>,
     [{ readonly accountId: AccountId; readonly role: 'player' | 'club_admin' }]
+  >;
+  readonly updateOwnProfile: jest.Mock<
+    Promise<UpdateOwnPlayerProfileResult>,
+    [{
+      readonly accountId: AccountId;
+      readonly role: 'player' | 'club_admin';
+      readonly changes: Record<string, unknown>;
+    }]
   >;
   readonly logs: readonly unknown[][];
 }
@@ -81,12 +92,35 @@ async function createHarness(): Promise<Harness> {
       username: 'synthetic_player',
       photoUrl: 'https://example.test/avatar.svg',
       languageCode: 'ru',
+      phone: '+79990000000',
+      sidePreference: 'Right',
     },
   });
   const nowEpochSeconds = jest.fn<
     ReturnType<SessionAuthenticationClock['nowEpochSeconds']>,
     []
   >(() => NOW);
+  const updateOwnProfile = jest.fn<
+    Promise<UpdateOwnPlayerProfileResult>,
+    [{
+      readonly accountId: AccountId;
+      readonly role: 'player' | 'club_admin';
+      readonly changes: Record<string, unknown>;
+    }]
+  >().mockResolvedValue({
+    outcome: 'updated',
+    profile: {
+      accountId: ACCOUNT_ID,
+      role: 'player',
+      firstName: 'Updated',
+      lastName: null,
+      username: 'synthetic_player',
+      photoUrl: 'https://example.test/avatar.svg',
+      languageCode: 'ru',
+      phone: '+79991112233',
+      sidePreference: 'Left',
+    },
+  });
   const moduleRef = await Test.createTestingModule({
     controllers: [PlayerProfileController],
     providers: [
@@ -97,7 +131,7 @@ async function createHarness(): Promise<Harness> {
       },
       {
         provide: PlayerProfileService,
-        useValue: { readOwnProfile },
+        useValue: { readOwnProfile, updateOwnProfile },
       },
       {
         provide: SESSION_AUTHENTICATION_CLOCK,
@@ -113,7 +147,13 @@ async function createHarness(): Promise<Harness> {
   app.setGlobalPrefix('api/v1');
   await app.init();
   await app.getHttpAdapter().getInstance().ready();
-  return { app, authenticate, readOwnProfile, logs };
+  return {
+    app,
+    authenticate,
+    readOwnProfile,
+    updateOwnProfile,
+    logs,
+  };
 }
 
 function inject(
@@ -121,6 +161,8 @@ function inject(
   authorization?: string,
   suffix = '',
   cookie?: string,
+  method: 'GET' | 'PATCH' = 'GET',
+  body?: unknown,
 ) {
   const headers: Record<string, string> = {};
   if (authorization !== undefined) {
@@ -129,10 +171,16 @@ function inject(
   if (cookie !== undefined) {
     headers.cookie = cookie;
   }
+  if (body !== undefined) {
+    headers['content-type'] = 'application/json';
+  }
   return harness.app.inject({
-    method: 'GET',
+    method,
     url: `${ROUTE}${suffix}`,
     headers,
+    ...(body === undefined
+      ? {}
+      : { payload: JSON.stringify(body) }),
   });
 }
 
@@ -171,6 +219,8 @@ describe('PlayerProfileController HTTP boundary', () => {
       username: 'synthetic_player',
       photoUrl: 'https://example.test/avatar.svg',
       languageCode: 'ru',
+      phone: '+79990000000',
+      sidePreference: 'Right',
     });
     expect(Object.keys(response.json()).sort()).toEqual(
       [
@@ -179,7 +229,9 @@ describe('PlayerProfileController HTTP boundary', () => {
         'languageCode',
         'lastName',
         'photoUrl',
+        'phone',
         'role',
+        'sidePreference',
         'username',
       ].sort(),
     );
@@ -287,6 +339,8 @@ describe('PlayerProfileController HTTP boundary', () => {
         username: null,
         photoUrl: null,
         languageCode: null,
+        phone: null,
+        sidePreference: null,
         extra: PRIVATE_MARKER,
       },
     },
@@ -319,5 +373,86 @@ describe('PlayerProfileController HTTP boundary', () => {
       code: 'session_service_unavailable',
     });
     expect(harness.readOwnProfile).not.toHaveBeenCalled();
+  });
+
+  it('updates only the authenticated profile from an exact body', async () => {
+    const body = {
+      firstName: 'Updated',
+      lastName: null,
+      phone: '+79991112233',
+      sidePreference: 'Left',
+    };
+    const response = await inject(
+      harness,
+      `Bearer ${CREDENTIAL}`,
+      '',
+      undefined,
+      'PATCH',
+      body,
+    );
+
+    expect(response.statusCode).toBe(200);
+    expectNoStore(response);
+    expect(response.json()).toEqual({
+      accountId: ACCOUNT_ID,
+      role: 'player',
+      firstName: 'Updated',
+      lastName: null,
+      username: 'synthetic_player',
+      photoUrl: 'https://example.test/avatar.svg',
+      languageCode: 'ru',
+      phone: '+79991112233',
+      sidePreference: 'Left',
+    });
+    expect(harness.updateOwnProfile).toHaveBeenCalledWith({
+      accountId: ACCOUNT_ID,
+      role: 'player',
+      changes: body,
+    });
+    expect(JSON.stringify(response.json())).not.toContain(CREDENTIAL);
+  });
+
+  it.each([
+    null,
+    {},
+    { firstName: '' },
+    { phone: '79991112233' },
+    { sidePreference: 'Center' },
+    { firstName: 'Updated', accountId: ACCOUNT_ID },
+    { username: PRIVATE_MARKER },
+  ])('rejects an invalid PATCH body without calling storage %#', async (body) => {
+    const response = await inject(
+      harness,
+      `Bearer ${CREDENTIAL}`,
+      '',
+      undefined,
+      'PATCH',
+      body,
+    );
+
+    expect(response.statusCode).toBe(400);
+    expectNoStore(response);
+    expect(response.json()).toEqual({
+      statusCode: 400,
+      code: 'profile_invalid_request',
+      message: 'Profile update is invalid',
+    });
+    expect(harness.updateOwnProfile).not.toHaveBeenCalled();
+    expect(JSON.stringify(response.json())).not.toContain(PRIVATE_MARKER);
+  });
+
+  it('does not accept an account ID or credential outside the bearer boundary', async () => {
+    const response = await inject(
+      harness,
+      undefined,
+      `?accountId=${ACCOUNT_ID}&credential=${CREDENTIAL}`,
+      `credential=${CREDENTIAL}`,
+      'PATCH',
+      { firstName: 'Updated' },
+    );
+
+    expect(response.statusCode).toBe(401);
+    expect(harness.authenticate).not.toHaveBeenCalled();
+    expect(harness.updateOwnProfile).not.toHaveBeenCalled();
   });
 });

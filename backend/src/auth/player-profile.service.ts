@@ -7,12 +7,20 @@ import {
   PlayerProfileReader,
   PlayerProfileRecord,
 } from '../database/player-profile-reader';
+import {
+  PlayerProfileWritePersistenceError,
+  PlayerProfileWriter,
+} from '../database/player-profile-writer';
 import { PostgresTransaction } from '../database/postgres-transaction';
 import {
   OwnPlayerProfile,
   ReadOwnPlayerProfileInput,
   ReadOwnPlayerProfileResult,
+  UpdateOwnPlayerProfileInput,
+  UpdateOwnPlayerProfileResult,
+  readOwnPlayerProfilePatch,
 } from './player-profile.types';
+import { SessionAuthenticationClock } from './session-authentication.guard';
 
 export interface PlayerProfileTransactionExecutor {
   run<T>(
@@ -23,6 +31,8 @@ export interface PlayerProfileTransactionExecutor {
 export interface PlayerProfileServiceDependencies {
   readonly transactions: PlayerProfileTransactionExecutor;
   readonly profiles: PlayerProfileReader;
+  readonly profileWriter: PlayerProfileWriter;
+  readonly clock: SessionAuthenticationClock;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -91,6 +101,8 @@ function readProfileRecord(
           'username',
           'photoUrl',
           'languageCode',
+          'phone',
+          'sidePreference',
         ].includes(key),
     ) ||
     !isAccountId(value.accountId) ||
@@ -100,6 +112,12 @@ function readProfileRecord(
     !validOptionalProfileValue(value.username, 64) ||
     !validOptionalProfileValue(value.photoUrl, 2_048) ||
     !validOptionalProfileValue(value.languageCode, 64)
+    || (value.phone !== undefined &&
+      (typeof value.phone !== 'string' ||
+        !/^\+[1-9][0-9]{6,14}$/u.test(value.phone)))
+    || (value.sidePreference !== undefined &&
+      (typeof value.sidePreference !== 'string' ||
+        !['Left', 'Both', 'Right'].includes(value.sidePreference)))
   ) {
     return undefined;
   }
@@ -126,6 +144,8 @@ function publicProfile(
     username: profile.username ?? null,
     photoUrl: profile.photoUrl ?? null,
     languageCode: profile.languageCode ?? null,
+    phone: profile.phone ?? null,
+    sidePreference: profile.sidePreference ?? null,
   });
 }
 
@@ -134,15 +154,30 @@ function rejected(
     ReadOwnPlayerProfileResult,
     { readonly outcome: 'rejected' }
   >['reason'],
-): ReadOwnPlayerProfileResult {
+): Extract<
+  ReadOwnPlayerProfileResult,
+  { readonly outcome: 'rejected' }
+> {
   return Object.freeze({ outcome: 'rejected', reason });
 }
 
 function temporaryStorageFailure(error: unknown): boolean {
   return (
-    error instanceof PlayerProfileReadPersistenceError &&
+    (error instanceof PlayerProfileReadPersistenceError ||
+      error instanceof PlayerProfileWritePersistenceError) &&
     (error.reason === 'database_unavailable' ||
       error.reason === 'transaction_conflict')
+  );
+}
+
+function validUpdateInput(
+  value: unknown,
+): value is UpdateOwnPlayerProfileInput {
+  return (
+    isRecord(value) &&
+    hasExactlyKeys(value, ['accountId', 'role', 'changes']) &&
+    validInput({ accountId: value.accountId, role: value.role }) &&
+    readOwnPlayerProfilePatch(value.changes) !== undefined
   );
 }
 
@@ -186,6 +221,63 @@ export class PlayerProfileService {
       }
       return Object.freeze({
         outcome: 'found',
+        profile: publicProfile(profile),
+      });
+    } catch (error) {
+      return rejected(
+        temporaryStorageFailure(error)
+          ? 'temporary_unavailable'
+          : 'internal_failure',
+      );
+    }
+  }
+
+  async updateOwnProfile(
+    input: UpdateOwnPlayerProfileInput,
+  ): Promise<UpdateOwnPlayerProfileResult> {
+    if (!validUpdateInput(input) || input.role !== 'player') {
+      return rejected('invalid_request');
+    }
+
+    try {
+      const result = await this.dependencies.transactions.run(
+        async (transaction) => {
+          const updated = await this.dependencies.profileWriter.updateByAccountId(
+            transaction,
+            {
+              accountId: input.accountId,
+              changes: input.changes,
+              updatedAt: this.dependencies.clock.nowEpochSeconds(),
+            },
+          );
+          if (updated.outcome === 'not_found') {
+            return updated;
+          }
+          return this.dependencies.profiles.findByAccountId(transaction, {
+            accountId: input.accountId,
+          });
+        },
+      );
+      if (
+        isRecord(result) &&
+        hasExactlyKeys(result, ['outcome']) &&
+        result.outcome === 'not_found'
+      ) {
+        return rejected('profile_not_found');
+      }
+      if (
+        !isRecord(result) ||
+        !hasExactlyKeys(result, ['outcome', 'profile']) ||
+        result.outcome !== 'found'
+      ) {
+        return rejected('internal_failure');
+      }
+      const profile = readProfileRecord(result.profile, input.accountId);
+      if (profile === undefined) {
+        return rejected('internal_failure');
+      }
+      return Object.freeze({
+        outcome: 'updated',
         profile: publicProfile(profile),
       });
     } catch (error) {

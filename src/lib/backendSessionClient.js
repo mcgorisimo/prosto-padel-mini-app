@@ -18,6 +18,14 @@ const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const INTERNAL_UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const PHONE_PATTERN = /^\+[1-9][0-9]{6,14}$/u;
+const PROFILE_PATCH_KEYS = Object.freeze([
+  'firstName',
+  'lastName',
+  'phone',
+  'sidePreference',
+]);
+const SIDE_PREFERENCES = Object.freeze(['Left', 'Both', 'Right']);
 
 function frozen(outcome, extra = {}) {
   return Object.freeze({ outcome, ...extra });
@@ -243,21 +251,28 @@ export function isBackendOwnProfile(value) {
   if (!isPlainObject(value)) return false;
   const keys = Object.keys(value).sort();
   if (
-    keys.length !== 7 ||
+    keys.length !== 9 ||
     keys[0] !== 'accountId' ||
     keys[1] !== 'firstName' ||
     keys[2] !== 'languageCode' ||
     keys[3] !== 'lastName' ||
-    keys[4] !== 'photoUrl' ||
-    keys[5] !== 'role' ||
-    keys[6] !== 'username' ||
+    keys[4] !== 'phone' ||
+    keys[5] !== 'photoUrl' ||
+    keys[6] !== 'role' ||
+    keys[7] !== 'sidePreference' ||
+    keys[8] !== 'username' ||
     !INTERNAL_UUID_PATTERN.test(value.accountId) ||
     value.role !== 'player' ||
     !isBoundedString(value.firstName, 256) ||
     !isNullableBoundedString(value.lastName, 256) ||
     !isNullableBoundedString(value.username, 64) ||
     !isNullableBoundedString(value.photoUrl, 2_048) ||
-    !isNullableBoundedString(value.languageCode, 64)
+    !isNullableBoundedString(value.languageCode, 64) ||
+    (value.phone !== null &&
+      (typeof value.phone !== 'string' ||
+        !PHONE_PATTERN.test(value.phone))) ||
+    (value.sidePreference !== null &&
+      !SIDE_PREFERENCES.includes(value.sidePreference))
   ) {
     return false;
   }
@@ -271,9 +286,31 @@ export function isBackendOwnProfile(value) {
   return true;
 }
 
-function profileSuccess(body) {
+export function isBackendOwnProfilePatch(value) {
+  if (!isPlainObject(value)) return false;
+  const keys = Object.keys(value);
+  return (
+    keys.length > 0 &&
+    keys.every((key) => PROFILE_PATCH_KEYS.includes(key)) &&
+    (!Object.prototype.hasOwnProperty.call(value, 'firstName') ||
+      (isBoundedString(value.firstName, 256) &&
+        value.firstName.trim() === value.firstName)) &&
+    (!Object.prototype.hasOwnProperty.call(value, 'lastName') ||
+      value.lastName === null ||
+      (isBoundedString(value.lastName, 256) &&
+        value.lastName.trim() === value.lastName)) &&
+    (!Object.prototype.hasOwnProperty.call(value, 'phone') ||
+      value.phone === null ||
+      (typeof value.phone === 'string' &&
+        PHONE_PATTERN.test(value.phone))) &&
+    (!Object.prototype.hasOwnProperty.call(value, 'sidePreference') ||
+      SIDE_PREFERENCES.includes(value.sidePreference))
+  );
+}
+
+function profileSuccess(body, outcome = 'profile_loaded') {
   if (!isBackendOwnProfile(body)) return null;
-  return frozen('profile_loaded', {
+  return frozen(outcome, {
     profile: Object.freeze({
       accountId: body.accountId,
       role: body.role,
@@ -282,6 +319,8 @@ function profileSuccess(body) {
       username: body.username,
       photoUrl: body.photoUrl,
       languageCode: body.languageCode,
+      phone: body.phone,
+      sidePreference: body.sidePreference,
     }),
   });
 }
@@ -330,6 +369,9 @@ function classifyProfile(status, body) {
   if (status === 404 && code === 'profile_not_found') {
     return frozen('rejected', { reason: 'profile_not_found' });
   }
+  if (status === 400 && code === 'profile_invalid_request') {
+    return frozen('rejected', { reason: 'invalid_request' });
+  }
   return frozen('rejected', { reason: 'internal_error' });
 }
 
@@ -341,7 +383,13 @@ export function createBackendSessionClient(dependencies = {}) {
   const requestTimeoutMs =
     dependencies.requestTimeoutMs ?? REQUEST_TIMEOUT_MS;
 
-  async function requestOnce(operation, credential, requestKey, externalSignal) {
+  async function requestOnce(
+    operation,
+    credential,
+    requestKey,
+    externalSignal,
+    profilePatch,
+  ) {
     if (
       typeof fetchImpl !== 'function' ||
       typeof AbortController !== 'function' ||
@@ -366,16 +414,23 @@ export function createBackendSessionClient(dependencies = {}) {
     try {
       const isReadOnly =
         operation === 'authenticate' || operation === 'profile';
+      const isProfileOperation =
+        operation === 'profile' || operation === 'profile_update';
       const response = await fetchImpl(
         operation === 'refresh'
           ? REFRESH_PATH
           : operation === 'logout'
             ? LOGOUT_PATH
-            : operation === 'profile'
+            : isProfileOperation
               ? PROFILE_PATH
               : AUTHENTICATE_PATH,
         {
-          method: isReadOnly ? 'GET' : 'POST',
+          method:
+            isReadOnly
+              ? 'GET'
+              : operation === 'profile_update'
+                ? 'PATCH'
+                : 'POST',
           headers: isReadOnly
             ? {
                 Accept: 'application/json',
@@ -388,7 +443,13 @@ export function createBackendSessionClient(dependencies = {}) {
               },
           ...(isReadOnly
             ? {}
-            : { body: JSON.stringify({ requestKey }) }),
+            : {
+                body: JSON.stringify(
+                  operation === 'profile_update'
+                    ? profilePatch
+                    : { requestKey },
+                ),
+              }),
           cache: 'no-store',
           credentials: 'omit',
           redirect: 'error',
@@ -413,6 +474,12 @@ export function createBackendSessionClient(dependencies = {}) {
           ? frozen('success', { result })
           : frozen('malformed_response');
       }
+      if (operation === 'profile_update' && response.status === 200) {
+        const result = profileSuccess(body, 'profile_updated');
+        return result
+          ? frozen('success', { result })
+          : frozen('malformed_response');
+      }
       if (operation === 'refresh' && response.status === 200) {
         const result = refreshSuccess(body);
         return result
@@ -422,7 +489,7 @@ export function createBackendSessionClient(dependencies = {}) {
       if (
         response.status === 503 &&
         exactPublicCode(body) === (
-          operation === 'profile'
+          isProfileOperation
             ? 'profile_service_unavailable'
             : 'session_service_unavailable'
         )
@@ -435,7 +502,7 @@ export function createBackendSessionClient(dependencies = {}) {
             ? classifyRefresh(response.status, body)
             : operation === 'logout'
               ? classifyLogout(response.status, body)
-              : operation === 'profile'
+              : isProfileOperation
                 ? classifyProfile(response.status, body)
                 : classifyAuthentication(response.status, body),
       });
@@ -451,12 +518,23 @@ export function createBackendSessionClient(dependencies = {}) {
     }
   }
 
-  async function execute(operation, credential, options = {}) {
+  async function execute(
+    operation,
+    credential,
+    options = {},
+    profilePatch,
+  ) {
     const externalSignal = options.signal;
     if (!isCanonicalSessionCredential(credential)) {
       return frozen('rejected', { reason: 'invalid' });
     }
     if (externalSignal?.aborted) return frozen('cancelled');
+    if (
+      operation === 'profile_update' &&
+      !isBackendOwnProfilePatch(profilePatch)
+    ) {
+      return frozen('rejected', { reason: 'invalid_request' });
+    }
 
     const requiresRequestKey =
       operation === 'refresh' || operation === 'logout';
@@ -472,6 +550,7 @@ export function createBackendSessionClient(dependencies = {}) {
         credential,
         requestKey,
         externalSignal,
+        profilePatch,
       );
       if (attempt.outcome === 'success') return attempt.result;
       if (attempt.outcome === 'cancelled') return frozen('cancelled');
@@ -514,6 +593,8 @@ export function createBackendSessionClient(dependencies = {}) {
       execute('authenticate', credential, options),
     readOwnProfile: (credential, options) =>
       execute('profile', credential, options),
+    updateOwnProfile: (credential, profilePatch, options) =>
+      execute('profile_update', credential, options, profilePatch),
     refresh: (credential, options) =>
       execute('refresh', credential, options),
     logout: (credential, options) =>

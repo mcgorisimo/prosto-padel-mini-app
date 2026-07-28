@@ -207,7 +207,7 @@ async function readCatalogEvidence(
       pg_catalog.obj_description(rel.oid, 'pg_class') =
         CASE rel.relname
           WHEN 'player_profile_details'
-            THEN '017_backend_auth_player_profile_details:'
+            THEN '018_backend_auth_player_profile_editable_fields:'
           ELSE '015_backend_auth_foundation:'
         END ||
         pg_catalog.md5(pg_catalog.jsonb_build_object(

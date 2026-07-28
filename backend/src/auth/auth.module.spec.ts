@@ -19,6 +19,7 @@ import { PostgresInitialSessionRepository } from '../database/postgres-initial-s
 import { PostgresPlayerAccountProvisioningRepository } from '../database/postgres-player-account-provisioning.repository';
 import { PostgresPlayerProfileDetailsRepository } from '../database/postgres-player-profile-details.repository';
 import { PostgresPlayerProfileReader } from '../database/postgres-player-profile-reader';
+import { PostgresPlayerProfileWriter } from '../database/postgres-player-profile-writer';
 import { PostgresSecurityAuditRepository } from '../database/postgres-security-audit.repository';
 import { PostgresSessionAuthenticationRepository } from '../database/postgres-session-authentication.repository';
 import { PostgresSessionCredentialLifecycleRepository } from '../database/postgres-session-credential-lifecycle.repository';
@@ -282,6 +283,12 @@ describe('AuthModule Telegram login wiring', () => {
     expect(playerProfile.dependencies.profiles).toBe(
       moduleRef.get(PostgresPlayerProfileReader),
     );
+    expect(playerProfile.dependencies.profileWriter).toBe(
+      moduleRef.get(PostgresPlayerProfileWriter),
+    );
+    expect(playerProfile.dependencies.clock).toBe(
+      moduleRef.get(SESSION_AUTHENTICATION_CLOCK),
+    );
     expect(
       getPlayerProfileControllerService(
         moduleRef.get(PlayerProfileController),
@@ -348,6 +355,9 @@ describe('AuthModule Telegram login wiring', () => {
     );
     expect(moduleRef.get(PostgresPlayerProfileReader)).toBeInstanceOf(
       PostgresPlayerProfileReader,
+    );
+    expect(moduleRef.get(PostgresPlayerProfileWriter)).toBeInstanceOf(
+      PostgresPlayerProfileWriter,
     );
     expect(dependencies.terminalOperations).toBe(
       moduleRef.get(PostgresAuthenticationOperationTerminalRepository),

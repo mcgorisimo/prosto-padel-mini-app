@@ -106,7 +106,20 @@ function Segmented({ value, onChange, options }) {
   );
 }
 
-export default function PersonalInfoScreen({ user, onBack, showToast, onProfileSaved }) {
+function normalizePhone(value) {
+  const compact = String(value ?? '')
+    .trim()
+    .replace(/[\s().-]/gu, '');
+  return compact === '' ? null : compact;
+}
+
+export default function PersonalInfoScreen({
+  user,
+  onBack,
+  showToast,
+  onProfileSaved,
+  onBackendProfileSave,
+}) {
   const { tg } = useTelegram();
   const [firstName, setFirstName] = useState(user?.firstName || '');
   const [lastName, setLastName]   = useState(user?.lastName || '');
@@ -128,7 +141,9 @@ export default function PersonalInfoScreen({ user, onBack, showToast, onProfileS
   }, [tg, onBack]);
 
   const handleSave = async () => {
-    if (!user?.id) {
+    const usesBackendProfile =
+      typeof onBackendProfileSave === 'function';
+    if (!usesBackendProfile && !user?.id) {
       const message = 'Не удалось определить профиль. Войдите заново и попробуйте еще раз.';
       setSaveError(message);
       showToast?.(message, 'error');
@@ -139,24 +154,35 @@ export default function PersonalInfoScreen({ user, onBack, showToast, onProfileS
     setSaveError('');
 
     try {
-      const payload = {
-        first_name: firstName.trim(),
-        last_name: lastName.trim(),
-        phone: phone.trim(),
-        side_preference: preferredSide,
-      };
+      if (usesBackendProfile) {
+        const result = await onBackendProfileSave({
+          firstName: firstName.trim(),
+          lastName: lastName.trim() || null,
+          phone: normalizePhone(phone),
+          sidePreference: preferredSide,
+        });
+        if (result?.outcome !== 'profile_updated') {
+          throw new Error('Backend profile update was not persisted');
+        }
+      } else {
+        const payload = {
+          first_name: firstName.trim(),
+          last_name: lastName.trim(),
+          phone: phone.trim(),
+          side_preference: preferredSide,
+        };
 
-      const data = await updateMyProfile(payload);
-      if (
-        data.first_name !== payload.first_name ||
-        data.last_name !== payload.last_name ||
-        (data.phone || '') !== payload.phone ||
-        (data.side_preference || 'Both') !== payload.side_preference
-      ) {
-        throw new Error('Profile update was not persisted');
+        const data = await updateMyProfile(payload);
+        if (
+          data.first_name !== payload.first_name ||
+          data.last_name !== payload.last_name ||
+          (data.phone || '') !== payload.phone ||
+          (data.side_preference || 'Both') !== payload.side_preference
+        ) {
+          throw new Error('Profile update was not persisted');
+        }
+        onProfileSaved?.(data);
       }
-
-      onProfileSaved?.(data);
       showToast?.('Профиль сохранен', 'success');
       onBack?.();
     } catch (err) {

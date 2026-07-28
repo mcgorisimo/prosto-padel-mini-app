@@ -14,6 +14,12 @@ import { PostgresTransaction } from './postgres-transaction';
 const MAX_NAME_CODE_POINTS = 256;
 const MAX_SHORT_TEXT_CODE_POINTS = 64;
 const MAX_PHOTO_URL_CODE_POINTS = 2_048;
+const PHONE_PATTERN = /^\+[1-9][0-9]{6,14}$/u;
+const SIDE_PREFERENCES = Object.freeze([
+  'Left',
+  'Both',
+  'Right',
+] as const);
 
 const FIND_PLAYER_PROFILE_SQL = `
   SELECT
@@ -22,7 +28,9 @@ const FIND_PLAYER_PROFILE_SQL = `
     last_name,
     username,
     photo_url,
-    language_code
+    language_code,
+    phone,
+    side_preference
   FROM backend_auth.player_profile_details
   WHERE account_id = $1
 `;
@@ -34,6 +42,8 @@ interface PlayerProfileRow extends QueryResultRow {
   readonly username: unknown;
   readonly photo_url: unknown;
   readonly language_code: unknown;
+  readonly phone: unknown;
+  readonly side_preference: unknown;
 }
 
 function failure(
@@ -108,6 +118,33 @@ function readPhotoUrl(value: unknown): string | undefined {
   return photoUrl;
 }
 
+function readPhone(value: unknown): string | undefined {
+  if (value === null) {
+    return undefined;
+  }
+  if (typeof value !== 'string' || !PHONE_PATTERN.test(value)) {
+    throw failure('invalid_persisted_state');
+  }
+  return value;
+}
+
+function readSidePreference(
+  value: unknown,
+): PlayerProfileRecord['sidePreference'] | undefined {
+  if (value === null) {
+    return undefined;
+  }
+  if (
+    typeof value !== 'string' ||
+    !SIDE_PREFERENCES.includes(
+      value as (typeof SIDE_PREFERENCES)[number],
+    )
+  ) {
+    throw failure('invalid_persisted_state');
+  }
+  return value as (typeof SIDE_PREFERENCES)[number];
+}
+
 function hydrateProfile(
   row: PlayerProfileRow,
   expectedAccountId: ReadPlayerProfileInput['accountId'],
@@ -133,6 +170,8 @@ function hydrateProfile(
     MAX_SHORT_TEXT_CODE_POINTS,
   );
   const photoUrl = readPhotoUrl(row.photo_url);
+  const phone = readPhone(row.phone);
+  const sidePreference = readSidePreference(row.side_preference);
 
   return Object.freeze({
     accountId: row.account_id,
@@ -141,6 +180,8 @@ function hydrateProfile(
     ...(username === undefined ? {} : { username }),
     ...(photoUrl === undefined ? {} : { photoUrl }),
     ...(languageCode === undefined ? {} : { languageCode }),
+    ...(phone === undefined ? {} : { phone }),
+    ...(sidePreference === undefined ? {} : { sidePreference }),
   });
 }
 

@@ -249,6 +249,14 @@ export function mergeProfileSources(profile, backendProfile, metadata = {}) {
     username: backendProfile
       ? (backendProfile.username ?? '')
       : (profile?.username || metadata.username || ''),
+    phone: backendProfile &&
+      (backendProfile.phone !== null ||
+        backendProfile.sidePreference !== null)
+      ? (backendProfile.phone ?? '')
+      : (profile?.phone || ''),
+    side_preference: backendProfile?.sidePreference ??
+      profile?.side_preference ??
+      'Both',
   };
 }
 
@@ -257,6 +265,7 @@ export function mergeProfileSources(profile, backendProfile, metadata = {}) {
 export default function App({
   session,
   backendProfile = null,
+  onBackendProfileSave = null,
   showToast,
   onLogout,
 }) { // Accept showToast as a prop
@@ -1595,6 +1604,7 @@ const handleBookSlot = async (booking) => {
         onBack={() => setScreen(null)}
         showToast={showToast}
         onProfileSaved={handleProfileSaved}
+        onBackendProfileSave={onBackendProfileSave}
         onLogout={handleLogout}
       />
     );

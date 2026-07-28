@@ -288,6 +288,8 @@ export const AUTH_INTEGRATION_EXPECTED_CONSTRAINT_NAMES =
   'player_profile_details_photo_url_check',
   'player_profile_details_language_code_check',
   'player_profile_details_time_check',
+  'player_profile_details_phone_check',
+  'player_profile_details_side_preference_check',
   'external_identities_pkey',
   'external_identities_binding_key',
   'external_identities_account_id_fkey',

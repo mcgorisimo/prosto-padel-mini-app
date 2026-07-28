@@ -52,7 +52,7 @@ function SettingsRow({ icon: Icon, label, onClick, isLast }) {
   );
 }
 
-export default function EditProfileScreen({ user, onBack, showToast, onProfileSaved, onLogout }) {
+export default function EditProfileScreen({ user, onBack, showToast, onProfileSaved, onBackendProfileSave, onLogout }) {
   const { tg } = useTelegram();
   const [subScreen, setSubScreen] = useState(null);
 
@@ -81,6 +81,7 @@ export default function EditProfileScreen({ user, onBack, showToast, onProfileSa
         onBack={() => setSubScreen(null)}
         showToast={showToast}
         onProfileSaved={onProfileSaved}
+        onBackendProfileSave={onBackendProfileSave}
       />
     );
   }

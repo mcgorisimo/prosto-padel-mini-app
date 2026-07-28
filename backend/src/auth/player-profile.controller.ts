@@ -1,10 +1,12 @@
 import {
   Controller,
+  Body,
   Get,
   HttpException,
   HttpStatus,
   Req,
   Res,
+  Patch,
   UseGuards,
 } from '@nestjs/common';
 import { FastifyReply, FastifyRequest } from 'fastify';
@@ -17,7 +19,9 @@ import { PlayerProfileService } from './player-profile.service';
 import {
   OwnPlayerProfile,
   ReadOwnPlayerProfileResult,
+  UpdateOwnPlayerProfileResult,
   isOwnPlayerProfile,
+  readOwnPlayerProfilePatch,
 } from './player-profile.types';
 
 function publicError(
@@ -67,6 +71,32 @@ function disableCaching(reply: FastifyReply): void {
   reply.header('Pragma', 'no-cache');
 }
 
+function invalidPatch(): HttpException {
+  return publicError(
+    HttpStatus.BAD_REQUEST,
+    'profile_invalid_request',
+    'Profile update is invalid',
+  );
+}
+
+function readFoundProfile(
+  result: ReadOwnPlayerProfileResult | UpdateOwnPlayerProfileResult,
+  expectedOutcome: 'found' | 'updated',
+): OwnPlayerProfile {
+  if (result.outcome === 'rejected') {
+    throw rejection(result.reason);
+  }
+  if (
+    result.outcome !== expectedOutcome ||
+    Object.keys(result).length !== 2 ||
+    !Object.prototype.hasOwnProperty.call(result, 'profile') ||
+    !isOwnPlayerProfile(result.profile)
+  ) {
+    throw rejection('internal_failure');
+  }
+  return result.profile;
+}
+
 @Controller('profile')
 export class PlayerProfileController {
   constructor(private readonly service: PlayerProfileService) {}
@@ -100,17 +130,44 @@ export class PlayerProfileController {
     ) {
       throw rejection('internal_failure');
     }
-    if (result.outcome === 'rejected') {
-      throw rejection(result.reason);
+    return readFoundProfile(result, 'found');
+  }
+
+  @Patch('me')
+  @UseGuards(SessionBearerGuard)
+  async updateMe(
+    @Body() body: unknown,
+    @Req() request: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ): Promise<OwnPlayerProfile> {
+    disableCaching(reply);
+    const changes = readOwnPlayerProfilePatch(body);
+    if (changes === undefined) {
+      throw invalidPatch();
+    }
+    const principal = readAuthenticatedSessionPrincipal(request);
+    if (principal === undefined) {
+      throw rejection('internal_failure');
+    }
+
+    let result;
+    try {
+      result = await this.service.updateOwnProfile({
+        accountId: principal.accountId,
+        role: principal.role,
+        changes,
+      });
+    } catch {
+      throw rejection('internal_failure');
     }
     if (
-      result.outcome !== 'found' ||
-      Object.keys(result).length !== 2 ||
-      !Object.prototype.hasOwnProperty.call(result, 'profile') ||
-      !isOwnPlayerProfile(result.profile)
+      typeof result !== 'object' ||
+      result === null ||
+      Array.isArray(result) ||
+      typeof result.outcome !== 'string'
     ) {
       throw rejection('internal_failure');
     }
-    return result.profile;
+    return readFoundProfile(result, 'updated');
   }
 }

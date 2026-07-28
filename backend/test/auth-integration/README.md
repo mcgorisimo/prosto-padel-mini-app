@@ -13,15 +13,18 @@ that must be retained.
    its roles, grants, comments, and migration fingerprints.
 3. Apply `docs/migrations/017_backend_auth_player_profile_details.sql`
    manually after its PRECHECK, then require its POSTCHECK to pass.
-4. Connect as the non-superuser `backend_auth_app` role.
-5. Set all four environment variables:
+4. Apply
+   `docs/migrations/018_backend_auth_player_profile_editable_fields.sql`
+   manually after its PRECHECK, then require its POSTCHECK to pass.
+5. Connect as the non-superuser `backend_auth_app` role.
+6. Set all four environment variables:
 
    - `AUTH_INTEGRATION_TESTS_ENABLED=true`
    - `AUTH_INTEGRATION_DISPOSABLE_DATABASE=true`
    - `AUTH_INTEGRATION_DATABASE_URL=<URL of the disposable database>`
    - `AUTH_INTEGRATION_EXPECTED_DATABASE_NAME=<exact database name>`
 
-6. Use the one-shot Docker runner documented in
+7. Use the one-shot Docker runner documented in
    `infra/test/auth-integration/README.md`. It builds from the backend
    package lock, runs as the unprivileged `node` user, and connects only
    to the internal Compose network.

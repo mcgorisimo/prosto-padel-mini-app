@@ -177,6 +177,8 @@ test.describe('Telegram backend login feature disabled', () => {
         username: 'synthetic_player',
         photoUrl: null,
         languageCode: 'ru',
+        phone: null,
+        sidePreference: null,
       });
     });
 
@@ -218,6 +220,8 @@ test.describe('Telegram backend login feature enabled', () => {
         username: 'synthetic_player',
         photoUrl: null,
         languageCode: 'ru',
+        phone: null,
+        sidePreference: null,
       });
     });
   });
@@ -407,6 +411,138 @@ test.describe('Telegram backend login feature enabled', () => {
       hasError: false,
     });
     await expect(status).toHaveCount(0);
+  });
+
+  test('saves personal information through the backend credential boundary', async ({
+    page,
+  }) => {
+    let profileGets = 0;
+    let profilePatches = 0;
+    let supabaseProfileUpdates = 0;
+    let patchContract = null;
+
+    await prepareBrowser(page);
+    await page.route(LOGIN_ROUTE, async (route) => {
+      await fulfillJson(route, 200, successBody('existing'));
+    });
+    await page.route(SESSION_ME_ROUTE, async (route) => {
+      await fulfillJson(route, 200, {
+        accountId: SYNTHETIC_ACCOUNT_ID,
+        role: 'player',
+        expiresAt: Math.floor(Date.now() / 1_000) + 3_600,
+      });
+    });
+    await page.route(PROFILE_ROUTE, async (route) => {
+      const request = route.request();
+      if (request.method() === 'PATCH') {
+        profilePatches += 1;
+        const body = request.postDataJSON();
+        const headers = request.headers();
+        patchContract = {
+          exactKeys:
+            Object.keys(body).sort().join(',') ===
+            'firstName,lastName,phone,sidePreference',
+          hasAccountId:
+            Object.prototype.hasOwnProperty.call(body, 'accountId'),
+          bearerIsCanonical:
+            /^Bearer [A-Za-z0-9_-]{43}$/u.test(
+              headers.authorization ?? '',
+            ),
+          noCookie:
+            !Object.prototype.hasOwnProperty.call(headers, 'cookie'),
+        };
+        await fulfillJson(route, 200, {
+          accountId: SYNTHETIC_ACCOUNT_ID,
+          role: 'player',
+          firstName: body.firstName,
+          lastName: body.lastName,
+          username: 'synthetic_player',
+          photoUrl: null,
+          languageCode: 'ru',
+          phone: body.phone,
+          sidePreference: body.sidePreference,
+        });
+        return;
+      }
+      profileGets += 1;
+      await fulfillJson(route, 200, {
+        accountId: SYNTHETIC_ACCOUNT_ID,
+        role: 'player',
+        firstName: 'Backend',
+        lastName: 'Player',
+        username: 'synthetic_player',
+        photoUrl: null,
+        languageCode: 'ru',
+        phone: null,
+        sidePreference: null,
+      });
+    });
+    await page.route('**/rest/v1/**', async (route) => {
+      const url = route.request().url();
+      if (url.includes('/rpc/update_my_profile')) {
+        supabaseProfileUpdates += 1;
+      }
+      if (url.includes('/rpc/get_my_profile')) {
+        await fulfillJson(route, 200, {
+          id: SYNTHETIC_ACCOUNT_ID,
+          first_name: 'Supabase',
+          last_name: 'Fallback',
+          username: 'supabase_profile',
+          phone: '+79990000000',
+          side_preference: 'Both',
+          rating: 3.4,
+          is_verified: false,
+          role: 'user',
+        });
+        return;
+      }
+      if (url.includes('/rpc/get_unread_notification_count')) {
+        await fulfillJson(route, 200, 0);
+        return;
+      }
+      await fulfillJson(route, 200, []);
+    });
+
+    await page.goto('/');
+    await expect.poll(() => profileGets).toBe(1);
+    const sessionResult = await establishSyntheticSupabaseSession(page);
+    expect(sessionResult).toEqual({
+      hasSession: true,
+      hasError: false,
+    });
+
+    const navigation = page.locator('.bottom-nav');
+    await expect(navigation).toBeVisible();
+    await navigation.getByRole('button').nth(4).click();
+    await page.getByRole('button', { name: 'Настройки' }).click();
+    await page.getByRole('button', {
+      name: /Личная информация/,
+    }).click();
+
+    const inputs = page.locator('input');
+    await expect(inputs.nth(0)).toHaveValue('Backend');
+    await expect(inputs.nth(2)).toHaveValue('+79990000000');
+    await inputs.nth(0).fill('Updated');
+    await inputs.nth(1).fill('');
+    await inputs.nth(2).fill('+7 (999) 111-22-33');
+    const sideButtons = page
+      .locator('label')
+      .filter({ has: page.locator('button') })
+      .getByRole('button');
+    await sideButtons.nth(0).click();
+    await page.getByRole('button', { name: 'Сохранить' }).click();
+
+    await expect.poll(() => profilePatches).toBe(1);
+    expect(patchContract).toEqual({
+      exactKeys: true,
+      hasAccountId: false,
+      bearerIsCanonical: true,
+      noCookie: true,
+    });
+    expect(supabaseProfileUpdates).toBe(0);
+    await expect(
+      page.getByText('Профиль сохранен', { exact: true }),
+    ).toBeVisible();
   });
 
   test('keeps a Telegram login error visible beyond the success timeout', async ({

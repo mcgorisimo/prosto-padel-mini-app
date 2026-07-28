@@ -1,4 +1,4 @@
-// Fixed test-only semantic inventory copied from migrations 015 and 017.
+// Fixed test-only semantic inventory copied from migrations 015, 017 and 018.
 // It is independent from database comments and is never loaded from SQL at runtime.
 
 export const AUTH_INTEGRATION_EXPECTED_COLUMNS = Object.freeze([
@@ -16,6 +16,8 @@ export const AUTH_INTEGRATION_EXPECTED_COLUMNS = Object.freeze([
   ["backend_auth","player_profile_details",6,"language_code","text",false,null,""],
   ["backend_auth","player_profile_details",7,"created_at","bigint",true,null,""],
   ["backend_auth","player_profile_details",8,"updated_at","bigint",true,null,""],
+  ["backend_auth","player_profile_details",9,"phone","text",false,null,""],
+  ["backend_auth","player_profile_details",10,"side_preference","text",false,null,""],
   ["backend_auth","external_identities",1,"id","uuid",true,null,""],
   ["backend_auth","external_identities",2,"account_id","uuid",true,null,""],
   ["backend_auth","external_identities",3,"provider","text",true,null,""],
@@ -181,6 +183,8 @@ export const AUTH_INTEGRATION_EXPECTED_CONSTRAINTS = Object.freeze([
   ["backend_auth","player_profile_details","player_profile_details_photo_url_check","c",false,false,true],
   ["backend_auth","player_profile_details","player_profile_details_language_code_check","c",false,false,true],
   ["backend_auth","player_profile_details","player_profile_details_time_check","c",false,false,true],
+  ["backend_auth","player_profile_details","player_profile_details_phone_check","c",false,false,true],
+  ["backend_auth","player_profile_details","player_profile_details_side_preference_check","c",false,false,true],
   ["backend_auth","external_identities","external_identities_pkey","p",false,false,true],
   ["backend_auth","external_identities","external_identities_binding_key","u",false,false,true],
   ["backend_auth","external_identities","external_identities_account_id_fkey","f",false,false,true],
@@ -409,6 +413,11 @@ export const AUTH_INTEGRATION_EXPECTED_COLUMN_ACL = Object.freeze([
   ["backend_auth","player_profile_details","language_code","backend_auth_app","INSERT",false],
   ["backend_auth","player_profile_details","created_at","backend_auth_app","INSERT",false],
   ["backend_auth","player_profile_details","updated_at","backend_auth_app","INSERT",false],
+  ["backend_auth","player_profile_details","first_name","backend_auth_app","UPDATE",false],
+  ["backend_auth","player_profile_details","last_name","backend_auth_app","UPDATE",false],
+  ["backend_auth","player_profile_details","phone","backend_auth_app","UPDATE",false],
+  ["backend_auth","player_profile_details","side_preference","backend_auth_app","UPDATE",false],
+  ["backend_auth","player_profile_details","updated_at","backend_auth_app","UPDATE",false],
   ["backend_auth","external_identities","id","backend_auth_app","INSERT",false],
   ["backend_auth","external_identities","account_id","backend_auth_app","INSERT",false],
   ["backend_auth","external_identities","provider","backend_auth_app","INSERT",false],

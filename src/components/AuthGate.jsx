@@ -108,6 +108,15 @@ export default function AuthGate() {
     if (supabaseError) throw supabaseError;
   }, [telegramBackendLogin.logout]);
 
+  const handleBackendProfileSave = useCallback(async (changes) => {
+    backendProfileRequestRef.current += 1;
+    const result = await telegramBackendLogin.updateOwnProfile(changes);
+    if (result.outcome === 'profile_updated') {
+      setBackendProfile(result.profile);
+    }
+    return result;
+  }, [telegramBackendLogin.updateOwnProfile]);
+
   const showToast = (message, variant = 'info') => {
     setToastMessage({ message, variant });
     setTimeout(() => setToastMessage(null), 3000);
@@ -218,6 +227,11 @@ const handleSignUp = async ({ email, password, options }) => {
         <App
           session={session}
           backendProfile={backendProfile}
+          onBackendProfileSave={
+            telegramBackendLogin.sessionReady
+              ? handleBackendProfileSave
+              : null
+          }
           showToast={showToast}
           onLogout={handleAppLogout}
         />

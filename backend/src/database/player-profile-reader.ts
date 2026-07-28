@@ -12,6 +12,8 @@ export interface PlayerProfileRecord {
   readonly username?: string;
   readonly photoUrl?: string;
   readonly languageCode?: string;
+  readonly phone?: string;
+  readonly sidePreference?: 'Left' | 'Both' | 'Right';
 }
 
 export type ReadPlayerProfileResult =

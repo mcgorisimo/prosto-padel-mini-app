@@ -1,10 +1,16 @@
 import { AccountId } from '../accounts/account.types';
 import { deterministicUuid } from '../../test/deterministic-uuid';
+import { unixEpochSeconds } from './auth.types';
 import {
   PlayerProfileReadPersistenceError,
   PlayerProfileReader,
   ReadPlayerProfileResult,
 } from '../database/player-profile-reader';
+import {
+  PlayerProfileWritePersistenceError,
+  PlayerProfileWriter,
+  UpdatePlayerProfileResult,
+} from '../database/player-profile-writer';
 import { PostgresTransaction } from '../database/postgres-transaction';
 import {
   PlayerProfileService,
@@ -19,6 +25,7 @@ const OTHER_ACCOUNT_ID = deterministicUuid(
   'player-profile-service-other',
 ) as AccountId;
 const PRIVATE_MARKER = 'SYNTHETIC_PLAYER_PROFILE_SERVICE_PRIVATE';
+const NOW = unixEpochSeconds(1_800_000_000);
 
 const TRANSACTION = Object.freeze({
   query: jest.fn(),
@@ -42,6 +49,10 @@ interface Harness {
     Parameters<PlayerProfileReader['findByAccountId']>
   >;
   readonly service: PlayerProfileService;
+  readonly updateByAccountId: jest.Mock<
+    Promise<UpdatePlayerProfileResult>,
+    Parameters<PlayerProfileWriter['updateByAccountId']>
+  >;
 }
 
 function createHarness(): Harness {
@@ -58,14 +69,23 @@ function createHarness(): Harness {
       username: 'synthetic_player',
       photoUrl: 'https://example.test/avatar.svg',
       languageCode: 'ru',
+      phone: '+79990000000',
+      sidePreference: 'Right',
     },
   });
+  const updateByAccountId = jest.fn<
+    Promise<UpdatePlayerProfileResult>,
+    Parameters<PlayerProfileWriter['updateByAccountId']>
+  >().mockResolvedValue({ outcome: 'updated' });
   return {
     transactions,
     findByAccountId,
+    updateByAccountId,
     service: new PlayerProfileService({
       transactions,
       profiles: { findByAccountId },
+      profileWriter: { updateByAccountId },
+      clock: { nowEpochSeconds: () => NOW },
     }),
   };
 }
@@ -96,6 +116,8 @@ describe('PlayerProfileService', () => {
         username: 'synthetic_player',
         photoUrl: 'https://example.test/avatar.svg',
         languageCode: 'ru',
+        phone: '+79990000000',
+        sidePreference: 'Right',
       },
     });
     expect(harness.transactions.calls).toBe(1);
@@ -129,6 +151,8 @@ describe('PlayerProfileService', () => {
         username: null,
         photoUrl: null,
         languageCode: null,
+        phone: null,
+        sidePreference: null,
       },
     });
   });
@@ -243,5 +267,121 @@ describe('PlayerProfileService', () => {
       outcome: 'rejected',
       reason: 'internal_failure',
     });
+  });
+
+  it('updates and re-reads the authenticated profile in one transaction', async () => {
+    const harness = createHarness();
+
+    await expect(
+      harness.service.updateOwnProfile({
+        ...input(),
+        changes: {
+          firstName: 'Updated',
+          lastName: null,
+          phone: '+79991112233',
+          sidePreference: 'Left',
+        },
+      }),
+    ).resolves.toEqual({
+      outcome: 'updated',
+      profile: {
+        accountId: ACCOUNT_ID,
+        role: 'player',
+        firstName: 'Synthetic',
+        lastName: 'Player',
+        username: 'synthetic_player',
+        photoUrl: 'https://example.test/avatar.svg',
+        languageCode: 'ru',
+        phone: '+79990000000',
+        sidePreference: 'Right',
+      },
+    });
+
+    expect(harness.transactions.calls).toBe(1);
+    expect(harness.updateByAccountId).toHaveBeenCalledWith(
+      TRANSACTION,
+      {
+        accountId: ACCOUNT_ID,
+        changes: {
+          firstName: 'Updated',
+          lastName: null,
+          phone: '+79991112233',
+          sidePreference: 'Left',
+        },
+        updatedAt: NOW,
+      },
+    );
+    expect(harness.findByAccountId).toHaveBeenCalledWith(
+      TRANSACTION,
+      { accountId: ACCOUNT_ID },
+    );
+    expect(
+      harness.updateByAccountId.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      harness.findByAccountId.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('maps an update of an absent profile to profile_not_found', async () => {
+    const harness = createHarness();
+    harness.updateByAccountId.mockResolvedValue({
+      outcome: 'not_found',
+    });
+
+    await expect(
+      harness.service.updateOwnProfile({
+        ...input(),
+        changes: { firstName: 'Updated' },
+      }),
+    ).resolves.toEqual({
+      outcome: 'rejected',
+      reason: 'profile_not_found',
+    });
+    expect(harness.findByAccountId).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    null,
+    {},
+    { ...input(), changes: {} },
+    { ...input(), changes: { firstName: '' } },
+    { ...input(), changes: { phone: '79990000000' } },
+    { ...input(), changes: { sidePreference: 'Center' } },
+    { ...input(), changes: { username: PRIVATE_MARKER } },
+    {
+      accountId: ACCOUNT_ID,
+      role: 'club_admin',
+      changes: { firstName: 'Updated' },
+    },
+  ])('rejects an invalid update before transaction %#', async (value) => {
+    const harness = createHarness();
+    await expect(
+      harness.service.updateOwnProfile(value as never),
+    ).resolves.toEqual({
+      outcome: 'rejected',
+      reason: 'invalid_request',
+    });
+    expect(harness.transactions.calls).toBe(0);
+    expect(harness.updateByAccountId).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['database_unavailable', 'temporary_unavailable'],
+    ['transaction_conflict', 'temporary_unavailable'],
+    ['permission_denied', 'internal_failure'],
+    ['invalid_persisted_state', 'internal_failure'],
+    ['storage_failure', 'internal_failure'],
+  ] as const)('maps update %s to %s', async (failure, reason) => {
+    const harness = createHarness();
+    harness.updateByAccountId.mockRejectedValue(
+      new PlayerProfileWritePersistenceError(failure),
+    );
+
+    await expect(
+      harness.service.updateOwnProfile({
+        ...input(),
+        changes: { firstName: 'Updated' },
+      }),
+    ).resolves.toEqual({ outcome: 'rejected', reason });
   });
 });

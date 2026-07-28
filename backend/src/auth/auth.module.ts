@@ -16,6 +16,7 @@ import { PostgresInitialSessionRepository } from '../database/postgres-initial-s
 import { PostgresPlayerAccountProvisioningRepository } from '../database/postgres-player-account-provisioning.repository';
 import { PostgresPlayerProfileDetailsRepository } from '../database/postgres-player-profile-details.repository';
 import { PostgresPlayerProfileReader } from '../database/postgres-player-profile-reader';
+import { PostgresPlayerProfileWriter } from '../database/postgres-player-profile-writer';
 import { PostgresSessionAuthenticationRepository } from '../database/postgres-session-authentication.repository';
 import { PostgresSessionCredentialLifecycleRepository } from '../database/postgres-session-credential-lifecycle.repository';
 import { PostgresTelegramAuthenticationOperationRepository } from '../database/postgres-telegram-authentication-operation.repository';
@@ -26,6 +27,8 @@ import { PlayerProfileService } from './player-profile.service';
 import { SessionAuthenticationController } from './session-authentication.controller';
 import {
   SESSION_AUTHENTICATION_CLOCK_PROVIDER,
+  SESSION_AUTHENTICATION_CLOCK,
+  SessionAuthenticationClock,
   SessionBearerGuard,
 } from './session-authentication.guard';
 import { SessionAuthenticationService } from './session-authentication.service';
@@ -220,10 +223,14 @@ function createSessionAuthenticationService(
 function createPlayerProfileService(
   transactions: PostgresTransactionExecutorAdapter,
   profiles: PostgresPlayerProfileReader,
+  profileWriter: PostgresPlayerProfileWriter,
+  clock: SessionAuthenticationClock,
 ): PlayerProfileService {
   return new PlayerProfileService({
     transactions,
     profiles,
+    profileWriter,
+    clock,
   });
 }
 
@@ -245,6 +252,8 @@ function createPlayerProfileService(
       inject: [
         PostgresTransactionExecutorAdapter,
         PostgresPlayerProfileReader,
+        PostgresPlayerProfileWriter,
+        SESSION_AUTHENTICATION_CLOCK,
       ],
       useFactory: createPlayerProfileService,
     },

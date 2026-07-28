@@ -70,6 +70,8 @@ function profileRow(
     username: 'synthetic_player',
     photo_url: 'https://example.test/avatar.svg',
     language_code: 'ru',
+    phone: '+79990000000',
+    side_preference: 'Right',
     ...overrides,
   };
 }
@@ -135,6 +137,8 @@ describe('PostgresPlayerProfileReader', () => {
         username: 'synthetic_player',
         photoUrl: 'https://example.test/avatar.svg',
         languageCode: 'ru',
+        phone: '+79990000000',
+        sidePreference: 'Right',
       },
     });
     expect(Object.isFrozen(result)).toBe(true);
@@ -147,6 +151,8 @@ describe('PostgresPlayerProfileReader', () => {
           'languageCode',
           'lastName',
           'photoUrl',
+          'phone',
+          'sidePreference',
           'username',
         ].sort(),
       );
@@ -165,7 +171,7 @@ describe('PostgresPlayerProfileReader', () => {
     expect(transaction.calls).toHaveLength(1);
     const call = transaction.calls[0];
     expect(normalizeSql(call.text)).toBe(
-      'SELECT account_id, first_name, last_name, username, photo_url, language_code FROM backend_auth.player_profile_details WHERE account_id = $1',
+      'SELECT account_id, first_name, last_name, username, photo_url, language_code, phone, side_preference FROM backend_auth.player_profile_details WHERE account_id = $1',
     );
     expect(call.values).toEqual([ACCOUNT_ID]);
     const upperSql = normalizeSql(call.text).toUpperCase();
@@ -199,6 +205,8 @@ describe('PostgresPlayerProfileReader', () => {
             username: null,
             photo_url: null,
             language_code: null,
+            phone: null,
+            side_preference: null,
           }),
         ]),
       ]),
@@ -223,6 +231,8 @@ describe('PostgresPlayerProfileReader', () => {
     ['overlong username', { username: 'u'.repeat(65) }],
     ['invalid photo URL', { photo_url: 'http://example.test/avatar' }],
     ['non-string language', { language_code: false }],
+    ['invalid phone', { phone: '79990000000' }],
+    ['invalid side', { side_preference: 'Center' }],
   ])('rejects invalid persisted state: %s', async (_label, overrides) => {
     await expect(
       new PostgresPlayerProfileReader().findByAccountId(
