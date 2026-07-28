@@ -77,7 +77,7 @@ begin
       ),
       (
         'player_profile_details_side_preference_check'::text,
-        'check (side_preference is null or side_preference = any (array[''Left''::text, ''Both''::text, ''Right''::text]))'::text
+        'check (side_preference is null or (side_preference = any (array[''Left''::text, ''Both''::text, ''Right''::text])))'::text
       )
   ),
   actual as (

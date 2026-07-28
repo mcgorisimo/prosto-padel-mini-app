@@ -59,6 +59,9 @@ describe('migration 018 editable player-profile contract', () => {
     expect(compact(POSTCHECK)).toContain(
       '(select * from actual except select * from expected)',
     );
+    expect(compact(POSTCHECK)).toContain(
+      "check (side_preference is null or (side_preference = any (array[''left''::text, ''both''::text, ''right''::text])))",
+    );
     expect(compact(POSTCHECK)).not.toMatch(/\b(like|strpos|position)\s*\(/u);
   });
 
