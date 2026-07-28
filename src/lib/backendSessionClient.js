@@ -3,6 +3,7 @@ import { isCanonicalSessionCredential } from './sessionCredential';
 const REFRESH_PATH = '/api/v1/auth/session/refresh';
 const LOGOUT_PATH = '/api/v1/auth/session/logout';
 const AUTHENTICATE_PATH = '/api/v1/auth/session/me';
+const PROFILE_PATH = '/api/v1/profile/me';
 const REQUEST_TIMEOUT_MS = 8_000;
 const MAX_REQUESTS = 3;
 const BACKOFF_BASE_MS = 250;
@@ -28,6 +29,18 @@ function isPlainObject(value) {
   }
   const prototype = Object.getPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
+}
+
+function isBoundedString(value, maximumCodePoints) {
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    [...value].length <= maximumCodePoints
+  );
+}
+
+function isNullableBoundedString(value, maximumCodePoints) {
+  return value === null || isBoundedString(value, maximumCodePoints);
 }
 
 function exactPublicCode(body) {
@@ -226,6 +239,53 @@ function authenticationSuccess(body) {
   });
 }
 
+export function isBackendOwnProfile(value) {
+  if (!isPlainObject(value)) return false;
+  const keys = Object.keys(value).sort();
+  if (
+    keys.length !== 7 ||
+    keys[0] !== 'accountId' ||
+    keys[1] !== 'firstName' ||
+    keys[2] !== 'languageCode' ||
+    keys[3] !== 'lastName' ||
+    keys[4] !== 'photoUrl' ||
+    keys[5] !== 'role' ||
+    keys[6] !== 'username' ||
+    !INTERNAL_UUID_PATTERN.test(value.accountId) ||
+    value.role !== 'player' ||
+    !isBoundedString(value.firstName, 256) ||
+    !isNullableBoundedString(value.lastName, 256) ||
+    !isNullableBoundedString(value.username, 64) ||
+    !isNullableBoundedString(value.photoUrl, 2_048) ||
+    !isNullableBoundedString(value.languageCode, 64)
+  ) {
+    return false;
+  }
+  if (value.photoUrl !== null) {
+    try {
+      if (new URL(value.photoUrl).protocol !== 'https:') return false;
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
+function profileSuccess(body) {
+  if (!isBackendOwnProfile(body)) return null;
+  return frozen('profile_loaded', {
+    profile: Object.freeze({
+      accountId: body.accountId,
+      role: body.role,
+      firstName: body.firstName,
+      lastName: body.lastName,
+      username: body.username,
+      photoUrl: body.photoUrl,
+      languageCode: body.languageCode,
+    }),
+  });
+}
+
 function classifyRefresh(status, body) {
   const code = exactPublicCode(body);
   if (status === 401 && code === 'session_expired') {
@@ -262,6 +322,17 @@ function classifyAuthentication(status, body) {
   return frozen('rejected', { reason: 'internal_error' });
 }
 
+function classifyProfile(status, body) {
+  const code = exactPublicCode(body);
+  if (status === 401 && code === 'session_invalid') {
+    return frozen('rejected', { reason: 'invalid' });
+  }
+  if (status === 404 && code === 'profile_not_found') {
+    return frozen('rejected', { reason: 'profile_not_found' });
+  }
+  return frozen('rejected', { reason: 'internal_error' });
+}
+
 export function createBackendSessionClient(dependencies = {}) {
   const fetchImpl = dependencies.fetchImpl ?? globalThis.fetch?.bind(globalThis);
   const cryptoImpl = dependencies.cryptoImpl ?? globalThis.crypto;
@@ -293,16 +364,19 @@ export function createBackendSessionClient(dependencies = {}) {
     }, requestTimeoutMs);
 
     try {
-      const isAuthentication = operation === 'authenticate';
+      const isReadOnly =
+        operation === 'authenticate' || operation === 'profile';
       const response = await fetchImpl(
         operation === 'refresh'
           ? REFRESH_PATH
           : operation === 'logout'
             ? LOGOUT_PATH
-            : AUTHENTICATE_PATH,
+            : operation === 'profile'
+              ? PROFILE_PATH
+              : AUTHENTICATE_PATH,
         {
-          method: isAuthentication ? 'GET' : 'POST',
-          headers: isAuthentication
+          method: isReadOnly ? 'GET' : 'POST',
+          headers: isReadOnly
             ? {
                 Accept: 'application/json',
                 Authorization: `Bearer ${credential}`,
@@ -312,7 +386,7 @@ export function createBackendSessionClient(dependencies = {}) {
                 Authorization: `Bearer ${credential}`,
                 'Content-Type': 'application/json',
               },
-          ...(isAuthentication
+          ...(isReadOnly
             ? {}
             : { body: JSON.stringify({ requestKey }) }),
           cache: 'no-store',
@@ -333,6 +407,12 @@ export function createBackendSessionClient(dependencies = {}) {
           ? frozen('success', { result })
           : frozen('malformed_response');
       }
+      if (operation === 'profile' && response.status === 200) {
+        const result = profileSuccess(body);
+        return result
+          ? frozen('success', { result })
+          : frozen('malformed_response');
+      }
       if (operation === 'refresh' && response.status === 200) {
         const result = refreshSuccess(body);
         return result
@@ -341,7 +421,11 @@ export function createBackendSessionClient(dependencies = {}) {
       }
       if (
         response.status === 503 &&
-        exactPublicCode(body) === 'session_service_unavailable'
+        exactPublicCode(body) === (
+          operation === 'profile'
+            ? 'profile_service_unavailable'
+            : 'session_service_unavailable'
+        )
       ) {
         return frozen('retryable_unavailable');
       }
@@ -351,7 +435,9 @@ export function createBackendSessionClient(dependencies = {}) {
             ? classifyRefresh(response.status, body)
             : operation === 'logout'
               ? classifyLogout(response.status, body)
-              : classifyAuthentication(response.status, body),
+              : operation === 'profile'
+                ? classifyProfile(response.status, body)
+                : classifyAuthentication(response.status, body),
       });
     } catch (error) {
       if (externalSignal?.aborted) return frozen('cancelled');
@@ -372,9 +458,11 @@ export function createBackendSessionClient(dependencies = {}) {
     }
     if (externalSignal?.aborted) return frozen('cancelled');
 
+    const requiresRequestKey =
+      operation === 'refresh' || operation === 'logout';
     const requestKey =
-      operation === 'authenticate' ? null : createRequestKey(cryptoImpl);
-    if (operation !== 'authenticate' && !requestKey) {
+      requiresRequestKey ? createRequestKey(cryptoImpl) : null;
+    if (requiresRequestKey && !requestKey) {
       return frozen('rejected', { reason: 'internal_error' });
     }
 
@@ -424,6 +512,8 @@ export function createBackendSessionClient(dependencies = {}) {
   return Object.freeze({
     authenticate: (credential, options) =>
       execute('authenticate', credential, options),
+    readOwnProfile: (credential, options) =>
+      execute('profile', credential, options),
     refresh: (credential, options) =>
       execute('refresh', credential, options),
     logout: (credential, options) =>

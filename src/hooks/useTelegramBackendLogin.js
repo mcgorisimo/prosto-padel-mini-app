@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
-import { backendSessionClient } from '../lib/backendSessionClient';
+import {
+  backendSessionClient,
+  isBackendOwnProfile,
+} from '../lib/backendSessionClient';
 import { telegramBackendLoginClient } from '../lib/telegramBackendLogin';
 import { telegramSecureCredentialStorage } from '../lib/telegramSecureCredentialStorage';
 
@@ -57,6 +60,7 @@ async function fingerprintInitData(rawInitData) {
 export function createTelegramBackendLoginLifecycle(dependencies = {}) {
   const client = dependencies.client ?? telegramBackendLoginClient;
   const sessions = dependencies.sessions ?? backendSessionClient;
+  const profiles = dependencies.profiles ?? sessions;
   const credentialStorage =
     dependencies.credentialStorage ?? telegramSecureCredentialStorage;
   const fingerprint = dependencies.fingerprint ?? fingerprintInitData;
@@ -75,6 +79,7 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
   let pendingIdentity = null;
   let activeAttempt = null;
   let activeLogout = null;
+  let activeProfileRead = null;
   let privateCredential = null;
   let privatePrincipal = null;
   let publicSnapshot = IDLE_SNAPSHOT;
@@ -173,7 +178,14 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
     attempt?.controller.abort();
   }
 
+  function abortActiveProfileRead() {
+    const request = activeProfileRead;
+    activeProfileRead = null;
+    request?.controller.abort();
+  }
+
   function clearPrivateSession() {
+    abortActiveProfileRead();
     privateCredential = null;
     privatePrincipal = null;
   }
@@ -567,6 +579,7 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
     }
 
     abortActiveAttempt();
+    abortActiveProfileRead();
     if (pendingIdentity !== null) {
       pendingIdentity.rawInitData = null;
       pendingIdentity = null;
@@ -638,6 +651,123 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
     return promise;
   }
 
+  function loadOwnProfile() {
+    const requestGeneration = generation;
+    const expectedPrincipal = privatePrincipal;
+    let presentedCredential = privateCredential;
+
+    if (
+      presentedCredential === null ||
+      expectedPrincipal === null
+    ) {
+      presentedCredential = null;
+      return Promise.resolve(Object.freeze({
+        outcome: 'rejected',
+        reason: 'not_authenticated',
+      }));
+    }
+    if (expectedPrincipal.role !== 'player') {
+      presentedCredential = null;
+      return Promise.resolve(Object.freeze({
+        outcome: 'rejected',
+        reason: 'profile_not_found',
+      }));
+    }
+
+    if (
+      activeProfileRead !== null &&
+      activeProfileRead.generation === requestGeneration &&
+      activeProfileRead.principal === expectedPrincipal
+    ) {
+      presentedCredential = null;
+      return activeProfileRead.promise;
+    }
+    abortActiveProfileRead();
+
+    const controller = new AbortController();
+    let requestRecord;
+    const promise = (async () => {
+      try {
+        let result;
+        try {
+          result = await profiles.readOwnProfile(presentedCredential, {
+            signal: controller.signal,
+          });
+        } catch {
+          result = Object.freeze({
+            outcome: 'rejected',
+            reason: 'internal_error',
+          });
+        }
+
+        if (
+          controller.signal.aborted ||
+          requestGeneration !== generation ||
+          activeProfileRead !== requestRecord ||
+          privatePrincipal !== expectedPrincipal
+        ) {
+          return Object.freeze({ outcome: 'cancelled' });
+        }
+        if (
+          result?.outcome === 'profile_loaded' &&
+          isBackendOwnProfile(result.profile) &&
+          result.profile.accountId === expectedPrincipal.accountId &&
+          result.profile.role === expectedPrincipal.role
+        ) {
+          return Object.freeze({
+            outcome: 'profile_loaded',
+            profile: Object.freeze({
+              accountId: result.profile.accountId,
+              role: result.profile.role,
+              firstName: result.profile.firstName,
+              lastName: result.profile.lastName,
+              username: result.profile.username,
+              photoUrl: result.profile.photoUrl,
+              languageCode: result.profile.languageCode,
+            }),
+          });
+        }
+        if (result?.outcome === 'cancelled') {
+          return Object.freeze({ outcome: 'cancelled' });
+        }
+
+        const allowedReason = result?.outcome === 'rejected'
+          ? result.reason
+          : 'internal_error';
+        if (allowedReason === 'invalid') {
+          clearBoundary();
+          return Object.freeze({
+            outcome: 'rejected',
+            reason: 'session_invalid',
+          });
+        }
+        return Object.freeze({
+          outcome: 'rejected',
+          reason:
+            allowedReason === 'profile_not_found'
+              ? 'profile_not_found'
+              : allowedReason === 'temporary_unavailable'
+                ? 'temporary_unavailable'
+                : 'internal_error',
+        });
+      } finally {
+        presentedCredential = null;
+        if (activeProfileRead === requestRecord) {
+          activeProfileRead = null;
+        }
+      }
+    })();
+
+    requestRecord = {
+      controller,
+      generation: requestGeneration,
+      principal: expectedPrincipal,
+      promise,
+    };
+    activeProfileRead = requestRecord;
+    return promise;
+  }
+
   function attach(rawInitData, listener) {
     if (teardownTimer !== null) {
       clearTimer(teardownTimer);
@@ -699,6 +829,7 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
     dismissSuccess,
     hasCredential: () => privateCredential !== null,
     hasPrincipal: () => privatePrincipal !== null,
+    loadOwnProfile,
     logout,
   });
 }
@@ -730,6 +861,16 @@ export function useTelegramBackendLogin() {
     return telegramBackendLoginLifecycle.logout();
   }, []);
 
+  const loadOwnProfile = useCallback(() => {
+    if (!FEATURE_ENABLED) {
+      return Promise.resolve(Object.freeze({
+        outcome: 'rejected',
+        reason: 'not_authenticated',
+      }));
+    }
+    return telegramBackendLoginLifecycle.loadOwnProfile();
+  }, []);
+
   useEffect(() => {
     if (!FEATURE_ENABLED) return undefined;
 
@@ -747,8 +888,11 @@ export function useTelegramBackendLogin() {
     accountKind: snapshot.accountKind,
     expiresAt: snapshot.expiresAt,
     errorKind: snapshot.errorKind,
+    sessionReady:
+      FEATURE_ENABLED && telegramBackendLoginLifecycle.hasPrincipal(),
     clear,
     dismissSuccess,
+    loadOwnProfile,
     logout,
   });
 }

@@ -4,6 +4,7 @@ const FEATURE_ENABLED =
   process.env.VITE_TELEGRAM_BACKEND_LOGIN_ENABLED === 'true';
 const LOGIN_ROUTE = '**/api/v1/auth/telegram/login';
 const SESSION_ME_ROUTE = '**/api/v1/auth/session/me';
+const PROFILE_ROUTE = '**/api/v1/profile/me';
 const SYNTHETIC_INIT_DATA =
   'query_id=synthetic-login&auth_date=1700000000&hash=synthetic-hash';
 const SYNTHETIC_CREDENTIAL =
@@ -152,6 +153,7 @@ test.describe('Telegram backend login feature disabled', () => {
   }) => {
     let loginCalls = 0;
     let sessionCalls = 0;
+    let profileCalls = 0;
     await prepareBrowser(page);
     await page.route(LOGIN_ROUTE, async (route) => {
       loginCalls += 1;
@@ -165,14 +167,27 @@ test.describe('Telegram backend login feature disabled', () => {
         expiresAt: Math.floor(Date.now() / 1_000) + 3_600,
       });
     });
+    await page.route(PROFILE_ROUTE, async (route) => {
+      profileCalls += 1;
+      await fulfillJson(route, 200, {
+        accountId: SYNTHETIC_ACCOUNT_ID,
+        role: 'player',
+        firstName: 'Synthetic',
+        lastName: 'Player',
+        username: 'synthetic_player',
+        photoUrl: null,
+        languageCode: 'ru',
+      });
+    });
 
     await page.goto('/');
     await expectExistingSupabaseWelcome(page);
     await page.waitForTimeout(300);
 
-    expect({ loginCalls, sessionCalls }).toEqual({
+    expect({ loginCalls, sessionCalls, profileCalls }).toEqual({
       loginCalls: 0,
       sessionCalls: 0,
+      profileCalls: 0,
     });
     await expect(
       page.getByTestId('telegram-backend-login-status'),
@@ -192,6 +207,17 @@ test.describe('Telegram backend login feature enabled', () => {
         accountId: SYNTHETIC_ACCOUNT_ID,
         role: 'player',
         expiresAt: Math.floor(Date.now() / 1_000) + 3_600,
+      });
+    });
+    await page.route(PROFILE_ROUTE, async (route) => {
+      await fulfillJson(route, 200, {
+        accountId: SYNTHETIC_ACCOUNT_ID,
+        role: 'player',
+        firstName: 'Synthetic',
+        lastName: 'Player',
+        username: 'synthetic_player',
+        photoUrl: null,
+        languageCode: 'ru',
       });
     });
   });

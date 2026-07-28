@@ -1,4 +1,4 @@
-import React, { useCallback, useState, useEffect } from 'react';
+import React, { useCallback, useState, useEffect, useRef } from 'react';
 import App          from '../App';
 import WelcomeScreen from './auth/WelcomeScreen';
 import SignUpScreen  from './auth/SignUpScreen';
@@ -25,6 +25,8 @@ export default function AuthGate() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [toastMessage, setToastMessage] = useState(null);
+  const [backendProfile, setBackendProfile] = useState(null);
+  const backendProfileRequestRef = useRef(0);
 
   useEffect(() => {
     const getSession = async () => {
@@ -38,6 +40,8 @@ export default function AuthGate() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, session) => {
         if (event === 'SIGNED_OUT') {
+          backendProfileRequestRef.current += 1;
+          setBackendProfile(null);
           telegramBackendLogin.clear();
         }
         setSession(session);
@@ -46,6 +50,37 @@ export default function AuthGate() {
 
     return () => subscription.unsubscribe();
   }, [telegramBackendLogin.clear]);
+
+  useEffect(() => {
+    if (!telegramBackendLogin.sessionReady) {
+      backendProfileRequestRef.current += 1;
+      setBackendProfile(null);
+      return;
+    }
+
+    const requestToken = backendProfileRequestRef.current + 1;
+    backendProfileRequestRef.current = requestToken;
+    void telegramBackendLogin.loadOwnProfile().then(
+      (result) => {
+        if (backendProfileRequestRef.current !== requestToken) return;
+        setBackendProfile(
+          result.outcome === 'profile_loaded' ? result.profile : null,
+        );
+      },
+      () => {
+        if (backendProfileRequestRef.current === requestToken) {
+          setBackendProfile(null);
+        }
+      },
+    );
+  }, [
+    telegramBackendLogin.loadOwnProfile,
+    telegramBackendLogin.sessionReady,
+  ]);
+
+  useEffect(() => () => {
+    backendProfileRequestRef.current += 1;
+  }, []);
 
   useEffect(() => {
     if (
@@ -62,6 +97,8 @@ export default function AuthGate() {
   ]);
 
   const handleAppLogout = useCallback(async () => {
+    backendProfileRequestRef.current += 1;
+    setBackendProfile(null);
     const backendResult = await telegramBackendLogin.logout();
     if (backendResult.outcome !== 'logged_out') {
       throw new Error('Backend session logout failed');
@@ -180,6 +217,7 @@ const handleSignUp = async ({ email, password, options }) => {
       <>
         <App
           session={session}
+          backendProfile={backendProfile}
           showToast={showToast}
           onLogout={handleAppLogout}
         />

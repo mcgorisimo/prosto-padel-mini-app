@@ -232,9 +232,34 @@ function isStaleInvitationError(error) {
     || code.includes('INVITATION_SLOT_UNAVAILABLE');
 }
 
+export function mergeProfileSources(profile, backendProfile, metadata = {}) {
+  const baseProfile = profile || {
+    rating: 3.0,
+    role: 'user',
+  };
+
+  return {
+    ...baseProfile,
+    first_name: backendProfile
+      ? backendProfile.firstName
+      : (profile?.first_name || metadata.first_name || 'Новый'),
+    last_name: backendProfile
+      ? (backendProfile.lastName ?? '')
+      : (profile?.last_name || metadata.last_name || 'Игрок'),
+    username: backendProfile
+      ? (backendProfile.username ?? '')
+      : (profile?.username || metadata.username || ''),
+  };
+}
+
 // ─── App ──────────────────────────────────────────────────────────────────────
 
-export default function App({ session, showToast, onLogout }) { // Accept showToast as a prop
+export default function App({
+  session,
+  backendProfile = null,
+  showToast,
+  onLogout,
+}) { // Accept showToast as a prop
   const { user, tg } = useTelegram();
   
   // --- 1. СТЕЙТЫ ---
@@ -464,13 +489,9 @@ export default function App({ session, showToast, onLogout }) { // Accept showTo
     // 1. Достаем метаданные из сессии (там точно лежат имя и фамилия из формы регистрации)
     const meta = session?.user?.user_metadata || {};
     
-    // 2. Если профиля в БД еще нет, берем данные из meta
-    const p = profile || { 
-      first_name: meta.first_name || 'Новый', 
-      last_name: meta.last_name || 'Игрок', 
-      rating: 3.0, 
-      role: 'user' 
-    };
+    // 2. Backend owns Telegram identity fields; Supabase still provides the
+    // remaining profile fields until their data flows are migrated.
+    const p = mergeProfileSources(profile, backendProfile, meta);
     
     const numericRating = p.rating || 3.0;
     const RATINGS_ORDER = ['D', 'D+', 'C', 'C+', 'B', 'B+', 'A'];
@@ -492,7 +513,7 @@ export default function App({ session, showToast, onLogout }) { // Accept showTo
       username: p.username || user?.username || meta.username || '',
       role: p.role,
     };
-  }, [profile, session, user?.username]); // <-- добавили session в зависимости
+  }, [backendProfile, profile, session, user?.username]); // <-- добавили session в зависимости
 
   const isAdmin = currentUser?.role === 'admin';
 

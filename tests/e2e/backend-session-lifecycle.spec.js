@@ -5,6 +5,7 @@ const FEATURE_ENABLED =
 const LOGIN_ROUTE = '**/api/v1/auth/telegram/login';
 const REFRESH_ROUTE = '**/api/v1/auth/session/refresh';
 const SESSION_ME_ROUTE = '**/api/v1/auth/session/me';
+const PROFILE_ROUTE = '**/api/v1/profile/me';
 const SYNTHETIC_INIT_DATA =
   'query_id=session-lifecycle&auth_date=1700000000&hash=synthetic';
 const SYNTHETIC_ACCOUNT_ID = '11111111-1111-4111-8111-111111111111';
@@ -88,6 +89,17 @@ test.describe('backend session credential lifecycle', () => {
         expiresAt: futureExpiry(),
       });
     });
+    await page.route(PROFILE_ROUTE, async (route) => {
+      await fulfillJson(route, 200, {
+        accountId: SYNTHETIC_ACCOUNT_ID,
+        role: 'player',
+        firstName: 'Synthetic',
+        lastName: 'Player',
+        username: 'synthetic_player',
+        photoUrl: null,
+        languageCode: 'ru',
+      });
+    });
   });
 
   test('restores through refresh, replaces SecureStorage and skips Telegram login', async ({
@@ -95,9 +107,11 @@ test.describe('backend session credential lifecycle', () => {
   }) => {
     let refreshCalls = 0;
     let authenticationCalls = 0;
+    let profileCalls = 0;
     let loginCalls = 0;
     let safeRequestContract = null;
     let safeAuthenticationContract = null;
+    let safeProfileContract = null;
     let consoleLeakDetected = false;
 
     page.on('console', (message) => {
@@ -157,10 +171,34 @@ test.describe('backend session credential lifecycle', () => {
         code: 'must_not_be_called',
       });
     });
+    await page.unroute(PROFILE_ROUTE);
+    await page.route(PROFILE_ROUTE, async (route) => {
+      profileCalls += 1;
+      const request = route.request();
+      const headers = request.headers();
+      safeProfileContract = {
+        method: request.method(),
+        bearerMatches:
+          headers.authorization === `Bearer ${NEXT_CREDENTIAL}`,
+        noBody: request.postData() === null,
+        noCookie:
+          !Object.prototype.hasOwnProperty.call(headers, 'cookie'),
+      };
+      await fulfillJson(route, 200, {
+        accountId: SYNTHETIC_ACCOUNT_ID,
+        role: 'player',
+        firstName: 'Synthetic',
+        lastName: 'Player',
+        username: 'synthetic_player',
+        photoUrl: null,
+        languageCode: 'ru',
+      });
+    });
 
     await page.goto('/');
     const status = page.getByTestId('telegram-backend-login-status');
     await expect(status).toHaveAttribute('data-status', 'session_restored');
+    await expect.poll(() => profileCalls).toBe(1);
 
     const storageSummary = await page.evaluate(async (values) => {
       const readSecureStorage = () => new Promise((resolve) => {
@@ -201,14 +239,17 @@ test.describe('backend session credential lifecycle', () => {
     expect({
       refreshCalls,
       authenticationCalls,
+      profileCalls,
       loginCalls,
       safeRequestContract,
       safeAuthenticationContract,
+      safeProfileContract,
       consoleLeakDetected,
       storageSummary,
     }).toEqual({
       refreshCalls: 1,
       authenticationCalls: 1,
+      profileCalls: 1,
       loginCalls: 0,
       safeRequestContract: {
         exactBody: true,
@@ -217,6 +258,12 @@ test.describe('backend session credential lifecycle', () => {
         noCookie: true,
       },
       safeAuthenticationContract: {
+        method: 'GET',
+        bearerMatches: true,
+        noBody: true,
+        noCookie: true,
+      },
+      safeProfileContract: {
         method: 'GET',
         bearerMatches: true,
         noBody: true,
@@ -685,6 +732,436 @@ test.describe('backend session credential lifecycle', () => {
       malformedOutcome: 'rejected',
       malformedReason: 'internal_error',
       malformedExposesPrincipal: false,
+    });
+  });
+
+  test('reads only an exact backend profile through a credential-bound no-store GET', async ({
+    page,
+  }) => {
+    await prepareTelegramWithSecureStorage(page, null, '');
+    await page.goto('/');
+
+    const summary = await page.evaluate(async (parameters) => {
+      const { createBackendSessionClient } = await import(
+        '/src/lib/backendSessionClient.js'
+      );
+      const contracts = [];
+      let calls = 0;
+      const client = createBackendSessionClient({
+        fetchImpl: async (url, options) => {
+          calls += 1;
+          contracts.push({
+            pathMatches: url === '/api/v1/profile/me',
+            method: options.method,
+            bearerMatches:
+              options.headers.Authorization ===
+              `Bearer ${parameters.credential}`,
+            noBody:
+              !Object.prototype.hasOwnProperty.call(options, 'body'),
+            cache: options.cache,
+            credentials: options.credentials,
+            redirect: options.redirect,
+          });
+          const body = {
+            accountId: parameters.accountId,
+            role: 'player',
+            firstName: 'Synthetic',
+            lastName: 'Player',
+            username: 'synthetic_player',
+            photoUrl: null,
+            languageCode: 'ru',
+          };
+          if (calls === 2) {
+            body.internalDigest = 'must-be-rejected';
+          }
+          return new Response(JSON.stringify(body), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        },
+      });
+
+      const accepted = await client.readOwnProfile(parameters.credential);
+      const malformed = await client.readOwnProfile(parameters.credential);
+      return {
+        calls,
+        contracts,
+        acceptedOutcome: accepted.outcome,
+        acceptedExactKeys:
+          Object.keys(accepted.profile ?? {}).sort().join(',') ===
+          'accountId,firstName,languageCode,lastName,photoUrl,role,username',
+        acceptedAccountMatches:
+          accepted.profile?.accountId === parameters.accountId,
+        acceptedExposesCredential:
+          Object.prototype.hasOwnProperty.call(accepted, 'credential'),
+        malformedOutcome: malformed.outcome,
+        malformedReason: malformed.reason,
+        malformedExposesProfile:
+          Object.prototype.hasOwnProperty.call(malformed, 'profile'),
+      };
+    }, {
+      credential: NEXT_CREDENTIAL,
+      accountId: SYNTHETIC_ACCOUNT_ID,
+    });
+
+    expect(summary).toEqual({
+      calls: 2,
+      contracts: [
+        {
+          pathMatches: true,
+          method: 'GET',
+          bearerMatches: true,
+          noBody: true,
+          cache: 'no-store',
+          credentials: 'omit',
+          redirect: 'error',
+        },
+        {
+          pathMatches: true,
+          method: 'GET',
+          bearerMatches: true,
+          noBody: true,
+          cache: 'no-store',
+          credentials: 'omit',
+          redirect: 'error',
+        },
+      ],
+      acceptedOutcome: 'profile_loaded',
+      acceptedExactKeys: true,
+      acceptedAccountMatches: true,
+      acceptedExposesCredential: false,
+      malformedOutcome: 'rejected',
+      malformedReason: 'internal_error',
+      malformedExposesProfile: false,
+    });
+  });
+
+  test('backend identity fields override Supabase identity while retaining Supabase-only data', async ({
+    page,
+  }) => {
+    await prepareTelegramWithSecureStorage(page, null, '');
+    await page.goto('/');
+
+    const summary = await page.evaluate(async () => {
+      const { mergeProfileSources } = await import('/src/App.jsx');
+      const merged = mergeProfileSources(
+        {
+          first_name: 'Supabase',
+          last_name: 'Profile',
+          username: 'supabase_profile',
+          rating: 3.4,
+          phone: '+79990000000',
+          side_preference: 'Both',
+          role: 'user',
+        },
+        {
+          accountId: '11111111-1111-4111-8111-111111111111',
+          role: 'player',
+          firstName: 'Backend',
+          lastName: 'Identity',
+          username: 'backend_identity',
+          photoUrl: null,
+          languageCode: 'ru',
+        },
+        {
+          first_name: 'Metadata',
+          last_name: 'User',
+          username: 'metadata_user',
+        },
+      );
+
+      return {
+        firstName: merged.first_name,
+        lastName: merged.last_name,
+        username: merged.username,
+        rating: merged.rating,
+        phonePreserved: merged.phone === '+79990000000',
+        sidePreference: merged.side_preference,
+        supabaseRolePreserved: merged.role === 'user',
+        exposesAccountId:
+          Object.prototype.hasOwnProperty.call(merged, 'accountId'),
+      };
+    });
+
+    expect(summary).toEqual({
+      firstName: 'Backend',
+      lastName: 'Identity',
+      username: 'backend_identity',
+      rating: 3.4,
+      phonePreserved: true,
+      sidePreference: 'Both',
+      supabaseRolePreserved: true,
+      exposesAccountId: false,
+    });
+  });
+
+  test('profile bootstrap is single-flight and clear aborts an active private request', async ({
+    page,
+  }) => {
+    await prepareTelegramWithSecureStorage(page, null, '');
+    await page.goto('/');
+
+    const summary = await page.evaluate(async (parameters) => {
+      const { createTelegramBackendLoginLifecycle } = await import(
+        '/src/hooks/useTelegramBackendLogin.js'
+      );
+      let profileCalls = 0;
+      let profileCredentialMatched = true;
+      let activeSignalAborted = false;
+      let releaseFirstProfile;
+      let releaseLateProfile;
+      const firstProfileGate = new Promise((resolve) => {
+        releaseFirstProfile = resolve;
+      });
+      const lateProfileGate = new Promise((resolve) => {
+        releaseLateProfile = resolve;
+      });
+      const exactProfile = Object.freeze({
+        accountId: parameters.accountId,
+        role: 'player',
+        firstName: 'Synthetic',
+        lastName: 'Player',
+        username: 'synthetic_player',
+        photoUrl: null,
+        languageCode: 'ru',
+      });
+      const lifecycle = createTelegramBackendLoginLifecycle({
+        fingerprint: async () => 'profile-lifecycle-fingerprint',
+        client: {
+          async login() {
+            return {
+              outcome: 'authenticated',
+              credential: parameters.credential,
+              expiresAt: Math.floor(Date.now() / 1_000) + 3_600,
+              accountKind: 'existing',
+            };
+          },
+        },
+        sessions: {
+          async refresh() {
+            throw new Error('must not refresh');
+          },
+          async authenticate(credential) {
+            if (credential !== parameters.credential) {
+              return { outcome: 'rejected', reason: 'internal_error' };
+            }
+            return {
+              outcome: 'authenticated',
+              principal: {
+                accountId: parameters.accountId,
+                role: 'player',
+                expiresAt: Math.floor(Date.now() / 1_000) + 3_600,
+              },
+            };
+          },
+          async logout() {
+            throw new Error('must not logout');
+          },
+        },
+        profiles: {
+          async readOwnProfile(credential, options) {
+            profileCalls += 1;
+            profileCredentialMatched =
+              profileCredentialMatched &&
+              credential === parameters.credential;
+            if (profileCalls === 1) {
+              await firstProfileGate;
+            } else {
+              options.signal.addEventListener(
+                'abort',
+                () => {
+                  activeSignalAborted = true;
+                },
+                { once: true },
+              );
+              await lateProfileGate;
+            }
+            return {
+              outcome: 'profile_loaded',
+              profile: exactProfile,
+            };
+          },
+        },
+        credentialStorage: {
+          async read() {
+            return { outcome: 'empty' };
+          },
+          async write() {
+            return { outcome: 'stored' };
+          },
+          async remove() {
+            return { outcome: 'removed' };
+          },
+        },
+      });
+
+      const detach = lifecycle.attach(parameters.initData, () => {});
+      for (let attempt = 0; attempt < 50; attempt += 1) {
+        if (lifecycle.hasPrincipal()) break;
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+
+      const first = lifecycle.loadOwnProfile();
+      const shared = lifecycle.loadOwnProfile();
+      const samePromise = first === shared;
+      releaseFirstProfile();
+      const [firstResult, sharedResult] = await Promise.all([first, shared]);
+
+      const late = lifecycle.loadOwnProfile();
+      await Promise.resolve();
+      lifecycle.clear();
+      releaseLateProfile();
+      const lateResult = await late;
+      detach();
+
+      return {
+        profileCalls,
+        profileCredentialMatched,
+        samePromise,
+        firstOutcome: firstResult.outcome,
+        sharedOutcome: sharedResult.outcome,
+        firstExactProfile:
+          Object.keys(firstResult.profile ?? {}).sort().join(',') ===
+          'accountId,firstName,languageCode,lastName,photoUrl,role,username',
+        firstExposesCredential:
+          Object.prototype.hasOwnProperty.call(firstResult, 'credential') ||
+          Object.prototype.hasOwnProperty.call(
+            firstResult.profile ?? {},
+            'credential',
+          ),
+        activeSignalAborted,
+        lateOutcome: lateResult.outcome,
+        hasCredentialAfterClear: lifecycle.hasCredential(),
+        hasPrincipalAfterClear: lifecycle.hasPrincipal(),
+      };
+    }, {
+      credential: LOGIN_CREDENTIAL,
+      accountId: SYNTHETIC_ACCOUNT_ID,
+      initData: SYNTHETIC_INIT_DATA,
+    });
+
+    expect(summary).toEqual({
+      profileCalls: 2,
+      profileCredentialMatched: true,
+      samePromise: true,
+      firstOutcome: 'profile_loaded',
+      sharedOutcome: 'profile_loaded',
+      firstExactProfile: true,
+      firstExposesCredential: false,
+      activeSignalAborted: true,
+      lateOutcome: 'cancelled',
+      hasCredentialAfterClear: false,
+      hasPrincipalAfterClear: false,
+    });
+  });
+
+  test('profile rejection invalidates the private credential and SecureStorage boundary', async ({
+    page,
+  }) => {
+    await prepareTelegramWithSecureStorage(page, null, '');
+    await page.goto('/');
+
+    const summary = await page.evaluate(async (parameters) => {
+      const { createTelegramBackendLoginLifecycle } = await import(
+        '/src/hooks/useTelegramBackendLogin.js'
+      );
+      let storedCredential = null;
+      let removeCalls = 0;
+      let profileCalls = 0;
+      const lifecycle = createTelegramBackendLoginLifecycle({
+        fingerprint: async () => 'profile-invalid-fingerprint',
+        client: {
+          async login() {
+            return {
+              outcome: 'authenticated',
+              credential: parameters.credential,
+              expiresAt: Math.floor(Date.now() / 1_000) + 3_600,
+              accountKind: 'existing',
+            };
+          },
+        },
+        sessions: {
+          async refresh() {
+            throw new Error('must not refresh');
+          },
+          async authenticate(credential) {
+            if (credential !== parameters.credential) {
+              return { outcome: 'rejected', reason: 'internal_error' };
+            }
+            return {
+              outcome: 'authenticated',
+              principal: {
+                accountId: parameters.accountId,
+                role: 'player',
+                expiresAt: Math.floor(Date.now() / 1_000) + 3_600,
+              },
+            };
+          },
+          async logout() {
+            throw new Error('must not logout');
+          },
+        },
+        profiles: {
+          async readOwnProfile() {
+            profileCalls += 1;
+            return { outcome: 'rejected', reason: 'invalid' };
+          },
+        },
+        credentialStorage: {
+          async read() {
+            return { outcome: 'empty' };
+          },
+          async write(credential) {
+            storedCredential = credential;
+            return { outcome: 'stored' };
+          },
+          async remove() {
+            removeCalls += 1;
+            storedCredential = null;
+            return { outcome: 'removed' };
+          },
+        },
+      });
+
+      const detach = lifecycle.attach(parameters.initData, () => {});
+      for (let attempt = 0; attempt < 50; attempt += 1) {
+        if (lifecycle.hasPrincipal()) break;
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+
+      const result = await lifecycle.loadOwnProfile();
+      for (let attempt = 0; attempt < 50; attempt += 1) {
+        if (removeCalls > 0) break;
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      detach();
+
+      return {
+        profileCalls,
+        outcome: result.outcome,
+        reason: result.reason,
+        resultExposesCredential:
+          Object.prototype.hasOwnProperty.call(result, 'credential'),
+        hasCredential: lifecycle.hasCredential(),
+        hasPrincipal: lifecycle.hasPrincipal(),
+        storedCredentialCleared: storedCredential === null,
+        removeCalled: removeCalls === 1,
+      };
+    }, {
+      credential: LOGIN_CREDENTIAL,
+      accountId: SYNTHETIC_ACCOUNT_ID,
+      initData: SYNTHETIC_INIT_DATA,
+    });
+
+    expect(summary).toEqual({
+      profileCalls: 1,
+      outcome: 'rejected',
+      reason: 'session_invalid',
+      resultExposesCredential: false,
+      hasCredential: false,
+      hasPrincipal: false,
+      storedCredentialCleared: true,
+      removeCalled: true,
     });
   });
 
