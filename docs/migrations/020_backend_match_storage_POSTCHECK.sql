@@ -676,8 +676,7 @@ begin
              '[[:space:]]+',
              ' ',
              'g'
-           ),
-           '()'
+           )
          ) =
            'status = any (array[''open''::text, ''searching''::text, ''confirmed''::text, ''upcoming''::text])'
      ) then
