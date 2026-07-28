@@ -3,6 +3,7 @@ import { PostgresAccountStatusReader } from './postgres-account-status.reader';
 import { PostgresAuthenticationOperationTerminalRepository } from './postgres-authentication-operation-terminal.repository';
 import { PostgresExternalIdentityResolutionRepository } from './postgres-external-identity.repository';
 import { PostgresInitialSessionRepository } from './postgres-initial-session.repository';
+import { PostgresMatchRepository } from './postgres-match.repository';
 import { PostgresPlayerAccountProvisioningRepository } from './postgres-player-account-provisioning.repository';
 import { PostgresPlayerProfileDetailsRepository } from './postgres-player-profile-details.repository';
 import { PostgresPlayerProfileReader } from './postgres-player-profile-reader';
@@ -24,6 +25,7 @@ const DATABASE_WORKFLOW_PROVIDERS: Provider[] = [
   PostgresPlayerProfileReader,
   PostgresPlayerProfileWriter,
   PostgresPublicPlayerProfileSearchRepository,
+  PostgresMatchRepository,
   PostgresSessionAuthenticationRepository,
   {
     provide: PostgresTransactionExecutorAdapter,
@@ -95,6 +97,7 @@ const DATABASE_WORKFLOW_EXPORTS = [
   PostgresPlayerProfileReader,
   PostgresPlayerProfileWriter,
   PostgresPublicPlayerProfileSearchRepository,
+  PostgresMatchRepository,
   PostgresAuthenticationOperationTerminalRepository,
   PostgresInitialSessionRepository,
   PostgresSessionCredentialLifecycleRepository,
