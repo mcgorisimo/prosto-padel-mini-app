@@ -181,7 +181,8 @@ begin
 
   if (select pg_catalog.count(*)
       from pg_catalog.pg_constraint c
-      where c.conrelid = v_profiles_oid) <> 2
+      where c.conrelid = v_profiles_oid
+        and c.contype = any (array['p'::"char", 'f'::"char"])) <> 2
      or not exists (
        select 1
        from pg_catalog.pg_constraint c
