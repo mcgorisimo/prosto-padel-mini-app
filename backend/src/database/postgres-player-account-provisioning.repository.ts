@@ -50,6 +50,13 @@ const INSERT_PLAYER_PROFILE_SQL = `
   VALUES ($1)
 `;
 
+const INSERT_PLAYER_RATING_STATE_SQL = `
+  INSERT INTO backend_auth.player_rating_states (
+    account_id, created_at, updated_at
+  )
+  VALUES ($1, $2, $2)
+`;
+
 const INSERT_EXTERNAL_IDENTITY_SQL = `
   INSERT INTO backend_auth.external_identities (
     id, account_id, provider, namespace, status, is_primary
@@ -362,6 +369,7 @@ function constraintFailure(
   switch (constraint) {
     case 'accounts_pkey':
     case 'player_profiles_pkey':
+    case 'player_rating_states_pkey':
       return 'account_binding_conflict';
     case 'external_identities_one_linked_primary_uidx':
       return 'identity_binding_conflict';
@@ -500,6 +508,10 @@ export class PostgresPlayerAccountProvisioningRepository
         createdAt,
       ]);
       await transaction.query(INSERT_PLAYER_PROFILE_SQL, [accountId]);
+      await transaction.query(INSERT_PLAYER_RATING_STATE_SQL, [
+        accountId,
+        createdAt,
+      ]);
       await transaction.query(INSERT_EXTERNAL_IDENTITY_SQL, [
         validated.identity.identityId,
         accountId,

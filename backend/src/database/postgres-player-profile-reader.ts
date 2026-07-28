@@ -15,6 +15,7 @@ const MAX_NAME_CODE_POINTS = 256;
 const MAX_SHORT_TEXT_CODE_POINTS = 64;
 const MAX_PHOTO_URL_CODE_POINTS = 2_048;
 const PHONE_PATTERN = /^\+[1-9][0-9]{6,14}$/u;
+const RATING_PATTERN = /^(?:[0-9]\.[0-9]{2}|10\.00)$/u;
 const SIDE_PREFERENCES = Object.freeze([
   'Left',
   'Both',
@@ -23,16 +24,20 @@ const SIDE_PREFERENCES = Object.freeze([
 
 const FIND_PLAYER_PROFILE_SQL = `
   SELECT
-    account_id,
-    first_name,
-    last_name,
-    username,
-    photo_url,
-    language_code,
-    phone,
-    side_preference
-  FROM backend_auth.player_profile_details
-  WHERE account_id = $1
+    details.account_id,
+    details.first_name,
+    details.last_name,
+    details.username,
+    details.photo_url,
+    details.language_code,
+    details.phone,
+    details.side_preference,
+    rating_states.rating,
+    rating_states.is_verified
+  FROM backend_auth.player_profile_details AS details
+  LEFT JOIN backend_auth.player_rating_states AS rating_states
+    ON rating_states.account_id = details.account_id
+  WHERE details.account_id = $1
 `;
 
 interface PlayerProfileRow extends QueryResultRow {
@@ -44,6 +49,8 @@ interface PlayerProfileRow extends QueryResultRow {
   readonly language_code: unknown;
   readonly phone: unknown;
   readonly side_preference: unknown;
+  readonly rating: unknown;
+  readonly is_verified: unknown;
 }
 
 function failure(
@@ -145,6 +152,24 @@ function readSidePreference(
   return value as (typeof SIDE_PREFERENCES)[number];
 }
 
+function readRating(value: unknown): number {
+  if (typeof value !== 'string' || !RATING_PATTERN.test(value)) {
+    throw failure('invalid_persisted_state');
+  }
+  const rating = Number(value);
+  if (!Number.isFinite(rating) || rating < 0 || rating > 10) {
+    throw failure('invalid_persisted_state');
+  }
+  return rating;
+}
+
+function readVerification(value: unknown): boolean {
+  if (typeof value !== 'boolean') {
+    throw failure('invalid_persisted_state');
+  }
+  return value;
+}
+
 function hydrateProfile(
   row: PlayerProfileRow,
   expectedAccountId: ReadPlayerProfileInput['accountId'],
@@ -172,6 +197,8 @@ function hydrateProfile(
   const photoUrl = readPhotoUrl(row.photo_url);
   const phone = readPhone(row.phone);
   const sidePreference = readSidePreference(row.side_preference);
+  const rating = readRating(row.rating);
+  const isVerified = readVerification(row.is_verified);
 
   return Object.freeze({
     accountId: row.account_id,
@@ -182,6 +209,8 @@ function hydrateProfile(
     ...(languageCode === undefined ? {} : { languageCode }),
     ...(phone === undefined ? {} : { phone }),
     ...(sidePreference === undefined ? {} : { sidePreference }),
+    rating,
+    isVerified,
   });
 }
 

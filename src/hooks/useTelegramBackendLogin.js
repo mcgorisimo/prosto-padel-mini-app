@@ -736,6 +736,15 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
               languageCode: result.profile.languageCode,
               phone: result.profile.phone,
               sidePreference: result.profile.sidePreference,
+              ...(Object.prototype.hasOwnProperty.call(
+                result.profile,
+                'rating',
+              )
+                ? {
+                    rating: result.profile.rating,
+                    isVerified: result.profile.isVerified,
+                  }
+                : {}),
             }),
           });
         }

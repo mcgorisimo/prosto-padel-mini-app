@@ -94,6 +94,8 @@ async function createHarness(): Promise<Harness> {
       languageCode: 'ru',
       phone: '+79990000000',
       sidePreference: 'Right',
+      rating: 3,
+      isVerified: false,
     },
   });
   const nowEpochSeconds = jest.fn<
@@ -119,6 +121,8 @@ async function createHarness(): Promise<Harness> {
       languageCode: 'ru',
       phone: '+79991112233',
       sidePreference: 'Left',
+      rating: 3,
+      isVerified: false,
     },
   });
   const moduleRef = await Test.createTestingModule({
@@ -221,6 +225,8 @@ describe('PlayerProfileController HTTP boundary', () => {
       languageCode: 'ru',
       phone: '+79990000000',
       sidePreference: 'Right',
+      rating: 3,
+      isVerified: false,
     });
     expect(Object.keys(response.json()).sort()).toEqual(
       [
@@ -230,9 +236,11 @@ describe('PlayerProfileController HTTP boundary', () => {
         'lastName',
         'photoUrl',
         'phone',
+        'rating',
         'role',
         'sidePreference',
         'username',
+        'isVerified',
       ].sort(),
     );
     expect(harness.authenticate).toHaveBeenCalledWith({
@@ -341,6 +349,8 @@ describe('PlayerProfileController HTTP boundary', () => {
         languageCode: null,
         phone: null,
         sidePreference: null,
+        rating: 3,
+        isVerified: false,
         extra: PRIVATE_MARKER,
       },
     },
@@ -403,6 +413,8 @@ describe('PlayerProfileController HTTP boundary', () => {
       languageCode: 'ru',
       phone: '+79991112233',
       sidePreference: 'Left',
+      rating: 3,
+      isVerified: false,
     });
     expect(harness.updateOwnProfile).toHaveBeenCalledWith({
       accountId: ACCOUNT_ID,
@@ -420,6 +432,8 @@ describe('PlayerProfileController HTTP boundary', () => {
     { sidePreference: 'Center' },
     { firstName: 'Updated', accountId: ACCOUNT_ID },
     { username: PRIVATE_MARKER },
+    { rating: 3 },
+    { isVerified: false },
   ])('rejects an invalid PATCH body without calling storage %#', async (body) => {
     const response = await inject(
       harness,

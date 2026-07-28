@@ -257,6 +257,12 @@ export function mergeProfileSources(profile, backendProfile, metadata = {}) {
     side_preference: backendProfile?.sidePreference ??
       profile?.side_preference ??
       'Both',
+    rating: typeof backendProfile?.rating === 'number'
+      ? backendProfile.rating
+      : baseProfile.rating,
+    is_verified: typeof backendProfile?.isVerified === 'boolean'
+      ? backendProfile.isVerified
+      : baseProfile.is_verified,
   };
 }
 
@@ -502,7 +508,7 @@ export default function App({
     // remaining profile fields until their data flows are migrated.
     const p = mergeProfileSources(profile, backendProfile, meta);
     
-    const numericRating = p.rating || 3.0;
+    const numericRating = Number.isFinite(p.rating) ? p.rating : 3.0;
     const RATINGS_ORDER = ['D', 'D+', 'C', 'C+', 'B', 'B+', 'A'];
     const levelLabel = getLevelForRating(numericRating)?.label || 'D';
     const ratingIdxFor  = (n) => Math.max(0, RATINGS_ORDER.indexOf(levelLabel));

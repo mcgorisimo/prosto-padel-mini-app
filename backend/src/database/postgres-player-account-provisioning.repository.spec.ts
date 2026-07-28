@@ -185,6 +185,9 @@ function queryLabel(text: string): string {
   if (/INSERT INTO backend_auth\.player_profiles/u.test(text)) {
     return 'insert:profile';
   }
+  if (/INSERT INTO backend_auth\.player_rating_states/u.test(text)) {
+    return 'insert:rating-state';
+  }
   if (/INSERT INTO backend_auth\.external_identities/u.test(text)) {
     return 'insert:identity';
   }
@@ -643,6 +646,7 @@ describe('PostgresPlayerAccountProvisioningRepository', () => {
       'resolve',
       'insert:account',
       'insert:profile',
+      'insert:rating-state',
       'insert:identity',
       'insert:aliases',
       'audit:account_created',
@@ -653,7 +657,7 @@ describe('PostgresPlayerAccountProvisioningRepository', () => {
     expect(audit.calls.every((call) => call.transaction === transaction)).toBe(
       true,
     );
-    expect(transaction.calls).toHaveLength(4);
+    expect(transaction.calls).toHaveLength(5);
 
     const sql = transaction.calls.map((call) => call.text).join(' ');
     expect(sql).not.toMatch(
@@ -661,7 +665,7 @@ describe('PostgresPlayerAccountProvisioningRepository', () => {
     );
   });
 
-  it('maps account, profile, identity, and aliases exactly', async () => {
+  it('maps account, profile, neutral rating state, identity, and aliases exactly', async () => {
     const resolver = new FakeExternalIdentityResolutionRepository();
     const audit = new FakeSecurityAuditRepository();
     const transaction = new FakePostgresTransaction();
@@ -699,7 +703,21 @@ describe('PostgresPlayerAccountProvisioningRepository', () => {
     expect(transaction.calls[1].values).toEqual([ACCOUNT_ID]);
 
     expect(
-      insertColumns(transaction.calls[2].text, 'external_identities'),
+      insertColumns(
+        transaction.calls[2].text,
+        'player_rating_states',
+      ),
+    ).toEqual(['account_id', 'created_at', 'updated_at']);
+    expect(transaction.calls[2].values).toEqual([
+      ACCOUNT_ID,
+      Number.MAX_SAFE_INTEGER.toString(10),
+    ]);
+    expect(transaction.calls[2].text).not.toMatch(
+      /\brating\b|\bis_verified\b/u,
+    );
+
+    expect(
+      insertColumns(transaction.calls[3].text, 'external_identities'),
     ).toEqual([
       'id',
       'account_id',
@@ -708,7 +726,7 @@ describe('PostgresPlayerAccountProvisioningRepository', () => {
       'status',
       'is_primary',
     ]);
-    expect(transaction.calls[2].values).toEqual([
+    expect(transaction.calls[3].values).toEqual([
       IDENTITY_ID,
       ACCOUNT_ID,
       'telegram',
@@ -717,7 +735,7 @@ describe('PostgresPlayerAccountProvisioningRepository', () => {
       true,
     ]);
 
-    const aliasCall = transaction.calls[3];
+    const aliasCall = transaction.calls[4];
     const normalizedAliasSql = aliasCall.text.replace(/\s+/gu, ' ').trim();
     expect(parseAliasInsertSql(aliasCall.text)).toEqual({
       columns: [
@@ -784,9 +802,9 @@ describe('PostgresPlayerAccountProvisioningRepository', () => {
     );
 
     expect(resolver.calls[0].candidates).toHaveLength(1);
-    expect(requireArray(transaction.calls[3].values[4])).toHaveLength(1);
-    expect(requireArray(transaction.calls[3].values[5])).toHaveLength(1);
-    expect(requireArray(transaction.calls[3].values[6])).toHaveLength(1);
+    expect(requireArray(transaction.calls[4].values[4])).toHaveLength(1);
+    expect(requireArray(transaction.calls[4].values[5])).toHaveLength(1);
+    expect(requireArray(transaction.calls[4].values[6])).toHaveLength(1);
   });
 
   it('rejects one version pair with different digests before resolution', async () => {
@@ -874,10 +892,10 @@ describe('PostgresPlayerAccountProvisioningRepository', () => {
     );
 
     const firstBuffer = requireBuffers(
-      firstTransaction.calls[3].values[4],
+      firstTransaction.calls[4].values[4],
     )[0];
     const secondBuffer = requireBuffers(
-      secondTransaction.calls[3].values[4],
+      secondTransaction.calls[4].values[4],
     )[0];
     expect(firstBuffer).not.toBe(secondBuffer);
     firstBuffer[0] = 0;
@@ -907,7 +925,7 @@ describe('PostgresPlayerAccountProvisioningRepository', () => {
     );
 
     const [firstBuffer, secondBuffer] = requireBuffers(
-      transaction.calls[3].values[4],
+      transaction.calls[4].values[4],
     );
     expect(firstBuffer).not.toBe(secondBuffer);
     expect(firstBuffer).toHaveLength(32);
@@ -1001,6 +1019,7 @@ describe('PostgresPlayerAccountProvisioningRepository', () => {
   it.each([
     ['accounts_pkey', 'account_binding_conflict'],
     ['player_profiles_pkey', 'account_binding_conflict'],
+    ['player_rating_states_pkey', 'account_binding_conflict'],
     [
       'external_identities_one_linked_primary_uidx',
       'identity_binding_conflict',

@@ -72,6 +72,8 @@ function profileRow(
     language_code: 'ru',
     phone: '+79990000000',
     side_preference: 'Right',
+    rating: '3.00',
+    is_verified: false,
     ...overrides,
   };
 }
@@ -139,6 +141,8 @@ describe('PostgresPlayerProfileReader', () => {
         languageCode: 'ru',
         phone: '+79990000000',
         sidePreference: 'Right',
+        rating: 3,
+        isVerified: false,
       },
     });
     expect(Object.isFrozen(result)).toBe(true);
@@ -152,8 +156,10 @@ describe('PostgresPlayerProfileReader', () => {
           'lastName',
           'photoUrl',
           'phone',
+          'rating',
           'sidePreference',
           'username',
+          'isVerified',
         ].sort(),
       );
     }
@@ -171,7 +177,7 @@ describe('PostgresPlayerProfileReader', () => {
     expect(transaction.calls).toHaveLength(1);
     const call = transaction.calls[0];
     expect(normalizeSql(call.text)).toBe(
-      'SELECT account_id, first_name, last_name, username, photo_url, language_code, phone, side_preference FROM backend_auth.player_profile_details WHERE account_id = $1',
+      'SELECT details.account_id, details.first_name, details.last_name, details.username, details.photo_url, details.language_code, details.phone, details.side_preference, rating_states.rating, rating_states.is_verified FROM backend_auth.player_profile_details AS details LEFT JOIN backend_auth.player_rating_states AS rating_states ON rating_states.account_id = details.account_id WHERE details.account_id = $1',
     );
     expect(call.values).toEqual([ACCOUNT_ID]);
     const upperSql = normalizeSql(call.text).toUpperCase();
@@ -218,6 +224,28 @@ describe('PostgresPlayerProfileReader', () => {
       profile: {
         accountId: ACCOUNT_ID,
         firstName: 'Synthetic',
+        rating: 3,
+        isVerified: false,
+      },
+    });
+  });
+
+  it('decodes a canonical two-decimal rating and verification flag', async () => {
+    const result = await new PostgresPlayerProfileReader().findByAccountId(
+      new FakeTransaction([
+        queryResult([
+          profileRow({ rating: '0.29', is_verified: true }),
+        ]),
+      ]),
+      { accountId: ACCOUNT_ID },
+    );
+
+    expect(result).toMatchObject({
+      outcome: 'found',
+      profile: {
+        accountId: ACCOUNT_ID,
+        rating: 0.29,
+        isVerified: true,
       },
     });
   });
@@ -233,6 +261,10 @@ describe('PostgresPlayerProfileReader', () => {
     ['non-string language', { language_code: false }],
     ['invalid phone', { phone: '79990000000' }],
     ['invalid side', { side_preference: 'Center' }],
+    ['missing rating state', { rating: null, is_verified: null }],
+    ['invalid rating scale', { rating: '3.001' }],
+    ['out-of-range rating', { rating: '10.01' }],
+    ['invalid verification', { is_verified: 'false' }],
   ])('rejects invalid persisted state: %s', async (_label, overrides) => {
     await expect(
       new PostgresPlayerProfileReader().findByAccountId(

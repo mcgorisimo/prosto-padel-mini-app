@@ -26,6 +26,30 @@ const PROFILE_PATCH_KEYS = Object.freeze([
   'sidePreference',
 ]);
 const SIDE_PREFERENCES = Object.freeze(['Left', 'Both', 'Right']);
+const LEGACY_PROFILE_KEYS = Object.freeze([
+  'accountId',
+  'firstName',
+  'languageCode',
+  'lastName',
+  'phone',
+  'photoUrl',
+  'role',
+  'sidePreference',
+  'username',
+]);
+const RATING_PROFILE_KEYS = Object.freeze([
+  'accountId',
+  'firstName',
+  'isVerified',
+  'languageCode',
+  'lastName',
+  'phone',
+  'photoUrl',
+  'rating',
+  'role',
+  'sidePreference',
+  'username',
+]);
 
 function frozen(outcome, extra = {}) {
   return Object.freeze({ outcome, ...extra });
@@ -45,6 +69,28 @@ function isBoundedString(value, maximumCodePoints) {
     value.length > 0 &&
     [...value].length <= maximumCodePoints
   );
+}
+
+function hasExactKeys(actual, expected) {
+  return (
+    actual.length === expected.length &&
+    actual.every((key, index) => key === expected[index])
+  );
+}
+
+function isRating(value) {
+  if (
+    typeof value !== 'number' ||
+    !Number.isFinite(value) ||
+    value < 0 ||
+    value > 10
+  ) {
+    return false;
+  }
+  const scaled = value * 100;
+  const tolerance =
+    Number.EPSILON * Math.max(1, Math.abs(scaled)) * 4;
+  return Math.abs(scaled - Math.round(scaled)) <= tolerance;
 }
 
 function isNullableBoundedString(value, maximumCodePoints) {
@@ -250,17 +296,9 @@ function authenticationSuccess(body) {
 export function isBackendOwnProfile(value) {
   if (!isPlainObject(value)) return false;
   const keys = Object.keys(value).sort();
+  const hasRatingState = hasExactKeys(keys, RATING_PROFILE_KEYS);
   if (
-    keys.length !== 9 ||
-    keys[0] !== 'accountId' ||
-    keys[1] !== 'firstName' ||
-    keys[2] !== 'languageCode' ||
-    keys[3] !== 'lastName' ||
-    keys[4] !== 'phone' ||
-    keys[5] !== 'photoUrl' ||
-    keys[6] !== 'role' ||
-    keys[7] !== 'sidePreference' ||
-    keys[8] !== 'username' ||
+    (!hasRatingState && !hasExactKeys(keys, LEGACY_PROFILE_KEYS)) ||
     !INTERNAL_UUID_PATTERN.test(value.accountId) ||
     value.role !== 'player' ||
     !isBoundedString(value.firstName, 256) ||
@@ -272,7 +310,10 @@ export function isBackendOwnProfile(value) {
       (typeof value.phone !== 'string' ||
         !PHONE_PATTERN.test(value.phone))) ||
     (value.sidePreference !== null &&
-      !SIDE_PREFERENCES.includes(value.sidePreference))
+      !SIDE_PREFERENCES.includes(value.sidePreference)) ||
+    (hasRatingState &&
+      (!isRating(value.rating) ||
+        typeof value.isVerified !== 'boolean'))
   ) {
     return false;
   }
@@ -321,6 +362,12 @@ function profileSuccess(body, outcome = 'profile_loaded') {
       languageCode: body.languageCode,
       phone: body.phone,
       sidePreference: body.sidePreference,
+      ...(Object.prototype.hasOwnProperty.call(body, 'rating')
+        ? {
+            rating: body.rating,
+            isVerified: body.isVerified,
+          }
+        : {}),
     }),
   });
 }

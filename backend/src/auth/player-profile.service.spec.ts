@@ -71,6 +71,8 @@ function createHarness(): Harness {
       languageCode: 'ru',
       phone: '+79990000000',
       sidePreference: 'Right',
+      rating: 3,
+      isVerified: false,
     },
   });
   const updateByAccountId = jest.fn<
@@ -118,6 +120,8 @@ describe('PlayerProfileService', () => {
         languageCode: 'ru',
         phone: '+79990000000',
         sidePreference: 'Right',
+        rating: 3,
+        isVerified: false,
       },
     });
     expect(harness.transactions.calls).toBe(1);
@@ -138,6 +142,8 @@ describe('PlayerProfileService', () => {
       profile: {
         accountId: ACCOUNT_ID,
         firstName: 'Synthetic',
+        rating: 3,
+        isVerified: false,
       },
     });
 
@@ -153,6 +159,38 @@ describe('PlayerProfileService', () => {
         languageCode: null,
         phone: null,
         sidePreference: null,
+        rating: 3,
+        isVerified: false,
+      },
+    });
+  });
+
+  it('preserves an exact two-decimal rating affected by binary floating point', async () => {
+    const harness = createHarness();
+    harness.findByAccountId.mockResolvedValue({
+      outcome: 'found',
+      profile: {
+        accountId: ACCOUNT_ID,
+        firstName: 'Synthetic',
+        rating: 0.29,
+        isVerified: true,
+      },
+    });
+
+    await expect(harness.service.readOwnProfile(input())).resolves.toEqual({
+      outcome: 'found',
+      profile: {
+        accountId: ACCOUNT_ID,
+        role: 'player',
+        firstName: 'Synthetic',
+        lastName: null,
+        username: null,
+        photoUrl: null,
+        languageCode: null,
+        phone: null,
+        sidePreference: null,
+        rating: 0.29,
+        isVerified: true,
       },
     });
   });
@@ -202,6 +240,9 @@ describe('PlayerProfileService', () => {
     ['empty first name', { firstName: '' }],
     ['invalid optional', { username: '' }],
     ['invalid photo URL', { photoUrl: 'http://example.test/avatar' }],
+    ['missing rating', { rating: undefined }],
+    ['invalid rating', { rating: 10.01 }],
+    ['invalid verification', { isVerified: 'false' }],
     ['extra field', { privateValue: PRIVATE_MARKER }],
   ])('rejects a malformed repository profile: %s', async (_label, patch) => {
     const harness = createHarness();
@@ -210,6 +251,8 @@ describe('PlayerProfileService', () => {
       profile: {
         accountId: ACCOUNT_ID,
         firstName: 'Synthetic',
+        rating: 3,
+        isVerified: false,
         ...patch,
       },
     } as never);
@@ -294,6 +337,8 @@ describe('PlayerProfileService', () => {
         languageCode: 'ru',
         phone: '+79990000000',
         sidePreference: 'Right',
+        rating: 3,
+        isVerified: false,
       },
     });
 

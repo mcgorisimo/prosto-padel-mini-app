@@ -84,6 +84,21 @@ function validOptionalProfileValue(
   return value === undefined || isBoundedString(value, maximumCodePoints);
 }
 
+function isRating(value: unknown): value is number {
+  if (
+    typeof value !== 'number' ||
+    !Number.isFinite(value) ||
+    value < 0 ||
+    value > 10
+  ) {
+    return false;
+  }
+  const scaled = value * 100;
+  const tolerance =
+    Number.EPSILON * Math.max(1, Math.abs(scaled)) * 4;
+  return Math.abs(scaled - Math.round(scaled)) <= tolerance;
+}
+
 function readProfileRecord(
   value: unknown,
   expectedAccountId: ReadOwnPlayerProfileInput['accountId'],
@@ -103,6 +118,8 @@ function readProfileRecord(
           'languageCode',
           'phone',
           'sidePreference',
+          'rating',
+          'isVerified',
         ].includes(key),
     ) ||
     !isAccountId(value.accountId) ||
@@ -118,6 +135,8 @@ function readProfileRecord(
     || (value.sidePreference !== undefined &&
       (typeof value.sidePreference !== 'string' ||
         !['Left', 'Both', 'Right'].includes(value.sidePreference)))
+    || !isRating(value.rating)
+    || typeof value.isVerified !== 'boolean'
   ) {
     return undefined;
   }
@@ -146,6 +165,8 @@ function publicProfile(
     languageCode: profile.languageCode ?? null,
     phone: profile.phone ?? null,
     sidePreference: profile.sidePreference ?? null,
+    rating: profile.rating,
+    isVerified: profile.isVerified,
   });
 }
 

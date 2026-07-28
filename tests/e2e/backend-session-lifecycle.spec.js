@@ -776,6 +776,8 @@ test.describe('backend session credential lifecycle', () => {
             languageCode: 'ru',
             phone: '+79991112233',
             sidePreference: 'Left',
+            rating: 4.25,
+            isVerified: true,
           };
           if (calls === 2) {
             body.internalDigest = 'must-be-rejected';
@@ -795,9 +797,11 @@ test.describe('backend session credential lifecycle', () => {
         acceptedOutcome: accepted.outcome,
         acceptedExactKeys:
           Object.keys(accepted.profile ?? {}).sort().join(',') ===
-          'accountId,firstName,languageCode,lastName,phone,photoUrl,role,sidePreference,username',
+          'accountId,firstName,isVerified,languageCode,lastName,phone,photoUrl,rating,role,sidePreference,username',
         acceptedAccountMatches:
           accepted.profile?.accountId === parameters.accountId,
+        acceptedRating: accepted.profile?.rating,
+        acceptedIsVerified: accepted.profile?.isVerified,
         acceptedExposesCredential:
           Object.prototype.hasOwnProperty.call(accepted, 'credential'),
         malformedOutcome: malformed.outcome,
@@ -835,6 +839,8 @@ test.describe('backend session credential lifecycle', () => {
       acceptedOutcome: 'profile_loaded',
       acceptedExactKeys: true,
       acceptedAccountMatches: true,
+      acceptedRating: 4.25,
+      acceptedIsVerified: true,
       acceptedExposesCredential: false,
       malformedOutcome: 'rejected',
       malformedReason: 'internal_error',
@@ -948,7 +954,7 @@ test.describe('backend session credential lifecycle', () => {
     });
   });
 
-  test('backend editable fields override Supabase after initialization while retaining Supabase-only data', async ({
+  test('backend-owned profile fields override Supabase while legacy fields retain fallback behavior', async ({
     page,
   }) => {
     await prepareTelegramWithSecureStorage(page, null, '');
@@ -962,6 +968,7 @@ test.describe('backend session credential lifecycle', () => {
           last_name: 'Profile',
           username: 'supabase_profile',
           rating: 3.4,
+          is_verified: false,
           phone: '+79990000000',
           side_preference: 'Both',
           role: 'user',
@@ -976,6 +983,8 @@ test.describe('backend session credential lifecycle', () => {
           languageCode: 'ru',
           phone: '+79991112233',
           sidePreference: 'Left',
+          rating: 4.25,
+          isVerified: true,
         },
         {
           first_name: 'Metadata',
@@ -1006,6 +1015,7 @@ test.describe('backend session credential lifecycle', () => {
         lastName: merged.last_name,
         username: merged.username,
         rating: merged.rating,
+        isVerified: merged.is_verified,
         backendPhoneOwned: merged.phone === '+79991112233',
         sidePreference: merged.side_preference,
         supabaseRolePreserved: merged.role === 'user',
@@ -1022,7 +1032,8 @@ test.describe('backend session credential lifecycle', () => {
       firstName: 'Backend',
       lastName: 'Identity',
       username: 'backend_identity',
-      rating: 3.4,
+      rating: 4.25,
+      isVerified: true,
       backendPhoneOwned: true,
       sidePreference: 'Left',
       supabaseRolePreserved: true,

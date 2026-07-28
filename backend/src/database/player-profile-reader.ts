@@ -14,6 +14,8 @@ export interface PlayerProfileRecord {
   readonly languageCode?: string;
   readonly phone?: string;
   readonly sidePreference?: 'Left' | 'Both' | 'Right';
+  readonly rating: number;
+  readonly isVerified: boolean;
 }
 
 export type ReadPlayerProfileResult =

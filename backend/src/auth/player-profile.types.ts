@@ -19,6 +19,8 @@ export interface OwnPlayerProfile {
   readonly languageCode: string | null;
   readonly phone: string | null;
   readonly sidePreference: 'Left' | 'Both' | 'Right' | null;
+  readonly rating: number;
+  readonly isVerified: boolean;
 }
 
 export interface OwnPlayerProfilePatch {
@@ -75,6 +77,21 @@ function isNullableBoundedString(
       value.length > 0 &&
       [...value].length <= maximumCodePoints)
   );
+}
+
+function isRating(value: unknown): value is number {
+  if (
+    typeof value !== 'number' ||
+    !Number.isFinite(value) ||
+    value < 0 ||
+    value > 10
+  ) {
+    return false;
+  }
+  const scaled = value * 100;
+  const tolerance =
+    Number.EPSILON * Math.max(1, Math.abs(scaled)) * 4;
+  return Math.abs(scaled - Math.round(scaled)) <= tolerance;
 }
 
 const PHONE_PATTERN = /^\+[1-9][0-9]{6,14}$/u;
@@ -167,6 +184,8 @@ export function isOwnPlayerProfile(
     'languageCode',
     'phone',
     'sidePreference',
+    'rating',
+    'isVerified',
   ] as const;
   if (
     !isRecord(value) ||
@@ -190,6 +209,8 @@ export function isOwnPlayerProfile(
         !SIDE_PREFERENCES.includes(
           value.sidePreference as (typeof SIDE_PREFERENCES)[number],
         )))
+    || !isRating(value.rating)
+    || typeof value.isVerified !== 'boolean'
   ) {
     return false;
   }
