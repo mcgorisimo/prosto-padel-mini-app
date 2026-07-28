@@ -15,11 +15,14 @@ import { PostgresExternalIdentityResolutionRepository } from '../database/postgr
 import { PostgresInitialSessionRepository } from '../database/postgres-initial-session.repository';
 import { PostgresPlayerAccountProvisioningRepository } from '../database/postgres-player-account-provisioning.repository';
 import { PostgresPlayerProfileDetailsRepository } from '../database/postgres-player-profile-details.repository';
+import { PostgresPlayerProfileReader } from '../database/postgres-player-profile-reader';
 import { PostgresSessionAuthenticationRepository } from '../database/postgres-session-authentication.repository';
 import { PostgresSessionCredentialLifecycleRepository } from '../database/postgres-session-credential-lifecycle.repository';
 import { PostgresTelegramAuthenticationOperationRepository } from '../database/postgres-telegram-authentication-operation.repository';
 import { PostgresTransactionExecutorAdapter } from '../database/postgres-transaction-executor.adapter';
 import { NodeSessionCredentialIssuer } from './session-credential-issuer.adapter';
+import { PlayerProfileController } from './player-profile.controller';
+import { PlayerProfileService } from './player-profile.service';
 import { SessionAuthenticationController } from './session-authentication.controller';
 import {
   SESSION_AUTHENTICATION_CLOCK_PROVIDER,
@@ -214,18 +217,37 @@ function createSessionAuthenticationService(
   });
 }
 
+function createPlayerProfileService(
+  transactions: PostgresTransactionExecutorAdapter,
+  profiles: PostgresPlayerProfileReader,
+): PlayerProfileService {
+  return new PlayerProfileService({
+    transactions,
+    profiles,
+  });
+}
+
 @Module({
   imports: [DatabaseModule],
   controllers: [
     TelegramLoginController,
     SessionLifecycleController,
     SessionAuthenticationController,
+    PlayerProfileController,
   ],
   providers: [
     TELEGRAM_LOGIN_HTTP_CLOCK_PROVIDER,
     SESSION_LIFECYCLE_HTTP_CLOCK_PROVIDER,
     SESSION_AUTHENTICATION_CLOCK_PROVIDER,
     SessionBearerGuard,
+    {
+      provide: PlayerProfileService,
+      inject: [
+        PostgresTransactionExecutorAdapter,
+        PostgresPlayerProfileReader,
+      ],
+      useFactory: createPlayerProfileService,
+    },
     {
       provide: SessionAuthenticationService,
       inject: [
@@ -262,6 +284,7 @@ function createSessionAuthenticationService(
     TELEGRAM_LOGIN_FEATURE,
     SessionAuthenticationService,
     SessionBearerGuard,
+    PlayerProfileService,
   ],
 })
 export class AuthModule {}

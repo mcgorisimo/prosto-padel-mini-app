@@ -18,6 +18,7 @@ import { PostgresExternalIdentityResolutionRepository } from '../database/postgr
 import { PostgresInitialSessionRepository } from '../database/postgres-initial-session.repository';
 import { PostgresPlayerAccountProvisioningRepository } from '../database/postgres-player-account-provisioning.repository';
 import { PostgresPlayerProfileDetailsRepository } from '../database/postgres-player-profile-details.repository';
+import { PostgresPlayerProfileReader } from '../database/postgres-player-profile-reader';
 import { PostgresSecurityAuditRepository } from '../database/postgres-security-audit.repository';
 import { PostgresSessionAuthenticationRepository } from '../database/postgres-session-authentication.repository';
 import { PostgresSessionCredentialLifecycleRepository } from '../database/postgres-session-credential-lifecycle.repository';
@@ -32,6 +33,8 @@ import {
 } from './auth.types';
 import { AuthModule } from './auth.module';
 import { NodeSessionCredentialIssuer } from './session-credential-issuer.adapter';
+import { PlayerProfileController } from './player-profile.controller';
+import { PlayerProfileService } from './player-profile.service';
 import { SessionAuthenticationController } from './session-authentication.controller';
 import {
   SESSION_AUTHENTICATION_CLOCK,
@@ -204,6 +207,16 @@ function getSessionBearerGuardService(
   ).service;
 }
 
+function getPlayerProfileControllerService(
+  controller: PlayerProfileController,
+): PlayerProfileService {
+  return (
+    controller as unknown as {
+      readonly service: PlayerProfileService;
+    }
+  ).service;
+}
+
 function expectProviderNotRegistered(
   moduleRef: TestingModule,
   token: string | symbol | Type<unknown>,
@@ -262,6 +275,18 @@ describe('AuthModule Telegram login wiring', () => {
     expect(moduleRef.get(SessionAuthenticationController)).toBeInstanceOf(
       SessionAuthenticationController,
     );
+    const playerProfile = moduleRef.get(PlayerProfileService);
+    expect(playerProfile.dependencies.transactions).toBe(
+      moduleRef.get(PostgresTransactionExecutorAdapter),
+    );
+    expect(playerProfile.dependencies.profiles).toBe(
+      moduleRef.get(PostgresPlayerProfileReader),
+    );
+    expect(
+      getPlayerProfileControllerService(
+        moduleRef.get(PlayerProfileController),
+      ),
+    ).toBe(playerProfile);
     expect(() => moduleRef.get(SESSION_AUTHENTICATION_CLOCK)).not.toThrow();
     for (const token of [
       TelegramLoginService,
@@ -320,6 +345,9 @@ describe('AuthModule Telegram login wiring', () => {
     );
     expect(dependencies.profileDetails).toBe(
       moduleRef.get(PostgresPlayerProfileDetailsRepository),
+    );
+    expect(moduleRef.get(PostgresPlayerProfileReader)).toBeInstanceOf(
+      PostgresPlayerProfileReader,
     );
     expect(dependencies.terminalOperations).toBe(
       moduleRef.get(PostgresAuthenticationOperationTerminalRepository),
