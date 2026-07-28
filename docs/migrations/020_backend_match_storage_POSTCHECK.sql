@@ -478,7 +478,7 @@ begin
       (
         'matches',
         'matches_price_per_person_snapshot_check',
-        'check (price_per_person_snapshot is null or price_per_person_snapshot <> ''NaN''::numeric and price_per_person_snapshot > 0::numeric and price_per_person_snapshot <= 1000000::numeric)'
+        'check (price_per_person_snapshot is null or price_per_person_snapshot <> ''nan''::numeric and price_per_person_snapshot > 0::numeric and price_per_person_snapshot <= 1000000::numeric)'
       ),
       (
         'matches',
