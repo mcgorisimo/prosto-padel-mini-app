@@ -744,8 +744,7 @@ begin
             '[[:space:]]+',
             ' ',
             'g'
-          ),
-          '()'
+          )
         )
       end
     from pg_catalog.pg_index index_row
