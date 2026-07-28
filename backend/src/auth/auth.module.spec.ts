@@ -20,6 +20,7 @@ import { PostgresPlayerAccountProvisioningRepository } from '../database/postgre
 import { PostgresPlayerProfileDetailsRepository } from '../database/postgres-player-profile-details.repository';
 import { PostgresPlayerProfileReader } from '../database/postgres-player-profile-reader';
 import { PostgresPlayerProfileWriter } from '../database/postgres-player-profile-writer';
+import { PostgresPublicPlayerProfileSearchRepository } from '../database/postgres-public-player-profile-search.repository';
 import { PostgresSecurityAuditRepository } from '../database/postgres-security-audit.repository';
 import { PostgresSessionAuthenticationRepository } from '../database/postgres-session-authentication.repository';
 import { PostgresSessionCredentialLifecycleRepository } from '../database/postgres-session-credential-lifecycle.repository';
@@ -36,6 +37,8 @@ import { AuthModule } from './auth.module';
 import { NodeSessionCredentialIssuer } from './session-credential-issuer.adapter';
 import { PlayerProfileController } from './player-profile.controller';
 import { PlayerProfileService } from './player-profile.service';
+import { PublicPlayerProfileController } from './public-player-profile.controller';
+import { PublicPlayerProfileService } from './public-player-profile.service';
 import { SessionAuthenticationController } from './session-authentication.controller';
 import {
   SESSION_AUTHENTICATION_CLOCK,
@@ -218,6 +221,16 @@ function getPlayerProfileControllerService(
   ).service;
 }
 
+function getPublicPlayerProfileControllerService(
+  controller: PublicPlayerProfileController,
+): PublicPlayerProfileService {
+  return (
+    controller as unknown as {
+      readonly service: PublicPlayerProfileService;
+    }
+  ).service;
+}
+
 function expectProviderNotRegistered(
   moduleRef: TestingModule,
   token: string | symbol | Type<unknown>,
@@ -294,6 +307,20 @@ describe('AuthModule Telegram login wiring', () => {
         moduleRef.get(PlayerProfileController),
       ),
     ).toBe(playerProfile);
+    const publicPlayerProfile = moduleRef.get(
+      PublicPlayerProfileService,
+    );
+    expect(publicPlayerProfile.dependencies.transactions).toBe(
+      moduleRef.get(PostgresTransactionExecutorAdapter),
+    );
+    expect(publicPlayerProfile.dependencies.profiles).toBe(
+      moduleRef.get(PostgresPublicPlayerProfileSearchRepository),
+    );
+    expect(
+      getPublicPlayerProfileControllerService(
+        moduleRef.get(PublicPlayerProfileController),
+      ),
+    ).toBe(publicPlayerProfile);
     expect(() => moduleRef.get(SESSION_AUTHENTICATION_CLOCK)).not.toThrow();
     for (const token of [
       TelegramLoginService,

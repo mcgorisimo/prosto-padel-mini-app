@@ -17,6 +17,7 @@ import { PostgresPlayerAccountProvisioningRepository } from '../database/postgre
 import { PostgresPlayerProfileDetailsRepository } from '../database/postgres-player-profile-details.repository';
 import { PostgresPlayerProfileReader } from '../database/postgres-player-profile-reader';
 import { PostgresPlayerProfileWriter } from '../database/postgres-player-profile-writer';
+import { PostgresPublicPlayerProfileSearchRepository } from '../database/postgres-public-player-profile-search.repository';
 import { PostgresSessionAuthenticationRepository } from '../database/postgres-session-authentication.repository';
 import { PostgresSessionCredentialLifecycleRepository } from '../database/postgres-session-credential-lifecycle.repository';
 import { PostgresTelegramAuthenticationOperationRepository } from '../database/postgres-telegram-authentication-operation.repository';
@@ -24,6 +25,8 @@ import { PostgresTransactionExecutorAdapter } from '../database/postgres-transac
 import { NodeSessionCredentialIssuer } from './session-credential-issuer.adapter';
 import { PlayerProfileController } from './player-profile.controller';
 import { PlayerProfileService } from './player-profile.service';
+import { PublicPlayerProfileController } from './public-player-profile.controller';
+import { PublicPlayerProfileService } from './public-player-profile.service';
 import { SessionAuthenticationController } from './session-authentication.controller';
 import {
   SESSION_AUTHENTICATION_CLOCK_PROVIDER,
@@ -234,6 +237,16 @@ function createPlayerProfileService(
   });
 }
 
+function createPublicPlayerProfileService(
+  transactions: PostgresTransactionExecutorAdapter,
+  profiles: PostgresPublicPlayerProfileSearchRepository,
+): PublicPlayerProfileService {
+  return new PublicPlayerProfileService({
+    transactions,
+    profiles,
+  });
+}
+
 @Module({
   imports: [DatabaseModule],
   controllers: [
@@ -241,12 +254,21 @@ function createPlayerProfileService(
     SessionLifecycleController,
     SessionAuthenticationController,
     PlayerProfileController,
+    PublicPlayerProfileController,
   ],
   providers: [
     TELEGRAM_LOGIN_HTTP_CLOCK_PROVIDER,
     SESSION_LIFECYCLE_HTTP_CLOCK_PROVIDER,
     SESSION_AUTHENTICATION_CLOCK_PROVIDER,
     SessionBearerGuard,
+    {
+      provide: PublicPlayerProfileService,
+      inject: [
+        PostgresTransactionExecutorAdapter,
+        PostgresPublicPlayerProfileSearchRepository,
+      ],
+      useFactory: createPublicPlayerProfileService,
+    },
     {
       provide: PlayerProfileService,
       inject: [
@@ -294,6 +316,7 @@ function createPlayerProfileService(
     SessionAuthenticationService,
     SessionBearerGuard,
     PlayerProfileService,
+    PublicPlayerProfileService,
   ],
 })
 export class AuthModule {}

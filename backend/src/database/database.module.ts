@@ -7,6 +7,7 @@ import { PostgresPlayerAccountProvisioningRepository } from './postgres-player-a
 import { PostgresPlayerProfileDetailsRepository } from './postgres-player-profile-details.repository';
 import { PostgresPlayerProfileReader } from './postgres-player-profile-reader';
 import { PostgresPlayerProfileWriter } from './postgres-player-profile-writer';
+import { PostgresPublicPlayerProfileSearchRepository } from './postgres-public-player-profile-search.repository';
 import { PostgresSecurityAuditRepository } from './postgres-security-audit.repository';
 import { PostgresSessionAuthenticationRepository } from './postgres-session-authentication.repository';
 import { PostgresSessionCredentialLifecycleRepository } from './postgres-session-credential-lifecycle.repository';
@@ -22,6 +23,7 @@ const DATABASE_WORKFLOW_PROVIDERS: Provider[] = [
   PostgresPlayerProfileDetailsRepository,
   PostgresPlayerProfileReader,
   PostgresPlayerProfileWriter,
+  PostgresPublicPlayerProfileSearchRepository,
   PostgresSessionAuthenticationRepository,
   {
     provide: PostgresTransactionExecutorAdapter,
@@ -92,6 +94,7 @@ const DATABASE_WORKFLOW_EXPORTS = [
   PostgresPlayerProfileDetailsRepository,
   PostgresPlayerProfileReader,
   PostgresPlayerProfileWriter,
+  PostgresPublicPlayerProfileSearchRepository,
   PostgresAuthenticationOperationTerminalRepository,
   PostgresInitialSessionRepository,
   PostgresSessionCredentialLifecycleRepository,
