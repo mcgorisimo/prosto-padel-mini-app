@@ -16,6 +16,7 @@ import { PostgresAccountStatusReader } from '../database/postgres-account-status
 import { PostgresAuthenticationOperationTerminalRepository } from '../database/postgres-authentication-operation-terminal.repository';
 import { PostgresExternalIdentityResolutionRepository } from '../database/postgres-external-identity.repository';
 import { PostgresInitialSessionRepository } from '../database/postgres-initial-session.repository';
+import { PostgresMatchInvitationRepository } from '../database/postgres-match-invitation.repository';
 import { PostgresMatchRepository } from '../database/postgres-match.repository';
 import { PostgresPlayerAccountProvisioningRepository } from '../database/postgres-player-account-provisioning.repository';
 import { PostgresPlayerProfileDetailsRepository } from '../database/postgres-player-profile-details.repository';
@@ -32,6 +33,8 @@ import { PostgresTransactionExecutorAdapter } from '../database/postgres-transac
 import { MatchApiService } from '../matches/match-api.service';
 import { MATCH_COURT_CATALOG } from '../matches/match-court-catalog';
 import { MatchController } from '../matches/match.controller';
+import { MatchInvitationController } from '../matches/match-invitation.controller';
+import { MatchInvitationService } from '../matches/match-invitation.service';
 import {
   AuthenticationProofFingerprint,
   VerifiedTelegramProof,
@@ -245,6 +248,16 @@ function getMatchControllerService(
   ).service;
 }
 
+function getMatchInvitationControllerService(
+  controller: MatchInvitationController,
+): MatchInvitationService {
+  return (
+    controller as unknown as {
+      readonly service: MatchInvitationService;
+    }
+  ).service;
+}
+
 function expectProviderNotRegistered(
   moduleRef: TestingModule,
   token: string | symbol | Type<unknown>,
@@ -356,6 +369,27 @@ describe('AuthModule Telegram login wiring', () => {
     expect(
       getMatchControllerService(moduleRef.get(MatchController)),
     ).toBe(matchApi);
+    const matchInvitations = moduleRef.get(MatchInvitationService);
+    expect(matchInvitations.dependencies.transactions).toBe(
+      moduleRef.get(PostgresTransactionExecutorAdapter),
+    );
+    expect(matchInvitations.dependencies.invitations).toBe(
+      moduleRef.get(PostgresMatchInvitationRepository),
+    );
+    expect(matchInvitations.dependencies.publicProfiles).toBe(
+      moduleRef.get(PostgresPublicPlayerProfileSearchRepository),
+    );
+    expect(matchInvitations.dependencies.clock).toBe(
+      moduleRef.get(SESSION_AUTHENTICATION_CLOCK),
+    );
+    expect(
+      getMatchInvitationControllerService(
+        moduleRef.get(MatchInvitationController),
+      ),
+    ).toBe(matchInvitations);
+    expect(
+      moduleRef.get(PostgresMatchInvitationRepository).matches,
+    ).toBe(matchRepository);
     expect(() => moduleRef.get(SESSION_AUTHENTICATION_CLOCK)).not.toThrow();
     for (const token of [
       TelegramLoginService,

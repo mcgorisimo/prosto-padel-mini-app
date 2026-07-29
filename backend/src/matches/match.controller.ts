@@ -102,6 +102,12 @@ function rejection(reason: MatchApiRejection): HttpException {
         'match_already_joined',
         'Player has already joined the match',
       );
+    case 'invitation_pending':
+      return publicError(
+        HttpStatus.CONFLICT,
+        'match_invitation_pending',
+        'Respond to the pending invitation before joining',
+      );
     case 'match_full':
       return publicError(
         HttpStatus.CONFLICT,

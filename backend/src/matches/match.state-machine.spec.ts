@@ -229,6 +229,41 @@ describe('match state machine', () => {
     });
   });
 
+  it('protects reserved invitation slots and accepts the requested invited slot', () => {
+    expect(
+      transitionMatch(
+        createdState(),
+        joinCommand({ reservedSlotNumbers: [2] }),
+      ),
+    ).toMatchObject({
+      outcome: 'transitioned',
+      participant: { slotNumber: 3 },
+    });
+
+    expect(
+      transitionMatch(
+        createdState(),
+        joinCommand({
+          requestedSlotNumber: 3,
+          reservedSlotNumbers: [2, 4],
+        }),
+      ),
+    ).toMatchObject({
+      outcome: 'transitioned',
+      participant: { slotNumber: 3 },
+    });
+
+    expect(
+      transitionMatch(
+        createdState(),
+        joinCommand({ reservedSlotNumbers: [2, 3, 4] }),
+      ),
+    ).toEqual({
+      outcome: 'rejected',
+      reason: 'match_full',
+    });
+  });
+
   it('leaves an active participant without deleting its history', () => {
     const command: LeaveMatchCommand = {
       type: 'leave_match',

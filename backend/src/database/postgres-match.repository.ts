@@ -23,6 +23,7 @@ import {
   MatchCommandId,
   MatchDurationMinutes,
   MatchId,
+  MatchInvitationId,
   MatchParticipantId,
   MatchParticipantState,
   MatchRequestDigest,
@@ -31,6 +32,7 @@ import {
   MatchStatus,
   isMatchCommandId,
   isMatchId,
+  isMatchInvitationId,
   isMatchParticipantId,
   isMatchRequestDigest,
 } from '../matches/match.types';
@@ -158,6 +160,15 @@ const SELECT_ACTOR_RATING_SQL = `
   SELECT rating, is_verified
   FROM backend_auth.player_rating_states
   WHERE account_id = $1
+`;
+
+const SELECT_PENDING_INVITATIONS_FOR_UPDATE_SQL = `
+  SELECT id, invited_account_id, slot_number
+  FROM backend_match.match_invitations
+  WHERE match_id = $1
+    AND status = 'pending'
+  ORDER BY slot_number, id
+  FOR UPDATE
 `;
 
 const INSERT_MATCH_SQL = `
@@ -404,6 +415,12 @@ interface ActorRatingRow extends QueryResultRow {
   readonly is_verified: unknown;
 }
 
+interface PendingInvitationRow extends QueryResultRow {
+  readonly id: unknown;
+  readonly invited_account_id: unknown;
+  readonly slot_number: unknown;
+}
+
 interface VisibleMatchRow extends MatchRow {
   readonly participant_id: unknown;
   readonly participant_match_id: unknown;
@@ -534,7 +551,7 @@ function readNullableRating(value: unknown): number | undefined {
   return value as number;
 }
 
-function readPlayerRatingLevel(value: unknown): number {
+export function readPlayerRatingLevel(value: unknown): number {
   if (
     typeof value !== 'string' ||
     !PLAYER_RATING_PATTERN.test(value)
@@ -1048,9 +1065,12 @@ function originalCreateDetail(
 }
 
 function assertJoinInput(input: JoinMatchInput): void {
+  const keys = Object.keys(input);
   if (
     !isPlainRecord(input) ||
-    Object.keys(input).length !== 7 ||
+    (keys.length !== 7 && keys.length !== 8) ||
+    (input.invitationId !== undefined &&
+      !isMatchInvitationId(input.invitationId)) ||
     !isValidMatchCommand({
       ...input,
       actorRatingLevel: 0,
@@ -1568,6 +1588,60 @@ export class PostgresMatchRepository implements MatchRepository {
             candidate.commandId === command.commandId,
         )
       ) {
+        const pending = await transaction.query<PendingInvitationRow>(
+          SELECT_PENDING_INVITATIONS_FOR_UPDATE_SQL,
+          [command.matchId],
+        );
+        if (
+          pending.rowCount !== pending.rows.length ||
+          pending.rows.length > 3
+        ) {
+          throw invalidPersistedState();
+        }
+        const reservations = pending.rows.map((row) => {
+          if (
+            !isMatchInvitationId(row.id) ||
+            !isAccountId(row.invited_account_id) ||
+            ![2, 3, 4].includes(row.slot_number as number)
+          ) {
+            throw invalidPersistedState();
+          }
+          return Object.freeze({
+            invitationId: row.id as MatchInvitationId,
+            invitedAccountId: row.invited_account_id as AccountId,
+            slotNumber: row.slot_number as 2 | 3 | 4,
+          });
+        });
+        const requestedInvitation =
+          command.invitationId === undefined
+            ? undefined
+            : reservations.find(
+                (candidate) =>
+                  candidate.invitationId === command.invitationId,
+              );
+        if (
+          command.invitationId === undefined &&
+          reservations.some(
+            (candidate) =>
+              candidate.invitedAccountId === command.actorAccountId,
+          )
+        ) {
+          return Object.freeze({
+            outcome: 'rejected',
+            reason: 'invitation_pending',
+          });
+        }
+        if (
+          command.invitationId !== undefined &&
+          (requestedInvitation === undefined ||
+            requestedInvitation.invitedAccountId !==
+              command.actorAccountId)
+        ) {
+          return Object.freeze({
+            outcome: 'rejected',
+            reason: 'match_not_joinable',
+          });
+        }
         const rating = await transaction.query<ActorRatingRow>(
           SELECT_ACTOR_RATING_SQL,
           [command.actorAccountId],
@@ -1584,12 +1658,27 @@ export class PostgresMatchRepository implements MatchRepository {
               : (() => {
                   throw invalidPersistedState();
                 })(),
+          ...(requestedInvitation === undefined
+            ? {}
+            : {
+                requestedSlotNumber:
+                  requestedInvitation.slotNumber,
+              }),
+          reservedSlotNumbers: Object.freeze(
+            reservations
+              .filter(
+                (candidate) =>
+                  candidate.invitationId !== command.invitationId,
+              )
+              .map((candidate) => candidate.slotNumber),
+          ),
         });
       } else {
         stateMachineCommand = Object.freeze({
           ...command,
           actorRatingLevel: 0,
           actorIsVerified: false,
+          reservedSlotNumbers: Object.freeze([]),
         });
       }
       const transition = transitionMatch(

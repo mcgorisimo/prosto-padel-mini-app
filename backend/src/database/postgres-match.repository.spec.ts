@@ -5,6 +5,7 @@ import {
   LeaveMatchCommand,
   MatchCommandId,
   MatchId,
+  MatchInvitationId,
   MatchParticipantId,
   MatchRequestDigest,
 } from '../matches/match.types';
@@ -39,6 +40,9 @@ const LEAVE_COMMAND_ID = deterministicUuid(
 const PARTICIPANT_ID = deterministicUuid(
   'repository-participant',
 ) as MatchParticipantId;
+const INVITATION_ID = deterministicUuid(
+  'repository-invitation',
+) as MatchInvitationId;
 const CREATE_DIGEST = '1'.repeat(64) as MatchRequestDigest;
 const JOIN_DIGEST = '2'.repeat(64) as MatchRequestDigest;
 const LEAVE_DIGEST = '3'.repeat(64) as MatchRequestDigest;
@@ -753,6 +757,7 @@ describe('PostgresMatchRepository', () => {
       queryResult([matchRow()]),
       queryResult([]),
       queryResult([commandRow()]),
+      queryResult([]),
       actorRatingResult(),
       queryResult([{ id: PARTICIPANT_ID }], 1, 'INSERT'),
       queryResult([{ id: MATCH_ID, version: '2' }], 1, 'UPDATE'),
@@ -781,6 +786,8 @@ describe('PostgresMatchRepository', () => {
         return 'participant_lock';
       if (sql.includes('FROM backend_match.match_commands'))
         return 'hydrate_commands';
+      if (sql.includes('FROM backend_match.match_invitations'))
+        return 'invitation_lock';
       if (sql.includes('FROM backend_auth.player_rating_states'))
         return 'actor_rating';
       if (sql.startsWith('INSERT INTO backend_match.match_participants'))
@@ -792,6 +799,7 @@ describe('PostgresMatchRepository', () => {
       'match_lock',
       'participant_lock',
       'hydrate_commands',
+      'invitation_lock',
       'actor_rating',
       'participant_write',
       'match_write',
@@ -803,14 +811,84 @@ describe('PostgresMatchRepository', () => {
     expect(normalizeSql(transaction.calls[1].text)).toContain(
       'ORDER BY slot_number, joined_at, id FOR UPDATE',
     );
-    expect(transaction.calls[3].values).toEqual([PLAYER_ID]);
-    expect(transaction.calls[5].values).toEqual([
+    expect(transaction.calls[4].values).toEqual([PLAYER_ID]);
+    expect(transaction.calls[6].values).toEqual([
       MATCH_ID,
       1_800_000_100,
       2,
       'open',
       1,
     ]);
+  });
+
+  it('reserves pending invitation slots from ordinary joins', async () => {
+    const transaction = new FakeTransaction([
+      queryResult([matchRow()]),
+      queryResult([]),
+      queryResult([commandRow()]),
+      queryResult([
+        {
+          id: INVITATION_ID,
+          invited_account_id: VIEWER_ID,
+          slot_number: 2,
+        },
+      ]),
+      actorRatingResult(),
+      queryResult([{ id: PARTICIPANT_ID }], 1, 'INSERT'),
+      queryResult([{ id: MATCH_ID, version: '2' }], 1, 'UPDATE'),
+      queryResult([{ command_id: JOIN_COMMAND_ID }], 1, 'INSERT'),
+    ]);
+
+    await expect(
+      repository().join(transaction, joinCommand()),
+    ).resolves.toMatchObject({
+      outcome: 'participant_joined',
+      participant: { slotNumber: 3 },
+    });
+    expect(transaction.calls[5].values[3]).toBe(3);
+  });
+
+  it('requires an invited player to accept its reserved invitation', async () => {
+    const pendingInvitation = {
+      id: INVITATION_ID,
+      invited_account_id: PLAYER_ID,
+      slot_number: 2,
+    };
+    const ordinary = new FakeTransaction([
+      queryResult([matchRow()]),
+      queryResult([]),
+      queryResult([commandRow()]),
+      queryResult([pendingInvitation]),
+    ]);
+
+    await expect(
+      repository().join(ordinary, joinCommand()),
+    ).resolves.toEqual({
+      outcome: 'rejected',
+      reason: 'invitation_pending',
+    });
+    expect(ordinary.calls).toHaveLength(4);
+
+    const accepted = new FakeTransaction([
+      queryResult([matchRow()]),
+      queryResult([]),
+      queryResult([commandRow()]),
+      queryResult([pendingInvitation]),
+      actorRatingResult(),
+      queryResult([{ id: PARTICIPANT_ID }], 1, 'INSERT'),
+      queryResult([{ id: MATCH_ID, version: '2' }], 1, 'UPDATE'),
+      queryResult([{ command_id: JOIN_COMMAND_ID }], 1, 'INSERT'),
+    ]);
+
+    await expect(
+      repository().join(
+        accepted,
+        joinCommand({ invitationId: INVITATION_ID }),
+      ),
+    ).resolves.toMatchObject({
+      outcome: 'participant_joined',
+      participant: { slotNumber: 2 },
+    });
   });
 
   it('returns idempotent join from persisted command without writes or a new participant binding', async () => {
@@ -935,6 +1013,7 @@ describe('PostgresMatchRepository', () => {
       queryResult([matchRow()]),
       queryResult([]),
       queryResult([commandRow()]),
+      queryResult([]),
       actorRatingResult(),
     ]);
     const ownerJoin = await repository().join(
@@ -945,7 +1024,7 @@ describe('PostgresMatchRepository', () => {
       outcome: 'rejected',
       reason: 'owner_cannot_join',
     });
-    expect(ownerTransaction.calls).toHaveLength(4);
+    expect(ownerTransaction.calls).toHaveLength(5);
   });
 
   it('uses the trusted backend rating state and rejects an out-of-range join', async () => {
@@ -953,6 +1032,7 @@ describe('PostgresMatchRepository', () => {
       queryResult([matchRow()]),
       queryResult([]),
       queryResult([commandRow()]),
+      queryResult([]),
       actorRatingResult('7.51'),
     ]);
 
@@ -965,11 +1045,11 @@ describe('PostgresMatchRepository', () => {
       outcome: 'rejected',
       reason: 'rating_out_of_range',
     });
-    expect(transaction.calls).toHaveLength(4);
-    expect(normalizeSql(transaction.calls[3].text)).toContain(
+    expect(transaction.calls).toHaveLength(5);
+    expect(normalizeSql(transaction.calls[4].text)).toContain(
       'SELECT rating, is_verified FROM backend_auth.player_rating_states',
     );
-    expect(transaction.calls[3].values).toEqual([PLAYER_ID]);
+    expect(transaction.calls[4].values).toEqual([PLAYER_ID]);
   });
 
   it('uses trusted backend verification and rejects an unverified rating join', async () => {
@@ -977,6 +1057,7 @@ describe('PostgresMatchRepository', () => {
       queryResult([matchRow()]),
       queryResult([]),
       queryResult([commandRow()]),
+      queryResult([]),
       actorRatingResult('3.00', false),
     ]);
 
@@ -986,7 +1067,7 @@ describe('PostgresMatchRepository', () => {
       outcome: 'rejected',
       reason: 'rating_verification_required',
     });
-    expect(transaction.calls).toHaveLength(4);
+    expect(transaction.calls).toHaveLength(5);
     expect(
       transaction.calls.some((call) =>
         normalizeSql(call.text).startsWith('INSERT'),

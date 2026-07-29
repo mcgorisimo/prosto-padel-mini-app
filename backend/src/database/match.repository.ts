@@ -6,6 +6,7 @@ import {
   LeaveMatchCommand,
   MatchDurationMinutes,
   MatchId,
+  MatchInvitationId,
   MatchKind,
   MatchParticipantState,
   MatchScenario,
@@ -27,6 +28,7 @@ export type MatchCommandRejection =
   | 'rating_out_of_range'
   | 'owner_cannot_join'
   | 'already_joined'
+  | 'invitation_pending'
   | 'match_full'
   | 'participant_not_active';
 
@@ -141,8 +143,13 @@ export interface MatchDetailRecord {
 
 export type JoinMatchInput = Omit<
   JoinMatchCommand,
-  'actorRatingLevel' | 'actorIsVerified'
->;
+  | 'actorRatingLevel'
+  | 'actorIsVerified'
+  | 'requestedSlotNumber'
+  | 'reservedSlotNumbers'
+> & {
+  readonly invitationId?: MatchInvitationId;
+};
 
 export type MatchPersistenceFailure =
   | 'invalid_input'

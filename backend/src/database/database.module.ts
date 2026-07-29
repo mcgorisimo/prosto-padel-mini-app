@@ -9,6 +9,7 @@ import { PostgresAuthenticationOperationTerminalRepository } from './postgres-au
 import { PostgresExternalIdentityResolutionRepository } from './postgres-external-identity.repository';
 import { PostgresInitialSessionRepository } from './postgres-initial-session.repository';
 import { PostgresMatchRepository } from './postgres-match.repository';
+import { PostgresMatchInvitationRepository } from './postgres-match-invitation.repository';
 import { PostgresPlayerAccountProvisioningRepository } from './postgres-player-account-provisioning.repository';
 import { PostgresPlayerProfileDetailsRepository } from './postgres-player-profile-details.repository';
 import { PostgresPlayerProfileReader } from './postgres-player-profile-reader';
@@ -44,6 +45,14 @@ const DATABASE_WORKFLOW_PROVIDERS: Provider[] = [
       courts: MatchCourtCatalog,
     ): PostgresMatchRepository =>
       new PostgresMatchRepository(profiles, courts),
+  },
+  {
+    provide: PostgresMatchInvitationRepository,
+    inject: [PostgresMatchRepository],
+    useFactory: (
+      matches: PostgresMatchRepository,
+    ): PostgresMatchInvitationRepository =>
+      new PostgresMatchInvitationRepository(matches),
   },
   {
     provide: PostgresTransactionExecutorAdapter,
@@ -116,6 +125,7 @@ const DATABASE_WORKFLOW_EXPORTS = [
   PostgresPlayerProfileWriter,
   PostgresPublicPlayerProfileSearchRepository,
   PostgresMatchRepository,
+  PostgresMatchInvitationRepository,
   MATCH_COURT_CATALOG,
   PostgresAuthenticationOperationTerminalRepository,
   PostgresInitialSessionRepository,

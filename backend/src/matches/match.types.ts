@@ -10,6 +10,7 @@ declare const matchIdBrand: unique symbol;
 declare const matchParticipantIdBrand: unique symbol;
 declare const matchCommandIdBrand: unique symbol;
 declare const matchRequestDigestBrand: unique symbol;
+declare const matchInvitationIdBrand: unique symbol;
 
 const SHA_256_HEX_PATTERN = /^[0-9a-f]{64}$/u;
 
@@ -27,6 +28,10 @@ export type MatchCommandId = InternalUuid & {
 
 export type MatchRequestDigest = string & {
   readonly [matchRequestDigestBrand]: 'MatchRequestDigest';
+};
+
+export type MatchInvitationId = InternalUuid & {
+  readonly [matchInvitationIdBrand]: 'MatchInvitationId';
 };
 
 export const MATCH_STATUSES = Object.freeze([
@@ -138,6 +143,8 @@ export interface JoinMatchCommand extends MatchCommandBase {
   readonly participantId: MatchParticipantId;
   readonly actorRatingLevel: number;
   readonly actorIsVerified: boolean;
+  readonly requestedSlotNumber?: MatchSlotNumber;
+  readonly reservedSlotNumbers?: readonly MatchSlotNumber[];
 }
 
 export interface LeaveMatchCommand extends MatchCommandBase {
@@ -167,6 +174,12 @@ export function isMatchRequestDigest(
   value: unknown,
 ): value is MatchRequestDigest {
   return typeof value === 'string' && SHA_256_HEX_PATTERN.test(value);
+}
+
+export function isMatchInvitationId(
+  value: unknown,
+): value is MatchInvitationId {
+  return isInternalUuid(value);
 }
 
 export function newMatchId(): MatchId {

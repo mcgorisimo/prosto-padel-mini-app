@@ -99,6 +99,7 @@ export type MatchApiRejection =
   | 'rating_out_of_range'
   | 'owner_cannot_join'
   | 'already_joined'
+  | 'invitation_pending'
   | 'match_full'
   | 'participant_not_active'
   | 'request_conflict'

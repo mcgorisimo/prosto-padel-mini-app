@@ -155,6 +155,7 @@ function mapRepositoryRejection(
     case 'rating_out_of_range':
     case 'owner_cannot_join':
     case 'already_joined':
+    case 'invitation_pending':
     case 'match_full':
     case 'participant_not_active':
       return reason;

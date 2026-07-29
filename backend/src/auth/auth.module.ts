@@ -14,6 +14,7 @@ import { PostgresAuthenticationOperationTerminalRepository } from '../database/p
 import { PostgresExternalIdentityResolutionRepository } from '../database/postgres-external-identity.repository';
 import { PostgresInitialSessionRepository } from '../database/postgres-initial-session.repository';
 import { PostgresMatchRepository } from '../database/postgres-match.repository';
+import { PostgresMatchInvitationRepository } from '../database/postgres-match-invitation.repository';
 import { PostgresPlayerAccountProvisioningRepository } from '../database/postgres-player-account-provisioning.repository';
 import { PostgresPlayerProfileDetailsRepository } from '../database/postgres-player-profile-details.repository';
 import { PostgresPlayerProfileReader } from '../database/postgres-player-profile-reader';
@@ -25,6 +26,8 @@ import { PostgresTelegramAuthenticationOperationRepository } from '../database/p
 import { PostgresTransactionExecutorAdapter } from '../database/postgres-transaction-executor.adapter';
 import { MatchApiService } from '../matches/match-api.service';
 import { MatchController } from '../matches/match.controller';
+import { MatchInvitationController } from '../matches/match-invitation.controller';
+import { MatchInvitationService } from '../matches/match-invitation.service';
 import { NodeSessionCredentialIssuer } from './session-credential-issuer.adapter';
 import { PlayerProfileController } from './player-profile.controller';
 import { PlayerProfileService } from './player-profile.service';
@@ -264,6 +267,20 @@ function createMatchApiService(
   });
 }
 
+function createMatchInvitationService(
+  transactions: PostgresTransactionExecutorAdapter,
+  invitations: PostgresMatchInvitationRepository,
+  publicProfiles: PostgresPublicPlayerProfileSearchRepository,
+  clock: SessionAuthenticationClock,
+): MatchInvitationService {
+  return new MatchInvitationService({
+    transactions,
+    invitations,
+    publicProfiles,
+    clock,
+  });
+}
+
 @Module({
   imports: [DatabaseModule],
   controllers: [
@@ -273,12 +290,23 @@ function createMatchApiService(
     PlayerProfileController,
     PublicPlayerProfileController,
     MatchController,
+    MatchInvitationController,
   ],
   providers: [
     TELEGRAM_LOGIN_HTTP_CLOCK_PROVIDER,
     SESSION_LIFECYCLE_HTTP_CLOCK_PROVIDER,
     SESSION_AUTHENTICATION_CLOCK_PROVIDER,
     SessionBearerGuard,
+    {
+      provide: MatchInvitationService,
+      inject: [
+        PostgresTransactionExecutorAdapter,
+        PostgresMatchInvitationRepository,
+        PostgresPublicPlayerProfileSearchRepository,
+        SESSION_AUTHENTICATION_CLOCK,
+      ],
+      useFactory: createMatchInvitationService,
+    },
     {
       provide: MatchApiService,
       inject: [
@@ -346,6 +374,7 @@ function createMatchApiService(
     PlayerProfileService,
     PublicPlayerProfileService,
     MatchApiService,
+    MatchInvitationService,
   ],
 })
 export class AuthModule {}

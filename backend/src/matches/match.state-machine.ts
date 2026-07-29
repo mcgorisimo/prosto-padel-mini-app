@@ -158,13 +158,22 @@ function isValidCreateCommand(command: CreateMatchCommand): boolean {
 }
 
 function isValidJoinCommand(command: JoinMatchCommand): boolean {
+  const reservedSlots = command.reservedSlotNumbers ?? [];
   return (
     isValidCommandBase(command) &&
     isMatchParticipantId(command.participantId) &&
     Number.isInteger(command.actorRatingLevel) &&
     command.actorRatingLevel >= 0 &&
     command.actorRatingLevel <= 6 &&
-    typeof command.actorIsVerified === 'boolean'
+    typeof command.actorIsVerified === 'boolean' &&
+    (command.requestedSlotNumber === undefined ||
+      [2, 3, 4].includes(command.requestedSlotNumber)) &&
+    Array.isArray(reservedSlots) &&
+    reservedSlots.length <= 3 &&
+    reservedSlots.every((slot) => [2, 3, 4].includes(slot)) &&
+    new Set(reservedSlots).size === reservedSlots.length &&
+    (command.requestedSlotNumber === undefined ||
+      !reservedSlots.includes(command.requestedSlotNumber))
   );
 }
 
@@ -195,13 +204,25 @@ function sameBinding(
   );
 }
 
-function nextSlot(state: MatchState): MatchSlotNumber | undefined {
+function nextSlot(
+  state: MatchState,
+  command: JoinMatchCommand,
+): MatchSlotNumber | undefined {
   const active = new Set(
     state.participants
       .filter((participant) => participant.status === 'active')
       .map((participant) => participant.slotNumber),
   );
-  return ([2, 3, 4] as const).find((slot) => !active.has(slot));
+  const reserved = new Set(command.reservedSlotNumbers ?? []);
+  if (command.requestedSlotNumber !== undefined) {
+    return active.has(command.requestedSlotNumber) ||
+      reserved.has(command.requestedSlotNumber)
+      ? undefined
+      : command.requestedSlotNumber;
+  }
+  return ([2, 3, 4] as const).find(
+    (slot) => !active.has(slot) && !reserved.has(slot),
+  );
 }
 
 function appliedCommand(
@@ -387,7 +408,7 @@ function joinMatch(
       reason: 'already_joined',
     });
   }
-  const slotNumber = nextSlot(state);
+  const slotNumber = nextSlot(state, command);
   if (slotNumber === undefined) {
     return Object.freeze({ outcome: 'rejected', reason: 'match_full' });
   }
