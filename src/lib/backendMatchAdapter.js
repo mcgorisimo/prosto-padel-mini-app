@@ -104,6 +104,61 @@ export function isBackendOwnedMatch(match) {
   return match?.backendOwned === true;
 }
 
+export function mapBackendPublicPlayerToApp(player) {
+  if (!player || typeof player !== 'object') return null;
+  return Object.freeze({
+    id: player.playerId,
+    first_name: player.firstName,
+    last_name: player.lastName ?? '',
+    username: player.username ?? '',
+    rating: player.rating,
+    is_verified: player.isVerified,
+    side_preference: 'Both',
+    backendOwned: true,
+  });
+}
+
+export function mapBackendInvitationToApp(invitation) {
+  if (!invitation || typeof invitation !== 'object') return null;
+  const dateTime = moscowDateTime(invitation.match?.startsAt);
+  const invitedPlayer = mapBackendPublicPlayerToApp(
+    invitation.invitedPlayer,
+  );
+  if (!dateTime || !invitedPlayer) return null;
+
+  return Object.freeze({
+    id: invitation.invitationId,
+    invitation_id: invitation.invitationId,
+    match_id: invitation.matchId,
+    invited_by: invitation.invitedByAccountId,
+    invited_user_id: invitation.invitedAccountId,
+    slot_index: invitation.slotNumber - 1,
+    status: invitation.status,
+    created_at: invitation.createdAt,
+    updated_at: invitation.updatedAt,
+    responded_at: invitation.respondedAt ?? null,
+    version: invitation.version,
+    organizer_first_name: invitation.match.owner.firstName,
+    organizer_last_name: invitation.match.owner.lastName ?? '',
+    date_iso: dateTime.dateISO,
+    start_time: dateTime.time,
+    court_name: invitation.match.courtName,
+    rating_min: invitation.match.ratingMin,
+    rating_max: invitation.match.ratingMax,
+    is_rating_match: invitation.match.isRatingMatch,
+    price_per_person:
+      invitation.match.pricePerPersonSnapshot ?? null,
+    player: Object.freeze({
+      ...invitedPlayer,
+      firstName: invitedPlayer.first_name,
+      lastName: invitedPlayer.last_name,
+      numericRating: invitedPlayer.rating,
+      isVerified: invitedPlayer.is_verified,
+    }),
+    backendOwned: true,
+  });
+}
+
 export function resolveMatchSource(
   matchId,
   explicitMatch = null,

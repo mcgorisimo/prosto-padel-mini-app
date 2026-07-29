@@ -5,12 +5,16 @@ const LOGOUT_PATH = '/api/v1/auth/session/logout';
 const AUTHENTICATE_PATH = '/api/v1/auth/session/me';
 const PROFILE_PATH = '/api/v1/profile/me';
 const MATCHES_PATH = '/api/v1/matches';
+const PLAYER_SEARCH_PATH = '/api/v1/players/search';
+const MATCH_INVITATIONS_PATH = '/api/v1/match-invitations';
 const REQUEST_TIMEOUT_MS = 8_000;
 const MAX_REQUESTS = 3;
 const BACKOFF_BASE_MS = 250;
 const BACKOFF_MAX_MS = 2_000;
 const MAX_RESPONSE_BODY_BYTES = 32_768;
+const MAX_PLAYER_SEARCH_RESPONSE_BODY_BYTES = 65_536;
 const MAX_MATCH_FEED_RESPONSE_BODY_BYTES = 1_048_576;
+const MAX_MATCH_INVITATION_RESPONSE_BODY_BYTES = 524_288;
 
 const BODY_ABORTED = Symbol('backend-session-body-aborted');
 const BODY_INVALID = Symbol('backend-session-body-invalid');
@@ -57,6 +61,13 @@ const MATCH_CREATE_OPTIONAL_KEYS = Object.freeze([
   'ratingMin',
   'ratingMax',
 ]);
+const MATCH_INVITATION_STATUSES = Object.freeze([
+  'pending',
+  'accepted',
+  'declined',
+  'cancelled',
+]);
+const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f-\u009f]/u;
 const LEGACY_PROFILE_KEYS = Object.freeze([
   'accountId',
   'firstName',
@@ -214,6 +225,126 @@ function isBackendMatchPublicPlayer(value, slotRequired = false) {
     return false;
   }
   return !slotRequired || [2, 3, 4].includes(value.slotNumber);
+}
+
+function isBackendPublicPlayer(value) {
+  return (
+    isPlainObject(value) &&
+    hasExactKeys(
+      Object.keys(value).sort(),
+      [
+        'firstName',
+        'isVerified',
+        'lastName',
+        'playerId',
+        'rating',
+        'username',
+      ],
+    ) &&
+    isMatchId(value.playerId) &&
+    isBoundedString(value.firstName, 256) &&
+    (value.lastName === null || isBoundedString(value.lastName, 256)) &&
+    (value.username === null || isBoundedString(value.username, 64)) &&
+    isRating(value.rating) &&
+    typeof value.isVerified === 'boolean'
+  );
+}
+
+function isBackendMatchInvitationMatch(value) {
+  if (
+    !isPlainObject(value) ||
+    !hasOnlyAllowedKeys(
+      value,
+      [
+        'matchId',
+        'ownerAccountId',
+        'startsAt',
+        'durationMinutes',
+        'courtId',
+        'courtName',
+        'courtType',
+        'scenario',
+        'status',
+        'isRatingMatch',
+        'owner',
+      ],
+      [
+        'title',
+        'ratingMin',
+        'ratingMax',
+        'pricePerPersonSnapshot',
+      ],
+    ) ||
+    !isMatchId(value.matchId) ||
+    !isMatchId(value.ownerAccountId) ||
+    !isUnixEpochSeconds(value.startsAt) ||
+    !MATCH_DURATIONS.includes(value.durationMinutes) ||
+    typeof value.courtId !== 'string' ||
+    typeof value.courtName !== 'string' ||
+    typeof value.courtType !== 'string' ||
+    !MATCH_SCENARIOS.includes(value.scenario) ||
+    !MATCH_STATUSES.includes(value.status) ||
+    !isOptionalMatchTitle(value.title) ||
+    typeof value.isRatingMatch !== 'boolean' ||
+    !isOptionalSafePrice(value.pricePerPersonSnapshot) ||
+    !isBackendMatchPublicPlayer(value.owner) ||
+    value.owner.playerId !== value.ownerAccountId
+  ) {
+    return false;
+  }
+  if (value.scenario === 'private') {
+    return value.ratingMin === undefined && value.ratingMax === undefined;
+  }
+  return (
+    isMatchRating(value.ratingMin) &&
+    isMatchRating(value.ratingMax) &&
+    value.ratingMin <= value.ratingMax
+  );
+}
+
+export function isBackendMatchInvitation(value) {
+  return (
+    isPlainObject(value) &&
+    hasOnlyAllowedKeys(
+      value,
+      [
+        'invitationId',
+        'matchId',
+        'invitedByAccountId',
+        'invitedAccountId',
+        'slotNumber',
+        'status',
+        'createdAt',
+        'updatedAt',
+        'version',
+        'match',
+        'invitedPlayer',
+      ],
+      ['respondedAt'],
+    ) &&
+    isMatchId(value.invitationId) &&
+    isMatchId(value.matchId) &&
+    isMatchId(value.invitedByAccountId) &&
+    isMatchId(value.invitedAccountId) &&
+    [2, 3, 4].includes(value.slotNumber) &&
+    MATCH_INVITATION_STATUSES.includes(value.status) &&
+    isUnixEpochSeconds(value.createdAt) &&
+    isUnixEpochSeconds(value.updatedAt) &&
+    value.updatedAt >= value.createdAt &&
+    (value.respondedAt === undefined ||
+      isUnixEpochSeconds(value.respondedAt)) &&
+    (
+      (value.status === 'pending' && value.respondedAt === undefined) ||
+      (value.status !== 'pending' && value.respondedAt !== undefined)
+    ) &&
+    Number.isSafeInteger(value.version) &&
+    value.version >= 1 &&
+    isBackendMatchInvitationMatch(value.match) &&
+    value.match.matchId === value.matchId &&
+    value.match.ownerAccountId === value.invitedByAccountId &&
+    isBackendMatchPublicPlayer(value.invitedPlayer) &&
+    value.invitedPlayer.playerId === value.invitedAccountId
+  );
 }
 
 function isBackendMatchParticipantIdentity(value) {
@@ -788,6 +919,102 @@ function matchParticipantSuccess(body, outcome, status) {
   });
 }
 
+function playerSearchSuccess(body, maximumLength = 20) {
+  if (
+    !isPlainObject(body) ||
+    !hasExactKeys(Object.keys(body).sort(), ['players']) ||
+    !Array.isArray(body.players) ||
+    body.players.length > maximumLength ||
+    !body.players.every(isBackendPublicPlayer) ||
+    new Set(body.players.map(({ playerId }) => playerId)).size !==
+      body.players.length
+  ) {
+    return null;
+  }
+  return frozen('players_loaded', {
+    players: Object.freeze(
+      body.players.map((player) => Object.freeze({ ...player })),
+    ),
+  });
+}
+
+function freezeBackendMatchInvitation(invitation) {
+  return Object.freeze({
+    ...invitation,
+    match: Object.freeze({
+      ...invitation.match,
+      owner: Object.freeze({ ...invitation.match.owner }),
+    }),
+    invitedPlayer: Object.freeze({ ...invitation.invitedPlayer }),
+  });
+}
+
+function matchInvitationListSuccess(body, maximumLength = 20) {
+  if (
+    !isPlainObject(body) ||
+    !hasExactKeys(Object.keys(body).sort(), ['invitations']) ||
+    !Array.isArray(body.invitations) ||
+    body.invitations.length > maximumLength ||
+    !body.invitations.every(isBackendMatchInvitation) ||
+    body.invitations.some(({ status }) => status !== 'pending') ||
+    new Set(body.invitations.map(({ invitationId }) => invitationId)).size !==
+      body.invitations.length
+  ) {
+    return null;
+  }
+  return frozen('invitations_loaded', {
+    invitations: Object.freeze(
+      body.invitations.map(freezeBackendMatchInvitation),
+    ),
+  });
+}
+
+function matchInvitationSuccess(body, outcome, status) {
+  if (
+    !isPlainObject(body) ||
+    !hasExactKeys(Object.keys(body).sort(), ['invitation']) ||
+    !isBackendMatchInvitation(body.invitation) ||
+    body.invitation.status !== status
+  ) {
+    return null;
+  }
+  return frozen(outcome, {
+    invitation: freezeBackendMatchInvitation(body.invitation),
+  });
+}
+
+function acceptedMatchInvitationSuccess(body) {
+  if (
+    !isPlainObject(body) ||
+    !hasExactKeys(
+      Object.keys(body).sort(),
+      ['invitation', 'matchVersion', 'participant'],
+    ) ||
+    !isBackendMatchInvitation(body.invitation) ||
+    body.invitation.status !== 'accepted' ||
+    !isPlainObject(body.participant) ||
+    !hasExactKeys(
+      Object.keys(body.participant).sort(),
+      ['accountId', 'participantId', 'slotNumber', 'status'],
+    ) ||
+    !isMatchId(body.participant.participantId) ||
+    !isMatchId(body.participant.accountId) ||
+    ![2, 3, 4].includes(body.participant.slotNumber) ||
+    body.participant.status !== 'active' ||
+    body.participant.accountId !== body.invitation.invitedAccountId ||
+    body.participant.slotNumber !== body.invitation.slotNumber ||
+    !Number.isSafeInteger(body.matchVersion) ||
+    body.matchVersion < 1
+  ) {
+    return null;
+  }
+  return frozen('invitation_accepted', {
+    invitation: freezeBackendMatchInvitation(body.invitation),
+    participant: Object.freeze({ ...body.participant }),
+    matchVersion: body.matchVersion,
+  });
+}
+
 function classifyRefresh(status, body) {
   const code = exactPublicCode(body);
   if (status === 401 && code === 'session_expired') {
@@ -864,6 +1091,45 @@ function classifyMatch(status, body) {
   });
 }
 
+function classifyPlayerSearch(status, body) {
+  const code = exactPublicCode(body);
+  if (status === 401 && code === 'session_invalid') {
+    return frozen('rejected', { reason: 'invalid' });
+  }
+  if (status === 400 && code === 'player_search_invalid_request') {
+    return frozen('rejected', { reason: 'invalid_request' });
+  }
+  return frozen('rejected', { reason: 'internal_error' });
+}
+
+function classifyMatchInvitation(status, body) {
+  const code = exactPublicCode(body);
+  if (status === 401 && code === 'session_invalid') {
+    return frozen('rejected', { reason: 'invalid' });
+  }
+  const reasons = Object.freeze({
+    match_invitation_invalid_request: 'invalid_request',
+    match_invitation_forbidden: 'forbidden',
+    match_invitation_not_found: 'invitation_not_found',
+    match_invitation_closed: 'invitation_closed',
+    match_not_found: 'match_not_found',
+    match_closed: 'match_closed',
+    match_started: 'match_started',
+    match_full: 'match_full',
+    match_invitation_slot_unavailable: 'slot_unavailable',
+    match_invitation_already_participant: 'already_participant',
+    match_invitation_already_pending: 'already_invited',
+    match_invitation_player_not_found: 'player_not_found',
+    match_rating_verification_required: 'rating_verification_required',
+    match_rating_out_of_range: 'rating_out_of_range',
+    match_invitation_request_conflict: 'request_conflict',
+    match_conflict: 'match_conflict',
+  });
+  return frozen('rejected', {
+    reason: reasons[code] ?? 'internal_error',
+  });
+}
+
 export function createBackendSessionClient(dependencies = {}) {
   const fetchImpl = dependencies.fetchImpl ?? globalThis.fetch?.bind(globalThis);
   const cryptoImpl = dependencies.cryptoImpl ?? globalThis.crypto;
@@ -902,11 +1168,17 @@ export function createBackendSessionClient(dependencies = {}) {
 
     try {
       const isMatchOperation = operation.startsWith('match_');
+      const isMatchInvitationOperation =
+        operation.startsWith('match_invitation_');
+      const isPlayerSearchOperation = operation === 'player_search';
       const isReadOnly =
         operation === 'authenticate' ||
         operation === 'profile' ||
         operation === 'match_list' ||
-        operation === 'match_detail';
+        operation === 'match_detail' ||
+        operation === 'player_search' ||
+        operation === 'match_invitation_incoming' ||
+        operation === 'match_invitation_outgoing';
       const isProfileOperation =
         operation === 'profile' || operation === 'profile_update';
       const matchId = operationPayload?.matchId;
@@ -919,10 +1191,24 @@ export function createBackendSessionClient(dependencies = {}) {
               ? PROFILE_PATH
               : operation === 'match_list'
                 ? `${MATCHES_PATH}?limit=${operationPayload.limit}`
+                : operation === 'player_search'
+                  ? `${PLAYER_SEARCH_PATH}?q=${encodeURIComponent(operationPayload.query)}&limit=${operationPayload.limit}`
+                  : operation === 'match_invitation_incoming'
+                    ? `${MATCH_INVITATIONS_PATH}?limit=${operationPayload.limit}`
+                    : operation === 'match_invitation_outgoing'
+                      ? `${MATCHES_PATH}/${encodeURIComponent(matchId)}/invitations?limit=${operationPayload.limit}`
                 : operation === 'match_detail'
                   ? `${MATCHES_PATH}/${encodeURIComponent(matchId)}`
                   : operation === 'match_create'
                     ? MATCHES_PATH
+                    : operation === 'match_invitation_create'
+                      ? `${MATCHES_PATH}/${encodeURIComponent(matchId)}/invitations`
+                      : operation === 'match_invitation_accept'
+                        ? `${MATCH_INVITATIONS_PATH}/${encodeURIComponent(operationPayload.invitationId)}/accept`
+                        : operation === 'match_invitation_decline'
+                          ? `${MATCH_INVITATIONS_PATH}/${encodeURIComponent(operationPayload.invitationId)}/decline`
+                          : operation === 'match_invitation_cancel'
+                            ? `${MATCH_INVITATIONS_PATH}/${encodeURIComponent(operationPayload.invitationId)}/cancel`
                     : operation === 'match_join'
                       ? `${MATCHES_PATH}/${encodeURIComponent(matchId)}/join`
                       : operation === 'match_leave'
@@ -955,6 +1241,12 @@ export function createBackendSessionClient(dependencies = {}) {
                     ? operationPayload
                     : operation === 'match_create'
                       ? { ...operationPayload, requestKey }
+                      : operation === 'match_invitation_create'
+                        ? {
+                            requestKey,
+                            playerId: operationPayload.playerId,
+                            slotNumber: operationPayload.slotNumber,
+                          }
                       : { requestKey },
                 ),
               }),
@@ -974,7 +1266,11 @@ export function createBackendSessionClient(dependencies = {}) {
         controller.signal,
         operation === 'match_list'
           ? MAX_MATCH_FEED_RESPONSE_BODY_BYTES
-          : MAX_RESPONSE_BODY_BYTES,
+          : isPlayerSearchOperation
+            ? MAX_PLAYER_SEARCH_RESPONSE_BODY_BYTES
+            : isMatchInvitationOperation
+              ? MAX_MATCH_INVITATION_RESPONSE_BODY_BYTES
+              : MAX_RESPONSE_BODY_BYTES,
       );
       if (operation === 'authenticate' && response.status === 200) {
         const result = authenticationSuccess(body);
@@ -996,6 +1292,68 @@ export function createBackendSessionClient(dependencies = {}) {
       }
       if (operation === 'match_list' && response.status === 200) {
         const result = matchListSuccess(body);
+        return result
+          ? frozen('success', { result })
+          : frozen('malformed_response');
+      }
+      if (operation === 'player_search' && response.status === 200) {
+        const result = playerSearchSuccess(
+          body,
+          operationPayload.limit,
+        );
+        return result
+          ? frozen('success', { result })
+          : frozen('malformed_response');
+      }
+      if (
+        (operation === 'match_invitation_incoming' ||
+          operation === 'match_invitation_outgoing') &&
+        response.status === 200
+      ) {
+        const result = matchInvitationListSuccess(
+          body,
+          operationPayload.limit,
+        );
+        return result
+          ? frozen('success', { result })
+          : frozen('malformed_response');
+      }
+      if (
+        operation === 'match_invitation_create' &&
+        response.status === 201
+      ) {
+        const result = matchInvitationSuccess(
+          body,
+          'invitation_created',
+          'pending',
+        );
+        return result
+          ? frozen('success', { result })
+          : frozen('malformed_response');
+      }
+      if (
+        (operation === 'match_invitation_decline' ||
+          operation === 'match_invitation_cancel') &&
+        response.status === 201
+      ) {
+        const result = matchInvitationSuccess(
+          body,
+          operation === 'match_invitation_decline'
+            ? 'invitation_declined'
+            : 'invitation_cancelled',
+          operation === 'match_invitation_decline'
+            ? 'declined'
+            : 'cancelled',
+        );
+        return result
+          ? frozen('success', { result })
+          : frozen('malformed_response');
+      }
+      if (
+        operation === 'match_invitation_accept' &&
+        response.status === 201
+      ) {
+        const result = acceptedMatchInvitationSuccess(body);
         return result
           ? frozen('success', { result })
           : frozen('malformed_response');
@@ -1045,6 +1403,10 @@ export function createBackendSessionClient(dependencies = {}) {
         exactPublicCode(body) === (
           isProfileOperation
             ? 'profile_service_unavailable'
+            : isPlayerSearchOperation
+              ? 'player_search_unavailable'
+              : isMatchInvitationOperation
+                ? 'match_invitation_service_unavailable'
             : isMatchOperation
               ? 'match_service_unavailable'
               : 'session_service_unavailable'
@@ -1060,6 +1422,10 @@ export function createBackendSessionClient(dependencies = {}) {
               ? classifyLogout(response.status, body)
               : isProfileOperation
                 ? classifyProfile(response.status, body)
+                : isPlayerSearchOperation
+                  ? classifyPlayerSearch(response.status, body)
+                  : isMatchInvitationOperation
+                    ? classifyMatchInvitation(response.status, body)
                 : isMatchOperation
                   ? classifyMatch(response.status, body)
                   : classifyAuthentication(response.status, body),
@@ -1103,7 +1469,38 @@ export function createBackendSessionClient(dependencies = {}) {
         operation === 'match_leave') &&
         !isMatchId(operationPayload?.matchId)) ||
       (operation === 'match_create' &&
-        !isBackendCreateMatchDraft(operationPayload))
+        !isBackendCreateMatchDraft(operationPayload)) ||
+      (operation === 'player_search' &&
+        (
+          typeof operationPayload?.query !== 'string' ||
+          [...operationPayload.query.normalize('NFKC').trim().replace(/^@/u, '').trim()].length < 2 ||
+          [...operationPayload.query.normalize('NFKC').trim().replace(/^@/u, '').trim()].length > 64 ||
+          CONTROL_CHARACTER_PATTERN.test(
+            operationPayload.query.normalize('NFKC'),
+          ) ||
+          !Number.isInteger(operationPayload.limit) ||
+          operationPayload.limit < 1 ||
+          operationPayload.limit > 20
+        )) ||
+      ((operation === 'match_invitation_incoming' ||
+        operation === 'match_invitation_outgoing') &&
+        (
+          (operation === 'match_invitation_outgoing' &&
+            !isMatchId(operationPayload?.matchId)) ||
+          !Number.isInteger(operationPayload?.limit) ||
+          operationPayload.limit < 1 ||
+          operationPayload.limit > 20
+        )) ||
+      (operation === 'match_invitation_create' &&
+        (
+          !isMatchId(operationPayload?.matchId) ||
+          !isMatchId(operationPayload?.playerId) ||
+          ![2, 3, 4].includes(operationPayload?.slotNumber)
+        )) ||
+      ((operation === 'match_invitation_accept' ||
+        operation === 'match_invitation_decline' ||
+        operation === 'match_invitation_cancel') &&
+        !isMatchId(operationPayload?.invitationId))
     ) {
       return frozen('rejected', { reason: 'invalid_request' });
     }
@@ -1113,7 +1510,11 @@ export function createBackendSessionClient(dependencies = {}) {
       operation === 'logout' ||
       operation === 'match_create' ||
       operation === 'match_join' ||
-      operation === 'match_leave';
+      operation === 'match_leave' ||
+      operation === 'match_invitation_create' ||
+      operation === 'match_invitation_accept' ||
+      operation === 'match_invitation_decline' ||
+      operation === 'match_invitation_cancel';
     const requestKey =
       requiresRequestKey ? createRequestKey(cryptoImpl) : null;
     if (requiresRequestKey && !requestKey) {
@@ -1181,6 +1582,54 @@ export function createBackendSessionClient(dependencies = {}) {
       execute('match_join', credential, options, { matchId }),
     leaveMatch: (credential, matchId, options) =>
       execute('match_leave', credential, options, { matchId }),
+    searchPlayers: (credential, query, limit = 8, options) =>
+      execute('player_search', credential, options, { query, limit }),
+    listIncomingMatchInvitations: (credential, limit = 20, options) =>
+      execute('match_invitation_incoming', credential, options, { limit }),
+    listOutgoingMatchInvitations: (
+      credential,
+      matchId,
+      limit = 20,
+      options,
+    ) => execute(
+      'match_invitation_outgoing',
+      credential,
+      options,
+      { matchId, limit },
+    ),
+    createMatchInvitation: (
+      credential,
+      matchId,
+      playerId,
+      slotNumber,
+      options,
+    ) => execute(
+      'match_invitation_create',
+      credential,
+      options,
+      { matchId, playerId, slotNumber },
+    ),
+    acceptMatchInvitation: (credential, invitationId, options) =>
+      execute(
+        'match_invitation_accept',
+        credential,
+        options,
+        { invitationId },
+      ),
+    declineMatchInvitation: (credential, invitationId, options) =>
+      execute(
+        'match_invitation_decline',
+        credential,
+        options,
+        { invitationId },
+      ),
+    cancelMatchInvitation: (credential, invitationId, options) =>
+      execute(
+        'match_invitation_cancel',
+        credential,
+        options,
+        { invitationId },
+      ),
     refresh: (credential, options) =>
       execute('refresh', credential, options),
     logout: (credential, options) =>

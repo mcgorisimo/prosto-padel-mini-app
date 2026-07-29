@@ -5,6 +5,8 @@ const ACCOUNT_ID = '11111111-1111-4111-8111-111111111111';
 const OTHER_ACCOUNT_ID = '22222222-2222-4222-8222-222222222222';
 const MATCH_ID = '33333333-3333-4333-8333-333333333333';
 const REQUEST_KEY = '44444444-4444-4444-8444-444444444444';
+const INVITATION_ID = '55555555-5555-4555-8555-555555555555';
+const PARTICIPANT_ID = '66666666-6666-4666-8666-666666666666';
 
 test.describe('backend match credential lifecycle', () => {
   test('uses exact no-store contracts for feed, detail, create, join and leave', async ({
@@ -360,6 +362,354 @@ test.describe('backend match credential lifecycle', () => {
     ]);
   });
 
+  test('uses the private bearer boundary for player search and invitations', async ({
+    page,
+  }) => {
+    await page.goto('/');
+
+    const summary = await page.evaluate(async (parameters) => {
+      const {
+        createBackendSessionClient,
+        isBackendMatchInvitation,
+      } = await import('/src/lib/backendSessionClient.js');
+      const {
+        mapBackendInvitationToApp,
+        mapBackendPublicPlayerToApp,
+      } = await import('/src/lib/backendMatchAdapter.js');
+      const {
+        supportsBackendMatchInvitations,
+      } = await import('/src/components/MatchDetailsScreen.jsx');
+
+      const owner = {
+        playerId: parameters.accountId,
+        firstName: 'Owner',
+        lastName: 'Player',
+        username: 'owner',
+        rating: 3,
+        isVerified: true,
+      };
+      const invitedPlayer = {
+        playerId: parameters.otherAccountId,
+        firstName: 'Invited',
+        lastName: 'Player',
+        username: 'invited',
+        rating: 3.5,
+        isVerified: true,
+      };
+      const invitationMatch = {
+        matchId: parameters.matchId,
+        ownerAccountId: parameters.accountId,
+        startsAt: 1_900_086_400,
+        durationMinutes: 90,
+        courtId: 'court-1',
+        courtName: 'Корт 1',
+        courtType: 'panoramic',
+        scenario: 'social',
+        status: 'open',
+        title: 'Invitation match',
+        ratingMin: 1,
+        ratingMax: 5,
+        isRatingMatch: false,
+        pricePerPersonSnapshot: 750,
+        owner,
+      };
+      const invitation = {
+        invitationId: parameters.invitationId,
+        matchId: parameters.matchId,
+        invitedByAccountId: parameters.accountId,
+        invitedAccountId: parameters.otherAccountId,
+        slotNumber: 2,
+        status: 'pending',
+        createdAt: 1_900_000_000,
+        updatedAt: 1_900_000_000,
+        version: 1,
+        match: invitationMatch,
+        invitedPlayer,
+      };
+      const contracts = [];
+      const client = createBackendSessionClient({
+        cryptoImpl: {
+          randomUUID: () => parameters.requestKey,
+        },
+        fetchImpl: async (url, options) => {
+          contracts.push({
+            url,
+            method: options.method,
+            bearerMatches:
+              options.headers.Authorization ===
+              `Bearer ${parameters.credential}`,
+            body: options.body ? JSON.parse(options.body) : null,
+            cache: options.cache,
+            credentials: options.credentials,
+            redirect: options.redirect,
+          });
+
+          if (url.startsWith('/api/v1/players/search?')) {
+            return new Response(JSON.stringify({
+              players: [invitedPlayer],
+            }), { status: 200 });
+          }
+          if (url === '/api/v1/match-invitations?limit=20') {
+            return new Response(JSON.stringify({
+              invitations: [invitation],
+            }), { status: 200 });
+          }
+          if (
+            url ===
+            `/api/v1/matches/${parameters.matchId}/invitations?limit=20`
+          ) {
+            return new Response(JSON.stringify({
+              invitations: [invitation],
+            }), { status: 200 });
+          }
+          if (
+            url ===
+            `/api/v1/matches/${parameters.matchId}/invitations`
+          ) {
+            return new Response(JSON.stringify({ invitation }), {
+              status: 201,
+            });
+          }
+          const action = url.split('/').at(-1);
+          const status = action === 'accept'
+            ? 'accepted'
+            : action === 'decline'
+              ? 'declined'
+              : 'cancelled';
+          const closedInvitation = {
+            ...invitation,
+            status,
+            updatedAt: invitation.updatedAt + 1,
+            respondedAt: invitation.updatedAt + 1,
+            version: 2,
+          };
+          if (action === 'accept') {
+            return new Response(JSON.stringify({
+              invitation: closedInvitation,
+              participant: {
+                participantId: parameters.participantId,
+                accountId: parameters.otherAccountId,
+                slotNumber: 2,
+                status: 'active',
+              },
+              matchVersion: 2,
+            }), { status: 201 });
+          }
+          return new Response(JSON.stringify({
+            invitation: closedInvitation,
+          }), { status: 201 });
+        },
+      });
+
+      const results = [
+        await client.searchPlayers(parameters.credential, '@Invited', 5),
+        await client.listIncomingMatchInvitations(
+          parameters.credential,
+          20,
+        ),
+        await client.listOutgoingMatchInvitations(
+          parameters.credential,
+          parameters.matchId,
+          20,
+        ),
+        await client.createMatchInvitation(
+          parameters.credential,
+          parameters.matchId,
+          parameters.otherAccountId,
+          2,
+        ),
+        await client.acceptMatchInvitation(
+          parameters.credential,
+          parameters.invitationId,
+        ),
+        await client.declineMatchInvitation(
+          parameters.credential,
+          parameters.invitationId,
+        ),
+        await client.cancelMatchInvitation(
+          parameters.credential,
+          parameters.invitationId,
+        ),
+      ];
+      const malformed = await createBackendSessionClient({
+        fetchImpl: async () => new Response(JSON.stringify({
+          invitations: [{
+            ...invitation,
+            slotNumber: 1,
+          }],
+        }), { status: 200 }),
+      }).listIncomingMatchInvitations(parameters.credential, 20);
+      const malformedLifecycle = await createBackendSessionClient({
+        fetchImpl: async () => new Response(JSON.stringify({
+          invitations: [{
+            ...invitation,
+            status: 'cancelled',
+          }],
+        }), { status: 200 }),
+      }).listIncomingMatchInvitations(parameters.credential, 20);
+      const invalidSearch = await client.searchPlayers(
+        parameters.credential,
+        'player\u0000name',
+        5,
+      );
+      const largePlayerSearch = Array.from(
+        { length: 20 },
+        (_, index) => ({
+          ...invitedPlayer,
+          playerId:
+            `44444444-4444-4444-8444-${index
+              .toString(16)
+              .padStart(12, '0')}`,
+          firstName: '😀'.repeat(256),
+          lastName: '😀'.repeat(256),
+          username: 'u'.repeat(64),
+        }),
+      );
+      const largePlayerSearchBody = JSON.stringify({
+        players: largePlayerSearch,
+      });
+      const largePlayerSearchResult = await createBackendSessionClient({
+        fetchImpl: async () => new Response(
+          largePlayerSearchBody,
+          { status: 200 },
+        ),
+      }).searchPlayers(parameters.credential, 'player', 20);
+      const mappedInvitation = mapBackendInvitationToApp(invitation);
+      const mappedPlayer = mapBackendPublicPlayerToApp(invitedPlayer);
+
+      return {
+        outcomes: results.map(({ outcome }) => outcome),
+        contracts,
+        malformed,
+        malformedLifecycle,
+        invalidSearch,
+        largePlayerSearchAccepted:
+          new TextEncoder().encode(largePlayerSearchBody).byteLength > 32_768 &&
+          largePlayerSearchResult.outcome === 'players_loaded' &&
+          largePlayerSearchResult.players.length === 20,
+        validatorAcceptsCanonical:
+          isBackendMatchInvitation(invitation),
+        mapped: {
+          invitationId: mappedInvitation.invitation_id,
+          matchId: mappedInvitation.match_id,
+          slotIndex: mappedInvitation.slot_index,
+          organizer: mappedInvitation.organizer_first_name,
+          playerId: mappedInvitation.player.id,
+          playerSearchId: mappedPlayer.id,
+        },
+        backendInvitationUiEnabled:
+          supportsBackendMatchInvitations(
+            { backendOwned: true },
+            () => {},
+            () => {},
+          ),
+        backendInvitationUiFailClosed:
+          !supportsBackendMatchInvitations(
+            { backendOwned: true },
+            null,
+            () => {},
+          ),
+        publicResultsHideCredential:
+          !JSON.stringify(results).includes(parameters.credential),
+      };
+    }, {
+      credential: SYNTHETIC_CREDENTIAL,
+      accountId: ACCOUNT_ID,
+      otherAccountId: OTHER_ACCOUNT_ID,
+      matchId: MATCH_ID,
+      invitationId: INVITATION_ID,
+      participantId: PARTICIPANT_ID,
+      requestKey: REQUEST_KEY,
+    });
+
+    expect(summary.outcomes).toEqual([
+      'players_loaded',
+      'invitations_loaded',
+      'invitations_loaded',
+      'invitation_created',
+      'invitation_accepted',
+      'invitation_declined',
+      'invitation_cancelled',
+    ]);
+    expect(summary.contracts).toEqual([
+      {
+        url: '/api/v1/players/search?q=%40Invited&limit=5',
+        method: 'GET',
+        bearerMatches: true,
+        body: null,
+        cache: 'no-store',
+        credentials: 'omit',
+        redirect: 'error',
+      },
+      {
+        url: '/api/v1/match-invitations?limit=20',
+        method: 'GET',
+        bearerMatches: true,
+        body: null,
+        cache: 'no-store',
+        credentials: 'omit',
+        redirect: 'error',
+      },
+      {
+        url:
+          `/api/v1/matches/${MATCH_ID}/invitations?limit=20`,
+        method: 'GET',
+        bearerMatches: true,
+        body: null,
+        cache: 'no-store',
+        credentials: 'omit',
+        redirect: 'error',
+      },
+      {
+        url: `/api/v1/matches/${MATCH_ID}/invitations`,
+        method: 'POST',
+        bearerMatches: true,
+        body: {
+          requestKey: REQUEST_KEY,
+          playerId: OTHER_ACCOUNT_ID,
+          slotNumber: 2,
+        },
+        cache: 'no-store',
+        credentials: 'omit',
+        redirect: 'error',
+      },
+      ...['accept', 'decline', 'cancel'].map((action) => ({
+        url: `/api/v1/match-invitations/${INVITATION_ID}/${action}`,
+        method: 'POST',
+        bearerMatches: true,
+        body: { requestKey: REQUEST_KEY },
+        cache: 'no-store',
+        credentials: 'omit',
+        redirect: 'error',
+      })),
+    ]);
+    expect(summary.malformed).toEqual({
+      outcome: 'rejected',
+      reason: 'internal_error',
+    });
+    expect(summary.malformedLifecycle).toEqual({
+      outcome: 'rejected',
+      reason: 'internal_error',
+    });
+    expect(summary.invalidSearch).toEqual({
+      outcome: 'rejected',
+      reason: 'invalid_request',
+    });
+    expect(summary.largePlayerSearchAccepted).toBe(true);
+    expect(summary.validatorAcceptsCanonical).toBe(true);
+    expect(summary.mapped).toEqual({
+      invitationId: INVITATION_ID,
+      matchId: MATCH_ID,
+      slotIndex: 1,
+      organizer: 'Owner',
+      playerId: OTHER_ACCOUNT_ID,
+      playerSearchId: OTHER_ACCOUNT_ID,
+    });
+    expect(summary.backendInvitationUiEnabled).toBe(true);
+    expect(summary.backendInvitationUiFailClosed).toBe(true);
+    expect(summary.publicResultsHideCredential).toBe(true);
+  });
+
   test('keeps the credential private and clears the boundary on invalid match session', async ({
     page,
   }) => {
@@ -451,6 +801,99 @@ test.describe('backend match credential lifecycle', () => {
               },
             };
           },
+          async searchPlayers(credential) {
+            credentialMatched =
+              credentialMatched &&
+              credential === parameters.credential;
+            return {
+              outcome: 'players_loaded',
+              players: [{
+                playerId: parameters.otherAccountId,
+              }],
+            };
+          },
+          async listIncomingMatchInvitations(credential) {
+            credentialMatched =
+              credentialMatched &&
+              credential === parameters.credential;
+            return {
+              outcome: 'invitations_loaded',
+              invitations: [{
+                invitationId: parameters.invitationId,
+                matchId: parameters.matchId,
+                invitedByAccountId: parameters.otherAccountId,
+                invitedAccountId: parameters.accountId,
+              }],
+            };
+          },
+          async listOutgoingMatchInvitations(credential) {
+            credentialMatched =
+              credentialMatched &&
+              credential === parameters.credential;
+            return {
+              outcome: 'invitations_loaded',
+              invitations: [{
+                invitationId: parameters.invitationId,
+                matchId: parameters.matchId,
+                invitedByAccountId: parameters.accountId,
+                invitedAccountId: parameters.otherAccountId,
+              }],
+            };
+          },
+          async createMatchInvitation(credential) {
+            credentialMatched =
+              credentialMatched &&
+              credential === parameters.credential;
+            return {
+              outcome: 'invitation_created',
+              invitation: {
+                invitationId: parameters.invitationId,
+                matchId: parameters.matchId,
+                invitedByAccountId: parameters.accountId,
+                invitedAccountId: parameters.otherAccountId,
+                slotNumber: 2,
+              },
+            };
+          },
+          async acceptMatchInvitation(credential) {
+            credentialMatched =
+              credentialMatched &&
+              credential === parameters.credential;
+            return {
+              outcome: 'invitation_accepted',
+              invitation: {
+                invitationId: parameters.invitationId,
+                invitedAccountId: parameters.accountId,
+              },
+              participant: {
+                accountId: parameters.accountId,
+              },
+            };
+          },
+          async declineMatchInvitation(credential) {
+            credentialMatched =
+              credentialMatched &&
+              credential === parameters.credential;
+            return {
+              outcome: 'invitation_declined',
+              invitation: {
+                invitationId: parameters.invitationId,
+                invitedAccountId: parameters.accountId,
+              },
+            };
+          },
+          async cancelMatchInvitation(credential) {
+            credentialMatched =
+              credentialMatched &&
+              credential === parameters.credential;
+            return {
+              outcome: 'invitation_cancelled',
+              invitation: {
+                invitationId: parameters.invitationId,
+                invitedByAccountId: parameters.accountId,
+              },
+            };
+          },
         },
         credentialStorage: {
           async read() {
@@ -480,6 +923,20 @@ test.describe('backend match credential lifecycle', () => {
         await lifecycle.createMatch({}),
         await lifecycle.joinMatch(parameters.matchId),
         await lifecycle.leaveMatch(parameters.matchId),
+        await lifecycle.searchPlayers('Invited', 5),
+        await lifecycle.listIncomingMatchInvitations(20),
+        await lifecycle.listOutgoingMatchInvitations(
+          parameters.matchId,
+          20,
+        ),
+        await lifecycle.createMatchInvitation(
+          parameters.matchId,
+          parameters.otherAccountId,
+          2,
+        ),
+        await lifecycle.acceptMatchInvitation(parameters.invitationId),
+        await lifecycle.declineMatchInvitation(parameters.invitationId),
+        await lifecycle.cancelMatchInvitation(parameters.invitationId),
       ];
       const invalid = await lifecycle.listMatches();
       for (let attempt = 0; attempt < 50; attempt += 1) {
@@ -505,7 +962,9 @@ test.describe('backend match credential lifecycle', () => {
     }, {
       credential: SYNTHETIC_CREDENTIAL,
       accountId: ACCOUNT_ID,
+      otherAccountId: OTHER_ACCOUNT_ID,
       matchId: MATCH_ID,
+      invitationId: INVITATION_ID,
     });
 
     expect(summary).toEqual({
@@ -516,6 +975,13 @@ test.describe('backend match credential lifecycle', () => {
         'match_created',
         'participant_joined',
         'participant_left',
+        'players_loaded',
+        'invitations_loaded',
+        'invitations_loaded',
+        'invitation_created',
+        'invitation_accepted',
+        'invitation_declined',
+        'invitation_cancelled',
       ],
       invalidOutcome: 'rejected',
       invalidReason: 'session_invalid',

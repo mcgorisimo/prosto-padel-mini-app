@@ -1045,6 +1045,119 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
     );
   }
 
+  function searchPlayers(query, limit = 8) {
+    return runMatchOperation(
+      (credential, signal) =>
+        matches.searchPlayers(credential, query, limit, { signal }),
+      (result) =>
+        result?.outcome === 'players_loaded' &&
+        Array.isArray(result.players),
+    );
+  }
+
+  function listIncomingMatchInvitations(limit = 20) {
+    return runMatchOperation(
+      (credential, signal) =>
+        matches.listIncomingMatchInvitations(
+          credential,
+          limit,
+          { signal },
+        ),
+      (result, principal) =>
+        result?.outcome === 'invitations_loaded' &&
+        Array.isArray(result.invitations) &&
+        result.invitations.every(
+          ({ invitedAccountId }) =>
+            invitedAccountId === principal.accountId,
+        ),
+    );
+  }
+
+  function listOutgoingMatchInvitations(matchId, limit = 20) {
+    return runMatchOperation(
+      (credential, signal) =>
+        matches.listOutgoingMatchInvitations(
+          credential,
+          matchId,
+          limit,
+          { signal },
+        ),
+      (result, principal) =>
+        result?.outcome === 'invitations_loaded' &&
+        Array.isArray(result.invitations) &&
+        result.invitations.every(
+          (invitation) =>
+            invitation.matchId === matchId &&
+            invitation.invitedByAccountId === principal.accountId,
+        ),
+    );
+  }
+
+  function createMatchInvitation(matchId, playerId, slotNumber) {
+    return runMatchOperation(
+      (credential, signal) =>
+        matches.createMatchInvitation(
+          credential,
+          matchId,
+          playerId,
+          slotNumber,
+          { signal },
+        ),
+      (result, principal) =>
+        result?.outcome === 'invitation_created' &&
+        result.invitation?.matchId === matchId &&
+        result.invitation?.invitedByAccountId === principal.accountId &&
+        result.invitation?.invitedAccountId === playerId &&
+        result.invitation?.slotNumber === slotNumber,
+    );
+  }
+
+  function acceptMatchInvitation(invitationId) {
+    return runMatchOperation(
+      (credential, signal) =>
+        matches.acceptMatchInvitation(
+          credential,
+          invitationId,
+          { signal },
+        ),
+      (result, principal) =>
+        result?.outcome === 'invitation_accepted' &&
+        result.invitation?.invitationId === invitationId &&
+        result.invitation?.invitedAccountId === principal.accountId &&
+        result.participant?.accountId === principal.accountId,
+    );
+  }
+
+  function declineMatchInvitation(invitationId) {
+    return runMatchOperation(
+      (credential, signal) =>
+        matches.declineMatchInvitation(
+          credential,
+          invitationId,
+          { signal },
+        ),
+      (result, principal) =>
+        result?.outcome === 'invitation_declined' &&
+        result.invitation?.invitationId === invitationId &&
+        result.invitation?.invitedAccountId === principal.accountId,
+    );
+  }
+
+  function cancelMatchInvitation(invitationId) {
+    return runMatchOperation(
+      (credential, signal) =>
+        matches.cancelMatchInvitation(
+          credential,
+          invitationId,
+          { signal },
+        ),
+      (result, principal) =>
+        result?.outcome === 'invitation_cancelled' &&
+        result.invitation?.invitationId === invitationId &&
+        result.invitation?.invitedByAccountId === principal.accountId,
+    );
+  }
+
   function attach(rawInitData, listener) {
     if (teardownTimer !== null) {
       clearTimer(teardownTimer);
@@ -1113,6 +1226,13 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
     createMatch,
     joinMatch,
     leaveMatch,
+    searchPlayers,
+    listIncomingMatchInvitations,
+    listOutgoingMatchInvitations,
+    createMatchInvitation,
+    acceptMatchInvitation,
+    declineMatchInvitation,
+    cancelMatchInvitation,
     logout,
   });
 }
@@ -1214,6 +1334,90 @@ export function useTelegramBackendLogin() {
     return telegramBackendLoginLifecycle.leaveMatch(matchId);
   }, []);
 
+  const searchPlayers = useCallback((query, limit = 8) => {
+    if (!FEATURE_ENABLED) {
+      return Promise.resolve(Object.freeze({
+        outcome: 'rejected',
+        reason: 'not_authenticated',
+      }));
+    }
+    return telegramBackendLoginLifecycle.searchPlayers(query, limit);
+  }, []);
+
+  const listIncomingMatchInvitations = useCallback((limit = 20) => {
+    if (!FEATURE_ENABLED) {
+      return Promise.resolve(Object.freeze({
+        outcome: 'rejected',
+        reason: 'not_authenticated',
+      }));
+    }
+    return telegramBackendLoginLifecycle.listIncomingMatchInvitations(limit);
+  }, []);
+
+  const listOutgoingMatchInvitations = useCallback((
+    matchId,
+    limit = 20,
+  ) => {
+    if (!FEATURE_ENABLED) {
+      return Promise.resolve(Object.freeze({
+        outcome: 'rejected',
+        reason: 'not_authenticated',
+      }));
+    }
+    return telegramBackendLoginLifecycle.listOutgoingMatchInvitations(
+      matchId,
+      limit,
+    );
+  }, []);
+
+  const createMatchInvitation = useCallback((
+    matchId,
+    playerId,
+    slotNumber,
+  ) => {
+    if (!FEATURE_ENABLED) {
+      return Promise.resolve(Object.freeze({
+        outcome: 'rejected',
+        reason: 'not_authenticated',
+      }));
+    }
+    return telegramBackendLoginLifecycle.createMatchInvitation(
+      matchId,
+      playerId,
+      slotNumber,
+    );
+  }, []);
+
+  const acceptMatchInvitation = useCallback((invitationId) => {
+    if (!FEATURE_ENABLED) {
+      return Promise.resolve(Object.freeze({
+        outcome: 'rejected',
+        reason: 'not_authenticated',
+      }));
+    }
+    return telegramBackendLoginLifecycle.acceptMatchInvitation(invitationId);
+  }, []);
+
+  const declineMatchInvitation = useCallback((invitationId) => {
+    if (!FEATURE_ENABLED) {
+      return Promise.resolve(Object.freeze({
+        outcome: 'rejected',
+        reason: 'not_authenticated',
+      }));
+    }
+    return telegramBackendLoginLifecycle.declineMatchInvitation(invitationId);
+  }, []);
+
+  const cancelMatchInvitation = useCallback((invitationId) => {
+    if (!FEATURE_ENABLED) {
+      return Promise.resolve(Object.freeze({
+        outcome: 'rejected',
+        reason: 'not_authenticated',
+      }));
+    }
+    return telegramBackendLoginLifecycle.cancelMatchInvitation(invitationId);
+  }, []);
+
   useEffect(() => {
     if (!FEATURE_ENABLED) return undefined;
 
@@ -1242,6 +1446,13 @@ export function useTelegramBackendLogin() {
     createMatch,
     joinMatch,
     leaveMatch,
+    searchPlayers,
+    listIncomingMatchInvitations,
+    listOutgoingMatchInvitations,
+    createMatchInvitation,
+    acceptMatchInvitation,
+    declineMatchInvitation,
+    cancelMatchInvitation,
     logout,
   });
 }

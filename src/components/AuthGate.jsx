@@ -146,14 +146,34 @@ export default function AuthGate() {
           createMatch: telegramBackendLogin.createMatch,
           joinMatch: telegramBackendLogin.joinMatch,
           leaveMatch: telegramBackendLogin.leaveMatch,
+          searchPlayers: telegramBackendLogin.searchPlayers,
+          listIncomingMatchInvitations:
+            telegramBackendLogin.listIncomingMatchInvitations,
+          listOutgoingMatchInvitations:
+            telegramBackendLogin.listOutgoingMatchInvitations,
+          createMatchInvitation:
+            telegramBackendLogin.createMatchInvitation,
+          acceptMatchInvitation:
+            telegramBackendLogin.acceptMatchInvitation,
+          declineMatchInvitation:
+            telegramBackendLogin.declineMatchInvitation,
+          cancelMatchInvitation:
+            telegramBackendLogin.cancelMatchInvitation,
         })
       : null
   ), [
     telegramBackendLogin.createMatch,
+    telegramBackendLogin.createMatchInvitation,
+    telegramBackendLogin.acceptMatchInvitation,
+    telegramBackendLogin.cancelMatchInvitation,
+    telegramBackendLogin.declineMatchInvitation,
     telegramBackendLogin.joinMatch,
     telegramBackendLogin.leaveMatch,
+    telegramBackendLogin.listIncomingMatchInvitations,
     telegramBackendLogin.listMatches,
+    telegramBackendLogin.listOutgoingMatchInvitations,
     telegramBackendLogin.loadMatch,
+    telegramBackendLogin.searchPlayers,
     telegramBackendLogin.sessionReady,
   ]);
 

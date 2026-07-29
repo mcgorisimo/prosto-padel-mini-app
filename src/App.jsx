@@ -19,7 +19,9 @@ import {
   createBackendMatchDraft,
   applyBackendParticipantResult,
   isBackendOwnedMatch,
+  mapBackendInvitationToApp,
   mapBackendMatchToApp,
+  mapBackendPublicPlayerToApp,
   resolveBackendMatchMode,
   resolveMatchSource,
   shouldApplyBackendMatchDetail,
@@ -243,6 +245,25 @@ function isStaleInvitationError(error) {
     || code.includes('INVITATION_SLOT_UNAVAILABLE');
 }
 
+function isBackendInvitationStaleReason(reason) {
+  return [
+    'invitation_not_found',
+    'invitation_closed',
+    'match_not_found',
+    'match_closed',
+    'match_started',
+    'match_full',
+    'slot_unavailable',
+    'already_participant',
+  ].includes(reason);
+}
+
+function backendInvitationError(reason) {
+  const error = new Error('BACKEND_MATCH_INVITATION_REJECTED');
+  error.reason = reason;
+  return error;
+}
+
 export function mergeProfileSources(profile, backendProfile, metadata = {}) {
   const baseProfile = profile || {
     rating: 3.0,
@@ -319,6 +340,7 @@ export default function App({
   const [selectedMatch, setSelected] = useState(null);
   const backendDetailRequestRef = useRef(0);
   const backendFeedRequestRef = useRef(0);
+  const backendInvitationRequestRef = useRef(0);
   const [incomingInvitations, setIncomingInvitations] = useState([]);
   const [outgoingInvitations, setOutgoingInvitations] = useState([]);
   const [invitationsLoading, setInvitationsLoading] = useState(true);
@@ -460,11 +482,35 @@ export default function App({
   }, []);
 
   const loadInvitations = useCallback(async () => {
-    if (!ME_ID) return null;
+    if (!ME_ID && !backendProfile?.accountId) return null;
     setInvitationsLoading(true);
     setInvitationsLoadError('');
 
     try {
+      if (usesBackendMatches) {
+        if (!backendMatchesReady) {
+          setIncomingInvitations([]);
+          setOutgoingInvitations([]);
+          return null;
+        }
+        const result =
+          await backendMatchActions.listIncomingMatchInvitations(20);
+        if (result.outcome !== 'invitations_loaded') {
+          throw new Error('BACKEND_INVITATION_LIST_REJECTED');
+        }
+        const handledIds = handledIncomingInvitationIdsRef.current;
+        const visibleIncoming = result.invitations
+          .map(mapBackendInvitationToApp)
+          .filter(Boolean)
+          .filter(
+            (item) =>
+              item.status === 'pending' &&
+              !handledIds.has(String(item.invitation_id)),
+          );
+        setIncomingInvitations(visibleIncoming);
+        return visibleIncoming;
+      }
+
       const [incoming, outgoing] = await Promise.all([
         getIncomingMatchInvitations(),
         getOutgoingMatchInvitations(ME_ID),
@@ -486,7 +532,41 @@ export default function App({
     } finally {
       setInvitationsLoading(false);
     }
-  }, [ME_ID]);
+  }, [
+    ME_ID,
+    backendMatchActions,
+    backendMatchesReady,
+    backendProfile?.accountId,
+    usesBackendMatches,
+  ]);
+
+  const loadBackendOutgoingInvitations = useCallback(async (matchId) => {
+    const requestId = backendInvitationRequestRef.current + 1;
+    backendInvitationRequestRef.current = requestId;
+    if (!backendMatchesReady || !matchId) {
+      setOutgoingInvitations([]);
+      return null;
+    }
+    try {
+      const result =
+        await backendMatchActions.listOutgoingMatchInvitations(matchId, 20);
+      if (backendInvitationRequestRef.current !== requestId) return null;
+      if (result.outcome !== 'invitations_loaded') {
+        throw new Error('BACKEND_INVITATION_LIST_REJECTED');
+      }
+      const outgoing = result.invitations
+        .map(mapBackendInvitationToApp)
+        .filter(Boolean)
+        .filter((item) => item.status === 'pending');
+      setOutgoingInvitations(outgoing);
+      return outgoing;
+    } catch {
+      if (backendInvitationRequestRef.current === requestId) {
+        setOutgoingInvitations([]);
+      }
+      return null;
+    }
+  }, [backendMatchActions, backendMatchesReady]);
 
   const loadNotifications = useCallback(async () => {
     if (!ME_ID) return null;
@@ -565,12 +645,14 @@ export default function App({
       })
       .subscribe();
 
-    const invitationsSubscription = supabase.channel('public:match_invitations')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'match_invitations' }, () => {
-        loadInvitations();
-        loadNotifications();
-      })
-      .subscribe();
+    const invitationsSubscription = usesBackendMatches
+      ? null
+      : supabase.channel('public:match_invitations')
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'match_invitations' }, () => {
+            loadInvitations();
+            loadNotifications();
+          })
+          .subscribe();
 
     const notificationsSubscription = supabase.channel('public:notifications')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications' }, loadNotifications)
@@ -579,7 +661,9 @@ export default function App({
     return () => {
       supabase.removeChannel(matchesSubscription);
       supabase.removeChannel(messagesSubscription);
-      supabase.removeChannel(invitationsSubscription);
+      if (invitationsSubscription) {
+        supabase.removeChannel(invitationsSubscription);
+      }
       supabase.removeChannel(notificationsSubscription);
     };
   }, [fetchData]);
@@ -587,24 +671,41 @@ export default function App({
   useEffect(() => {
     if (activeTab === 'profile') {
       fetchProfile();
+      if (usesBackendMatches) {
+        void loadInvitations();
+      }
     }
-  }, [activeTab, fetchProfile]);
+  }, [
+    activeTab,
+    fetchProfile,
+    loadInvitations,
+    usesBackendMatches,
+  ]);
 
   useEffect(() => {
-    const refreshVisibleProfile = () => {
+    const refreshVisibleAccountData = () => {
       if (document.visibilityState === 'visible') {
         fetchProfile();
+        if (usesBackendMatches) {
+          void loadInvitations();
+        }
       }
     };
 
-    window.addEventListener('focus', fetchProfile);
-    document.addEventListener('visibilitychange', refreshVisibleProfile);
+    window.addEventListener('focus', refreshVisibleAccountData);
+    document.addEventListener(
+      'visibilitychange',
+      refreshVisibleAccountData,
+    );
 
     return () => {
-      window.removeEventListener('focus', fetchProfile);
-      document.removeEventListener('visibilitychange', refreshVisibleProfile);
+      window.removeEventListener('focus', refreshVisibleAccountData);
+      document.removeEventListener(
+        'visibilitychange',
+        refreshVisibleAccountData,
+      );
     };
-  }, [fetchProfile]);
+  }, [fetchProfile, loadInvitations, usesBackendMatches]);
 
   // --- 3. ПОЛЬЗОВАТЕЛЬ ---
   const currentUser = useMemo(() => {
@@ -1459,6 +1560,14 @@ const handleBookSlot = async (booking) => {
     setScreen('match-details');
     if (isBackendOwnedMatch(match)) {
       if (!backendMatchesReady) return;
+      if (
+        (match.ownerId ?? match.owner_id) === backendProfile?.accountId
+      ) {
+        void loadBackendOutgoingInvitations(match.id);
+      } else {
+        backendInvitationRequestRef.current += 1;
+        setOutgoingInvitations([]);
+      }
       void backendMatchActions.loadMatch(match.id).then((result) => {
         if (backendDetailRequestRef.current !== detailRequestId) return;
         if (result.outcome !== 'match_loaded') return;
@@ -1476,6 +1585,8 @@ const handleBookSlot = async (booking) => {
 
   const closeMatchDetails = () => {
     backendDetailRequestRef.current += 1;
+    backendInvitationRequestRef.current += 1;
+    setOutgoingInvitations([]);
     setSelected(null);
     setScreen(null);
   };
@@ -1580,11 +1691,51 @@ const handleBookSlot = async (booking) => {
     loadNotifications();
   };
 
+  const handleSearchInvitationPlayers = async (query, limit = 5) => {
+    if (!backendMatchesReady) return [];
+    const result = await backendMatchActions.searchPlayers(query, limit);
+    if (result.outcome !== 'players_loaded') {
+      throw backendInvitationError(result.reason);
+    }
+    return result.players
+      .filter((player) => player.playerId !== backendProfile?.accountId)
+      .map(mapBackendPublicPlayerToApp)
+      .filter(Boolean);
+  };
+
   const handleCreateInvitation = async (matchId, player, slotIndex) => {
     const key = `create:${matchId}:${slotIndex}`;
     if (!beginInvitationAction(key)) return null;
 
     try {
+      const matchSource = getMatchSource(matchId);
+      if (isBackendOwnedMatch(matchSource)) {
+        if (!backendMatchesReady) {
+          throw backendInvitationError('temporary_unavailable');
+        }
+        const result = await backendMatchActions.createMatchInvitation(
+          matchId,
+          player.id,
+          slotIndex + 1,
+        );
+        if (result.outcome !== 'invitation_created') {
+          throw backendInvitationError(result.reason);
+        }
+        const invitation = mapBackendInvitationToApp(result.invitation);
+        if (!invitation) {
+          throw backendInvitationError('internal_error');
+        }
+        setOutgoingInvitations((prev) => [
+          ...prev.filter((item) => item.id !== invitation.id),
+          invitation,
+        ]);
+        showToast?.(
+          `Приглашение для ${player.first_name || player.firstName || 'игрока'} отправлено`,
+          'success',
+        );
+        return invitation;
+      }
+
       const invitation = await createMatchInvitation({
         matchId,
         invitedUserId: player.id,
@@ -1597,9 +1748,34 @@ const handleBookSlot = async (booking) => {
       showToast?.(`Приглашение для ${player.firstName || 'игрока'} отправлено`, 'success');
       return invitation;
     } catch (error) {
-      console.error(`Ошибка create_match_invitation: ${error.message}`);
-      showToast?.(getCreateInvitationErrorMessage(error), 'error');
-      if (isStaleInvitationError(error)) await loadInvitations();
+      if (error?.message !== 'BACKEND_MATCH_INVITATION_REJECTED') {
+        console.error(`Ошибка create_match_invitation: ${error.message}`);
+      }
+      const backendReason = error?.reason;
+      showToast?.(
+        backendReason === 'already_invited'
+          ? 'Этому игроку уже отправлено приглашение.'
+          : backendReason === 'already_participant'
+            ? 'Этот игрок уже участвует в матче.'
+            : backendReason === 'rating_verification_required'
+              ? 'Для рейтингового матча нужен подтверждённый рейтинг игрока.'
+              : backendReason === 'rating_out_of_range'
+                ? 'Уровень игрока не входит в диапазон этого матча.'
+                : backendReason
+                  ? 'Не удалось отправить приглашение. Обновите матч и попробуйте ещё раз.'
+                  : getCreateInvitationErrorMessage(error),
+        'error',
+      );
+      if (
+        isBackendInvitationStaleReason(backendReason) ||
+        isStaleInvitationError(error)
+      ) {
+        if (isBackendOwnedMatch(getMatchSource(matchId))) {
+          await loadBackendOutgoingInvitations(matchId);
+        } else {
+          await loadInvitations();
+        }
+      }
       throw error;
     } finally {
       endInvitationAction(key);
@@ -1609,18 +1785,50 @@ const handleBookSlot = async (booking) => {
   const handleCancelInvitation = async (invitationId) => {
     const key = `cancel:${invitationId}`;
     if (!beginInvitationAction(key)) return null;
+    const invitation = outgoingInvitations.find(
+      (item) => item.id === invitationId,
+    );
+    const backendInvitation = (
+      invitation?.backendOwned === true ||
+      isBackendOwnedMatch(
+        getMatchSource(invitation?.match_id ?? selectedMatch?.id),
+      )
+    );
 
     try {
+      if (backendInvitation) {
+        const result =
+          await backendMatchActions.cancelMatchInvitation(invitationId);
+        if (result.outcome !== 'invitation_cancelled') {
+          throw backendInvitationError(result.reason);
+        }
+        setOutgoingInvitations((prev) =>
+          prev.filter((item) => item.id !== invitationId));
+        showToast?.('Приглашение отменено. Слот снова свободен.', 'info');
+        return true;
+      }
+
       await cancelMatchInvitation(invitationId);
       setOutgoingInvitations(prev => prev.filter((item) => item.id !== invitationId));
       showToast?.('Приглашение отменено. Слот снова свободен.', 'info');
       return true;
     } catch (error) {
-      console.error(`Ошибка cancel_match_invitation: ${error.message}`);
-      if (isStaleInvitationError(error)) {
+      if (error?.message !== 'BACKEND_MATCH_INVITATION_REJECTED') {
+        console.error(`Ошибка cancel_match_invitation: ${error.message}`);
+      }
+      if (
+        isBackendInvitationStaleReason(error?.reason) ||
+        isStaleInvitationError(error)
+      ) {
         setOutgoingInvitations(prev => prev.filter((item) => item.id !== invitationId));
         showToast?.('Приглашение уже обработано на другом устройстве.', 'info');
-        await loadInvitations();
+        if (backendInvitation) {
+          await loadBackendOutgoingInvitations(
+            invitation?.match_id ?? selectedMatch?.id,
+          );
+        } else {
+          await loadInvitations();
+        }
         return false;
       }
       showToast?.('Не удалось отменить приглашение. Попробуйте ещё раз.', 'error');
@@ -1636,6 +1844,23 @@ const handleBookSlot = async (booking) => {
     if (!beginInvitationAction(key)) return null;
 
     try {
+      if (invitation.backendOwned === true) {
+        const result =
+          await backendMatchActions.acceptMatchInvitation(invitationId);
+        if (result.outcome !== 'invitation_accepted') {
+          throw backendInvitationError(result.reason);
+        }
+        hideHandledIncomingInvitation(invitationId);
+        const updatedMatch = await handleRefreshMatch(
+          invitation.match_id,
+          { id: invitation.match_id, backendOwned: true },
+        );
+        await Promise.all([loadInvitations(), loadBackendMatchFeed()]);
+        showToast?.('Приглашение принято. Вы добавлены в состав.', 'success');
+        if (updatedMatch) openMatchDetails(updatedMatch);
+        return updatedMatch;
+      }
+
       const updatedMatch = storeUpdatedMatch(await acceptMatchInvitation(invitationId));
       hideHandledIncomingInvitation(invitationId);
       await markInvitationHandled(invitationId);
@@ -1644,13 +1869,22 @@ const handleBookSlot = async (booking) => {
       openMatchDetails(updatedMatch);
       return updatedMatch;
     } catch (error) {
-      if (isStaleInvitationError(error)) {
+      if (
+        isBackendInvitationStaleReason(error?.reason) ||
+        isStaleInvitationError(error)
+      ) {
         hideHandledIncomingInvitation(invitationId);
         showToast?.('Приглашение уже обработано или устарело.', 'info');
-        await Promise.all([loadInvitations(), loadMatches(), loadNotifications()]);
+        await (
+          invitation.backendOwned === true
+            ? Promise.all([loadInvitations(), loadBackendMatchFeed()])
+            : Promise.all([loadInvitations(), loadMatches(), loadNotifications()])
+        );
         return null;
       }
-      console.error(`Ошибка accept_match_invitation: ${error.message}`);
+      if (error?.message !== 'BACKEND_MATCH_INVITATION_REJECTED') {
+        console.error(`Ошибка accept_match_invitation: ${error.message}`);
+      }
       showToast?.('Не удалось принять приглашение. Попробуйте ещё раз.', 'error');
       throw error;
     } finally {
@@ -1664,6 +1898,22 @@ const handleBookSlot = async (booking) => {
     if (!beginInvitationAction(key)) return null;
 
     try {
+      if (invitation.backendOwned === true) {
+        const result =
+          await backendMatchActions.declineMatchInvitation(invitationId);
+        if (result.outcome !== 'invitation_declined') {
+          throw backendInvitationError(result.reason);
+        }
+        hideHandledIncomingInvitation(invitationId);
+        const updatedMatch = await handleRefreshMatch(
+          invitation.match_id,
+          { id: invitation.match_id, backendOwned: true },
+        );
+        await loadInvitations();
+        showToast?.('Вы отказались от приглашения. Слот освобождён.', 'info');
+        return updatedMatch ?? true;
+      }
+
       await declineMatchInvitation(invitationId);
       hideHandledIncomingInvitation(invitationId);
       await markInvitationHandled(invitationId);
@@ -1675,17 +1925,32 @@ const handleBookSlot = async (booking) => {
       showToast?.('Вы отказались от приглашения. Слот освобождён.', 'info');
       return updatedMatch ?? true;
     } catch (error) {
-      if (isStaleInvitationError(error)) {
+      if (
+        isBackendInvitationStaleReason(error?.reason) ||
+        isStaleInvitationError(error)
+      ) {
         hideHandledIncomingInvitation(invitationId);
         showToast?.('Приглашение уже обработано на другом устройстве.', 'info');
-        const [, updatedMatch] = await Promise.all([
-          loadInvitations(),
-          handleRefreshMatch(invitation.match_id),
-          loadNotifications(),
-        ]);
+        const [, updatedMatch] = await (
+          invitation.backendOwned === true
+            ? Promise.all([
+                loadInvitations(),
+                handleRefreshMatch(
+                  invitation.match_id,
+                  { id: invitation.match_id, backendOwned: true },
+                ),
+              ])
+            : Promise.all([
+                loadInvitations(),
+                handleRefreshMatch(invitation.match_id),
+                loadNotifications(),
+              ])
+        );
         return updatedMatch ?? false;
       }
-      console.error(`Ошибка decline_match_invitation: ${error.message}`);
+      if (error?.message !== 'BACKEND_MATCH_INVITATION_REJECTED') {
+        console.error(`Ошибка decline_match_invitation: ${error.message}`);
+      }
       showToast?.('Не удалось отказаться от приглашения. Попробуйте ещё раз.', 'error');
       throw error;
     } finally {
@@ -1946,6 +2211,11 @@ const handleBookSlot = async (booking) => {
         onDeclineInvitation={handleDeclineInvitation}
         onCreateInvitation={handleCreateInvitation}
         onCancelInvitation={handleCancelInvitation}
+        onSearchPlayers={
+          isBackendOwnedMatch(selectedMatch)
+            ? handleSearchInvitationPlayers
+            : null
+        }
         onRemoveParticipant={handleRemoveParticipant}
         allMessages={allMessages}
         messagesLoading={messagesLoading}
@@ -2094,7 +2364,10 @@ const handleBookSlot = async (booking) => {
         active={activeTab}
         setActive={setActiveTab}
         isAdmin={isAdmin}
-        profileBadgeCount={notificationCenter.unreadCount}
+        profileBadgeCount={
+          notificationCenter.unreadCount +
+          (usesBackendMatches ? incomingInvitations.length : 0)
+        }
       />
     </div>
   );

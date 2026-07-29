@@ -63,6 +63,18 @@ export function supportsLegacyMatchExtensions(match) {
   return match?.backendOwned !== true;
 }
 
+export function supportsBackendMatchInvitations(
+  match,
+  onCreateInvitation,
+  onSearchPlayers,
+) {
+  return (
+    match?.backendOwned === true &&
+    typeof onCreateInvitation === 'function' &&
+    typeof onSearchPlayers === 'function'
+  );
+}
+
 export async function refreshLegacyMatchWaitlist(
   match,
   refreshWaitlist,
@@ -650,13 +662,14 @@ function LevelOverrideConfirm({ message, onConfirm, onCancel }) {
   );
 }
 
-function SlotActionSheet({ slotIndex, isOwner, currentUser, matchId, onAddGuest, onAddBot, availableBotsCount = 0, onTakeSlot, onClose, showToast, slots }) {
+function SlotActionSheet({ slotIndex, isOwner, currentUser, matchId, onAddGuest, onAddBot, availableBotsCount = 0, onTakeSlot, onSearchPlayers, onClose, showToast, slots }) {
   const [copied, setCopied] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
   const [invitingPlayerId, setInvitingPlayerId] = useState(null);
   const invitationInFlightRef = useRef(false);
+  const playerSearchRequestRef = useRef(0);
 
   // Проверяем, играет ли уже юзер в матче
   const isParticipant = slots?.some(player => player?.id === currentUser?.id);
@@ -670,27 +683,45 @@ function SlotActionSheet({ slotIndex, isOwner, currentUser, matchId, onAddGuest,
   };
 
   useEffect(() => {
+    const requestId = playerSearchRequestRef.current + 1;
+    playerSearchRequestRef.current = requestId;
     const canSearch = isOwner;
     if (!canSearch || searchTerm.trim().length < 2) {
       setSearchResults([]);
+      setIsSearching(false);
       return;
     }
     setIsSearching(true);
     const delayDebounceFn = setTimeout(async () => {
       try {
-        const data = await getPublicPlayerProfiles({
-          search: searchTerm,
-          excludeId: currentUser?.id,
-          select: 'id, first_name, last_name, username, rating, is_verified, side_preference',
-          limit: 5,
-        });
-        setSearchResults(data || []);
+        const data = typeof onSearchPlayers === 'function'
+          ? await onSearchPlayers(searchTerm, 5)
+          : await getPublicPlayerProfiles({
+              search: searchTerm,
+              excludeId: currentUser?.id,
+              select: 'id, first_name, last_name, username, rating, is_verified, side_preference',
+              limit: 5,
+            });
+        if (playerSearchRequestRef.current === requestId) {
+          setSearchResults(data || []);
+        }
+      } catch {
+        if (playerSearchRequestRef.current === requestId) {
+          setSearchResults([]);
+        }
       } finally {
-        setIsSearching(false);
+        if (playerSearchRequestRef.current === requestId) {
+          setIsSearching(false);
+        }
       }
     }, 300);
-    return () => clearTimeout(delayDebounceFn);
-  }, [searchTerm, isOwner, currentUser?.id]);
+    return () => {
+      clearTimeout(delayDebounceFn);
+      if (playerSearchRequestRef.current === requestId) {
+        playerSearchRequestRef.current += 1;
+      }
+    };
+  }, [searchTerm, isOwner, currentUser?.id, onSearchPlayers]);
 
   const handleSelectPlayer = async (player) => {
     if (invitationInFlightRef.current) return;
@@ -1073,7 +1104,7 @@ function MatchInvitationPanel({ accepting, declining, onAccept, onDecline }) {
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
-export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinSuccess, onDelete, onComplete, onConfirmScore, onDisputeScore, onUpdate, onSlotsChange, onJoinMatch, onLeaveMatch, onRefreshMatch, incomingInvitation = null, pendingInvitations = [], invitationActions = new Set(), onAcceptInvitation, onDeclineInvitation, onCreateInvitation, onCancelInvitation, onRemoveParticipant, allMessages, messagesLoading, messagesLoadError, onRetryMessages, onSendMessage, onRevertToPrivate, showToast }) {
+export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinSuccess, onDelete, onComplete, onConfirmScore, onDisputeScore, onUpdate, onSlotsChange, onJoinMatch, onLeaveMatch, onRefreshMatch, incomingInvitation = null, pendingInvitations = [], invitationActions = new Set(), onAcceptInvitation, onDeclineInvitation, onCreateInvitation, onCancelInvitation, onSearchPlayers, onRemoveParticipant, allMessages, messagesLoading, messagesLoadError, onRetryMessages, onSendMessage, onRevertToPrivate, showToast }) {
   const isOwner = canManageMatch(currentUser, match);
 
   const allBots = useMemo(() => getTestBots(), []);
@@ -1289,12 +1320,21 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
   const savedScore = match.finalScore ?? match.score;
   const hasFinalScore = Array.isArray(savedScore) && savedScore.some(s => (s?.t1 ?? 0) + (s?.t2 ?? 0) > 0);
   const isCompletedMatch = finished || status === 'completed' || status === 'finished' || (hasFinalScore && !isScorePending && !isScoreDisputed && !isRatedMatch);
-  const usesLegacyMatchExtensions = supportsLegacyMatchExtensions(match);
-  const canEditMatch = usesLegacyMatchExtensions && isOwner && !isCompletedMatch && !isScorePending && !isScoreDisputed;
-  const completedScoreText = fmtSetList(savedScore);
-  const scoreSubmittedBy = match.scoreSubmittedBy ?? match.score_submitted_by;
   const matchStartMs = new Date(`${dateISO}T${time || '00:00'}:00`).getTime();
   const matchHasNotStarted = !Number.isFinite(matchStartMs) || matchStartMs > Date.now();
+  const usesLegacyMatchExtensions = supportsLegacyMatchExtensions(match);
+  const usesBackendMatchInvitations = supportsBackendMatchInvitations(
+    match,
+    onCreateInvitation,
+    onSearchPlayers,
+  );
+  const canEditMatch = usesLegacyMatchExtensions && isOwner && !isCompletedMatch && !isScorePending && !isScoreDisputed;
+  const canInvitePlayers = (
+    usesLegacyMatchExtensions ||
+    usesBackendMatchInvitations
+  ) && isOwner && matchHasNotStarted && !isCompletedMatch && !isScorePending && !isScoreDisputed;
+  const completedScoreText = fmtSetList(savedScore);
+  const scoreSubmittedBy = match.scoreSubmittedBy ?? match.score_submitted_by;
   const isPaidParticipation = (player) => {
     const paymentStatus = String(player?.paymentStatus ?? player?.payment_status ?? '').toLowerCase();
     return player?.paid === true || player?.isPaid === true || paymentStatus === 'paid' || paymentStatus === 'full';
@@ -1391,7 +1431,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
   const refreshMatchAndWaitlist = async () => {
     const [updatedMatch] = await Promise.all([
       onRefreshMatch?.(match.id, match),
-      refreshWaitlist(),
+      refreshLegacyMatchWaitlist(match, refreshWaitlist),
     ]);
     return updatedMatch ?? null;
   };
@@ -1425,7 +1465,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
     try {
       const updatedMatch = await onAcceptInvitation(pendingInvitation);
       if (updatedMatch?.filledSlots) setLocalSlots(updatedMatch.filledSlots);
-      await refreshWaitlist();
+      await refreshLegacyMatchWaitlist(match, refreshWaitlist);
       return Boolean(updatedMatch);
     } catch {
       return false;
@@ -1437,7 +1477,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
     try {
       const result = await onDeclineInvitation(pendingInvitation);
       if (result?.filledSlots) setLocalSlots(result.filledSlots);
-      await refreshWaitlist();
+      await refreshLegacyMatchWaitlist(match, refreshWaitlist);
       return result;
     } catch {
       return false;
@@ -1642,6 +1682,13 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
       playerRatingIdx != null &&
       (playerRatingIdx < levelRequirement.minIdx || playerRatingIdx > levelRequirement.maxIdx)
     ) {
+      if (usesBackendMatchInvitations) {
+        showToast?.(
+          'Уровень игрока не входит в диапазон этого матча.',
+          'error',
+        );
+        return false;
+      }
       const direction = playerRatingIdx < levelRequirement.minIdx ? 'ниже' : 'выше';
       setLevelOverride({
         slotIndex,
@@ -1974,7 +2021,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
             <div style={{ fontSize: '10px', fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.12em' }}>
               Игроки {allFilled.length}/{maxSlots}
             </div>
-            {canEditMatch && !isCapacityReserved && (
+            {canInvitePlayers && !isCapacityReserved && (
               <button onClick={() => setTargetSlot(slots.findIndex((slot) => !slot))} style={{ padding: '5px 12px', background: 'rgba(216,243,74,0.10)', border: '1px solid rgba(216,243,74,0.24)', borderRadius: '8px', color: C.gold, fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}>
                 + Пригласить
               </button>
@@ -1997,7 +2044,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
                   ratingChange={enrichedPlayer?.id ? ratingChanges[enrichedPlayer.id] : null}
                   onSlotClick={
                     !isCompletedMatch &&
-                    (!isOwner || usesLegacyMatchExtensions)
+                    (!isOwner || canInvitePlayers)
                       ? () => handleEmptySlotClick(i)
                       : undefined
                   }
@@ -2207,7 +2254,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
           onCancel={() => setLeaveTarget(null)}
         />
       )}
-      {levelOverride && canEditMatch && (
+      {levelOverride && canInvitePlayers && (
         <LevelOverrideConfirm
           message={levelOverride.message}
           onConfirm={handleConfirmLevelOverride}
@@ -2235,8 +2282,14 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
           slots={slots} // <-- ВОТ ОНА, САМАЯ ГЛАВНАЯ СТРОКА! Передаем массив слотов родителя
           onAddGuest={handleAddGuest}
           onAddBot={handleAddBot}
-          availableBotsCount={currentUser?.role === 'admin' ? availableBotsCount : 0}
+          availableBotsCount={
+            usesLegacyMatchExtensions &&
+            currentUser?.role === 'admin'
+              ? availableBotsCount
+              : 0
+          }
           onTakeSlot={handleTakeSlot}
+          onSearchPlayers={onSearchPlayers}
           showToast={showToast}
           onClose={() => setTargetSlot(null)}
         />
