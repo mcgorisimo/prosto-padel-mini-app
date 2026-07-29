@@ -14,6 +14,17 @@ import { useTelegram } from './hooks/useTelegram';
 import { isPrimeTime, normalizeStoredPrice } from './lib/pricing';
 import { calculateRatingChange, getLevelForRating, MIN_RATING, MAX_RATING } from './lib/ratingEngine';
 import { isRatingMatch } from './lib/matchRating';
+import {
+  BACKEND_PRIVATE_MATCH_CREATION_ENABLED,
+  createBackendMatchDraft,
+  applyBackendParticipantResult,
+  isBackendOwnedMatch,
+  mapBackendMatchToApp,
+  resolveBackendMatchMode,
+  resolveMatchSource,
+  shouldApplyBackendMatchDetail,
+  shouldApplyBackendMatchFeedResponse,
+} from './lib/backendMatchAdapter';
 import { getMyProfile, getPublicPlayerProfiles } from './lib/profileApi';
 import {
   acceptMatchInvitation,
@@ -271,6 +282,10 @@ export function mergeProfileSources(profile, backendProfile, metadata = {}) {
 export default function App({
   session,
   backendProfile = null,
+  backendMatchRequired = false,
+  backendMatchLifecycleStatus = 'disabled',
+  backendProfileStatus = backendProfile ? 'ready' : 'inactive',
+  backendMatchActions = null,
   onBackendProfileSave = null,
   showToast,
   onLogout,
@@ -279,17 +294,31 @@ export default function App({
   
   // --- 1. СТЕЙТЫ ---
   const ME_ID = session?.user?.id;
+  const backendMatchMode = resolveBackendMatchMode({
+    backendRequired: backendMatchRequired,
+    hasBackendActions: backendMatchActions !== null,
+    lifecycleStatus: backendMatchLifecycleStatus,
+    profileStatus: backendProfileStatus,
+    accountId: backendProfile?.accountId,
+  });
+  const usesBackendMatches = backendMatchMode !== 'legacy';
+  const backendMatchesReady = backendMatchMode === 'ready';
   const [profile, setProfile] = useState(null);
   const [allMatches, setAllMatches] = useState([]);
   const [allMessages, setAllMessages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [matchesLoading, setMatchesLoading] = useState(true);
   const [matchesLoadError, setMatchesLoadError] = useState('');
+  const [backendFeedMatches, setBackendFeedMatches] = useState([]);
+  const [backendFeedLoading, setBackendFeedLoading] = useState(false);
+  const [backendFeedError, setBackendFeedError] = useState('');
   const [messagesLoading, setMessagesLoading] = useState(true);
   const [messagesLoadError, setMessagesLoadError] = useState('');
   const [activeTab, setActiveTab]    = useState('home');
   const [toast, setToast]            = useState(null);
   const [selectedMatch, setSelected] = useState(null);
+  const backendDetailRequestRef = useRef(0);
+  const backendFeedRequestRef = useRef(0);
   const [incomingInvitations, setIncomingInvitations] = useState([]);
   const [outgoingInvitations, setOutgoingInvitations] = useState([]);
   const [invitationsLoading, setInvitationsLoading] = useState(true);
@@ -344,6 +373,69 @@ export default function App({
       setMatchesLoading(false);
     }
   }, []);
+
+  const loadBackendMatchFeed = useCallback(async () => {
+    const requestId = backendFeedRequestRef.current + 1;
+    backendFeedRequestRef.current = requestId;
+    if (!usesBackendMatches) {
+      setBackendFeedMatches([]);
+      setBackendFeedError('');
+      setBackendFeedLoading(false);
+      return null;
+    }
+    if (!backendMatchesReady) {
+      setBackendFeedMatches([]);
+      setBackendFeedError(
+        backendMatchMode === 'error'
+          ? 'Не удалось загрузить профиль для матчей. Откройте приложение заново.'
+          : '',
+      );
+      setBackendFeedLoading(backendMatchMode === 'loading');
+      return null;
+    }
+
+    setBackendFeedLoading(true);
+    setBackendFeedError('');
+    try {
+      const result = await backendMatchActions.listMatches(50);
+      if (!shouldApplyBackendMatchFeedResponse(
+        backendFeedRequestRef.current,
+        requestId,
+      )) {
+        return null;
+      }
+      if (result.outcome !== 'matches_loaded') {
+        throw new Error('BACKEND_MATCH_FEED_REJECTED');
+      }
+      const matches = result.matches
+        .map((record) => mapBackendMatchToApp(record, backendProfile))
+        .filter(Boolean);
+      setBackendFeedMatches(matches);
+      return matches;
+    } catch {
+      if (!shouldApplyBackendMatchFeedResponse(
+        backendFeedRequestRef.current,
+        requestId,
+      )) {
+        return null;
+      }
+      setBackendFeedError('Не удалось загрузить матчи. Проверьте подключение и попробуйте ещё раз.');
+      return null;
+    } finally {
+      if (shouldApplyBackendMatchFeedResponse(
+        backendFeedRequestRef.current,
+        requestId,
+      )) {
+        setBackendFeedLoading(false);
+      }
+    }
+  }, [
+    backendMatchActions,
+    backendMatchMode,
+    backendMatchesReady,
+    backendProfile,
+    usesBackendMatches,
+  ]);
 
   const loadMessages = useCallback(async () => {
     setMessagesLoading(true);
@@ -420,11 +512,26 @@ export default function App({
     }
 
     try {
-      await Promise.all([fetchProfile(), loadMatches(), loadMessages(), loadInvitations(), loadNotifications()]);
+      await Promise.all([
+        fetchProfile(),
+        loadMatches(),
+        loadBackendMatchFeed(),
+        loadMessages(),
+        loadInvitations(),
+        loadNotifications(),
+      ]);
     } finally {
       setLoading(false);
     }
-  }, [ME_ID, fetchProfile, loadMatches, loadMessages, loadInvitations, loadNotifications]);
+  }, [
+    ME_ID,
+    fetchProfile,
+    loadMatches,
+    loadBackendMatchFeed,
+    loadMessages,
+    loadInvitations,
+    loadNotifications,
+  ]);
 
   // --- 2. ЗАГРУЗКА ДАННЫХ ---
   useEffect(() => {
@@ -529,6 +636,64 @@ export default function App({
       role: p.role,
     };
   }, [backendProfile, profile, session, user?.username]); // <-- добавили session в зависимости
+
+  const backendMatchCurrentUser = useMemo(() => ({
+    ...currentUser,
+    id: backendProfile?.accountId ?? null,
+  }), [backendProfile?.accountId, currentUser]);
+  const matchCurrentUser = isBackendOwnedMatch(selectedMatch)
+    ? backendMatchCurrentUser
+    : currentUser;
+  const getMatchSource = useCallback((matchId, explicitMatch = null) => (
+    resolveMatchSource(
+      matchId,
+      explicitMatch ?? selectedMatch,
+      backendFeedMatches,
+      allMatches,
+    )
+  ), [
+    allMatches,
+    backendFeedMatches,
+    selectedMatch,
+  ]);
+  const storeBackendMatch = useCallback((updatedMatch) => {
+    if (!isBackendOwnedMatch(updatedMatch)) return null;
+    backendFeedRequestRef.current += 1;
+    setBackendFeedLoading(false);
+    setBackendFeedMatches((previous) => {
+      const existing = previous.find(
+        (match) => match.id === updatedMatch.id,
+      );
+      if (
+        existing &&
+        !shouldApplyBackendMatchDetail(
+          existing,
+          updatedMatch.id,
+          updatedMatch,
+        )
+      ) {
+        return previous;
+      }
+      if (updatedMatch.isPrivate) {
+        return previous.filter(
+          (match) => match.id !== updatedMatch.id,
+        );
+      }
+      return existing
+        ? previous.map((match) =>
+            match.id === updatedMatch.id ? updatedMatch : match)
+        : [updatedMatch, ...previous];
+    });
+    setSelected((previous) =>
+      shouldApplyBackendMatchDetail(
+        previous,
+        updatedMatch.id,
+        updatedMatch,
+      )
+        ? updatedMatch
+        : previous);
+    return updatedMatch;
+  }, []);
 
   const isAdmin = currentUser?.role === 'admin';
 
@@ -1106,7 +1271,39 @@ const handleBookSlot = async (booking) => {
     return 'Не удалось присоединиться к матчу. Попробуйте еще раз.';
   };
 
-  const handleJoinMatch = async (matchId) => {
+  const handleJoinMatch = async (matchId, explicitMatch = null) => {
+    const matchSource = getMatchSource(matchId, explicitMatch);
+    if (isBackendOwnedMatch(matchSource)) {
+      if (!backendMatchesReady) {
+        const unavailableError = new Error('backend_match_session_required');
+        showToast?.('Сессия истекла. Войдите через Telegram ещё раз.', 'error');
+        throw unavailableError;
+      }
+      const result = await backendMatchActions.joinMatch(matchId);
+      if (result.outcome !== 'participant_joined') {
+        const safeError = new Error(
+          result.reason ?? 'match_join_failed',
+        );
+        showToast?.(getJoinMatchErrorMessage(safeError), 'error');
+        throw safeError;
+      }
+      const updatedMatch = await handleRefreshMatch(matchId, matchSource);
+      if (!updatedMatch) {
+        const optimisticMatch = applyBackendParticipantResult(
+          matchSource,
+          result.participant,
+          backendMatchCurrentUser,
+        );
+        if (optimisticMatch) storeBackendMatch(optimisticMatch);
+        showToast?.(
+          'Вы присоединились к матчу. Детали обновятся после перезагрузки ленты.',
+          'info',
+        );
+        return optimisticMatch ?? matchSource;
+      }
+      return updatedMatch;
+    }
+
     const { data, error } = await supabase.rpc('join_match', { p_match_id: matchId });
 
     if (error) {
@@ -1144,7 +1341,39 @@ const handleBookSlot = async (booking) => {
     return updatedMatch;
   };
 
-  const handleLeaveMatch = async (matchId) => {
+  const handleLeaveMatch = async (matchId, explicitMatch = null) => {
+    const matchSource = getMatchSource(matchId, explicitMatch);
+    if (isBackendOwnedMatch(matchSource)) {
+      if (!backendMatchesReady) {
+        const unavailableError = new Error('backend_match_session_required');
+        showToast?.('Сессия истекла. Войдите через Telegram ещё раз.', 'error');
+        throw unavailableError;
+      }
+      const result = await backendMatchActions.leaveMatch(matchId);
+      if (result.outcome !== 'participant_left') {
+        const safeError = new Error(
+          result.reason ?? 'match_leave_failed',
+        );
+        showToast?.('Не удалось выйти из матча. Попробуйте ещё раз.', 'error');
+        throw safeError;
+      }
+      const updatedMatch = await handleRefreshMatch(matchId, matchSource);
+      if (!updatedMatch) {
+        const optimisticMatch = applyBackendParticipantResult(
+          matchSource,
+          result.participant,
+          backendMatchCurrentUser,
+        );
+        if (optimisticMatch) storeBackendMatch(optimisticMatch);
+        showToast?.(
+          'Вы вышли из матча. Детали обновятся после перезагрузки ленты.',
+          'info',
+        );
+        return optimisticMatch ?? matchSource;
+      }
+      return updatedMatch;
+    }
+
     const { data, error } = await supabase.rpc('leave_match', { p_match_id: matchId });
 
     if (error) {
@@ -1211,15 +1440,44 @@ const handleBookSlot = async (booking) => {
 
   // ── Navigation helpers ──
   const openCreateMatch = () => {
+    if (usesBackendMatches && !backendMatchesReady) {
+      showToast?.(
+        'Профиль ещё загружается. Попробуйте открыть создание матча позже.',
+        backendMatchMode === 'error' ? 'error' : 'info',
+      );
+      return;
+    }
     tg?.HapticFeedback?.impactOccurred('medium');
     setScreen('create-match');
   };
 
   const openMatchDetails = (match) => {
+    const detailRequestId = backendDetailRequestRef.current + 1;
+    backendDetailRequestRef.current = detailRequestId;
     tg?.HapticFeedback?.impactOccurred('light');
     setSelected(match);
     setScreen('match-details');
+    if (isBackendOwnedMatch(match)) {
+      if (!backendMatchesReady) return;
+      void backendMatchActions.loadMatch(match.id).then((result) => {
+        if (backendDetailRequestRef.current !== detailRequestId) return;
+        if (result.outcome !== 'match_loaded') return;
+        const detailedMatch = mapBackendMatchToApp(
+          result.match,
+          backendProfile,
+        );
+        if (!detailedMatch) return;
+        storeBackendMatch(detailedMatch);
+      });
+      return;
+    }
     void Promise.allSettled([loadInvitations(), loadMatches()]);
+  };
+
+  const closeMatchDetails = () => {
+    backendDetailRequestRef.current += 1;
+    setSelected(null);
+    setScreen(null);
   };
 
   const beginInvitationAction = (key) => {
@@ -1243,7 +1501,24 @@ const handleBookSlot = async (booking) => {
     return updatedMatch;
   };
 
-  const handleRefreshMatch = async (matchId) => {
+  const handleRefreshMatch = async (matchId, explicitMatch = null) => {
+    const matchSource = getMatchSource(matchId, explicitMatch);
+    if (isBackendOwnedMatch(matchSource)) {
+      if (!backendMatchesReady) return null;
+      const detailRequestId = backendDetailRequestRef.current + 1;
+      backendDetailRequestRef.current = detailRequestId;
+      const result = await backendMatchActions.loadMatch(matchId);
+      if (backendDetailRequestRef.current !== detailRequestId) return null;
+      if (result.outcome !== 'match_loaded') return null;
+      const updatedMatch = mapBackendMatchToApp(
+        result.match,
+        backendProfile,
+      );
+      if (!updatedMatch) return null;
+      storeBackendMatch(updatedMatch);
+      return updatedMatch;
+    }
+
     const rows = await loadMatches();
     const row = rows?.find((item) => String(item.id) === String(matchId));
     if (!row) return null;
@@ -1439,6 +1714,67 @@ const handleBookSlot = async (booking) => {
   const handleMatchSuccess = async (data) => {
     const isRated = data.isRatingMatch === true || data.is_rating_match === true;
 
+    if (usesBackendMatches) {
+      if (!backendMatchesReady) {
+        const unavailableProfile = new Error(
+          'backend_match_profile_required',
+        );
+        showToast?.(
+          'Профиль ещё не готов. Откройте создание матча позже.',
+          'error',
+        );
+        throw unavailableProfile;
+      }
+      if (
+        data.isPrivate === true &&
+        !BACKEND_PRIVATE_MATCH_CREATION_ENABLED
+      ) {
+        const unsupportedPrivateMatch = new Error(
+          'backend_private_match_creation_unavailable',
+        );
+        showToast?.(
+          'Приватные матчи временно недоступны. Создайте открытый матч.',
+          'error',
+        );
+        throw unsupportedPrivateMatch;
+      }
+      const draft = createBackendMatchDraft({
+        ...data,
+        isRatingMatch: isRated,
+      });
+      if (!draft) {
+        const invalidDraft = new Error('match_invalid_request');
+        showToast?.('Проверьте параметры матча и попробуйте ещё раз.', 'error');
+        throw invalidDraft;
+      }
+      const result = await backendMatchActions.createMatch(draft);
+      if (result.outcome !== 'match_created') {
+        const safeError = new Error(
+          result.reason ?? 'match_create_failed',
+        );
+        showToast?.('Не удалось создать матч. Попробуйте ещё раз.', 'error');
+        throw safeError;
+      }
+      const createdMatch = mapBackendMatchToApp(
+        result.match,
+        backendProfile,
+      );
+      if (!createdMatch) {
+        const malformedMatch = new Error('match_response_invalid');
+        showToast?.('Матч создан, но ответ сервера не распознан. Обновите ленту.', 'error');
+        throw malformedMatch;
+      }
+      if (!createdMatch.isPrivate) {
+        storeBackendMatch(createdMatch);
+        setScreen(null);
+        setActiveTab('matches');
+        return;
+      }
+      setSelected(createdMatch);
+      setScreen('match-details');
+      return;
+    }
+
     const ownerSlot = {
       id:          ME_ID,
       firstName:   currentUser.firstName,
@@ -1515,7 +1851,7 @@ const handleBookSlot = async (booking) => {
     return Number.isFinite(end.getTime()) && end <= new Date();
   });
   // Public feed shows only non-private open matches.
-  const openMatches = allMatches.filter(m => {
+  const legacyOpenMatches = allMatches.filter(m => {
     // Восстанавливаем строгий фильтр: только публичные, не завершенные матчи
     const isPublicFeedMatch = m.type === 'match' && m.isPrivate === false && m.status !== 'completed';
     if (!isPublicFeedMatch) {
@@ -1525,6 +1861,9 @@ const handleBookSlot = async (booking) => {
     const matchEndDateTime = new Date(matchStartDateTime.getTime() + (m.duration || 1.5) * 3600 * 1000);
     return matchEndDateTime > new Date();
   });
+  const openMatches = usesBackendMatches
+    ? backendFeedMatches
+    : legacyOpenMatches;
 
   // Real profile stats derived from allMatches + live rating.
   const profileStats = useMemo(() => {
@@ -1559,10 +1898,19 @@ const handleBookSlot = async (booking) => {
   if (screen === 'create-match') {
     return (
       <MatchCreationScreen
-        allMatches={allMatches}
+        allMatches={usesBackendMatches ? backendFeedMatches : allMatches}
         onBack={() => setScreen(null)}
         onSuccess={handleMatchSuccess}
-        user={currentUser}
+        user={
+          usesBackendMatches
+            ? backendMatchCurrentUser
+            : currentUser
+        }
+        minimumDuration={usesBackendMatches ? 1 : 0.5}
+        allowPrivateMatches={
+          !usesBackendMatches ||
+          BACKEND_PRIVATE_MATCH_CREATION_ENABLED
+        }
         showToast={showToast}
       />
     );
@@ -1571,10 +1919,17 @@ const handleBookSlot = async (booking) => {
   if (screen === 'match-details' && selectedMatch) {
     return (
       <MatchDetailsScreen
-        match={allMatches.find(m => m.id === selectedMatch.id) ?? selectedMatch}
-        currentUser={currentUser}
-        onBack={() => setScreen(null)}
-        onJoinSuccess={() => { setScreen(null); setActiveTab('matches'); }}
+        match={
+          selectedMatch.backendOwned
+            ? selectedMatch
+            : allMatches.find(m => m.id === selectedMatch.id) ?? selectedMatch
+        }
+        currentUser={matchCurrentUser}
+        onBack={closeMatchDetails}
+        onJoinSuccess={() => {
+          closeMatchDetails();
+          setActiveTab('matches');
+        }}
         onDelete={handleDeleteMatch}
         onComplete={handleCompleteMatch}
         onConfirmScore={handleConfirmScore}
@@ -1697,14 +2052,30 @@ const handleBookSlot = async (booking) => {
         {activeTab === 'matches' && (
           <MatchFeed
             matches={openMatches}
-            currentUser={currentUser}
-            playerRating={currentUser.ratingIdx}
+            currentUser={
+              usesBackendMatches
+                ? backendMatchCurrentUser
+                : currentUser
+            }
+            playerRating={
+              usesBackendMatches
+                ? backendMatchCurrentUser.ratingIdx
+                : currentUser.ratingIdx
+            }
             onJoin={(match) => console.log('join', match.id)}
             onViewDetails={openMatchDetails} // This needs showToast
             onCreateMatch={openCreateMatch} // This needs showToast
-            loading={matchesLoading}
-            loadError={matchesLoadError}
-            onRetry={loadMatches}
+            loading={
+              usesBackendMatches
+                ? backendMatchMode === 'loading' || backendFeedLoading
+                : matchesLoading
+            }
+            loadError={
+              usesBackendMatches ? backendFeedError : matchesLoadError
+            }
+            onRetry={
+              usesBackendMatches ? loadBackendMatchFeed : loadMatches
+            }
             onReset={currentUser?.role === 'admin' ? handleReset : null}
           />
         )}

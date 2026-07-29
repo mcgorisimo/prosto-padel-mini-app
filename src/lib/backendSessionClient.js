@@ -4,6 +4,7 @@ const REFRESH_PATH = '/api/v1/auth/session/refresh';
 const LOGOUT_PATH = '/api/v1/auth/session/logout';
 const AUTHENTICATE_PATH = '/api/v1/auth/session/me';
 const PROFILE_PATH = '/api/v1/profile/me';
+const MATCHES_PATH = '/api/v1/matches';
 const REQUEST_TIMEOUT_MS = 8_000;
 const MAX_REQUESTS = 3;
 const BACKOFF_BASE_MS = 250;
@@ -26,6 +27,35 @@ const PROFILE_PATCH_KEYS = Object.freeze([
   'sidePreference',
 ]);
 const SIDE_PREFERENCES = Object.freeze(['Left', 'Both', 'Right']);
+const MATCH_DURATIONS = Object.freeze([60, 90, 120, 150]);
+const MATCH_SCENARIOS = Object.freeze(['community', 'social', 'private']);
+const MATCH_STATUSES = Object.freeze([
+  'open',
+  'searching',
+  'confirmed',
+  'upcoming',
+  'completed',
+  'cancelled',
+]);
+const MATCH_FEED_STATUSES = Object.freeze([
+  'open',
+  'searching',
+  'confirmed',
+  'upcoming',
+]);
+const MATCH_CREATE_REQUIRED_KEYS = Object.freeze([
+  'startsAt',
+  'durationMinutes',
+  'scenario',
+  'description',
+  'isRatingMatch',
+]);
+const MATCH_CREATE_OPTIONAL_KEYS = Object.freeze([
+  'courtId',
+  'title',
+  'ratingMin',
+  'ratingMax',
+]);
 const LEGACY_PROFILE_KEYS = Object.freeze([
   'accountId',
   'firstName',
@@ -75,6 +105,244 @@ function hasExactKeys(actual, expected) {
   return (
     actual.length === expected.length &&
     actual.every((key, index) => key === expected[index])
+  );
+}
+
+function hasOnlyAllowedKeys(value, required, optional = []) {
+  const keys = Object.keys(value);
+  return (
+    required.every((key) =>
+      Object.prototype.hasOwnProperty.call(value, key)) &&
+    keys.every((key) => required.includes(key) || optional.includes(key))
+  );
+}
+
+function isUnixEpochSeconds(value) {
+  return Number.isSafeInteger(value) && value >= 0;
+}
+
+function isMatchId(value) {
+  return typeof value === 'string' && INTERNAL_UUID_PATTERN.test(value);
+}
+
+function isOptionalSafePrice(value) {
+  if (value === undefined) return true;
+  if (
+    typeof value !== 'number' ||
+    !Number.isFinite(value) ||
+    value <= 0 ||
+    value > 1_000_000
+  ) {
+    return false;
+  }
+  return Number(value.toFixed(2)) === value;
+}
+
+function isOptionalMatchTitle(value) {
+  return value === undefined || isBoundedString(value, 160);
+}
+
+function isMatchRating(value) {
+  return Number.isInteger(value) && value >= 0 && value <= 6;
+}
+
+export function isBackendCreateMatchDraft(value) {
+  if (
+    !isPlainObject(value) ||
+    !hasOnlyAllowedKeys(
+      value,
+      MATCH_CREATE_REQUIRED_KEYS,
+      MATCH_CREATE_OPTIONAL_KEYS,
+    ) ||
+    !isUnixEpochSeconds(value.startsAt) ||
+    !MATCH_DURATIONS.includes(value.durationMinutes) ||
+    !MATCH_SCENARIOS.includes(value.scenario) ||
+    (value.courtId !== undefined &&
+      (!isBoundedString(value.courtId, 64) ||
+        value.courtId.trim() !== value.courtId)) ||
+    !isOptionalMatchTitle(value.title) ||
+    (value.title !== undefined && value.title.trim() !== value.title) ||
+    typeof value.description !== 'string' ||
+    [...value.description].length > 2_000 ||
+    typeof value.isRatingMatch !== 'boolean'
+  ) {
+    return false;
+  }
+
+  if (value.scenario === 'private') {
+    return (
+      value.courtId !== undefined &&
+      value.isRatingMatch === false &&
+      !Object.prototype.hasOwnProperty.call(value, 'ratingMin') &&
+      !Object.prototype.hasOwnProperty.call(value, 'ratingMax')
+    );
+  }
+
+  return (
+    (value.scenario !== 'social' || value.courtId !== undefined) &&
+    isMatchRating(value.ratingMin) &&
+    isMatchRating(value.ratingMax) &&
+    value.ratingMin <= value.ratingMax
+  );
+}
+
+export function isBackendMatchFeedRecord(value) {
+  return (
+    isPlainObject(value) &&
+    hasOnlyAllowedKeys(
+      value,
+      [
+        'matchId',
+        'ownerAccountId',
+        'startsAt',
+        'durationMinutes',
+        'courtId',
+        'courtName',
+        'courtType',
+        'scenario',
+        'status',
+        'ratingMin',
+        'ratingMax',
+        'isRatingMatch',
+        'occupiedSlots',
+        'version',
+      ],
+      ['title', 'pricePerPersonSnapshot'],
+    ) &&
+    isMatchId(value.matchId) &&
+    isMatchId(value.ownerAccountId) &&
+    isUnixEpochSeconds(value.startsAt) &&
+    MATCH_DURATIONS.includes(value.durationMinutes) &&
+    typeof value.courtId === 'string' &&
+    typeof value.courtName === 'string' &&
+    typeof value.courtType === 'string' &&
+    (value.scenario === 'community' || value.scenario === 'social') &&
+    MATCH_FEED_STATUSES.includes(value.status) &&
+    isOptionalMatchTitle(value.title) &&
+    isMatchRating(value.ratingMin) &&
+    isMatchRating(value.ratingMax) &&
+    value.ratingMin <= value.ratingMax &&
+    typeof value.isRatingMatch === 'boolean' &&
+    isOptionalSafePrice(value.pricePerPersonSnapshot) &&
+    Number.isInteger(value.occupiedSlots) &&
+    value.occupiedSlots >= 1 &&
+    value.occupiedSlots <= 4 &&
+    Number.isSafeInteger(value.version) &&
+    value.version >= 1
+  );
+}
+
+export function isBackendMatchDetailRecord(value) {
+  if (
+    !isPlainObject(value) ||
+    !hasOnlyAllowedKeys(
+      value,
+      [
+        'matchId',
+        'ownerAccountId',
+        'createdAt',
+        'updatedAt',
+        'startsAt',
+        'durationMinutes',
+        'courtId',
+        'courtName',
+        'courtType',
+        'kind',
+        'visibility',
+        'scenario',
+        'status',
+        'description',
+        'isRatingMatch',
+        'version',
+        'participants',
+      ],
+      [
+        'title',
+        'ratingMin',
+        'ratingMax',
+        'pricePerPersonSnapshot',
+        'terminalAt',
+      ],
+    ) ||
+    !isMatchId(value.matchId) ||
+    !isMatchId(value.ownerAccountId) ||
+    !isUnixEpochSeconds(value.createdAt) ||
+    !isUnixEpochSeconds(value.updatedAt) ||
+    !isUnixEpochSeconds(value.startsAt) ||
+    !MATCH_DURATIONS.includes(value.durationMinutes) ||
+    typeof value.courtId !== 'string' ||
+    typeof value.courtName !== 'string' ||
+    typeof value.courtType !== 'string' ||
+    (value.kind !== 'match' && value.kind !== 'private') ||
+    (value.visibility !== 'public' && value.visibility !== 'private') ||
+    !MATCH_SCENARIOS.includes(value.scenario) ||
+    !MATCH_STATUSES.includes(value.status) ||
+    !isOptionalMatchTitle(value.title) ||
+    typeof value.description !== 'string' ||
+    [...value.description].length > 2_000 ||
+    typeof value.isRatingMatch !== 'boolean' ||
+    !isOptionalSafePrice(value.pricePerPersonSnapshot) ||
+    !Number.isSafeInteger(value.version) ||
+    value.version < 1 ||
+    (value.terminalAt !== undefined &&
+      !isUnixEpochSeconds(value.terminalAt)) ||
+    !Array.isArray(value.participants) ||
+    value.participants.length > 3
+  ) {
+    return false;
+  }
+
+  const participantsValid = value.participants.every((participant) =>
+    isPlainObject(participant) &&
+    hasExactKeys(
+      Object.keys(participant).sort(),
+      ['playerId', 'slotNumber'],
+    ) &&
+    isMatchId(participant.playerId) &&
+    [2, 3, 4].includes(participant.slotNumber));
+  if (!participantsValid) return false;
+
+  const playerIds = value.participants.map(({ playerId }) => playerId);
+  const slotNumbers = value.participants.map(({ slotNumber }) => slotNumber);
+  if (
+    new Set(playerIds).size !== playerIds.length ||
+    new Set(slotNumbers).size !== slotNumbers.length
+  ) {
+    return false;
+  }
+
+  if (value.scenario === 'private') {
+    return (
+      value.kind === 'private' &&
+      value.visibility === 'private' &&
+      value.isRatingMatch === false &&
+      value.ratingMin === undefined &&
+      value.ratingMax === undefined
+    );
+  }
+
+  return (
+    value.kind === 'match' &&
+    value.visibility === 'public' &&
+    isMatchRating(value.ratingMin) &&
+    isMatchRating(value.ratingMax) &&
+    value.ratingMin <= value.ratingMax
+  );
+}
+
+function isBackendMatchParticipant(value, status) {
+  return (
+    isPlainObject(value) &&
+    hasExactKeys(
+      Object.keys(value).sort(),
+      ['matchId', 'matchVersion', 'playerId', 'slotNumber', 'status'],
+    ) &&
+    isMatchId(value.matchId) &&
+    isMatchId(value.playerId) &&
+    [2, 3, 4].includes(value.slotNumber) &&
+    value.status === status &&
+    Number.isSafeInteger(value.matchVersion) &&
+    value.matchVersion >= 1
   );
 }
 
@@ -372,6 +640,55 @@ function profileSuccess(body, outcome = 'profile_loaded') {
   });
 }
 
+function matchListSuccess(body) {
+  if (
+    !isPlainObject(body) ||
+    !hasExactKeys(Object.keys(body).sort(), ['matches']) ||
+    !Array.isArray(body.matches) ||
+    body.matches.length > 50 ||
+    !body.matches.every(isBackendMatchFeedRecord)
+  ) {
+    return null;
+  }
+  return frozen('matches_loaded', {
+    matches: Object.freeze(
+      body.matches.map((match) => Object.freeze({ ...match })),
+    ),
+  });
+}
+
+function matchDetailSuccess(body, outcome) {
+  if (
+    !isPlainObject(body) ||
+    !hasExactKeys(Object.keys(body).sort(), ['match']) ||
+    !isBackendMatchDetailRecord(body.match)
+  ) {
+    return null;
+  }
+  return frozen(outcome, {
+    match: Object.freeze({
+      ...body.match,
+      participants: Object.freeze(
+        body.match.participants.map((participant) =>
+          Object.freeze({ ...participant })),
+      ),
+    }),
+  });
+}
+
+function matchParticipantSuccess(body, outcome, status) {
+  if (
+    !isPlainObject(body) ||
+    !hasExactKeys(Object.keys(body).sort(), ['participant']) ||
+    !isBackendMatchParticipant(body.participant, status)
+  ) {
+    return null;
+  }
+  return frozen(outcome, {
+    participant: Object.freeze({ ...body.participant }),
+  });
+}
+
 function classifyRefresh(status, body) {
   const code = exactPublicCode(body);
   if (status === 401 && code === 'session_expired') {
@@ -422,6 +739,32 @@ function classifyProfile(status, body) {
   return frozen('rejected', { reason: 'internal_error' });
 }
 
+function classifyMatch(status, body) {
+  const code = exactPublicCode(body);
+  if (status === 401 && code === 'session_invalid') {
+    return frozen('rejected', { reason: 'invalid' });
+  }
+  const reasons = Object.freeze({
+    match_invalid_request: 'invalid_request',
+    match_forbidden: 'forbidden',
+    match_not_found: 'match_not_found',
+    match_closed: 'match_closed',
+    match_not_joinable: 'match_not_joinable',
+    match_started: 'match_started',
+    match_rating_verification_required: 'rating_verification_required',
+    match_rating_out_of_range: 'rating_out_of_range',
+    match_owner_cannot_join: 'owner_cannot_join',
+    match_already_joined: 'already_joined',
+    match_full: 'match_full',
+    match_participant_not_active: 'participant_not_active',
+    match_request_conflict: 'request_conflict',
+    match_conflict: 'match_conflict',
+  });
+  return frozen('rejected', {
+    reason: reasons[code] ?? 'internal_error',
+  });
+}
+
 export function createBackendSessionClient(dependencies = {}) {
   const fetchImpl = dependencies.fetchImpl ?? globalThis.fetch?.bind(globalThis);
   const cryptoImpl = dependencies.cryptoImpl ?? globalThis.crypto;
@@ -435,7 +778,7 @@ export function createBackendSessionClient(dependencies = {}) {
     credential,
     requestKey,
     externalSignal,
-    profilePatch,
+    operationPayload,
   ) {
     if (
       typeof fetchImpl !== 'function' ||
@@ -459,18 +802,35 @@ export function createBackendSessionClient(dependencies = {}) {
     }, requestTimeoutMs);
 
     try {
+      const isMatchOperation = operation.startsWith('match_');
       const isReadOnly =
-        operation === 'authenticate' || operation === 'profile';
+        operation === 'authenticate' ||
+        operation === 'profile' ||
+        operation === 'match_list' ||
+        operation === 'match_detail';
       const isProfileOperation =
         operation === 'profile' || operation === 'profile_update';
-      const response = await fetchImpl(
+      const matchId = operationPayload?.matchId;
+      const url =
         operation === 'refresh'
           ? REFRESH_PATH
           : operation === 'logout'
             ? LOGOUT_PATH
             : isProfileOperation
               ? PROFILE_PATH
-              : AUTHENTICATE_PATH,
+              : operation === 'match_list'
+                ? `${MATCHES_PATH}?limit=${operationPayload.limit}`
+                : operation === 'match_detail'
+                  ? `${MATCHES_PATH}/${encodeURIComponent(matchId)}`
+                  : operation === 'match_create'
+                    ? MATCHES_PATH
+                    : operation === 'match_join'
+                      ? `${MATCHES_PATH}/${encodeURIComponent(matchId)}/join`
+                      : operation === 'match_leave'
+                        ? `${MATCHES_PATH}/${encodeURIComponent(matchId)}/leave`
+                        : AUTHENTICATE_PATH;
+      const response = await fetchImpl(
+        url,
         {
           method:
             isReadOnly
@@ -493,8 +853,10 @@ export function createBackendSessionClient(dependencies = {}) {
             : {
                 body: JSON.stringify(
                   operation === 'profile_update'
-                    ? profilePatch
-                    : { requestKey },
+                    ? operationPayload
+                    : operation === 'match_create'
+                      ? { ...operationPayload, requestKey }
+                      : { requestKey },
                 ),
               }),
           cache: 'no-store',
@@ -527,6 +889,46 @@ export function createBackendSessionClient(dependencies = {}) {
           ? frozen('success', { result })
           : frozen('malformed_response');
       }
+      if (operation === 'match_list' && response.status === 200) {
+        const result = matchListSuccess(body);
+        return result
+          ? frozen('success', { result })
+          : frozen('malformed_response');
+      }
+      if (
+        (operation === 'match_detail' || operation === 'match_create') &&
+        response.status === (
+          operation === 'match_create' ? 201 : 200
+        )
+      ) {
+        const result = matchDetailSuccess(
+          body,
+          operation === 'match_create' ? 'match_created' : 'match_loaded',
+        );
+        return result
+          ? frozen('success', { result })
+          : frozen('malformed_response');
+      }
+      if (operation === 'match_join' && response.status === 200) {
+        const result = matchParticipantSuccess(
+          body,
+          'participant_joined',
+          'active',
+        );
+        return result
+          ? frozen('success', { result })
+          : frozen('malformed_response');
+      }
+      if (operation === 'match_leave' && response.status === 200) {
+        const result = matchParticipantSuccess(
+          body,
+          'participant_left',
+          'left',
+        );
+        return result
+          ? frozen('success', { result })
+          : frozen('malformed_response');
+      }
       if (operation === 'refresh' && response.status === 200) {
         const result = refreshSuccess(body);
         return result
@@ -538,7 +940,9 @@ export function createBackendSessionClient(dependencies = {}) {
         exactPublicCode(body) === (
           isProfileOperation
             ? 'profile_service_unavailable'
-            : 'session_service_unavailable'
+            : isMatchOperation
+              ? 'match_service_unavailable'
+              : 'session_service_unavailable'
         )
       ) {
         return frozen('retryable_unavailable');
@@ -551,7 +955,9 @@ export function createBackendSessionClient(dependencies = {}) {
               ? classifyLogout(response.status, body)
               : isProfileOperation
                 ? classifyProfile(response.status, body)
-                : classifyAuthentication(response.status, body),
+                : isMatchOperation
+                  ? classifyMatch(response.status, body)
+                  : classifyAuthentication(response.status, body),
       });
     } catch (error) {
       if (externalSignal?.aborted) return frozen('cancelled');
@@ -569,7 +975,7 @@ export function createBackendSessionClient(dependencies = {}) {
     operation,
     credential,
     options = {},
-    profilePatch,
+    operationPayload,
   ) {
     const externalSignal = options.signal;
     if (!isCanonicalSessionCredential(credential)) {
@@ -578,13 +984,31 @@ export function createBackendSessionClient(dependencies = {}) {
     if (externalSignal?.aborted) return frozen('cancelled');
     if (
       operation === 'profile_update' &&
-      !isBackendOwnProfilePatch(profilePatch)
+      !isBackendOwnProfilePatch(operationPayload)
+    ) {
+      return frozen('rejected', { reason: 'invalid_request' });
+    }
+    if (
+      (operation === 'match_list' &&
+        (!Number.isInteger(operationPayload?.limit) ||
+          operationPayload.limit < 1 ||
+          operationPayload.limit > 50)) ||
+      ((operation === 'match_detail' ||
+        operation === 'match_join' ||
+        operation === 'match_leave') &&
+        !isMatchId(operationPayload?.matchId)) ||
+      (operation === 'match_create' &&
+        !isBackendCreateMatchDraft(operationPayload))
     ) {
       return frozen('rejected', { reason: 'invalid_request' });
     }
 
     const requiresRequestKey =
-      operation === 'refresh' || operation === 'logout';
+      operation === 'refresh' ||
+      operation === 'logout' ||
+      operation === 'match_create' ||
+      operation === 'match_join' ||
+      operation === 'match_leave';
     const requestKey =
       requiresRequestKey ? createRequestKey(cryptoImpl) : null;
     if (requiresRequestKey && !requestKey) {
@@ -597,7 +1021,7 @@ export function createBackendSessionClient(dependencies = {}) {
         credential,
         requestKey,
         externalSignal,
-        profilePatch,
+        operationPayload,
       );
       if (attempt.outcome === 'success') return attempt.result;
       if (attempt.outcome === 'cancelled') return frozen('cancelled');
@@ -642,6 +1066,16 @@ export function createBackendSessionClient(dependencies = {}) {
       execute('profile', credential, options),
     updateOwnProfile: (credential, profilePatch, options) =>
       execute('profile_update', credential, options, profilePatch),
+    listMatches: (credential, limit = 20, options) =>
+      execute('match_list', credential, options, { limit }),
+    readMatch: (credential, matchId, options) =>
+      execute('match_detail', credential, options, { matchId }),
+    createMatch: (credential, matchDraft, options) =>
+      execute('match_create', credential, options, matchDraft),
+    joinMatch: (credential, matchId, options) =>
+      execute('match_join', credential, options, { matchId }),
+    leaveMatch: (credential, matchId, options) =>
+      execute('match_leave', credential, options, { matchId }),
     refresh: (credential, options) =>
       execute('refresh', credential, options),
     logout: (credential, options) =>

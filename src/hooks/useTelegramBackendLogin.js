@@ -62,6 +62,7 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
   const client = dependencies.client ?? telegramBackendLoginClient;
   const sessions = dependencies.sessions ?? backendSessionClient;
   const profiles = dependencies.profiles ?? sessions;
+  const matches = dependencies.matches ?? sessions;
   const credentialStorage =
     dependencies.credentialStorage ?? telegramSecureCredentialStorage;
   const fingerprint = dependencies.fingerprint ?? fingerprintInitData;
@@ -82,6 +83,7 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
   let activeLogout = null;
   let activeProfileRead = null;
   let activeProfileUpdate = null;
+  const activeMatchRequests = new Set();
   let privateCredential = null;
   let privatePrincipal = null;
   let publicSnapshot = IDLE_SNAPSHOT;
@@ -192,9 +194,17 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
     request?.controller.abort();
   }
 
+  function abortActiveMatchRequests() {
+    for (const controller of activeMatchRequests) {
+      controller.abort();
+    }
+    activeMatchRequests.clear();
+  }
+
   function clearPrivateSession() {
     abortActiveProfileRead();
     abortActiveProfileUpdate();
+    abortActiveMatchRequests();
     privateCredential = null;
     privatePrincipal = null;
   }
@@ -900,6 +910,141 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
     return promise;
   }
 
+  function runMatchOperation(invoke, validateResult) {
+    const requestGeneration = generation;
+    const expectedPrincipal = privatePrincipal;
+    let presentedCredential = privateCredential;
+
+    if (
+      presentedCredential === null ||
+      expectedPrincipal === null
+    ) {
+      presentedCredential = null;
+      return Promise.resolve(Object.freeze({
+        outcome: 'rejected',
+        reason: 'not_authenticated',
+      }));
+    }
+    if (expectedPrincipal.role !== 'player') {
+      presentedCredential = null;
+      return Promise.resolve(Object.freeze({
+        outcome: 'rejected',
+        reason: 'forbidden',
+      }));
+    }
+
+    const controller = new AbortController();
+    activeMatchRequests.add(controller);
+    return (async () => {
+      try {
+        let result;
+        try {
+          result = await invoke(
+            presentedCredential,
+            controller.signal,
+          );
+        } catch {
+          result = Object.freeze({
+            outcome: 'rejected',
+            reason: 'internal_error',
+          });
+        }
+
+        if (
+          controller.signal.aborted ||
+          requestGeneration !== generation ||
+          privatePrincipal !== expectedPrincipal
+        ) {
+          return Object.freeze({ outcome: 'cancelled' });
+        }
+        if (validateResult(result, expectedPrincipal)) {
+          return result;
+        }
+        if (result?.outcome === 'cancelled') {
+          return Object.freeze({ outcome: 'cancelled' });
+        }
+        if (
+          result?.outcome === 'rejected' &&
+          result.reason === 'invalid'
+        ) {
+          clearBoundary();
+          return Object.freeze({
+            outcome: 'rejected',
+            reason: 'session_invalid',
+          });
+        }
+        if (
+          result?.outcome === 'rejected' &&
+          typeof result.reason === 'string'
+        ) {
+          return Object.freeze({
+            outcome: 'rejected',
+            reason: result.reason,
+          });
+        }
+        return Object.freeze({
+          outcome: 'rejected',
+          reason: 'internal_error',
+        });
+      } finally {
+        presentedCredential = null;
+        activeMatchRequests.delete(controller);
+      }
+    })();
+  }
+
+  function listMatches(limit = 20) {
+    return runMatchOperation(
+      (credential, signal) =>
+        matches.listMatches(credential, limit, { signal }),
+      (result) =>
+        result?.outcome === 'matches_loaded' &&
+        Array.isArray(result.matches),
+    );
+  }
+
+  function loadMatch(matchId) {
+    return runMatchOperation(
+      (credential, signal) =>
+        matches.readMatch(credential, matchId, { signal }),
+      (result) =>
+        result?.outcome === 'match_loaded' &&
+        result.match?.matchId === matchId,
+    );
+  }
+
+  function createMatch(draft) {
+    return runMatchOperation(
+      (credential, signal) =>
+        matches.createMatch(credential, draft, { signal }),
+      (result, principal) =>
+        result?.outcome === 'match_created' &&
+        result.match?.ownerAccountId === principal.accountId,
+    );
+  }
+
+  function joinMatch(matchId) {
+    return runMatchOperation(
+      (credential, signal) =>
+        matches.joinMatch(credential, matchId, { signal }),
+      (result, principal) =>
+        result?.outcome === 'participant_joined' &&
+        result.participant?.matchId === matchId &&
+        result.participant?.playerId === principal.accountId,
+    );
+  }
+
+  function leaveMatch(matchId) {
+    return runMatchOperation(
+      (credential, signal) =>
+        matches.leaveMatch(credential, matchId, { signal }),
+      (result, principal) =>
+        result?.outcome === 'participant_left' &&
+        result.participant?.matchId === matchId &&
+        result.participant?.playerId === principal.accountId,
+    );
+  }
+
   function attach(rawInitData, listener) {
     if (teardownTimer !== null) {
       clearTimer(teardownTimer);
@@ -963,6 +1108,11 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
     hasPrincipal: () => privatePrincipal !== null,
     loadOwnProfile,
     updateOwnProfile,
+    listMatches,
+    loadMatch,
+    createMatch,
+    joinMatch,
+    leaveMatch,
     logout,
   });
 }
@@ -1014,6 +1164,56 @@ export function useTelegramBackendLogin() {
     return telegramBackendLoginLifecycle.updateOwnProfile(changes);
   }, []);
 
+  const listMatches = useCallback((limit = 20) => {
+    if (!FEATURE_ENABLED) {
+      return Promise.resolve(Object.freeze({
+        outcome: 'rejected',
+        reason: 'not_authenticated',
+      }));
+    }
+    return telegramBackendLoginLifecycle.listMatches(limit);
+  }, []);
+
+  const loadMatch = useCallback((matchId) => {
+    if (!FEATURE_ENABLED) {
+      return Promise.resolve(Object.freeze({
+        outcome: 'rejected',
+        reason: 'not_authenticated',
+      }));
+    }
+    return telegramBackendLoginLifecycle.loadMatch(matchId);
+  }, []);
+
+  const createMatch = useCallback((draft) => {
+    if (!FEATURE_ENABLED) {
+      return Promise.resolve(Object.freeze({
+        outcome: 'rejected',
+        reason: 'not_authenticated',
+      }));
+    }
+    return telegramBackendLoginLifecycle.createMatch(draft);
+  }, []);
+
+  const joinMatch = useCallback((matchId) => {
+    if (!FEATURE_ENABLED) {
+      return Promise.resolve(Object.freeze({
+        outcome: 'rejected',
+        reason: 'not_authenticated',
+      }));
+    }
+    return telegramBackendLoginLifecycle.joinMatch(matchId);
+  }, []);
+
+  const leaveMatch = useCallback((matchId) => {
+    if (!FEATURE_ENABLED) {
+      return Promise.resolve(Object.freeze({
+        outcome: 'rejected',
+        reason: 'not_authenticated',
+      }));
+    }
+    return telegramBackendLoginLifecycle.leaveMatch(matchId);
+  }, []);
+
   useEffect(() => {
     if (!FEATURE_ENABLED) return undefined;
 
@@ -1037,6 +1237,11 @@ export function useTelegramBackendLogin() {
     dismissSuccess,
     loadOwnProfile,
     updateOwnProfile,
+    listMatches,
+    loadMatch,
+    createMatch,
+    joinMatch,
+    leaveMatch,
     logout,
   });
 }

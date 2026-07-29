@@ -1,4 +1,10 @@
-import React, { useCallback, useState, useEffect, useRef } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import App          from '../App';
 import WelcomeScreen from './auth/WelcomeScreen';
 import SignUpScreen  from './auth/SignUpScreen';
@@ -26,6 +32,8 @@ export default function AuthGate() {
   const [error, setError] = useState('');
   const [toastMessage, setToastMessage] = useState(null);
   const [backendProfile, setBackendProfile] = useState(null);
+  const [backendProfileStatus, setBackendProfileStatus] =
+    useState('inactive');
   const backendProfileRequestRef = useRef(0);
 
   useEffect(() => {
@@ -42,6 +50,7 @@ export default function AuthGate() {
         if (event === 'SIGNED_OUT') {
           backendProfileRequestRef.current += 1;
           setBackendProfile(null);
+          setBackendProfileStatus('inactive');
           telegramBackendLogin.clear();
         }
         setSession(session);
@@ -55,21 +64,31 @@ export default function AuthGate() {
     if (!telegramBackendLogin.sessionReady) {
       backendProfileRequestRef.current += 1;
       setBackendProfile(null);
+      setBackendProfileStatus((previous) =>
+        previous === 'ready' || previous === 'loading'
+          ? 'error'
+          : 'inactive');
       return;
     }
 
     const requestToken = backendProfileRequestRef.current + 1;
     backendProfileRequestRef.current = requestToken;
+    setBackendProfileStatus('loading');
     void telegramBackendLogin.loadOwnProfile().then(
       (result) => {
         if (backendProfileRequestRef.current !== requestToken) return;
-        setBackendProfile(
-          result.outcome === 'profile_loaded' ? result.profile : null,
-        );
+        if (result.outcome === 'profile_loaded') {
+          setBackendProfile(result.profile);
+          setBackendProfileStatus('ready');
+          return;
+        }
+        setBackendProfile(null);
+        setBackendProfileStatus('error');
       },
       () => {
         if (backendProfileRequestRef.current === requestToken) {
           setBackendProfile(null);
+          setBackendProfileStatus('error');
         }
       },
     );
@@ -99,6 +118,7 @@ export default function AuthGate() {
   const handleAppLogout = useCallback(async () => {
     backendProfileRequestRef.current += 1;
     setBackendProfile(null);
+    setBackendProfileStatus('inactive');
     const backendResult = await telegramBackendLogin.logout();
     if (backendResult.outcome !== 'logged_out') {
       throw new Error('Backend session logout failed');
@@ -113,9 +133,29 @@ export default function AuthGate() {
     const result = await telegramBackendLogin.updateOwnProfile(changes);
     if (result.outcome === 'profile_updated') {
       setBackendProfile(result.profile);
+      setBackendProfileStatus('ready');
     }
     return result;
   }, [telegramBackendLogin.updateOwnProfile]);
+
+  const backendMatchActions = useMemo(() => (
+    telegramBackendLogin.sessionReady
+      ? Object.freeze({
+          listMatches: telegramBackendLogin.listMatches,
+          loadMatch: telegramBackendLogin.loadMatch,
+          createMatch: telegramBackendLogin.createMatch,
+          joinMatch: telegramBackendLogin.joinMatch,
+          leaveMatch: telegramBackendLogin.leaveMatch,
+        })
+      : null
+  ), [
+    telegramBackendLogin.createMatch,
+    telegramBackendLogin.joinMatch,
+    telegramBackendLogin.leaveMatch,
+    telegramBackendLogin.listMatches,
+    telegramBackendLogin.loadMatch,
+    telegramBackendLogin.sessionReady,
+  ]);
 
   const showToast = (message, variant = 'info') => {
     setToastMessage({ message, variant });
@@ -227,6 +267,18 @@ const handleSignUp = async ({ email, password, options }) => {
         <App
           session={session}
           backendProfile={backendProfile}
+          backendMatchRequired={
+            telegramBackendLogin.status !== 'disabled' &&
+            telegramBackendLogin.status !== 'outside_telegram'
+          }
+          backendMatchLifecycleStatus={telegramBackendLogin.status}
+          backendProfileStatus={
+            telegramBackendLogin.sessionReady &&
+            backendProfileStatus === 'inactive'
+              ? 'loading'
+              : backendProfileStatus
+          }
+          backendMatchActions={backendMatchActions}
           onBackendProfileSave={
             telegramBackendLogin.sessionReady
               ? handleBackendProfileSave

@@ -58,6 +58,25 @@ const calcPerPlayer = (time, duration, courtType, dateISO) =>
   getPerPlayerPrice(time, duration, courtType, dateISO);
 
 const fmtPrice = fmtPriceLib;
+
+export function supportsLegacyMatchExtensions(match) {
+  return match?.backendOwned !== true;
+}
+
+export async function refreshLegacyMatchWaitlist(
+  match,
+  refreshWaitlist,
+) {
+  if (!supportsLegacyMatchExtensions(match)) return null;
+  return refreshWaitlist();
+}
+
+export function tryBeginMatchAction(actionRef) {
+  if (!actionRef || actionRef.current === true) return false;
+  actionRef.current = true;
+  return true;
+}
+
 const fmtSetList = (sets) => (sets ?? [])
   .filter(s => (s.t1 ?? 0) + (s.t2 ?? 0) > 0)
   .map(s => `${s.t1}:${s.t2}`)
@@ -594,7 +613,7 @@ function KickConfirm({ player, onConfirm, onCancel }) {
   );
 }
 
-function LeaveConfirm({ onConfirm, onCancel }) {
+function LeaveConfirm({ busy, onConfirm, onCancel }) {
   return (
     <div className="app-modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.92)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '20px' }}>
       <div className="app-modal-panel" style={{ background: '#07160F', borderRadius: '16px', padding: '24px', width: '100%', maxWidth: '320px', border: '1px solid rgba(245,241,232,0.16)', textAlign: 'center' }}>
@@ -604,8 +623,8 @@ function LeaveConfirm({ onConfirm, onCancel }) {
           Ваше место станет свободным
         </div>
         <div style={{ display: 'flex', gap: '8px' }}>
-          <button onClick={onCancel} style={{ flex: 1, padding: '12px', background: 'transparent', color: C.muted, border: `1px solid ${C.border}`, borderRadius: '10px', fontSize: '14px', cursor: 'pointer' }}>Отмена</button>
-          <button data-testid="match-leave-confirm-button" onClick={onConfirm} style={{ flex: 1, padding: '12px', background: 'linear-gradient(135deg, #dc2626, #ef4444)', color: '#fff', border: 'none', borderRadius: '10px', fontSize: '14px', fontWeight: 700, cursor: 'pointer' }}>Выйти</button>
+          <button disabled={busy} onClick={onCancel} style={{ flex: 1, padding: '12px', background: 'transparent', color: C.muted, border: `1px solid ${C.border}`, borderRadius: '10px', fontSize: '14px', cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.6 : 1 }}>Отмена</button>
+          <button data-testid="match-leave-confirm-button" disabled={busy} onClick={onConfirm} style={{ flex: 1, padding: '12px', background: 'linear-gradient(135deg, #dc2626, #ef4444)', color: '#fff', border: 'none', borderRadius: '10px', fontSize: '14px', fontWeight: 700, cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.7 : 1 }}>{busy ? 'Выходим…' : 'Выйти'}</button>
         </div>
       </div>
     </div>
@@ -1068,6 +1087,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
   const [viewPlayer,  setViewPlayer]  = useState(null);
   const [joined,      setJoined]      = useState(false);
   const [joining,     setJoining]     = useState(false);
+  const [leaving,     setLeaving]     = useState(false);
   const [cancelled,   setCancelled]   = useState(false);
   const [editSheet,   setEditSheet]   = useState(false);
   const [cancelSheet, setCancelSheet] = useState(false);
@@ -1081,6 +1101,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
   const [chatOpen,    setChatOpen]    = useState(false);
   const [levelOverride, setLevelOverride] = useState(null);
   const joinInFlightRef = useRef(false);
+  const leaveInFlightRef = useRef(false);
   const joinSuccessTimerRef = useRef(null);
   const waitlistActionRef = useRef(false);
   const waitlistLoadRef = useRef(0);
@@ -1268,7 +1289,8 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
   const savedScore = match.finalScore ?? match.score;
   const hasFinalScore = Array.isArray(savedScore) && savedScore.some(s => (s?.t1 ?? 0) + (s?.t2 ?? 0) > 0);
   const isCompletedMatch = finished || status === 'completed' || status === 'finished' || (hasFinalScore && !isScorePending && !isScoreDisputed && !isRatedMatch);
-  const canEditMatch = isOwner && !isCompletedMatch && !isScorePending && !isScoreDisputed;
+  const usesLegacyMatchExtensions = supportsLegacyMatchExtensions(match);
+  const canEditMatch = usesLegacyMatchExtensions && isOwner && !isCompletedMatch && !isScorePending && !isScoreDisputed;
   const completedScoreText = fmtSetList(savedScore);
   const scoreSubmittedBy = match.scoreSubmittedBy ?? match.score_submitted_by;
   const matchStartMs = new Date(`${dateISO}T${time || '00:00'}:00`).getTime();
@@ -1316,7 +1338,8 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
     ? invitationActions.has(`decline:${pendingInvitationId}`)
     : false;
   const isActiveWaitlistStatus = ['open', 'searching', 'upcoming', 'confirmed'].includes(status);
-  const canViewWaitlist = match.type === 'match'
+  const canViewWaitlist = usesLegacyMatchExtensions
+    && match.type === 'match'
     && match.isPrivate !== true
     && isActiveWaitlistStatus
     && matchHasNotStarted
@@ -1367,7 +1390,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
 
   const refreshMatchAndWaitlist = async () => {
     const [updatedMatch] = await Promise.all([
-      onRefreshMatch?.(match.id),
+      onRefreshMatch?.(match.id, match),
       refreshWaitlist(),
     ]);
     return updatedMatch ?? null;
@@ -1459,7 +1482,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
         showToast?.('Место уже освободилось. Обновите матч и вступите в игру', 'info');
       } else if (code.includes('WAITLIST_ALREADY_PARTICIPANT')) {
         setWaitlistPosition(null);
-        await onRefreshMatch?.(match.id);
+        await onRefreshMatch?.(match.id, match);
         showToast?.('Вы уже добавлены в состав', 'info');
       } else if (code.includes('WAITLIST_ALREADY_WAITING')) {
         setCapacityUnavailable(true);
@@ -1576,12 +1599,14 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
   };
 
   const handleLeaveConfirm = async () => {
+    if (!tryBeginMatchAction(leaveInFlightRef)) return;
+    setLeaving(true);
     try {
       if (!onLeaveMatch) {
         throw new Error('leave_match RPC handler is not available');
       }
 
-      const updatedMatch = await onLeaveMatch(match.id);
+      const updatedMatch = await onLeaveMatch(match.id, match);
       if (joinSuccessTimerRef.current) {
         clearTimeout(joinSuccessTimerRef.current);
         joinSuccessTimerRef.current = null;
@@ -1589,9 +1614,12 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
       setLocalSlots(updatedMatch?.filledSlots ?? allFilled);
       setJoined(false);
       setLeaveTarget(null);
-      await refreshWaitlist();
+      await refreshLegacyMatchWaitlist(match, refreshWaitlist);
     } catch {
       // The parent handler shows the concrete RPC error without duplicating the message.
+    } finally {
+      leaveInFlightRef.current = false;
+      setLeaving(false);
     }
   };
 
@@ -1743,11 +1771,11 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
     setJoining(true);
 
     try {
-      const updatedMatch = await onJoinMatch?.(match.id);
+      const updatedMatch = await onJoinMatch?.(match.id, match);
       setLocalSlots(updatedMatch?.filledSlots ?? slots);
       setTargetSlot(null);
       setJoined(true);
-      await refreshWaitlist();
+      await refreshLegacyMatchWaitlist(match, refreshWaitlist);
       joinSuccessTimerRef.current = setTimeout(() => onJoinSuccess?.(updatedMatch ?? match), 1500);
       return true;
     } catch (error) {
@@ -1967,7 +1995,12 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
                   slotIndex={i}
                   onTap={setViewPlayer}
                   ratingChange={enrichedPlayer?.id ? ratingChanges[enrichedPlayer.id] : null}
-                  onSlotClick={!isCompletedMatch ? () => handleEmptySlotClick(i) : undefined}
+                  onSlotClick={
+                    !isCompletedMatch &&
+                    (!isOwner || usesLegacyMatchExtensions)
+                      ? () => handleEmptySlotClick(i)
+                      : undefined
+                  }
                 />
               );
             })}
@@ -2014,7 +2047,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
           />
         )}
         
-        {isParticipant && (
+        {usesLegacyMatchExtensions && isParticipant && (
           <div className="mb-4">
             <PadelButton variant="info" fullWidth onClick={() => setChatOpen(true)}>
               💬 Открыть чат игры
@@ -2024,7 +2057,9 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
 
 
         {/* ── Pinned message ────────────────────────────────────────────────── */}
-        <PinnedBlock msg={pinnedMsg} isOwner={isOwner} onSave={setPinnedMsg} />
+        {usesLegacyMatchExtensions && (
+          <PinnedBlock msg={pinnedMsg} isOwner={isOwner} onSave={setPinnedMsg} />
+        )}
 
         {/* ── Price ────────────────────────────────────────────────────────── */}
         <div style={{ background: 'rgba(216,243,74,0.06)', borderRadius: '12px', padding: '12px 16px', marginBottom: '20px', border: '1px solid rgba(216,243,74,0.18)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -2081,7 +2116,11 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
               variant={isFull && !isCompletedMatch ? 'success' : 'dark'}
               size="lg"
               fullWidth
-              disabled={!isFull || isCompletedMatch}
+              disabled={
+                !usesLegacyMatchExtensions ||
+                !isFull ||
+                isCompletedMatch
+              }
               onClick={handleFinishMatch}
               className="mt-2.5"
             >
@@ -2105,14 +2144,25 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
             onDecline={handleDeclinePendingInvitation}
           />
         ) : showWaitlist ? (
-          <WaitlistPanel
-            position={waitlistPosition}
-            count={waitlistCount}
-            loading={waitlistLoading}
-            action={waitlistAction}
-            onJoin={handleJoinWaitlist}
-            onLeave={handleLeaveWaitlist}
-          />
+          <>
+            <PadelButton
+              data-testid="match-self-join-button"
+              variant="dark"
+              size="lg"
+              fullWidth
+              disabled
+            >
+              {isFull ? 'Матч заполнен' : 'Свободных мест нет'}
+            </PadelButton>
+            <WaitlistPanel
+              position={waitlistPosition}
+              count={waitlistCount}
+              loading={waitlistLoading}
+              action={waitlistAction}
+              onJoin={handleJoinWaitlist}
+              onLeave={handleLeaveWaitlist}
+            />
+          </>
         ) : (
           <>
             {!canJoin && showRatingGuard && (
@@ -2150,7 +2200,13 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
       {editSheet   && canEditMatch && <EditPanel initDate={dateISO} initTime={time} initCourt={courtType} initDuration={duration} initTitle={title} initDescription={description} onSave={handleEditSave} onClose={() => setEditSheet(false)} />}
       {cancelSheet && canEditMatch && <CancelSheet onConfirm={handleCancelConfirm} onClose={() => setCancelSheet(false)} />}
       {kickTarget  && canEditMatch && <KickConfirm player={kickTarget} onConfirm={handleKickConfirm} onCancel={() => setKickTarget(null)} />}
-      {leaveTarget && <LeaveConfirm onConfirm={handleLeaveConfirm} onCancel={() => setLeaveTarget(null)} />}
+      {leaveTarget && (
+        <LeaveConfirm
+          busy={leaving}
+          onConfirm={handleLeaveConfirm}
+          onCancel={() => setLeaveTarget(null)}
+        />
+      )}
       {levelOverride && canEditMatch && (
         <LevelOverrideConfirm
           message={levelOverride.message}
@@ -2158,7 +2214,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
           onCancel={() => setLevelOverride(null)}
         />
       )}
-      {chatOpen && (
+      {usesLegacyMatchExtensions && chatOpen && (
         <MatchChat
           match={match}
           currentUser={currentUser}

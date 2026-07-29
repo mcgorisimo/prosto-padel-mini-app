@@ -135,7 +135,15 @@ function ScenarioSelector({ onSelect }) {
 
 // ─── 1. TimePicker ────────────────────────────────────────────────────────────
 
-function TimePicker({ time, onTime, duration, onDuration, maxDur, selectedDate }) {
+function TimePicker({
+  time,
+  onTime,
+  duration,
+  onDuration,
+  maxDur,
+  minDur = 0.5,
+  selectedDate,
+}) {
   const card = { background: 'rgba(255,255,255,0.045)', borderRadius: '16px', border: `1px solid ${T.border}`, padding: '12px 16px' };
   const canIncrease = duration + 0.5 <= maxDur;
 
@@ -161,7 +169,7 @@ function TimePicker({ time, onTime, duration, onDuration, maxDur, selectedDate }
     <Section title="Время и продолжительность">
       <div style={{ ...card, display: 'flex', alignItems: 'center', marginBottom: '12px' }}>
         <span style={{ color: T.muted, fontSize: '14px', flex: 1 }}>Продолжительность</span>
-        <button onClick={() => onDuration(Math.max(0.5, duration - 0.5))} style={styles.dBtn}>−</button>
+        <button onClick={() => onDuration(Math.max(minDur, duration - 0.5))} style={styles.dBtn}>−</button>
         <span style={{ color: T.text, fontWeight: 700, fontSize: '16px', width: '52px', textAlign: 'center' }}>{duration}ч</span>
         <button onClick={() => canIncrease && onDuration(duration + 0.5)} style={{ ...styles.dBtn, opacity: canIncrease ? 1 : 0.3, cursor: canIncrease ? 'pointer' : 'default' }}>
           +
@@ -176,7 +184,9 @@ function TimePicker({ time, onTime, duration, onDuration, maxDur, selectedDate }
         {TIME_SLOTS.map((slot) => {
           const prime  = isPrime(slot, selectedDate.dateISO);
           const active = time === slot;
-          const isPast = hasMoscowSlotStarted(selectedDate.dateISO, slot);
+          const isPast =
+            hasMoscowSlotStarted(selectedDate.dateISO, slot) ||
+            maxDuration(slot) < minDur;
 
           const setFirstAvailableRef = (node) => {
             if (node && !isPast && !firstAvailableFound) {
@@ -451,9 +461,24 @@ function RatingMatchToggle({ value, onChange }) {
   );
 }
 
+export function isPrivateMatchCreationEnabled(
+  allowPrivateMatches,
+  isPrivate,
+) {
+  return allowPrivateMatches === true && isPrivate === true;
+}
+
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
-export default function MatchCreationScreen({ onBack, onSuccess, user, allMatches, showToast }) {
+export default function MatchCreationScreen({
+  onBack,
+  onSuccess,
+  user,
+  allMatches,
+  showToast,
+  minimumDuration = 0.5,
+  allowPrivateMatches = true,
+}) {
   const [step,       setStep]       = useState(0); // 0 = scenario select, 1 = form
   const [scenario,   setScenario]   = useState(null); // 'community' | 'social'
   const [time,       setTime]       = useState('10:00');
@@ -479,10 +504,14 @@ export default function MatchCreationScreen({ onBack, onSuccess, user, allMatche
     }
   }, [selectedDate, time]);
 
+  useEffect(() => {
+    if (!allowPrivateMatches) setIsPrivate(false);
+  }, [allowPrivateMatches]);
+
   const handleTimeSelect = (newTime) => {
     setTime(newTime);
     const cap = maxDuration(newTime);
-    if (duration > cap) setDuration(Math.max(0.5, cap));
+    if (duration > cap) setDuration(Math.max(minimumDuration, cap));
   };
 
   const handleCourtTypeChange = (newType) => {
@@ -491,6 +520,7 @@ export default function MatchCreationScreen({ onBack, onSuccess, user, allMatche
   };
 
   const handleScenarioSelect = (s) => {
+    if (s === 'community') setIsPrivate(false);
     setScenario(s);
     setStep(1);
   };
@@ -520,7 +550,10 @@ export default function MatchCreationScreen({ onBack, onSuccess, user, allMatche
       ratingMax, 
       scenario: 'community', 
       status: 'searching',
-      isPrivate: isPrivate,
+      isPrivate: isPrivateMatchCreationEnabled(
+        allowPrivateMatches,
+        isPrivate,
+      ),
       isRatingMatch,
       dateISO: selectedDate.dateISO,
       date: formatMoscowDateISO(selectedDate.dateISO, { day: 'numeric', month: 'long' }).replace(' г.', ''),
@@ -555,7 +588,10 @@ export default function MatchCreationScreen({ onBack, onSuccess, user, allMatche
   status: 'confirmed',
       ownerPaid: courtTotal(time, duration, courtType, selectedDate.dateISO),
       holdAmount: 0,
-      isPrivate: isPrivate,
+      isPrivate: isPrivateMatchCreationEnabled(
+        allowPrivateMatches,
+        isPrivate,
+      ),
       isRatingMatch,
       courtId: selectedCourt.id,
       courtName: selectedCourt.name,
@@ -639,6 +675,7 @@ export default function MatchCreationScreen({ onBack, onSuccess, user, allMatche
               time={time} onTime={handleTimeSelect}
               duration={duration} onDuration={d => setDuration(Math.min(d, maxDuration(time)))}
               maxDur={maxDuration(time)}
+              minDur={minimumDuration}
               selectedDate={selectedDate}
             />
             <CourtTypeToggle value={courtType} onChange={handleCourtTypeChange} />
@@ -718,7 +755,9 @@ export default function MatchCreationScreen({ onBack, onSuccess, user, allMatche
           {/* Privacy Toggle */}
           <div style={{ padding: '0 16px' }}>
             <RatingMatchToggle value={isRatingMatch} onChange={setIsRatingMatch} />
-            <PrivacyToggle value={isPrivate} onChange={setIsPrivate} />
+            {scenario === 'social' && allowPrivateMatches && (
+              <PrivacyToggle value={isPrivate} onChange={setIsPrivate} />
+            )}
           </div>
 
           {/* CTA */}
