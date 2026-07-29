@@ -48,13 +48,14 @@ function createCommand(
     courtType: 'indoor',
     kind: 'match',
     visibility: 'public',
-    scenario: 'community',
-    status: 'open',
+    scenario: 'social',
+    status: 'confirmed',
     title: 'Synthetic match',
     description: '',
     ratingMin: 2,
     ratingMax: 4,
     isRatingMatch: true,
+    actorIsVerified: true,
     ...overrides,
   };
 }
@@ -79,6 +80,7 @@ function joinCommand(
     now: unixEpochSeconds(1_800_000_100),
     participantId: PARTICIPANT_ID,
     actorRatingLevel: 3,
+    actorIsVerified: true,
     ...overrides,
   };
 }
@@ -116,6 +118,58 @@ describe('match state machine', () => {
       expect(Object.isFrozen(result.state)).toBe(true);
       expect(Object.isFrozen(result.state.appliedCommands)).toBe(true);
     }
+  });
+
+  it('uses the exact product status for social and community creation', () => {
+    expect(transitionMatch(null, createCommand())).toMatchObject({
+      outcome: 'transitioned',
+      state: { scenario: 'social', status: 'confirmed' },
+    });
+    expect(
+      transitionMatch(
+        null,
+        createCommand({
+          scenario: 'community',
+          status: 'searching',
+        }),
+      ),
+    ).toMatchObject({
+      outcome: 'transitioned',
+      state: { scenario: 'community', status: 'searching' },
+    });
+    expect(
+      transitionMatch(
+        null,
+        createCommand({ scenario: 'social', status: 'open' }),
+      ),
+    ).toEqual({
+      outcome: 'rejected',
+      reason: 'invalid_match_command',
+    });
+  });
+
+  it('requires trusted verification only for rating match creation', () => {
+    expect(
+      transitionMatch(
+        null,
+        createCommand({ actorIsVerified: false }),
+      ),
+    ).toEqual({
+      outcome: 'rejected',
+      reason: 'rating_verification_required',
+    });
+    expect(
+      transitionMatch(
+        null,
+        createCommand({
+          actorIsVerified: false,
+          isRatingMatch: false,
+        }),
+      ),
+    ).toMatchObject({
+      outcome: 'transitioned',
+      transition: 'match_created',
+    });
   });
 
   it('accepts the exact private format and rejects mixed formats', () => {
@@ -201,6 +255,27 @@ describe('match state machine', () => {
         resultType: 'participant_left',
       },
     });
+  });
+
+  it('rejects leave exactly at the match start boundary', () => {
+    const state = joinedState();
+
+    expect(
+      transitionMatch(state, {
+        type: 'leave_match',
+        matchId: MATCH_ID,
+        commandId: LEAVE_COMMAND_ID,
+        actorAccountId: PLAYER_ID,
+        requestDigest: '3'.repeat(64) as MatchRequestDigest,
+        now: state.startsAt,
+      }),
+    ).toEqual({
+      outcome: 'rejected',
+      reason: 'match_started',
+    });
+    expect(state.participants).toHaveLength(1);
+    expect(state.appliedCommands).toHaveLength(2);
+    expect(state.version).toBe(2);
   });
 
   it('returns the original result for an exact command retry', () => {
@@ -355,11 +430,40 @@ describe('match state machine', () => {
     expect(
       transitionMatch(
         createdState(),
+        joinCommand({ actorIsVerified: false }),
+      ),
+    ).toEqual({
+      outcome: 'rejected',
+      reason: 'rating_verification_required',
+    });
+    expect(
+      transitionMatch(
+        createdState(),
         joinCommand({ actorRatingLevel: 5 }),
       ),
     ).toEqual({
       outcome: 'rejected',
       reason: 'rating_out_of_range',
+    });
+  });
+
+  it('allows an unverified player to join a non-rating match', () => {
+    const created = transitionMatch(
+      null,
+      createCommand({ isRatingMatch: false }),
+    );
+    if (created.outcome !== 'transitioned') {
+      throw new Error('Synthetic non-rating create failed');
+    }
+
+    expect(
+      transitionMatch(
+        created.state,
+        joinCommand({ actorIsVerified: false }),
+      ),
+    ).toMatchObject({
+      outcome: 'transitioned',
+      transition: 'participant_joined',
     });
   });
 

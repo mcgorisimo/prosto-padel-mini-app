@@ -2,19 +2,24 @@ import { QueryResult, QueryResultRow } from 'pg';
 import { AccountId } from '../accounts/account.types';
 import { unixEpochSeconds } from '../auth/auth.types';
 import {
-  CreateMatchCommand,
   LeaveMatchCommand,
   MatchCommandId,
   MatchId,
   MatchParticipantId,
   MatchRequestDigest,
 } from '../matches/match.types';
+import {
+  MatchCourtCatalog,
+  MatchCourtSnapshot,
+} from '../matches/match-court-catalog';
 import { deterministicUuid } from '../../test/deterministic-uuid';
 import {
+  CreateMatchPersistenceInput,
   JoinMatchInput,
   MatchPersistenceError,
   MatchPersistenceFailure,
 } from './match.repository';
+import { PlayerProfileReader } from './player-profile-reader';
 import { PostgresMatchRepository } from './postgres-match.repository';
 import { PostgresTransaction } from './postgres-transaction';
 
@@ -96,11 +101,11 @@ function matchRow(
     duration_minutes: 90,
     court_id: 'court-1',
     court_name: 'Synthetic court',
-    court_type: 'indoor',
+    court_type: 'panoramic',
     kind: 'match',
     visibility: 'public',
-    scenario: 'community',
-    status: 'open',
+    scenario: 'social',
+    status: 'confirmed',
     title: 'Synthetic match',
     description: '',
     rating_min: 2,
@@ -205,13 +210,16 @@ function createCommandLockResult(): QueryResult<QueryResultRow> {
   return queryResult([{ locked: '' }]);
 }
 
-function actorRatingResult(rating = '3.00'): QueryResult<QueryResultRow> {
-  return queryResult([{ rating }]);
+function actorRatingResult(
+  rating = '3.00',
+  isVerified = true,
+): QueryResult<QueryResultRow> {
+  return queryResult([{ rating, is_verified: isVerified }]);
 }
 
 function createCommand(
-  overrides: Partial<CreateMatchCommand> = {},
-): CreateMatchCommand {
+  overrides: Partial<CreateMatchPersistenceInput> = {},
+): CreateMatchPersistenceInput {
   return {
     type: 'create_match',
     matchId: MATCH_ID,
@@ -222,20 +230,68 @@ function createCommand(
     startsAt: unixEpochSeconds(1_800_003_600),
     durationMinutes: 90,
     courtId: 'court-1',
-    courtName: 'Synthetic court',
-    courtType: 'indoor',
     kind: 'match',
     visibility: 'public',
-    scenario: 'community',
-    status: 'open',
+    scenario: 'social',
+    status: 'confirmed',
     title: 'Synthetic match',
     description: '',
     ratingMin: 2,
     ratingMax: 4,
     isRatingMatch: true,
-    pricePerPersonSnapshot: 1000,
     ...overrides,
   };
+}
+
+interface RepositoryHarness {
+  readonly repository: PostgresMatchRepository;
+  readonly findProfile: jest.MockedFunction<
+    PlayerProfileReader['findByAccountId']
+  >;
+  readonly resolveCourt: jest.MockedFunction<MatchCourtCatalog['resolve']>;
+}
+
+function repositoryHarness(options: {
+  readonly isVerified?: boolean;
+  readonly court?: MatchCourtSnapshot | undefined;
+} = {}): RepositoryHarness {
+  const findProfile = jest.fn<
+    ReturnType<PlayerProfileReader['findByAccountId']>,
+    Parameters<PlayerProfileReader['findByAccountId']>
+  >().mockResolvedValue({
+    outcome: 'found',
+    profile: {
+      accountId: OWNER_ID,
+      firstName: 'Synthetic',
+      rating: 3,
+      isVerified: options.isVerified ?? true,
+    },
+  });
+  const resolveCourt = jest.fn<
+    ReturnType<MatchCourtCatalog['resolve']>,
+    Parameters<MatchCourtCatalog['resolve']>
+  >().mockReturnValue(
+    Object.prototype.hasOwnProperty.call(options, 'court')
+      ? options.court
+      : Object.freeze({
+          courtId: 'court-1',
+          courtName: 'Synthetic court',
+          courtType: 'panoramic',
+          pricePerPersonSnapshot: 1_000,
+        }),
+  );
+  return {
+    repository: new PostgresMatchRepository(
+      { findByAccountId: findProfile },
+      { resolve: resolveCourt },
+    ),
+    findProfile,
+    resolveCourt,
+  };
+}
+
+function repository(): PostgresMatchRepository {
+  return repositoryHarness().repository;
 }
 
 function joinCommand(
@@ -310,6 +366,7 @@ function expectSafeError(
 
 describe('PostgresMatchRepository', () => {
   it('creates the match and append-only command in one passed transaction', async () => {
+    const harness = repositoryHarness();
     const transaction = new FakeTransaction([
       createCommandLockResult(),
       queryResult([]),
@@ -327,7 +384,7 @@ describe('PostgresMatchRepository', () => {
       ),
     ]);
 
-    const result = await new PostgresMatchRepository().create(
+    const result = await harness.repository.create(
       transaction,
       createCommand(),
     );
@@ -357,17 +414,87 @@ describe('PostgresMatchRepository', () => {
       'INSERT INTO backend_match.match_commands',
     );
     expect(transaction.calls[2].values[1]).toBe(OWNER_ID);
+    expect(transaction.calls[2].values.slice(6, 9)).toEqual([
+      'court-1',
+      'Synthetic court',
+      'panoramic',
+    ]);
+    expect(transaction.calls[2].values[18]).toBe(1_000);
     expect(transaction.calls[3].values[4]).toEqual(
       Buffer.from(CREATE_DIGEST, 'hex'),
     );
     expect(
       transaction.calls.flatMap((call) => call.values),
     ).not.toContain(PRIVATE_MARKER);
+    expect(harness.resolveCourt).toHaveBeenCalledWith({
+      matchId: MATCH_ID,
+      scenario: 'social',
+      courtId: 'court-1',
+      startsAt: 1_800_003_600,
+      durationMinutes: 90,
+    });
+    expect(harness.findProfile).toHaveBeenCalledWith(transaction, {
+      accountId: OWNER_ID,
+    });
+  });
+
+  it('creates a community match without a selected court using a trusted per-match snapshot', async () => {
+    const harness = repositoryHarness({
+      court: Object.freeze({
+        courtId: `unassigned:${MATCH_ID}`,
+        courtName: 'Корт не выбран',
+        courtType: 'unassigned',
+      }),
+    });
+    const transaction = new FakeTransaction([
+      createCommandLockResult(),
+      queryResult([]),
+      queryResult([{ id: MATCH_ID, version: '1' }], 1, 'INSERT'),
+      queryResult([{ command_id: CREATE_COMMAND_ID }], 1, 'INSERT'),
+    ]);
+
+    const result = await harness.repository.create(
+      transaction,
+      createCommand({
+        courtId: undefined,
+        scenario: 'community',
+        status: 'searching',
+        isRatingMatch: false,
+      }),
+    );
+
+    expect(result).toMatchObject({
+      outcome: 'match_created',
+      persistence: 'applied',
+      match: {
+        courtId: `unassigned:${MATCH_ID}`,
+        courtName: 'Корт не выбран',
+        courtType: 'unassigned',
+        scenario: 'community',
+        status: 'searching',
+      },
+    });
+    if (result.outcome === 'match_created') {
+      expect(result.match).not.toHaveProperty('pricePerPersonSnapshot');
+    }
+    expect(harness.resolveCourt).toHaveBeenCalledWith({
+      matchId: MATCH_ID,
+      scenario: 'community',
+      startsAt: 1_800_003_600,
+      durationMinutes: 90,
+    });
+    expect(transaction.calls[2].values.slice(6, 9)).toEqual([
+      `unassigned:${MATCH_ID}`,
+      'Корт не выбран',
+      'unassigned',
+    ]);
+    expect(transaction.calls[2].values[18]).toBeNull();
+    expect(harness.findProfile).not.toHaveBeenCalled();
   });
 
   it('reconstructs the original create result after later join and leave changes', async () => {
-    const repository = new PostgresMatchRepository();
-    const applied = await repository.create(
+    const matchRepository = repository();
+    const applied = await matchRepository.create(
       new FakeTransaction([
         createCommandLockResult(),
         queryResult([]),
@@ -384,6 +511,7 @@ describe('PostgresMatchRepository', () => {
           updated_at: '1800000200',
           status: 'open',
           version: '3',
+          scenario: 'social',
         }),
       ]),
       queryResult([
@@ -397,7 +525,11 @@ describe('PostgresMatchRepository', () => {
       queryResult([commandRow(), joinCommandRow(), leaveCommandRow()]),
     ]);
 
-    const result = await repository.create(
+    const retryHarness = repositoryHarness({
+      isVerified: false,
+      court: undefined,
+    });
+    const result = await retryHarness.repository.create(
       transaction,
       createCommand({
         now: unixEpochSeconds(1_800_004_000),
@@ -417,10 +549,68 @@ describe('PostgresMatchRepository', () => {
         normalizeSql(call.text).startsWith('INSERT'),
       ),
     ).toBe(false);
+    expect(retryHarness.resolveCourt).not.toHaveBeenCalled();
+    expect(retryHarness.findProfile).not.toHaveBeenCalled();
+  });
+
+  it('rejects a new rating match for an unverified backend profile without writes', async () => {
+    const harness = repositoryHarness({ isVerified: false });
+    const transaction = new FakeTransaction([
+      createCommandLockResult(),
+      queryResult([]),
+    ]);
+
+    await expect(
+      harness.repository.create(transaction, createCommand()),
+    ).resolves.toEqual({
+      outcome: 'rejected',
+      reason: 'rating_verification_required',
+    });
+    expect(harness.findProfile).toHaveBeenCalledWith(transaction, {
+      accountId: OWNER_ID,
+    });
+    expect(transaction.calls).toHaveLength(2);
+  });
+
+  it('rejects an unknown trusted court before profile reads or writes', async () => {
+    const harness = repositoryHarness({ court: undefined });
+    const transaction = new FakeTransaction([
+      createCommandLockResult(),
+      queryResult([]),
+    ]);
+
+    await expect(
+      harness.repository.create(transaction, createCommand()),
+    ).resolves.toEqual({
+      outcome: 'rejected',
+      reason: 'court_invalid',
+    });
+    expect(harness.findProfile).not.toHaveBeenCalled();
+    expect(transaction.calls).toHaveLength(2);
+  });
+
+  it('rejects a new started match only after the durable command lookup', async () => {
+    const harness = repositoryHarness();
+    const transaction = new FakeTransaction([
+      createCommandLockResult(),
+      queryResult([]),
+    ]);
+
+    await expect(
+      harness.repository.create(
+        transaction,
+        createCommand({
+          now: unixEpochSeconds(1_800_003_600),
+        }),
+      ),
+    ).rejects.toMatchObject({ reason: 'invalid_input' });
+    expect(transaction.calls).toHaveLength(2);
+    expect(harness.resolveCourt).not.toHaveBeenCalled();
+    expect(harness.findProfile).not.toHaveBeenCalled();
   });
 
   it('rejects create commandId reuse with changed immutable bindings', async () => {
-    const result = await new PostgresMatchRepository().create(
+    const result = await repository().create(
       new FakeTransaction([
         createCommandLockResult(),
         queryResult([
@@ -462,7 +652,7 @@ describe('PostgresMatchRepository', () => {
       ]),
     ]);
 
-    const result = await new PostgresMatchRepository().listPublicFeed(
+    const result = await repository().listPublicFeed(
       transaction,
       { now: unixEpochSeconds(1_800_000_000), limit: 20 },
     );
@@ -501,7 +691,7 @@ describe('PostgresMatchRepository', () => {
         visibleMatchRow(participantRow(), { version: '2' }),
       ]),
     ]);
-    const found = await new PostgresMatchRepository().findVisibleById(
+    const found = await repository().findVisibleById(
       transaction,
       { matchId: MATCH_ID, viewerAccountId: VIEWER_ID },
     );
@@ -526,7 +716,7 @@ describe('PostgresMatchRepository', () => {
     expect(JSON.stringify(found)).not.toContain('leftAt');
     expect(JSON.stringify(found)).not.toContain('version":1');
     expect(
-      await new PostgresMatchRepository().findVisibleById(
+      await repository().findVisibleById(
         new FakeTransaction([
           queryResult([visibleMatchRow(null)]),
         ]),
@@ -534,7 +724,7 @@ describe('PostgresMatchRepository', () => {
       ),
     ).toMatchObject({ matchId: MATCH_ID, participants: [] });
     expect(
-      await new PostgresMatchRepository().findVisibleById(
+      await repository().findVisibleById(
         new FakeTransaction([queryResult([])]),
         { matchId: MATCH_ID, viewerAccountId: VIEWER_ID },
       ),
@@ -552,7 +742,7 @@ describe('PostgresMatchRepository', () => {
       queryResult([{ command_id: JOIN_COMMAND_ID }], 1, 'INSERT'),
     ]);
 
-    const result = await new PostgresMatchRepository().join(
+    const result = await repository().join(
       transaction,
       joinCommand(),
     );
@@ -613,7 +803,7 @@ describe('PostgresMatchRepository', () => {
       queryResult([commandRow(), joinCommandRow()]),
     ]);
 
-    const result = await new PostgresMatchRepository().join(
+    const result = await repository().join(
       transaction,
       joinCommand({
         participantId: deterministicUuid(
@@ -655,7 +845,7 @@ describe('PostgresMatchRepository', () => {
       ]),
     ]);
 
-    const result = await new PostgresMatchRepository().join(
+    const result = await repository().join(
       transaction,
       joinCommand({
         participantId: deterministicUuid(
@@ -691,7 +881,7 @@ describe('PostgresMatchRepository', () => {
       queryResult([{ command_id: LEAVE_COMMAND_ID }], 1, 'INSERT'),
     ]);
 
-    const result = await new PostgresMatchRepository().leave(
+    const result = await repository().leave(
       transaction,
       leaveCommand(),
     );
@@ -715,7 +905,7 @@ describe('PostgresMatchRepository', () => {
   });
 
   it('returns safe domain rejections without writes', async () => {
-    const notFound = await new PostgresMatchRepository().join(
+    const notFound = await repository().join(
       new FakeTransaction([queryResult([])]),
       joinCommand(),
     );
@@ -730,7 +920,7 @@ describe('PostgresMatchRepository', () => {
       queryResult([commandRow()]),
       actorRatingResult(),
     ]);
-    const ownerJoin = await new PostgresMatchRepository().join(
+    const ownerJoin = await repository().join(
       ownerTransaction,
       joinCommand({ actorAccountId: OWNER_ID }),
     );
@@ -749,7 +939,7 @@ describe('PostgresMatchRepository', () => {
       actorRatingResult('7.51'),
     ]);
 
-    const result = await new PostgresMatchRepository().join(
+    const result = await repository().join(
       transaction,
       joinCommand(),
     );
@@ -760,33 +950,49 @@ describe('PostgresMatchRepository', () => {
     });
     expect(transaction.calls).toHaveLength(4);
     expect(normalizeSql(transaction.calls[3].text)).toContain(
-      'FROM backend_auth.player_rating_states',
+      'SELECT rating, is_verified FROM backend_auth.player_rating_states',
     );
     expect(transaction.calls[3].values).toEqual([PLAYER_ID]);
+  });
+
+  it('uses trusted backend verification and rejects an unverified rating join', async () => {
+    const transaction = new FakeTransaction([
+      queryResult([matchRow()]),
+      queryResult([]),
+      queryResult([commandRow()]),
+      actorRatingResult('3.00', false),
+    ]);
+
+    await expect(
+      repository().join(transaction, joinCommand()),
+    ).resolves.toEqual({
+      outcome: 'rejected',
+      reason: 'rating_verification_required',
+    });
+    expect(transaction.calls).toHaveLength(4);
+    expect(
+      transaction.calls.some((call) =>
+        normalizeSql(call.text).startsWith('INSERT'),
+      ),
+    ).toBe(false);
   });
 
   it('fails closed before SQL for invalid commands and read inputs', async () => {
     const transaction = new FakeTransaction([]);
     await expect(
-      new PostgresMatchRepository().create(
+      repository().create(
         transaction,
         createCommand({ courtId: '' }),
       ),
     ).rejects.toMatchObject({ reason: 'invalid_input' });
     await expect(
-      new PostgresMatchRepository().create(
-        transaction,
-        createCommand({ pricePerPersonSnapshot: 10.999 }),
-      ),
-    ).rejects.toMatchObject({ reason: 'invalid_input' });
-    await expect(
-      new PostgresMatchRepository().listPublicFeed(transaction, {
+      repository().listPublicFeed(transaction, {
         now: unixEpochSeconds(1),
         limit: 51,
       }),
     ).rejects.toMatchObject({ reason: 'invalid_input' });
     await expect(
-      new PostgresMatchRepository().findVisibleById(transaction, {
+      repository().findVisibleById(transaction, {
         matchId: 'invalid' as MatchId,
         viewerAccountId: VIEWER_ID,
       }),
@@ -809,7 +1015,7 @@ describe('PostgresMatchRepository', () => {
     'maps PostgreSQL %s safely to %s',
     async (code, constraint, reason) => {
       try {
-        await new PostgresMatchRepository().listPublicFeed(
+        await repository().listPublicFeed(
           new FakeTransaction([
             postgresError(code, constraint),
           ]),
@@ -824,7 +1030,7 @@ describe('PostgresMatchRepository', () => {
 
   it('maps corrupt persisted state and unknown errors without detail leakage', async () => {
     await expect(
-      new PostgresMatchRepository().listPublicFeed(
+      repository().listPublicFeed(
         new FakeTransaction([
           queryResult([
             {
@@ -852,7 +1058,7 @@ describe('PostgresMatchRepository', () => {
     ).rejects.toMatchObject({ reason: 'invalid_persisted_state' });
 
     try {
-      await new PostgresMatchRepository().listPublicFeed(
+      await repository().listPublicFeed(
         new FakeTransaction([new Error(PRIVATE_MARKER)]),
         { now: unixEpochSeconds(1), limit: 20 },
       );
@@ -864,7 +1070,7 @@ describe('PostgresMatchRepository', () => {
 
   it('uses static parameterized backend_match SQL without secret or payment state fields', async () => {
     const transaction = new FakeTransaction([queryResult([])]);
-    await new PostgresMatchRepository().listPublicFeed(transaction, {
+    await repository().listPublicFeed(transaction, {
       now: unixEpochSeconds(1),
       limit: 20,
     });

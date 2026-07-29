@@ -16,6 +16,7 @@ import { PostgresAccountStatusReader } from '../database/postgres-account-status
 import { PostgresAuthenticationOperationTerminalRepository } from '../database/postgres-authentication-operation-terminal.repository';
 import { PostgresExternalIdentityResolutionRepository } from '../database/postgres-external-identity.repository';
 import { PostgresInitialSessionRepository } from '../database/postgres-initial-session.repository';
+import { PostgresMatchRepository } from '../database/postgres-match.repository';
 import { PostgresPlayerAccountProvisioningRepository } from '../database/postgres-player-account-provisioning.repository';
 import { PostgresPlayerProfileDetailsRepository } from '../database/postgres-player-profile-details.repository';
 import { PostgresPlayerProfileReader } from '../database/postgres-player-profile-reader';
@@ -28,6 +29,9 @@ import { PostgresService } from '../database/postgres.service';
 import { PostgresTelegramAuthenticationOperationRepository } from '../database/postgres-telegram-authentication-operation.repository';
 import { PostgresTransactionRunner } from '../database/postgres-transaction';
 import { PostgresTransactionExecutorAdapter } from '../database/postgres-transaction-executor.adapter';
+import { MatchApiService } from '../matches/match-api.service';
+import { MATCH_COURT_CATALOG } from '../matches/match-court-catalog';
+import { MatchController } from '../matches/match.controller';
 import {
   AuthenticationProofFingerprint,
   VerifiedTelegramProof,
@@ -231,6 +235,16 @@ function getPublicPlayerProfileControllerService(
   ).service;
 }
 
+function getMatchControllerService(
+  controller: MatchController,
+): MatchApiService {
+  return (
+    controller as unknown as {
+      readonly service: MatchApiService;
+    }
+  ).service;
+}
+
 function expectProviderNotRegistered(
   moduleRef: TestingModule,
   token: string | symbol | Type<unknown>,
@@ -321,6 +335,24 @@ describe('AuthModule Telegram login wiring', () => {
         moduleRef.get(PublicPlayerProfileController),
       ),
     ).toBe(publicPlayerProfile);
+    const matchApi = moduleRef.get(MatchApiService);
+    const matchRepository = moduleRef.get(PostgresMatchRepository);
+    expect(matchApi.dependencies.transactions).toBe(
+      moduleRef.get(PostgresTransactionExecutorAdapter),
+    );
+    expect(matchApi.dependencies.matches).toBe(matchRepository);
+    expect(matchRepository.profiles).toBe(
+      moduleRef.get(PostgresPlayerProfileReader),
+    );
+    expect(matchRepository.courts).toBe(
+      moduleRef.get(MATCH_COURT_CATALOG),
+    );
+    expect(matchApi.dependencies.clock).toBe(
+      moduleRef.get(SESSION_AUTHENTICATION_CLOCK),
+    );
+    expect(
+      getMatchControllerService(moduleRef.get(MatchController)),
+    ).toBe(matchApi);
     expect(() => moduleRef.get(SESSION_AUTHENTICATION_CLOCK)).not.toThrow();
     for (const token of [
       TelegramLoginService,

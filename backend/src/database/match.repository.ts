@@ -23,6 +23,7 @@ export type MatchCommandRejection =
   | 'match_closed'
   | 'match_not_joinable'
   | 'match_started'
+  | 'rating_verification_required'
   | 'rating_out_of_range'
   | 'owner_cannot_join'
   | 'already_joined'
@@ -37,8 +38,22 @@ export type CreateMatchResult =
     }
   | {
       readonly outcome: 'rejected';
-      readonly reason: 'command_reuse_conflict';
+      readonly reason:
+        | 'command_reuse_conflict'
+        | 'court_invalid'
+        | 'rating_verification_required';
     };
+
+export type CreateMatchPersistenceInput = Omit<
+  CreateMatchCommand,
+  | 'actorIsVerified'
+  | 'courtId'
+  | 'courtName'
+  | 'courtType'
+  | 'pricePerPersonSnapshot'
+> & {
+  readonly courtId?: string;
+};
 
 export type JoinMatchResult =
   | {
@@ -125,7 +140,7 @@ export interface MatchDetailRecord {
 
 export type JoinMatchInput = Omit<
   JoinMatchCommand,
-  'actorRatingLevel'
+  'actorRatingLevel' | 'actorIsVerified'
 >;
 
 export type MatchPersistenceFailure =
@@ -150,7 +165,7 @@ export class MatchPersistenceError extends Error {
 export interface MatchRepository {
   create(
     transaction: PostgresTransaction,
-    command: CreateMatchCommand,
+    command: CreateMatchPersistenceInput,
   ): Promise<CreateMatchResult>;
 
   listPublicFeed(

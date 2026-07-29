@@ -33,6 +33,7 @@ export type MatchTransitionRejection =
   | 'match_closed'
   | 'match_not_joinable'
   | 'match_started'
+  | 'rating_verification_required'
   | 'rating_out_of_range'
   | 'owner_cannot_join'
   | 'already_joined'
@@ -108,8 +109,10 @@ function isValidFormat(command: CreateMatchCommand): boolean {
   return (
     command.kind === 'match' &&
     command.visibility === 'public' &&
-    (command.scenario === 'community' || command.scenario === 'social') &&
-    (command.status === 'open' || command.status === 'searching') &&
+    ((command.scenario === 'community' &&
+      command.status === 'searching') ||
+      (command.scenario === 'social' &&
+        command.status === 'confirmed')) &&
     Number.isInteger(command.ratingMin) &&
     Number.isInteger(command.ratingMax) &&
     (command.ratingMin as number) >= 0 &&
@@ -142,6 +145,7 @@ function isValidCreateCommand(command: CreateMatchCommand): boolean {
     typeof command.description === 'string' &&
     [...command.description].length <= 2000 &&
     typeof command.isRatingMatch === 'boolean' &&
+    typeof command.actorIsVerified === 'boolean' &&
     (command.pricePerPersonSnapshot === undefined ||
       (typeof command.pricePerPersonSnapshot === 'number' &&
         Number.isFinite(command.pricePerPersonSnapshot) &&
@@ -159,7 +163,8 @@ function isValidJoinCommand(command: JoinMatchCommand): boolean {
     isMatchParticipantId(command.participantId) &&
     Number.isInteger(command.actorRatingLevel) &&
     command.actorRatingLevel >= 0 &&
-    command.actorRatingLevel <= 6
+    command.actorRatingLevel <= 6 &&
+    typeof command.actorIsVerified === 'boolean'
   );
 }
 
@@ -264,6 +269,12 @@ function createMatch(
       reason: 'match_already_exists',
     });
   }
+  if (command.isRatingMatch && !command.actorIsVerified) {
+    return Object.freeze({
+      outcome: 'rejected',
+      reason: 'rating_verification_required',
+    });
+  }
   const persistedCommand = appliedCommand(
     command,
     1,
@@ -339,6 +350,12 @@ function joinMatch(
     return Object.freeze({
       outcome: 'rejected',
       reason: 'match_started',
+    });
+  }
+  if (state.isRatingMatch && !command.actorIsVerified) {
+    return Object.freeze({
+      outcome: 'rejected',
+      reason: 'rating_verification_required',
     });
   }
   if (
@@ -428,6 +445,12 @@ function leaveMatch(
   }
   if (!ACTIVE_MATCH_STATUSES.has(state.status)) {
     return Object.freeze({ outcome: 'rejected', reason: 'match_closed' });
+  }
+  if (command.now >= state.startsAt) {
+    return Object.freeze({
+      outcome: 'rejected',
+      reason: 'match_started',
+    });
   }
   const current = state.participants.find(
     (participant) =>

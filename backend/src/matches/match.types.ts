@@ -123,12 +123,13 @@ export interface CreateMatchCommand extends MatchCommandBase {
   readonly kind: MatchKind;
   readonly visibility: MatchVisibility;
   readonly scenario: MatchScenario;
-  readonly status: 'open' | 'searching' | 'upcoming';
+  readonly status: 'open' | 'searching' | 'confirmed' | 'upcoming';
   readonly title?: string;
   readonly description: string;
   readonly ratingMin?: number;
   readonly ratingMax?: number;
   readonly isRatingMatch: boolean;
+  readonly actorIsVerified: boolean;
   readonly pricePerPersonSnapshot?: number;
 }
 
@@ -136,6 +137,7 @@ export interface JoinMatchCommand extends MatchCommandBase {
   readonly type: 'join_match';
   readonly participantId: MatchParticipantId;
   readonly actorRatingLevel: number;
+  readonly actorIsVerified: boolean;
 }
 
 export interface LeaveMatchCommand extends MatchCommandBase {

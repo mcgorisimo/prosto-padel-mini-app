@@ -10,6 +10,10 @@ import {
   transitionMatch,
 } from '../matches/match.state-machine';
 import {
+  MatchCourtCatalog,
+  MatchCourtSnapshot,
+} from '../matches/match-court-catalog';
+import {
   AppliedMatchCommand,
   CreateMatchCommand,
   JoinMatchCommand,
@@ -38,6 +42,7 @@ import {
 import { classifyPostgresError } from './postgres-error-classifier';
 import {
   CreateMatchResult,
+  CreateMatchPersistenceInput,
   FindVisibleMatchInput,
   JoinMatchInput,
   JoinMatchResult,
@@ -51,6 +56,10 @@ import {
   MatchRepository,
   matchDetailFromState,
 } from './match.repository';
+import {
+  PlayerProfileReadPersistenceError,
+  PlayerProfileReader,
+} from './player-profile-reader';
 import { PostgresTransaction } from './postgres-transaction';
 
 const MAX_FEED_RESULTS = 50;
@@ -146,7 +155,7 @@ const SELECT_COMMANDS_SQL = `
 `;
 
 const SELECT_ACTOR_RATING_SQL = `
-  SELECT rating
+  SELECT rating, is_verified
   FROM backend_auth.player_rating_states
   WHERE account_id = $1
 `;
@@ -377,6 +386,7 @@ interface CommandRow extends QueryResultRow {
 
 interface ActorRatingRow extends QueryResultRow {
   readonly rating: unknown;
+  readonly is_verified: unknown;
 }
 
 interface VisibleMatchRow extends MatchRow {
@@ -886,19 +896,101 @@ function assertCommand(command: MatchCommand): void {
   }
 }
 
-function assertCreateCommandForLookup(command: CreateMatchCommand): void {
+function assertCreateCommandForLookup(
+  command: CreateMatchPersistenceInput,
+): void {
+  const expectedStatus =
+    command.scenario === 'private'
+      ? 'upcoming'
+      : command.scenario === 'community'
+        ? 'searching'
+        : 'confirmed';
   if (
     !isPlainRecord(command) ||
     command.type !== 'create_match' ||
     !isUnixEpochSeconds(command.now) ||
     !isUnixEpochSeconds(command.startsAt) ||
+    (command.courtId === undefined &&
+      command.scenario !== 'community') ||
+    command.status !== expectedStatus ||
     !isValidMatchCommand({
       ...command,
       now: command.startsAt,
+      courtId: command.courtId ?? `unassigned:${command.matchId}`,
+      courtName: 'trusted-court',
+      courtType: 'panoramic',
+      actorIsVerified: false,
+      pricePerPersonSnapshot: 1,
     })
   ) {
     throw invalidInput();
   }
+}
+
+function trustedCreateCommand(
+  input: CreateMatchPersistenceInput,
+  court: MatchCourtSnapshot,
+  actorIsVerified: boolean,
+): CreateMatchCommand {
+  return Object.freeze({
+    ...input,
+    courtId: court.courtId,
+    courtName: court.courtName,
+    courtType: court.courtType,
+    actorIsVerified,
+    pricePerPersonSnapshot: court.pricePerPersonSnapshot,
+  });
+}
+
+function originalCreateDetail(
+  state: MatchState,
+  command: AppliedMatchCommand,
+): MatchDetailRecord {
+  if (
+    command.commandType !== 'create_match' ||
+    command.resultType !== 'match_created' ||
+    command.commandSequence !== 1 ||
+    command.matchVersion !== 1 ||
+    command.appliedAt !== state.createdAt ||
+    command.actorAccountId !== state.ownerAccountId
+  ) {
+    throw invalidPersistedState();
+  }
+  const status =
+    state.scenario === 'private'
+      ? 'upcoming'
+      : state.scenario === 'community'
+        ? 'searching'
+        : 'confirmed';
+  return Object.freeze({
+    matchId: state.matchId,
+    ownerAccountId: state.ownerAccountId,
+    createdAt: command.appliedAt,
+    updatedAt: command.appliedAt,
+    startsAt: state.startsAt,
+    durationMinutes: state.durationMinutes,
+    courtId: state.courtId,
+    courtName: state.courtName,
+    courtType: state.courtType,
+    kind: state.kind,
+    visibility: state.visibility,
+    scenario: state.scenario,
+    status,
+    ...(state.title === undefined ? {} : { title: state.title }),
+    description: state.description,
+    ...(state.ratingMin === undefined
+      ? {}
+      : { ratingMin: state.ratingMin }),
+    ...(state.ratingMax === undefined
+      ? {}
+      : { ratingMax: state.ratingMax }),
+    isRatingMatch: state.isRatingMatch,
+    ...(state.pricePerPersonSnapshot === undefined
+      ? {}
+      : { pricePerPersonSnapshot: state.pricePerPersonSnapshot }),
+    version: 1,
+    participants: Object.freeze([]),
+  });
 }
 
 function assertJoinInput(input: JoinMatchInput): void {
@@ -908,6 +1000,7 @@ function assertJoinInput(input: JoinMatchInput): void {
     !isValidMatchCommand({
       ...input,
       actorRatingLevel: 0,
+      actorIsVerified: false,
     })
   ) {
     throw invalidInput();
@@ -1017,6 +1110,22 @@ function mapPersistenceError(error: unknown): MatchPersistenceError {
   if (error instanceof MatchPersistenceError) {
     return error;
   }
+  if (error instanceof PlayerProfileReadPersistenceError) {
+    switch (error.reason) {
+      case 'invalid_input':
+        return failure('storage_failure');
+      case 'invalid_persisted_state':
+        return failure('invalid_persisted_state');
+      case 'permission_denied':
+        return failure('permission_denied');
+      case 'transaction_conflict':
+        return failure('transaction_conflict');
+      case 'database_unavailable':
+        return failure('database_unavailable');
+      case 'storage_failure':
+        return failure('storage_failure');
+    }
+  }
   const classified = classifyPostgresError(error);
   if (classified.kind === 'non_postgres_error') {
     return failure('storage_failure');
@@ -1071,6 +1180,11 @@ function exactOne(rowCount: number | null, rows: readonly unknown[]): void {
 }
 
 export class PostgresMatchRepository implements MatchRepository {
+  constructor(
+    readonly profiles: PlayerProfileReader,
+    readonly courts: MatchCourtCatalog,
+  ) {}
+
   private async lockAndHydrate(
     transaction: PostgresTransaction,
     matchId: MatchId,
@@ -1108,7 +1222,7 @@ export class PostgresMatchRepository implements MatchRepository {
 
   async create(
     transaction: PostgresTransaction,
-    command: CreateMatchCommand,
+    command: CreateMatchPersistenceInput,
   ): Promise<CreateMatchResult> {
     assertCreateCommandForLookup(command);
     try {
@@ -1147,37 +1261,82 @@ export class PostgresMatchRepository implements MatchRepository {
         if (state === null) {
           throw invalidPersistedState();
         }
-        const transition = transitionMatch(state, command);
-        if (transition.outcome !== 'idempotent_retry') {
-          throw invalidPersistedState();
-        }
-        const originalTransition = transitionMatch(
-          null,
-          Object.freeze({
-            ...command,
-            now: persisted.appliedAt,
-          }),
+        const stateCommand = state.appliedCommands.find(
+          (candidate) => candidate.commandId === persisted.commandId,
         );
         if (
-          originalTransition.outcome !== 'transitioned' ||
-          originalTransition.transition !== 'match_created'
+          stateCommand === undefined ||
+          stateCommand.requestDigest !== persisted.requestDigest ||
+          stateCommand.matchId !== persisted.matchId ||
+          stateCommand.actorAccountId !== persisted.actorAccountId
         ) {
           throw invalidPersistedState();
         }
         return Object.freeze({
           outcome: 'match_created',
           persistence: 'idempotent_retry',
-          match: matchDetailFromState(originalTransition.state),
+          match: originalCreateDetail(state, persisted),
         });
       }
-      assertCommand(command);
-      const transition = transitionMatch(null, command);
+      if (command.startsAt <= command.now) {
+        throw invalidInput();
+      }
+      const court = this.courts.resolve({
+        matchId: command.matchId,
+        scenario: command.scenario,
+        ...(command.courtId === undefined
+          ? {}
+          : { courtId: command.courtId }),
+        startsAt: command.startsAt,
+        durationMinutes: command.durationMinutes,
+      });
+      if (court === undefined) {
+        return Object.freeze({
+          outcome: 'rejected',
+          reason: 'court_invalid',
+        });
+      }
+      if (
+        command.courtId !== undefined &&
+        court.courtId !== command.courtId
+      ) {
+        throw invalidPersistedState();
+      }
+      let actorIsVerified = false;
+      if (command.isRatingMatch) {
+        const profile = await this.profiles.findByAccountId(transaction, {
+          accountId: command.actorAccountId,
+        });
+        if (profile.outcome === 'not_found') {
+          throw failure('referential_integrity');
+        }
+        if (
+          profile.profile.accountId !== command.actorAccountId ||
+          typeof profile.profile.isVerified !== 'boolean'
+        ) {
+          throw invalidPersistedState();
+        }
+        actorIsVerified = profile.profile.isVerified;
+      }
+      const verifiedCommand = trustedCreateCommand(
+        command,
+        court,
+        actorIsVerified,
+      );
+      assertCommand(verifiedCommand);
+      const transition = transitionMatch(null, verifiedCommand);
       if (
         transition.outcome !== 'transitioned' ||
         transition.transition !== 'match_created'
       ) {
         if (transition.outcome === 'rejected') {
-          mapRejection(transition.reason);
+          const reason = mapRejection(transition.reason);
+          if (reason === 'rating_verification_required') {
+            return Object.freeze({
+              outcome: 'rejected',
+              reason,
+            });
+          }
         }
         throw invalidPersistedState();
       }
@@ -1365,11 +1524,18 @@ export class PostgresMatchRepository implements MatchRepository {
           actorRatingLevel: readPlayerRatingLevel(
             rating.rows[0].rating,
           ),
+          actorIsVerified:
+            typeof rating.rows[0].is_verified === 'boolean'
+              ? rating.rows[0].is_verified
+              : (() => {
+                  throw invalidPersistedState();
+                })(),
         });
       } else {
         stateMachineCommand = Object.freeze({
           ...command,
           actorRatingLevel: 0,
+          actorIsVerified: false,
         });
       }
       const transition = transitionMatch(

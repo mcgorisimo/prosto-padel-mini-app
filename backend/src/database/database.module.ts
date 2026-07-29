@@ -1,4 +1,9 @@
 import { Module, Provider } from '@nestjs/common';
+import {
+  MATCH_COURT_CATALOG,
+  MatchCourtCatalog,
+  SystemMatchCourtCatalog,
+} from '../matches/match-court-catalog';
 import { PostgresAccountStatusReader } from './postgres-account-status.reader';
 import { PostgresAuthenticationOperationTerminalRepository } from './postgres-authentication-operation-terminal.repository';
 import { PostgresExternalIdentityResolutionRepository } from './postgres-external-identity.repository';
@@ -25,8 +30,21 @@ const DATABASE_WORKFLOW_PROVIDERS: Provider[] = [
   PostgresPlayerProfileReader,
   PostgresPlayerProfileWriter,
   PostgresPublicPlayerProfileSearchRepository,
-  PostgresMatchRepository,
   PostgresSessionAuthenticationRepository,
+  {
+    provide: MATCH_COURT_CATALOG,
+    useFactory: (): MatchCourtCatalog =>
+      Object.freeze(new SystemMatchCourtCatalog()),
+  },
+  {
+    provide: PostgresMatchRepository,
+    inject: [PostgresPlayerProfileReader, MATCH_COURT_CATALOG],
+    useFactory: (
+      profiles: PostgresPlayerProfileReader,
+      courts: MatchCourtCatalog,
+    ): PostgresMatchRepository =>
+      new PostgresMatchRepository(profiles, courts),
+  },
   {
     provide: PostgresTransactionExecutorAdapter,
     inject: [PostgresTransactionRunner],
@@ -98,6 +116,7 @@ const DATABASE_WORKFLOW_EXPORTS = [
   PostgresPlayerProfileWriter,
   PostgresPublicPlayerProfileSearchRepository,
   PostgresMatchRepository,
+  MATCH_COURT_CATALOG,
   PostgresAuthenticationOperationTerminalRepository,
   PostgresInitialSessionRepository,
   PostgresSessionCredentialLifecycleRepository,
