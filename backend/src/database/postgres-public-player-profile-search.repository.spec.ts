@@ -179,6 +179,79 @@ describe('PostgresPublicPlayerProfileSearchRepository', () => {
     expect(JSON.stringify(result)).not.toContain('languageCode');
   });
 
+  it('batch-reads the same public allowlist without private fields', async () => {
+    const transaction = new FakeTransaction([
+      queryResult([
+        playerRow(),
+        playerRow({
+          account_id: OTHER_PLAYER_ID,
+          first_name: 'Other',
+          last_name: null,
+          username: null,
+          rating: '4.25',
+          is_verified: true,
+        }),
+      ]),
+    ]);
+
+    const result =
+      await new PostgresPublicPlayerProfileSearchRepository()
+        .findByPlayerIds(transaction, {
+          playerIds: [PLAYER_ID, OTHER_PLAYER_ID],
+        });
+
+    expect(result).toEqual({
+      outcome: 'found',
+      players: [
+        {
+          playerId: PLAYER_ID,
+          firstName: 'Synthetic',
+          lastName: 'Player',
+          username: 'synthetic_player',
+          rating: 3,
+          isVerified: false,
+        },
+        {
+          playerId: OTHER_PLAYER_ID,
+          firstName: 'Other',
+          rating: 4.25,
+          isVerified: true,
+        },
+      ],
+    });
+    expect(transaction.calls).toHaveLength(1);
+    expect(transaction.calls[0].values).toEqual([
+      [PLAYER_ID, OTHER_PLAYER_ID],
+    ]);
+    const sql = normalizeSql(transaction.calls[0].text);
+    expect(sql).toContain(
+      'accounts.id = ANY ($1::uuid[])',
+    );
+    expect(sql).not.toContain('phone');
+    expect(sql).not.toContain('photo_url');
+    expect(sql).not.toContain('language_code');
+    expect(JSON.stringify(result)).not.toContain(PRIVATE_MARKER);
+    expect(Object.isFrozen(result)).toBe(true);
+    expect(Object.isFrozen(result.players)).toBe(true);
+    expect(result.players.every(Object.isFrozen)).toBe(true);
+  });
+
+  it.each([
+    { playerIds: [] },
+    { playerIds: [PLAYER_ID, PLAYER_ID] },
+    { playerIds: ['invalid'] },
+    { playerIds: Array.from({ length: 201 }, () => PLAYER_ID) },
+    { playerIds: [PLAYER_ID], extra: true },
+  ])('rejects invalid batch input before SQL: %p', async (input) => {
+    const transaction = new FakeTransaction([]);
+
+    await expect(
+      new PostgresPublicPlayerProfileSearchRepository()
+        .findByPlayerIds(transaction, input as never),
+    ).rejects.toMatchObject({ reason: 'invalid_input' });
+    expect(transaction.calls).toHaveLength(0);
+  });
+
   it('uses one static parameterized backend_auth-only query', async () => {
     const transaction = new FakeTransaction([queryResult([])]);
 

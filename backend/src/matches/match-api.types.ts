@@ -62,6 +62,32 @@ export interface MatchParticipationResponse {
   readonly matchVersion: number;
 }
 
+export interface MatchPublicPlayerResponse {
+  readonly playerId: AccountId;
+  readonly firstName: string;
+  readonly lastName?: string;
+  readonly username?: string;
+  readonly rating: number;
+  readonly isVerified: boolean;
+}
+
+export interface MatchPublicParticipantResponse
+  extends MatchPublicPlayerResponse {
+  readonly slotNumber: MatchSlotNumber;
+}
+
+export interface MatchFeedResponse
+  extends Omit<MatchFeedRecord, 'participants'> {
+  readonly owner: MatchPublicPlayerResponse;
+  readonly participants: readonly MatchPublicParticipantResponse[];
+}
+
+export interface MatchDetailResponse
+  extends Omit<MatchDetailRecord, 'participants'> {
+  readonly owner: MatchPublicPlayerResponse;
+  readonly participants: readonly MatchPublicParticipantResponse[];
+}
+
 export type MatchApiRejection =
   | 'invalid_request'
   | 'forbidden'
@@ -83,7 +109,7 @@ export type MatchApiRejection =
 export type CreateMatchApiResult =
   | {
       readonly outcome: 'created';
-      readonly match: MatchDetailRecord;
+      readonly match: MatchDetailResponse;
     }
   | {
       readonly outcome: 'rejected';
@@ -93,7 +119,7 @@ export type CreateMatchApiResult =
 export type ListMatchFeedApiResult =
   | {
       readonly outcome: 'found';
-      readonly matches: readonly MatchFeedRecord[];
+      readonly matches: readonly MatchFeedResponse[];
     }
   | {
       readonly outcome: 'rejected';
@@ -103,7 +129,7 @@ export type ListMatchFeedApiResult =
 export type ReadMatchDetailApiResult =
   | {
       readonly outcome: 'found';
-      readonly match: MatchDetailRecord;
+      readonly match: MatchDetailResponse;
     }
   | {
       readonly outcome: 'rejected';

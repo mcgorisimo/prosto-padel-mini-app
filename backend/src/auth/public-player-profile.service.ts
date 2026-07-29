@@ -23,7 +23,10 @@ export interface PublicPlayerProfileTransactionExecutor {
 
 export interface PublicPlayerProfileServiceDependencies {
   readonly transactions: PublicPlayerProfileTransactionExecutor;
-  readonly profiles: PublicPlayerProfileSearchRepository;
+  readonly profiles: Pick<
+    PublicPlayerProfileSearchRepository,
+    'search'
+  >;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

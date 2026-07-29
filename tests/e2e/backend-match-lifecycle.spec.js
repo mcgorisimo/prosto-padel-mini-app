@@ -13,7 +13,11 @@ test.describe('backend match credential lifecycle', () => {
     await page.goto('/');
 
     const summary = await page.evaluate(async (parameters) => {
-      const { createBackendSessionClient } = await import(
+      const {
+        createBackendSessionClient,
+        isBackendMatchDetailRecord,
+        isBackendMatchFeedRecord,
+      } = await import(
         '/src/lib/backendSessionClient.js'
       );
       const contracts = [];
@@ -38,7 +42,23 @@ test.describe('backend match credential lifecycle', () => {
         isRatingMatch: false,
         pricePerPersonSnapshot: 750,
         version: 1,
-        participants: [],
+        owner: {
+          playerId: parameters.accountId,
+          firstName: 'Synthetic',
+          lastName: 'Owner',
+          username: 'synthetic_owner',
+          rating: 3,
+          isVerified: true,
+        },
+        participants: [{
+          playerId: parameters.otherAccountId,
+          slotNumber: 2,
+          firstName: 'Other',
+          lastName: 'Player',
+          username: 'other_player',
+          rating: 4,
+          isVerified: false,
+        }],
       };
       const feed = {
         matchId: detail.matchId,
@@ -55,8 +75,10 @@ test.describe('backend match credential lifecycle', () => {
         ratingMax: detail.ratingMax,
         isRatingMatch: detail.isRatingMatch,
         pricePerPersonSnapshot: detail.pricePerPersonSnapshot,
-        occupiedSlots: 1,
+        occupiedSlots: 2,
         version: detail.version,
+        owner: detail.owner,
+        participants: detail.participants,
       };
       const client = createBackendSessionClient({
         cryptoImpl: {
@@ -149,10 +171,43 @@ test.describe('backend match credential lifecycle', () => {
           );
         }),
       );
+      const largeFeed = Array.from({ length: 20 }, (_, index) => ({
+        ...feed,
+        matchId:
+          `33333333-3333-4333-8333-${index
+            .toString(16)
+            .padStart(12, '0')}`,
+        owner: {
+          ...feed.owner,
+          firstName: '😀'.repeat(256),
+          lastName: '😀'.repeat(256),
+          username: 'u'.repeat(64),
+        },
+      }));
+      const largeFeedResult = await createBackendSessionClient({
+        fetchImpl: async () => new Response(JSON.stringify({
+          matches: largeFeed,
+        }), { status: 200 }),
+      }).listMatches(parameters.credential, 20);
       const serializedResults = JSON.stringify(results);
       const serializedErrors = results
         .map((result) => result.reason ?? '')
         .join('|');
+      const {
+        owner: _feedOwner,
+        participants: _feedParticipants,
+        ...legacyFeed
+      } = feed;
+      const {
+        owner: _detailOwner,
+        ...legacyDetailBase
+      } = detail;
+      const legacyDetail = {
+        ...legacyDetailBase,
+        participants: detail.participants.map(
+          ({ playerId, slotNumber }) => ({ playerId, slotNumber }),
+        ),
+      };
 
       return {
         contracts: contracts.map((contract) => ({
@@ -183,14 +238,51 @@ test.describe('backend match credential lifecycle', () => {
             result.outcome === 'rejected' &&
             result.reason === 'internal_error',
         ),
+        largeFeedAccepted:
+          largeFeedResult.outcome === 'matches_loaded' &&
+          largeFeedResult.matches.length === 20,
+        publicProjectionFailClosed:
+          !isBackendMatchFeedRecord({
+            ...feed,
+            owner: {
+              ...feed.owner,
+              phone: '+79990000000',
+            },
+          }) &&
+          !isBackendMatchFeedRecord({
+            ...feed,
+            occupiedSlots: 1,
+          }) &&
+          !isBackendMatchDetailRecord({
+            ...detail,
+            participants: [{
+              playerId: parameters.otherAccountId,
+              slotNumber: 2,
+              firstName: 'Other',
+              rating: 3,
+              isVerified: false,
+              photoUrl: 'https://example.invalid/private',
+            }],
+          }),
+        rollingUpgradeCompatible:
+          isBackendMatchFeedRecord(legacyFeed) &&
+          isBackendMatchDetailRecord(legacyDetail),
         credentialAbsentFromResults:
           !serializedResults.includes(parameters.credential),
         credentialAbsentFromErrors:
           !serializedErrors.includes(parameters.credential),
+        publicProjectionFrozen:
+          Object.isFrozen(results[0].matches[0]) &&
+          Object.isFrozen(results[0].matches[0].owner) &&
+          Object.isFrozen(results[0].matches[0].participants) &&
+          Object.isFrozen(results[0].matches[0].participants[0]) &&
+          Object.isFrozen(results[1].match.owner) &&
+          Object.isFrozen(results[1].match.participants[0]),
       };
     }, {
       credential: SYNTHETIC_CREDENTIAL,
       accountId: ACCOUNT_ID,
+      otherAccountId: OTHER_ACCOUNT_ID,
       matchId: MATCH_ID,
       requestKey: REQUEST_KEY,
     });
@@ -204,7 +296,11 @@ test.describe('backend match credential lifecycle', () => {
     ]);
     expect(summary.credentialAbsentFromResults).toBe(true);
     expect(summary.credentialAbsentFromErrors).toBe(true);
+    expect(summary.publicProjectionFrozen).toBe(true);
     expect(summary.terminalFeedRejected).toBe(true);
+    expect(summary.largeFeedAccepted).toBe(true);
+    expect(summary.publicProjectionFailClosed).toBe(true);
+    expect(summary.rollingUpgradeCompatible).toBe(true);
     expect(summary.contracts).toEqual([
       {
         url: '/api/v1/matches?limit=20',
@@ -468,7 +564,7 @@ test.describe('backend match credential lifecycle', () => {
         ratingMax: 5,
         isRatingMatch: true,
       });
-      const match = mapBackendMatchToApp({
+      const detailRecord = {
         matchId: parameters.matchId,
         ownerAccountId: parameters.accountId,
         createdAt: 1_893_499_200,
@@ -489,11 +585,25 @@ test.describe('backend match credential lifecycle', () => {
         isRatingMatch: true,
         pricePerPersonSnapshot: 750,
         version: 2,
+        owner: {
+          playerId: parameters.accountId,
+          firstName: 'Synthetic',
+          lastName: 'Owner',
+          username: 'synthetic_owner',
+          rating: 3,
+          isVerified: true,
+        },
         participants: [{
           playerId: parameters.otherAccountId,
           slotNumber: 3,
+          firstName: 'Visible',
+          lastName: 'Player',
+          username: 'visible_player',
+          rating: 4.25,
+          isVerified: true,
         }],
-      }, {
+      };
+      const match = mapBackendMatchToApp(detailRecord, {
         accountId: parameters.accountId,
         firstName: 'Synthetic',
         lastName: 'Owner',
@@ -503,6 +613,40 @@ test.describe('backend match credential lifecycle', () => {
         rating: 3,
         isVerified: true,
       });
+      const matchForOtherViewer = mapBackendMatchToApp(
+        detailRecord,
+        {
+          accountId: parameters.otherAccountId,
+          firstName: 'Private local alias',
+          lastName: '',
+          username: '',
+          photoUrl: null,
+          sidePreference: 'Left',
+          rating: 1,
+          isVerified: false,
+        },
+      );
+      const {
+        owner: _legacyOwner,
+        participants: _legacyParticipants,
+        ...legacyFeedRecord
+      } = detailRecord;
+      const legacyFeedMatch = mapBackendMatchToApp(
+        {
+          ...legacyFeedRecord,
+          occupiedSlots: 2,
+        },
+        {
+          accountId: parameters.accountId,
+          firstName: 'Synthetic',
+          lastName: 'Owner',
+          username: 'synthetic_owner',
+          photoUrl: null,
+          sidePreference: 'Both',
+          rating: 3,
+          isVerified: true,
+        },
+      );
       const joinableMatch = mapBackendMatchToApp({
         matchId: parameters.matchId,
         ownerAccountId: parameters.accountId,
@@ -524,6 +668,14 @@ test.describe('backend match credential lifecycle', () => {
         isRatingMatch: true,
         pricePerPersonSnapshot: 750,
         version: 2,
+        owner: {
+          playerId: parameters.accountId,
+          firstName: 'Synthetic',
+          lastName: 'Owner',
+          username: 'synthetic_owner',
+          rating: 3,
+          isVerified: true,
+        },
         participants: [],
       }, {
         accountId: parameters.accountId,
@@ -756,7 +908,21 @@ test.describe('backend match credential lifecycle', () => {
           slotNames: match.filledSlots
             .filter(Boolean)
             .map((player) => player.firstName),
+          slotRatings: match.filledSlots
+            .filter(Boolean)
+            .map((player) => player.rating),
+          slotVerification: match.filledSlots
+            .filter(Boolean)
+            .map((player) => player.isVerified),
         },
+        crossViewerPublicNames:
+          matchForOtherViewer.filledSlots
+            .filter(Boolean)
+            .map((player) => player.firstName),
+        rollingUpgradePlaceholderNames:
+          legacyFeedMatch.filledSlots
+            .filter(Boolean)
+            .map((player) => player.firstName),
         sensitiveAbsent:
           !/credential|requestKey|digest|authorization/iu.test(
             JSON.stringify({ draft, match }),
@@ -791,8 +957,18 @@ test.describe('backend match credential lifecycle', () => {
       participants: [ACCOUNT_ID, OTHER_ACCOUNT_ID],
       slotIds: [ACCOUNT_ID, null, OTHER_ACCOUNT_ID, null],
       slotIndexes: [0, null, 2, null],
-      slotNames: ['Synthetic', 'Игрок'],
+      slotNames: ['Synthetic', 'Visible'],
+      slotRatings: [3, 4.25],
+      slotVerification: [true, true],
     });
+    expect(summary.crossViewerPublicNames).toEqual([
+      'Synthetic',
+      'Visible',
+    ]);
+    expect(summary.rollingUpgradePlaceholderNames).toEqual([
+      'Synthetic',
+      'Игрок',
+    ]);
     expect(summary.routing).toEqual({
       backendSelectedWithLegacyCollision: true,
       legacySelectedWhileBackendAvailable: true,

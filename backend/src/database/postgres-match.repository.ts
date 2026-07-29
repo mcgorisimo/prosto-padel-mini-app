@@ -266,10 +266,25 @@ const SELECT_PUBLIC_FEED_SQL = `
     matches.price_per_person_snapshot,
     matches.version,
     1 + pg_catalog.count(participants.id)
-      FILTER (WHERE participants.status = 'active') AS occupied_slots
+      AS occupied_slots,
+    pg_catalog.coalesce(
+      pg_catalog.array_agg(
+        participants.account_id
+        ORDER BY participants.slot_number
+      ) FILTER (WHERE participants.id IS NOT NULL),
+      ARRAY[]::uuid[]
+    ) AS participant_account_ids,
+    pg_catalog.coalesce(
+      pg_catalog.array_agg(
+        participants.slot_number
+        ORDER BY participants.slot_number
+      ) FILTER (WHERE participants.id IS NOT NULL),
+      ARRAY[]::smallint[]
+    ) AS participant_slot_numbers
   FROM backend_match.matches AS matches
   LEFT JOIN backend_match.match_participants AS participants
     ON participants.match_id = matches.id
+   AND participants.status = 'active'
   WHERE matches.visibility = 'public'
     AND matches.kind = 'match'
     AND matches.status = ANY (
@@ -418,6 +433,8 @@ interface FeedRow extends QueryResultRow {
   readonly price_per_person_snapshot: unknown;
   readonly version: unknown;
   readonly occupied_slots: unknown;
+  readonly participant_account_ids: unknown;
+  readonly participant_slot_numbers: unknown;
 }
 
 function failure(reason: MatchPersistenceFailure): MatchPersistenceError {
@@ -856,11 +873,47 @@ function hydrateFeed(row: FeedRow): MatchFeedRecord {
   const ratingMax = row.rating_max as number;
   const occupiedSlots = decodePostgresNonNegativeBigint(row.occupied_slots);
   if (
+    !Array.isArray(row.participant_account_ids) ||
+    !Array.isArray(row.participant_slot_numbers) ||
+    row.participant_account_ids.length !==
+      row.participant_slot_numbers.length ||
+    row.participant_account_ids.length > 3
+  ) {
+    throw invalidPersistedState();
+  }
+  const participantAccountIds =
+    row.participant_account_ids as unknown[];
+  const participantSlotNumbers =
+    row.participant_slot_numbers as unknown[];
+  const participants = participantAccountIds.map(
+    (playerId, index) => {
+      const slotNumber = participantSlotNumbers[index];
+      if (
+        !isAccountId(playerId) ||
+        ![2, 3, 4].includes(slotNumber as number)
+      ) {
+        throw invalidPersistedState();
+      }
+      return Object.freeze({
+        playerId,
+        slotNumber: slotNumber as MatchParticipantState['slotNumber'],
+      });
+    },
+  );
+  if (
     ratingMin < 0 ||
     ratingMax > 6 ||
     ratingMin > ratingMax ||
     occupiedSlots < 1 ||
-    occupiedSlots > 4
+    occupiedSlots > 4 ||
+    occupiedSlots !== participants.length + 1 ||
+    new Set(participants.map((participant) => participant.playerId))
+      .size !== participants.length ||
+    new Set(participants.map((participant) => participant.slotNumber))
+      .size !== participants.length ||
+    participants.some(
+      (participant) => participant.playerId === row.owner_account_id,
+    )
   ) {
     throw invalidPersistedState();
   }
@@ -887,6 +940,7 @@ function hydrateFeed(row: FeedRow): MatchFeedRecord {
     ...(price === undefined ? {} : { pricePerPersonSnapshot: price }),
     occupiedSlots,
     version: readPositiveSafeInteger(row.version),
+    participants: Object.freeze(participants),
   });
 }
 

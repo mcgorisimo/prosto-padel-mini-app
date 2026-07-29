@@ -1,5 +1,6 @@
 ﻿import { createHash } from 'node:crypto';
 import {
+  AccountId,
   USER_ROLES,
   isAccountId,
 } from '../accounts/account.types';
@@ -19,6 +20,10 @@ import {
 } from '../database/match.repository';
 import { PostgresTransaction } from '../database/postgres-transaction';
 import {
+  PublicPlayerProfileSearchPersistenceError,
+  PublicPlayerProfileSearchRepository,
+} from '../database/public-player-profile-search.repository';
+import {
   MatchCommandId,
   MatchId,
   MatchParticipantId,
@@ -33,7 +38,10 @@ import {
   ListMatchFeedInput,
   MatchApiActor,
   MatchApiRejection,
+  MatchDetailResponse,
+  MatchFeedResponse,
   MatchParticipationResponse,
+  MatchPublicPlayerResponse,
   MutateMatchParticipationApiResult,
   MutateMatchParticipationInput,
   ReadMatchDetailApiResult,
@@ -70,6 +78,10 @@ export interface MatchApiTransactionExecutor {
 export interface MatchApiServiceDependencies {
   readonly transactions: MatchApiTransactionExecutor;
   readonly matches: MatchRepository;
+  readonly publicProfiles: Pick<
+    PublicPlayerProfileSearchRepository,
+    'findByPlayerIds'
+  >;
   readonly clock: {
     nowEpochSeconds(): import('../auth/auth.types').UnixEpochSeconds;
   };
@@ -152,6 +164,18 @@ function mapRepositoryRejection(
 }
 
 function mapPersistenceFailure(error: unknown): MatchApiRejection {
+  if (error instanceof PublicPlayerProfileSearchPersistenceError) {
+    switch (error.reason) {
+      case 'database_unavailable':
+      case 'transaction_conflict':
+        return 'temporary_unavailable';
+      case 'invalid_input':
+      case 'invalid_persisted_state':
+      case 'permission_denied':
+      case 'storage_failure':
+        return 'internal_failure';
+    }
+  }
   if (!(error instanceof MatchPersistenceError)) {
     return 'internal_failure';
   }
@@ -171,6 +195,10 @@ function mapPersistenceFailure(error: unknown): MatchApiRejection {
     case 'storage_failure':
       return 'internal_failure';
   }
+}
+
+function invalidReadModel(): MatchPersistenceError {
+  return new MatchPersistenceError('invalid_persisted_state');
 }
 
 function optionalSafeText(
@@ -205,6 +233,165 @@ function isOptionalRatingLevel(
       (value as number) >= 0 &&
       (value as number) <= 6)
   );
+}
+
+function hasOnlyKeys(
+  value: Record<string, unknown>,
+  required: readonly string[],
+  optional: readonly string[],
+): boolean {
+  const allowed = new Set([...required, ...optional]);
+  return (
+    required.every((key) =>
+      Object.prototype.hasOwnProperty.call(value, key),
+    ) &&
+    Object.keys(value).every((key) => allowed.has(key))
+  );
+}
+
+function safePublicPlayer(
+  value: unknown,
+): MatchPublicPlayerResponse | undefined {
+  if (
+    !isRecord(value) ||
+    !hasOnlyKeys(
+      value,
+      ['playerId', 'firstName', 'rating', 'isVerified'],
+      ['lastName', 'username'],
+    ) ||
+    !isAccountId(value.playerId) ||
+    typeof value.firstName !== 'string' ||
+    value.firstName.length === 0 ||
+    [...value.firstName].length > 256 ||
+    !optionalSafeText(value.lastName, 256) ||
+    !optionalSafeText(value.username, 64) ||
+    typeof value.rating !== 'number' ||
+    !Number.isFinite(value.rating) ||
+    value.rating < 0 ||
+    value.rating > 10 ||
+    Number(value.rating.toFixed(2)) !== value.rating ||
+    typeof value.isVerified !== 'boolean'
+  ) {
+    return undefined;
+  }
+  return Object.freeze({
+    playerId: value.playerId,
+    firstName: value.firstName,
+    ...(value.lastName === undefined
+      ? {}
+      : { lastName: value.lastName }),
+    ...(value.username === undefined
+      ? {}
+      : { username: value.username }),
+    rating: value.rating,
+    isVerified: value.isVerified,
+  });
+}
+
+function publicPlayerIds(
+  records: readonly (MatchDetailRecord | MatchFeedRecord)[],
+): readonly AccountId[] {
+  return Object.freeze([
+    ...new Set(
+      records.flatMap((record) => [
+        record.ownerAccountId,
+        ...record.participants.map(
+          (participant) => participant.playerId,
+        ),
+      ]),
+    ),
+  ]);
+}
+
+async function readPublicPlayers(
+  dependency: MatchApiServiceDependencies['publicProfiles'],
+  transaction: PostgresTransaction,
+  records: readonly (MatchDetailRecord | MatchFeedRecord)[],
+): Promise<ReadonlyMap<AccountId, MatchPublicPlayerResponse>> {
+  const playerIds = publicPlayerIds(records);
+  if (playerIds.length < 1 || playerIds.length > 200) {
+    throw invalidReadModel();
+  }
+  const result = await dependency.findByPlayerIds(transaction, {
+    playerIds,
+  });
+  if (
+    !isRecord(result) ||
+    result.outcome !== 'found' ||
+    !Array.isArray(result.players) ||
+    result.players.length !== playerIds.length
+  ) {
+    throw invalidReadModel();
+  }
+  const players = result.players.map((player) =>
+    safePublicPlayer(player),
+  );
+  if (players.some((player) => player === undefined)) {
+    throw invalidReadModel();
+  }
+  const byId = new Map(
+    (players as MatchPublicPlayerResponse[]).map((player) => [
+      player.playerId,
+      player,
+    ]),
+  );
+  if (
+    byId.size !== playerIds.length ||
+    playerIds.some((playerId) => !byId.has(playerId))
+  ) {
+    throw invalidReadModel();
+  }
+  return byId;
+}
+
+function enrichDetail(
+  record: MatchDetailRecord,
+  players: ReadonlyMap<AccountId, MatchPublicPlayerResponse>,
+): MatchDetailResponse {
+  const owner = players.get(record.ownerAccountId);
+  const participants = record.participants.map((participant) => {
+    const player = players.get(participant.playerId);
+    if (player === undefined) {
+      throw invalidReadModel();
+    }
+    return Object.freeze({
+      ...player,
+      slotNumber: participant.slotNumber,
+    });
+  });
+  if (owner === undefined) {
+    throw invalidReadModel();
+  }
+  return Object.freeze({
+    ...record,
+    owner,
+    participants: Object.freeze(participants),
+  });
+}
+
+function enrichFeed(
+  record: MatchFeedRecord,
+  players: ReadonlyMap<AccountId, MatchPublicPlayerResponse>,
+): MatchFeedResponse {
+  const owner = players.get(record.ownerAccountId);
+  const participants = record.participants.map((participant) => {
+    const player = players.get(participant.playerId);
+    if (player === undefined) {
+      throw invalidReadModel();
+    }
+    return Object.freeze({
+      ...player,
+      slotNumber: participant.slotNumber,
+    });
+  });
+  if (owner === undefined) {
+    throw invalidReadModel();
+  }
+  return Object.freeze({
+    ...record,
+    owner,
+    participants: Object.freeze(participants),
+  });
 }
 
 function safeMatchDetail(value: unknown): MatchDetailRecord | undefined {
@@ -344,7 +531,7 @@ function safeFeedRecord(
     kind: 'match',
     visibility: 'public',
     description: '',
-    participants: [],
+    participants: value.participants,
   });
   if (
     detail === undefined ||
@@ -383,6 +570,7 @@ function safeFeedRecord(
         }),
     occupiedSlots: value.occupiedSlots as number,
     version: detail.version,
+    participants: detail.participants,
   });
 }
 
@@ -506,24 +694,46 @@ export class MatchApiService {
           : { ratingMax: request.ratingMax }),
         isRatingMatch: request.isRatingMatch,
       });
-      const result = await this.dependencies.transactions.run(
-        (transaction) =>
-          this.dependencies.matches.create(transaction, command),
+      const completed = await this.dependencies.transactions.run(
+        async (transaction) => {
+          const result = await this.dependencies.matches.create(
+            transaction,
+            command,
+          );
+          if (result.outcome === 'rejected') {
+            return Object.freeze({ result });
+          }
+          const record = safeMatchDetail(result.match);
+          if (
+            record === undefined ||
+            record.matchId !== matchId ||
+            record.ownerAccountId !== input.accountId
+          ) {
+            throw invalidReadModel();
+          }
+          const players = await readPublicPlayers(
+            this.dependencies.publicProfiles,
+            transaction,
+            [record],
+          );
+          return Object.freeze({
+            result,
+            match: enrichDetail(record, players),
+          });
+        },
       );
-      if (result.outcome === 'rejected') {
+      if (completed.result.outcome === 'rejected') {
         return rejected(
-          mapRepositoryRejection(result.reason),
+          mapRepositoryRejection(completed.result.reason),
         );
       }
-      const match = safeMatchDetail(result.match);
-      if (
-        match === undefined ||
-        match.matchId !== matchId ||
-        match.ownerAccountId !== input.accountId
-      ) {
+      if (!('match' in completed)) {
         return rejected('internal_failure');
       }
-      return Object.freeze({ outcome: 'created', match });
+      return Object.freeze({
+        outcome: 'created',
+        match: completed.match,
+      });
     } catch (error) {
       return rejected(
         mapPersistenceFailure(error),
@@ -550,32 +760,47 @@ export class MatchApiService {
       if (!isUnixEpochSeconds(now)) {
         return rejected('internal_failure');
       }
-      const records = await this.dependencies.transactions.run(
-        (transaction) =>
-          this.dependencies.matches.listPublicFeed(transaction, {
-            now,
-            limit: input.request.limit,
-          }),
+      const matches = await this.dependencies.transactions.run(
+        async (transaction) => {
+          const records =
+            await this.dependencies.matches.listPublicFeed(transaction, {
+              now,
+              limit: input.request.limit,
+            });
+          if (
+            !Array.isArray(records) ||
+            records.length > input.request.limit
+          ) {
+            throw invalidReadModel();
+          }
+          const safeRecords = records.map((record) =>
+            safeFeedRecord(record, now),
+          );
+          if (
+            safeRecords.some((match) => match === undefined) ||
+            new Set(
+              safeRecords.map((match) => match?.matchId),
+            ).size !== safeRecords.length
+          ) {
+            throw invalidReadModel();
+          }
+          if (safeRecords.length === 0) {
+            return Object.freeze([]) as readonly MatchFeedResponse[];
+          }
+          const typedRecords = safeRecords as MatchFeedRecord[];
+          const players = await readPublicPlayers(
+            this.dependencies.publicProfiles,
+            transaction,
+            typedRecords,
+          );
+          return Object.freeze(
+            typedRecords.map((record) => enrichFeed(record, players)),
+          );
+        },
       );
-      if (
-        !Array.isArray(records) ||
-        records.length > input.request.limit
-      ) {
-        return rejected('internal_failure');
-      }
-      const matches = records.map((record) =>
-        safeFeedRecord(record, now),
-      );
-      if (
-        matches.some((match) => match === undefined) ||
-        new Set(matches.map((match) => match?.matchId)).size !==
-          matches.length
-      ) {
-        return rejected('internal_failure');
-      }
       return Object.freeze({
         outcome: 'found',
-        matches: Object.freeze(matches as MatchFeedRecord[]),
+        matches,
       });
     } catch (error) {
       return rejected(
@@ -591,19 +816,33 @@ export class MatchApiService {
       return rejected('invalid_request');
     }
     try {
-      const record = await this.dependencies.transactions.run(
-        (transaction) =>
-          this.dependencies.matches.findVisibleById(transaction, {
-            matchId: input.matchId,
-            viewerAccountId: input.accountId,
-          }),
+      const match = await this.dependencies.transactions.run(
+        async (transaction) => {
+          const record =
+            await this.dependencies.matches.findVisibleById(transaction, {
+              matchId: input.matchId,
+              viewerAccountId: input.accountId,
+            });
+          if (record === null) {
+            return null;
+          }
+          const safeRecord = safeMatchDetail(record);
+          if (
+            safeRecord === undefined ||
+            safeRecord.matchId !== input.matchId
+          ) {
+            throw invalidReadModel();
+          }
+          const players = await readPublicPlayers(
+            this.dependencies.publicProfiles,
+            transaction,
+            [safeRecord],
+          );
+          return enrichDetail(safeRecord, players);
+        },
       );
-      if (record === null) {
+      if (match === null) {
         return rejected('match_not_found');
-      }
-      const match = safeMatchDetail(record);
-      if (match === undefined || match.matchId !== input.matchId) {
-        return rejected('internal_failure');
       }
       return Object.freeze({ outcome: 'found', match });
     } catch (error) {

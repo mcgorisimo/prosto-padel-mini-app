@@ -106,6 +106,7 @@ export interface MatchFeedRecord {
   readonly pricePerPersonSnapshot?: number;
   readonly occupiedSlots: number;
   readonly version: number;
+  readonly participants: readonly VisibleMatchParticipantRecord[];
 }
 
 export interface VisibleMatchParticipantRecord {

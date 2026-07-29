@@ -7,6 +7,10 @@ import {
   MatchRepository,
 } from '../database/match.repository';
 import { PostgresTransaction } from '../database/postgres-transaction';
+import {
+  PublicPlayerProfileSearchPersistenceError,
+  PublicPlayerProfileSearchRepository,
+} from '../database/public-player-profile-search.repository';
 import { deterministicUuid } from '../../test/deterministic-uuid';
 import { MatchApiService } from './match-api.service';
 import { CreateMatchRequest } from './match-api.types';
@@ -41,6 +45,9 @@ interface Harness {
   >;
   readonly join: jest.MockedFunction<MatchRepository['join']>;
   readonly leave: jest.MockedFunction<MatchRepository['leave']>;
+  readonly findByPlayerIds: jest.MockedFunction<
+    PublicPlayerProfileSearchRepository['findByPlayerIds']
+  >;
   readonly clockNow: jest.Mock;
 }
 
@@ -109,6 +116,26 @@ function createHarness(): Harness {
     ReturnType<MatchRepository['leave']>,
     Parameters<MatchRepository['leave']>
   >();
+  const findByPlayerIds = jest.fn<
+    ReturnType<PublicPlayerProfileSearchRepository['findByPlayerIds']>,
+    Parameters<PublicPlayerProfileSearchRepository['findByPlayerIds']>
+  >().mockImplementation(async (_transaction, input) => ({
+    outcome: 'found',
+    players: Object.freeze(
+      input.playerIds.map((playerId) =>
+        Object.freeze({
+          playerId,
+          firstName:
+            playerId === ACCOUNT_ID ? 'Synthetic' : 'Other',
+          ...(playerId === ACCOUNT_ID
+            ? { lastName: 'Owner', username: 'synthetic_owner' }
+            : { lastName: 'Player', username: 'synthetic_player' }),
+          rating: 3,
+          isVerified: playerId === ACCOUNT_ID,
+        }),
+      ),
+    ),
+  }));
   const run = jest.fn(
     async (
       operation: (
@@ -132,6 +159,7 @@ function createHarness(): Harness {
       join,
       leave,
     },
+    publicProfiles: { findByPlayerIds },
     clock: { nowEpochSeconds: clockNow },
   });
   return {
@@ -142,6 +170,7 @@ function createHarness(): Harness {
     findVisibleById,
     join,
     leave,
+    findByPlayerIds,
     clockNow,
   };
 }
@@ -300,16 +329,26 @@ describe('MatchApiService', () => {
 
   it('lists and reads only safe repository records', async () => {
     const harness = createHarness();
+    const participants = Object.freeze([
+      Object.freeze({
+        playerId: OTHER_ACCOUNT_ID,
+        slotNumber: 2 as const,
+      }),
+    ]);
     harness.listPublicFeed.mockResolvedValue([
       {
         ...detail(),
         scenario: 'social',
         ratingMin: 2,
         ratingMax: 4,
-        occupiedSlots: 1,
+        occupiedSlots: 2,
+        participants,
       },
     ]);
-    harness.findVisibleById.mockResolvedValue(detail());
+    harness.findVisibleById.mockResolvedValue({
+      ...detail(),
+      participants,
+    });
 
     const feed = await harness.service.list({
       accountId: ACCOUNT_ID,
@@ -322,8 +361,56 @@ describe('MatchApiService', () => {
       matchId: MATCH_ID,
     });
 
-    expect(feed).toMatchObject({ outcome: 'found' });
-    expect(found).toEqual({ outcome: 'found', match: detail() });
+    expect(feed).toMatchObject({
+      outcome: 'found',
+      matches: [
+        {
+          owner: {
+            playerId: ACCOUNT_ID,
+            firstName: 'Synthetic',
+            lastName: 'Owner',
+            username: 'synthetic_owner',
+            rating: 3,
+            isVerified: true,
+          },
+          participants: [
+            {
+              playerId: OTHER_ACCOUNT_ID,
+              slotNumber: 2,
+              firstName: 'Other',
+              lastName: 'Player',
+              username: 'synthetic_player',
+              rating: 3,
+              isVerified: false,
+            },
+          ],
+        },
+      ],
+    });
+    expect(found).toMatchObject({
+      outcome: 'found',
+      match: {
+        owner: {
+          playerId: ACCOUNT_ID,
+          firstName: 'Synthetic',
+          lastName: 'Owner',
+          username: 'synthetic_owner',
+          rating: 3,
+          isVerified: true,
+        },
+        participants: [
+          {
+            playerId: OTHER_ACCOUNT_ID,
+            slotNumber: 2,
+            firstName: 'Other',
+            lastName: 'Player',
+            username: 'synthetic_player',
+            rating: 3,
+            isVerified: false,
+          },
+        ],
+      },
+    });
     expect(harness.listPublicFeed).toHaveBeenCalledWith(TRANSACTION, {
       now: NOW,
       limit: 20,
@@ -331,6 +418,75 @@ describe('MatchApiService', () => {
     expect(harness.findVisibleById).toHaveBeenCalledWith(TRANSACTION, {
       matchId: MATCH_ID,
       viewerAccountId: ACCOUNT_ID,
+    });
+    expect(harness.findByPlayerIds).toHaveBeenNthCalledWith(
+      1,
+      TRANSACTION,
+      { playerIds: [ACCOUNT_ID, OTHER_ACCOUNT_ID] },
+    );
+    expect(harness.findByPlayerIds).toHaveBeenNthCalledWith(
+      2,
+      TRANSACTION,
+      { playerIds: [ACCOUNT_ID, OTHER_ACCOUNT_ID] },
+    );
+    expect(JSON.stringify({ feed, found })).not.toMatch(
+      /phone|photoUrl|languageCode|sidePreference/iu,
+    );
+  });
+
+  it('fails closed when a participant public profile is missing', async () => {
+    const harness = createHarness();
+    harness.findVisibleById.mockResolvedValue({
+      ...detail(),
+      participants: [
+        {
+          playerId: OTHER_ACCOUNT_ID,
+          slotNumber: 2,
+        },
+      ],
+    });
+    harness.findByPlayerIds.mockResolvedValue({
+      outcome: 'found',
+      players: [
+        {
+          playerId: ACCOUNT_ID,
+          firstName: 'Synthetic',
+          rating: 3,
+          isVerified: true,
+        },
+      ],
+    });
+
+    await expect(
+      harness.service.detail({
+        accountId: ACCOUNT_ID,
+        role: 'player',
+        matchId: MATCH_ID,
+      }),
+    ).resolves.toEqual({
+      outcome: 'rejected',
+      reason: 'internal_failure',
+    });
+  });
+
+  it('hides public profile persistence failures', async () => {
+    const harness = createHarness();
+    harness.findVisibleById.mockResolvedValue(detail());
+    harness.findByPlayerIds.mockRejectedValue(
+      new PublicPlayerProfileSearchPersistenceError(
+        'permission_denied',
+      ),
+    );
+
+    await expect(
+      harness.service.detail({
+        accountId: ACCOUNT_ID,
+        role: 'player',
+        matchId: MATCH_ID,
+      }),
+    ).resolves.toEqual({
+      outcome: 'rejected',
+      reason: 'internal_failure',
     });
   });
 

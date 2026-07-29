@@ -53,6 +53,12 @@ function match() {
     ratingMax: 4,
     isRatingMatch: true,
     version: 1,
+    owner: {
+      playerId: ACCOUNT_ID,
+      firstName: 'Synthetic',
+      rating: 3,
+      isVerified: false,
+    },
     participants: [],
   };
 }

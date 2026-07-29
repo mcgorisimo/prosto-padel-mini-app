@@ -10,6 +10,7 @@ const MAX_REQUESTS = 3;
 const BACKOFF_BASE_MS = 250;
 const BACKOFF_MAX_MS = 2_000;
 const MAX_RESPONSE_BODY_BYTES = 32_768;
+const MAX_MATCH_FEED_RESPONSE_BODY_BYTES = 1_048_576;
 
 const BODY_ABORTED = Symbol('backend-session-body-aborted');
 const BODY_INVALID = Symbol('backend-session-body-invalid');
@@ -186,49 +187,128 @@ export function isBackendCreateMatchDraft(value) {
   );
 }
 
-export function isBackendMatchFeedRecord(value) {
-  return (
-    isPlainObject(value) &&
-    hasOnlyAllowedKeys(
+function isBackendMatchPublicPlayer(value, slotRequired = false) {
+  if (
+    !isPlainObject(value) ||
+    !hasOnlyAllowedKeys(
       value,
       [
-        'matchId',
-        'ownerAccountId',
-        'startsAt',
-        'durationMinutes',
-        'courtId',
-        'courtName',
-        'courtType',
-        'scenario',
-        'status',
-        'ratingMin',
-        'ratingMax',
-        'isRatingMatch',
-        'occupiedSlots',
-        'version',
+        'playerId',
+        'firstName',
+        'rating',
+        'isVerified',
+        ...(slotRequired ? ['slotNumber'] : []),
       ],
-      ['title', 'pricePerPersonSnapshot'],
+      ['lastName', 'username'],
+    ) ||
+    !isMatchId(value.playerId) ||
+    !isBoundedString(value.firstName, 256) ||
+    (value.lastName !== undefined &&
+      !isBoundedString(value.lastName, 256)) ||
+    (value.username !== undefined &&
+      !isBoundedString(value.username, 64)) ||
+    !isRating(value.rating) ||
+    Number(value.rating.toFixed(2)) !== value.rating ||
+    typeof value.isVerified !== 'boolean'
+  ) {
+    return false;
+  }
+  return !slotRequired || [2, 3, 4].includes(value.slotNumber);
+}
+
+function isBackendMatchParticipantIdentity(value) {
+  return (
+    isPlainObject(value) &&
+    hasExactKeys(
+      Object.keys(value).sort(),
+      ['playerId', 'slotNumber'],
     ) &&
-    isMatchId(value.matchId) &&
-    isMatchId(value.ownerAccountId) &&
-    isUnixEpochSeconds(value.startsAt) &&
-    MATCH_DURATIONS.includes(value.durationMinutes) &&
-    typeof value.courtId === 'string' &&
-    typeof value.courtName === 'string' &&
-    typeof value.courtType === 'string' &&
-    (value.scenario === 'community' || value.scenario === 'social') &&
-    MATCH_FEED_STATUSES.includes(value.status) &&
-    isOptionalMatchTitle(value.title) &&
-    isMatchRating(value.ratingMin) &&
-    isMatchRating(value.ratingMax) &&
-    value.ratingMin <= value.ratingMax &&
-    typeof value.isRatingMatch === 'boolean' &&
-    isOptionalSafePrice(value.pricePerPersonSnapshot) &&
-    Number.isInteger(value.occupiedSlots) &&
-    value.occupiedSlots >= 1 &&
-    value.occupiedSlots <= 4 &&
-    Number.isSafeInteger(value.version) &&
-    value.version >= 1
+    isMatchId(value.playerId) &&
+    [2, 3, 4].includes(value.slotNumber)
+  );
+}
+
+export function isBackendMatchFeedRecord(value) {
+  if (
+    !(
+      isPlainObject(value) &&
+      hasOnlyAllowedKeys(
+        value,
+        [
+          'matchId',
+          'ownerAccountId',
+          'startsAt',
+          'durationMinutes',
+          'courtId',
+          'courtName',
+          'courtType',
+          'scenario',
+          'status',
+          'ratingMin',
+          'ratingMax',
+          'isRatingMatch',
+          'occupiedSlots',
+          'version',
+        ],
+        [
+          'title',
+          'pricePerPersonSnapshot',
+          'owner',
+          'participants',
+        ],
+      ) &&
+      isMatchId(value.matchId) &&
+      isMatchId(value.ownerAccountId) &&
+      isUnixEpochSeconds(value.startsAt) &&
+      MATCH_DURATIONS.includes(value.durationMinutes) &&
+      typeof value.courtId === 'string' &&
+      typeof value.courtName === 'string' &&
+      typeof value.courtType === 'string' &&
+      (value.scenario === 'community' ||
+        value.scenario === 'social') &&
+      MATCH_FEED_STATUSES.includes(value.status) &&
+      isOptionalMatchTitle(value.title) &&
+      isMatchRating(value.ratingMin) &&
+      isMatchRating(value.ratingMax) &&
+      value.ratingMin <= value.ratingMax &&
+      typeof value.isRatingMatch === 'boolean' &&
+      isOptionalSafePrice(value.pricePerPersonSnapshot) &&
+      Number.isInteger(value.occupiedSlots) &&
+      value.occupiedSlots >= 1 &&
+      value.occupiedSlots <= 4 &&
+      Number.isSafeInteger(value.version) &&
+      value.version >= 1
+    )
+  ) {
+    return false;
+  }
+  const hasOwner = value.owner !== undefined;
+  const hasParticipants = value.participants !== undefined;
+  if (!hasOwner && !hasParticipants) {
+    return true;
+  }
+  if (!hasOwner || !hasParticipants) {
+    return false;
+  }
+  if (
+    !isBackendMatchPublicPlayer(value.owner) ||
+    value.owner.playerId !== value.ownerAccountId ||
+    !Array.isArray(value.participants) ||
+    value.participants.length > 3 ||
+    !value.participants.every((participant) =>
+      isBackendMatchPublicPlayer(participant, true))
+  ) {
+    return false;
+  }
+  const playerIds = value.participants.map(({ playerId }) => playerId);
+  const slotNumbers = value.participants.map(
+    ({ slotNumber }) => slotNumber,
+  );
+  return (
+    value.occupiedSlots === value.participants.length + 1 &&
+    !playerIds.includes(value.ownerAccountId) &&
+    new Set(playerIds).size === playerIds.length &&
+    new Set(slotNumbers).size === slotNumbers.length
   );
 }
 
@@ -262,6 +342,7 @@ export function isBackendMatchDetailRecord(value) {
         'ratingMax',
         'pricePerPersonSnapshot',
         'terminalAt',
+        'owner',
       ],
     ) ||
     !isMatchId(value.matchId) ||
@@ -292,19 +373,22 @@ export function isBackendMatchDetailRecord(value) {
     return false;
   }
 
+  const hasPublicProjection = value.owner !== undefined;
   const participantsValid = value.participants.every((participant) =>
-    isPlainObject(participant) &&
-    hasExactKeys(
-      Object.keys(participant).sort(),
-      ['playerId', 'slotNumber'],
-    ) &&
-    isMatchId(participant.playerId) &&
-    [2, 3, 4].includes(participant.slotNumber));
+    hasPublicProjection
+      ? isBackendMatchPublicPlayer(participant, true)
+      : isBackendMatchParticipantIdentity(participant));
   if (!participantsValid) return false;
 
   const playerIds = value.participants.map(({ playerId }) => playerId);
   const slotNumbers = value.participants.map(({ slotNumber }) => slotNumber);
   if (
+    (hasPublicProjection &&
+      (
+        !isBackendMatchPublicPlayer(value.owner) ||
+        value.owner.playerId !== value.ownerAccountId
+      )) ||
+    playerIds.includes(value.ownerAccountId) ||
     new Set(playerIds).size !== playerIds.length ||
     new Set(slotNumbers).size !== slotNumbers.length
   ) {
@@ -412,14 +496,18 @@ function waitForRead(readPromise, signal, reader) {
   });
 }
 
-async function readBoundedJson(response, signal) {
+async function readBoundedJson(
+  response,
+  signal,
+  maximumBytes = MAX_RESPONSE_BODY_BYTES,
+) {
   const declaredLength = response.headers?.get?.('content-length');
   if (declaredLength !== null && declaredLength !== undefined) {
     const parsedLength = Number(declaredLength);
     if (
       !Number.isSafeInteger(parsedLength) ||
       parsedLength < 0 ||
-      parsedLength > MAX_RESPONSE_BODY_BYTES
+      parsedLength > maximumBytes
     ) {
       try {
         const cancellation = response.body?.cancel?.();
@@ -448,7 +536,7 @@ async function readBoundedJson(response, signal) {
       if (!(chunk.value instanceof Uint8Array)) throw BODY_INVALID;
 
       totalBytes += chunk.value.byteLength;
-      if (totalBytes > MAX_RESPONSE_BODY_BYTES) {
+      if (totalBytes > maximumBytes) {
         cancelReader(reader);
         throw BODY_INVALID;
       }
@@ -640,6 +728,23 @@ function profileSuccess(body, outcome = 'profile_loaded') {
   });
 }
 
+function freezeBackendMatchRecord(match) {
+  return Object.freeze({
+    ...match,
+    ...(match.owner === undefined
+      ? {}
+      : { owner: Object.freeze({ ...match.owner }) }),
+    ...(match.participants === undefined
+      ? {}
+      : {
+          participants: Object.freeze(
+            match.participants.map((participant) =>
+              Object.freeze({ ...participant })),
+          ),
+        }),
+  });
+}
+
 function matchListSuccess(body) {
   if (
     !isPlainObject(body) ||
@@ -652,7 +757,7 @@ function matchListSuccess(body) {
   }
   return frozen('matches_loaded', {
     matches: Object.freeze(
-      body.matches.map((match) => Object.freeze({ ...match })),
+      body.matches.map(freezeBackendMatchRecord),
     ),
   });
 }
@@ -666,13 +771,7 @@ function matchDetailSuccess(body, outcome) {
     return null;
   }
   return frozen(outcome, {
-    match: Object.freeze({
-      ...body.match,
-      participants: Object.freeze(
-        body.match.participants.map((participant) =>
-          Object.freeze({ ...participant })),
-      ),
-    }),
+    match: freezeBackendMatchRecord(body.match),
   });
 }
 
@@ -870,7 +969,13 @@ export function createBackendSessionClient(dependencies = {}) {
         return frozen('success', { result: frozen('logged_out') });
       }
 
-      const body = await readBoundedJson(response, controller.signal);
+      const body = await readBoundedJson(
+        response,
+        controller.signal,
+        operation === 'match_list'
+          ? MAX_MATCH_FEED_RESPONSE_BODY_BYTES
+          : MAX_RESPONSE_BODY_BYTES,
+      );
       if (operation === 'authenticate' && response.status === 200) {
         const result = authenticationSuccess(body);
         return result

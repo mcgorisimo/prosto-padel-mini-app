@@ -7,6 +7,8 @@ import {
   PublicPlayerProfileSearchPersistenceError,
   PublicPlayerProfileSearchPersistenceFailure,
   PublicPlayerProfileSearchRepository,
+  ReadPublicPlayerProfilesInput,
+  ReadPublicPlayerProfilesResult,
   SearchPublicPlayerProfilesInput,
   SearchPublicPlayerProfilesResult,
 } from './public-player-profile-search.repository';
@@ -14,6 +16,7 @@ import {
 const MIN_QUERY_CODE_POINTS = 2;
 const MAX_QUERY_CODE_POINTS = 64;
 const MAX_RESULTS = 20;
+const MAX_BATCH_RESULTS = 200;
 const MAX_NAME_CODE_POINTS = 256;
 const MAX_USERNAME_CODE_POINTS = 64;
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f-\u009f]/u;
@@ -51,6 +54,27 @@ const SEARCH_PUBLIC_PLAYER_PROFILES_SQL = `
     pg_catalog.lower(pg_catalog.coalesce(details.last_name, '')),
     details.account_id
   LIMIT $2::integer
+`;
+
+const READ_PUBLIC_PLAYER_PROFILES_SQL = `
+  SELECT
+    details.account_id,
+    details.first_name,
+    details.last_name,
+    details.username,
+    rating_states.rating,
+    rating_states.is_verified
+  FROM backend_auth.accounts AS accounts
+  JOIN backend_auth.player_profiles AS profiles
+    ON profiles.account_id = accounts.id
+  JOIN backend_auth.player_profile_details AS details
+    ON details.account_id = profiles.account_id
+  JOIN backend_auth.player_rating_states AS rating_states
+    ON rating_states.account_id = profiles.account_id
+  WHERE accounts.role = 'player'
+    AND accounts.status = 'active'
+    AND accounts.id = ANY ($1::uuid[])
+  ORDER BY details.account_id
 `;
 
 interface PublicPlayerProfileRow extends QueryResultRow {
@@ -107,6 +131,26 @@ function validateInput(
     query: value.query,
     limit: value.limit as number,
   });
+}
+
+function validateBatchInput(
+  value: unknown,
+): ReadPublicPlayerProfilesInput {
+  if (
+    !isPlainRecord(value) ||
+    Object.keys(value).length !== 1 ||
+    !Object.prototype.hasOwnProperty.call(value, 'playerIds') ||
+    !Array.isArray(value.playerIds) ||
+    value.playerIds.length < 1 ||
+    value.playerIds.length > MAX_BATCH_RESULTS ||
+    value.playerIds.some((playerId) => !isAccountId(playerId)) ||
+    new Set(value.playerIds).size !== value.playerIds.length
+  ) {
+    throw failure('invalid_input');
+  }
+  return Object.freeze({
+    playerIds: Object.freeze([...value.playerIds]),
+  }) as ReadPublicPlayerProfilesInput;
 }
 
 function escapeLikePattern(value: string): string {
@@ -229,6 +273,43 @@ export class PostgresPublicPlayerProfileSearchRepository
       if (
         new Set(players.map((player) => player.playerId)).size !==
         players.length
+      ) {
+        throw failure('invalid_persisted_state');
+      }
+
+      return Object.freeze({
+        outcome: 'found',
+        players: Object.freeze(players),
+      });
+    } catch (error) {
+      throw mapPersistenceError(error);
+    }
+  }
+
+  async findByPlayerIds(
+    transaction: PostgresTransaction,
+    input: ReadPublicPlayerProfilesInput,
+  ): Promise<ReadPublicPlayerProfilesResult> {
+    try {
+      const validated = validateBatchInput(input);
+      const selected = await transaction.query<PublicPlayerProfileRow>(
+        READ_PUBLIC_PLAYER_PROFILES_SQL,
+        [validated.playerIds],
+      );
+
+      if (
+        selected.rowCount !== selected.rows.length ||
+        selected.rows.length > validated.playerIds.length
+      ) {
+        throw failure('invalid_persisted_state');
+      }
+
+      const requested = new Set(validated.playerIds);
+      const players = selected.rows.map(hydrateProfile);
+      if (
+        players.some((player) => !requested.has(player.playerId)) ||
+        new Set(players.map((player) => player.playerId)).size !==
+          players.length
       ) {
         throw failure('invalid_persisted_state');
       }

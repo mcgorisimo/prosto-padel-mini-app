@@ -20,6 +20,15 @@ export interface SearchPublicPlayerProfilesResult {
   readonly players: readonly PublicPlayerProfileRecord[];
 }
 
+export interface ReadPublicPlayerProfilesInput {
+  readonly playerIds: readonly AccountId[];
+}
+
+export interface ReadPublicPlayerProfilesResult {
+  readonly outcome: 'found';
+  readonly players: readonly PublicPlayerProfileRecord[];
+}
+
 export type PublicPlayerProfileSearchPersistenceFailure =
   | 'invalid_input'
   | 'invalid_persisted_state'
@@ -43,4 +52,9 @@ export interface PublicPlayerProfileSearchRepository {
     transaction: PostgresTransaction,
     input: SearchPublicPlayerProfilesInput,
   ): Promise<SearchPublicPlayerProfilesResult>;
+
+  findByPlayerIds(
+    transaction: PostgresTransaction,
+    input: ReadPublicPlayerProfilesInput,
+  ): Promise<ReadPublicPlayerProfilesResult>;
 }

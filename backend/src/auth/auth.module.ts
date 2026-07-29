@@ -253,11 +253,13 @@ function createPublicPlayerProfileService(
 function createMatchApiService(
   transactions: PostgresTransactionExecutorAdapter,
   matches: PostgresMatchRepository,
+  publicProfiles: PostgresPublicPlayerProfileSearchRepository,
   clock: SessionAuthenticationClock,
 ): MatchApiService {
   return new MatchApiService({
     transactions,
     matches,
+    publicProfiles,
     clock,
   });
 }
@@ -282,6 +284,7 @@ function createMatchApiService(
       inject: [
         PostgresTransactionExecutorAdapter,
         PostgresMatchRepository,
+        PostgresPublicPlayerProfileSearchRepository,
         SESSION_AUTHENTICATION_CLOCK,
       ],
       useFactory: createMatchApiService,

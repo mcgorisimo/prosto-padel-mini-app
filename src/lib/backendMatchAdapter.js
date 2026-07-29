@@ -180,27 +180,43 @@ function moscowDateTime(epochSeconds) {
   });
 }
 
-function profilePlayer(profile, playerId, isOrganizer, slotIndex) {
+function profilePlayer(profile, player, isOrganizer, slotIndex) {
+  const publicPlayer =
+    player && typeof player === 'object' ? player : null;
+  const playerId =
+    publicPlayer === null ? player : publicPlayer.playerId;
   const isCurrentPlayer = profile?.accountId === playerId;
   const numericRating =
-    isCurrentPlayer && typeof profile.rating === 'number'
-      ? profile.rating
-      : 3;
+    typeof publicPlayer?.rating === 'number'
+      ? publicPlayer.rating
+      : isCurrentPlayer && typeof profile.rating === 'number'
+        ? profile.rating
+        : 3;
   const level = getLevelForRating(numericRating)?.label ?? 'C';
   return Object.freeze({
     id: playerId,
-    firstName: isCurrentPlayer
-      ? profile.firstName
-      : isOrganizer
-        ? 'Организатор'
-        : 'Игрок',
-    lastName: isCurrentPlayer ? (profile.lastName ?? '') : '',
-    username: isCurrentPlayer ? (profile.username ?? '') : '',
+    firstName:
+      publicPlayer?.firstName ??
+      (isCurrentPlayer
+        ? profile.firstName
+        : isOrganizer
+          ? 'Организатор'
+          : 'Игрок'),
+    lastName:
+      publicPlayer?.lastName ??
+      (isCurrentPlayer ? (profile.lastName ?? '') : ''),
+    username:
+      publicPlayer?.username ??
+      (isCurrentPlayer ? (profile.username ?? '') : ''),
     photoUrl: isCurrentPlayer ? profile.photoUrl : null,
     numericRating,
     rating: numericRating,
     ratingIdx: Math.max(0, LEVELS.indexOf(level)),
-    isVerified: isCurrentPlayer ? profile.isVerified === true : false,
+    isVerified:
+      publicPlayer?.isVerified === true ||
+      (publicPlayer === null &&
+        isCurrentPlayer &&
+        profile.isVerified === true),
     sidePreference: isCurrentPlayer
       ? (profile.sidePreference ?? 'Both')
       : 'Both',
@@ -216,18 +232,12 @@ function feedPlaceholders(record, owner) {
     slotNumber <= Math.min(record.occupiedSlots, 4);
     slotNumber += 1
   ) {
-    slots.push(Object.freeze({
-      id: `occupied:${record.matchId}:${slotNumber}`,
-      firstName: 'Игрок',
-      lastName: '',
-      numericRating: 3,
-      rating: 3,
-      ratingIdx: 2,
-      isVerified: false,
-      sidePreference: 'Both',
-      isOrganizer: false,
-      slotIndex: slotNumber - 1,
-    }));
+    slots.push(profilePlayer(
+      null,
+      `occupied:${record.matchId}:${slotNumber}`,
+      false,
+      slotNumber - 1,
+    ));
   }
   return slots;
 }
@@ -293,7 +303,7 @@ export function mapBackendMatchToApp(record, profile = null) {
 
   const owner = profilePlayer(
     profile,
-    record.ownerAccountId,
+    record.owner ?? record.ownerAccountId,
     true,
     0,
   );
@@ -304,7 +314,9 @@ export function mapBackendMatchToApp(record, profile = null) {
     for (const participant of record.participants) {
       filledSlots[participant.slotNumber - 1] = profilePlayer(
         profile,
-        participant.playerId,
+        participant.firstName === undefined
+          ? participant.playerId
+          : participant,
         false,
         participant.slotNumber - 1,
       );

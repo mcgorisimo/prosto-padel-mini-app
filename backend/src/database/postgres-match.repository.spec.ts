@@ -648,6 +648,8 @@ describe('PostgresMatchRepository', () => {
           price_per_person_snapshot: '1000.00',
           version: '2',
           occupied_slots: '2',
+          participant_account_ids: [PLAYER_ID],
+          participant_slot_numbers: [2],
         },
       ]),
     ]);
@@ -675,11 +677,24 @@ describe('PostgresMatchRepository', () => {
         pricePerPersonSnapshot: 1000,
         occupiedSlots: 2,
         version: 2,
+        participants: [
+          {
+            playerId: PLAYER_ID,
+            slotNumber: 2,
+          },
+        ],
       },
     ]);
     const sql = normalizeSql(transaction.calls[0].text);
     expect(sql).toContain("matches.visibility = 'public'");
     expect(sql).toContain("matches.kind = 'match'");
+    expect(sql).toContain("participants.status = 'active'");
+    expect(sql.toLowerCase()).toContain(
+      'array_agg( participants.account_id order by participants.slot_number )',
+    );
+    expect(sql.toLowerCase()).toContain(
+      'array_agg( participants.slot_number order by participants.slot_number )',
+    );
     expect(sql).toContain('matches.starts_at > $1');
     expect(sql).not.toContain('matches.starts_at >= $1');
     expect(transaction.calls[0].values).toEqual([1_800_000_000, 20]);

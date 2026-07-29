@@ -340,7 +340,10 @@ describe('AuthModule Telegram login wiring', () => {
     expect(matchApi.dependencies.transactions).toBe(
       moduleRef.get(PostgresTransactionExecutorAdapter),
     );
-    expect(matchApi.dependencies.matches).toBe(matchRepository);
+      expect(matchApi.dependencies.matches).toBe(matchRepository);
+      expect(matchApi.dependencies.publicProfiles).toBe(
+        moduleRef.get(PostgresPublicPlayerProfileSearchRepository),
+      );
     expect(matchRepository.profiles).toBe(
       moduleRef.get(PostgresPlayerProfileReader),
     );
