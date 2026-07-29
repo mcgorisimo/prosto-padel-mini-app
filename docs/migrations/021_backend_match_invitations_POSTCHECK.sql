@@ -322,18 +322,19 @@ begin
     is_unique,
     is_primary,
     indexed_columns,
+    ordering_options,
     normalized_predicate
   ) as (
     values
-      ('match_invitations', 'match_invitations_pkey', 'btree', true, true, array['id'], null),
-      ('match_invitations', 'match_invitations_id_match_key', 'btree', true, false, array['id', 'match_id'], null),
-      ('match_invitations', 'match_invitations_one_pending_player', 'btree', true, false, array['match_id', 'invited_account_id'], 'status = ''pending''::text'),
-      ('match_invitations', 'match_invitations_one_pending_slot', 'btree', true, false, array['match_id', 'slot_number'], 'status = ''pending''::text'),
-      ('match_invitations', 'match_invitations_incoming_pending_idx', 'btree', false, false, array['invited_account_id', 'created_at DESC', 'id'], 'status = ''pending''::text'),
-      ('match_invitations', 'match_invitations_match_pending_idx', 'btree', false, false, array['match_id', 'slot_number', 'created_at', 'id'], 'status = ''pending''::text'),
-      ('match_invitation_commands', 'match_invitation_commands_pkey', 'btree', true, true, array['command_id'], null),
-      ('match_invitation_commands', 'match_invitation_commands_invitation_applied_idx', 'btree', false, false, array['invitation_id', 'applied_at', 'command_id'], null),
-      ('match_invitation_commands', 'match_invitation_commands_actor_applied_idx', 'btree', false, false, array['actor_account_id', 'applied_at', 'command_id'], null)
+      ('match_invitations', 'match_invitations_pkey', 'btree', true, true, array['id'], '0', null),
+      ('match_invitations', 'match_invitations_id_match_key', 'btree', true, false, array['id', 'match_id'], '0 0', null),
+      ('match_invitations', 'match_invitations_one_pending_player', 'btree', true, false, array['match_id', 'invited_account_id'], '0 0', 'status = ''pending''::text'),
+      ('match_invitations', 'match_invitations_one_pending_slot', 'btree', true, false, array['match_id', 'slot_number'], '0 0', 'status = ''pending''::text'),
+      ('match_invitations', 'match_invitations_incoming_pending_idx', 'btree', false, false, array['invited_account_id', 'created_at', 'id'], '0 3 0', 'status = ''pending''::text'),
+      ('match_invitations', 'match_invitations_match_pending_idx', 'btree', false, false, array['match_id', 'slot_number', 'created_at', 'id'], '0 0 0 0', 'status = ''pending''::text'),
+      ('match_invitation_commands', 'match_invitation_commands_pkey', 'btree', true, true, array['command_id'], '0', null),
+      ('match_invitation_commands', 'match_invitation_commands_invitation_applied_idx', 'btree', false, false, array['invitation_id', 'applied_at', 'command_id'], '0 0 0', null),
+      ('match_invitation_commands', 'match_invitation_commands_actor_applied_idx', 'btree', false, false, array['actor_account_id', 'applied_at', 'command_id'], '0 0 0', null)
   ),
   actual as (
     select
@@ -356,6 +357,7 @@ begin
           index_row.indnkeyatts
         ) position
       ),
+      index_row.indoption::text,
       pg_catalog.btrim(
         pg_catalog.regexp_replace(
           pg_catalog.lower(
