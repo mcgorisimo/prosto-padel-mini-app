@@ -689,6 +689,8 @@ describe('PostgresMatchRepository', () => {
     expect(sql).toContain("matches.visibility = 'public'");
     expect(sql).toContain("matches.kind = 'match'");
     expect(sql).toContain("participants.status = 'active'");
+    expect(sql.toLowerCase()).toContain('coalesce(');
+    expect(sql.toLowerCase()).not.toContain('pg_catalog.coalesce');
     expect(sql.toLowerCase()).toContain(
       'array_agg( participants.account_id order by participants.slot_number )',
     );

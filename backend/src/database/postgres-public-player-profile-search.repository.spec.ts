@@ -264,8 +264,10 @@ describe('PostgresPublicPlayerProfileSearchRepository', () => {
     const call = transaction.calls[0];
     expect(call.values).toEqual(['%100\\%\\_\\\\player%', 20]);
     expect(normalizeSql(call.text)).toBe(
-      "SELECT details.account_id, details.first_name, details.last_name, details.username, rating_states.rating, rating_states.is_verified FROM backend_auth.accounts AS accounts JOIN backend_auth.player_profiles AS profiles ON profiles.account_id = accounts.id JOIN backend_auth.player_profile_details AS details ON details.account_id = profiles.account_id JOIN backend_auth.player_rating_states AS rating_states ON rating_states.account_id = profiles.account_id WHERE accounts.role = 'player' AND accounts.status = 'active' AND ( details.first_name ILIKE $1 ESCAPE E'\\\\' OR details.last_name ILIKE $1 ESCAPE E'\\\\' OR details.username ILIKE $1 ESCAPE E'\\\\' OR pg_catalog.concat_ws( ' ', details.first_name, details.last_name ) ILIKE $1 ESCAPE E'\\\\' ) ORDER BY pg_catalog.lower(details.first_name), pg_catalog.lower(pg_catalog.coalesce(details.last_name, '')), details.account_id LIMIT $2::integer",
+      "SELECT details.account_id, details.first_name, details.last_name, details.username, rating_states.rating, rating_states.is_verified FROM backend_auth.accounts AS accounts JOIN backend_auth.player_profiles AS profiles ON profiles.account_id = accounts.id JOIN backend_auth.player_profile_details AS details ON details.account_id = profiles.account_id JOIN backend_auth.player_rating_states AS rating_states ON rating_states.account_id = profiles.account_id WHERE accounts.role = 'player' AND accounts.status = 'active' AND ( details.first_name ILIKE $1 ESCAPE E'\\\\' OR details.last_name ILIKE $1 ESCAPE E'\\\\' OR details.username ILIKE $1 ESCAPE E'\\\\' OR pg_catalog.concat_ws( ' ', details.first_name, details.last_name ) ILIKE $1 ESCAPE E'\\\\' ) ORDER BY pg_catalog.lower(details.first_name), pg_catalog.lower(COALESCE(details.last_name, '')), details.account_id LIMIT $2::integer",
     );
+    expect(normalizeSql(call.text).toLowerCase())
+      .not.toContain('pg_catalog.coalesce');
     const upperSql = normalizeSql(call.text).toUpperCase();
     for (const forbidden of [
       ' PUBLIC.',

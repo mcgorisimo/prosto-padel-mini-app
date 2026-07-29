@@ -267,14 +267,14 @@ const SELECT_PUBLIC_FEED_SQL = `
     matches.version,
     1 + pg_catalog.count(participants.id)
       AS occupied_slots,
-    pg_catalog.coalesce(
+    COALESCE(
       pg_catalog.array_agg(
         participants.account_id
         ORDER BY participants.slot_number
       ) FILTER (WHERE participants.id IS NOT NULL),
       ARRAY[]::uuid[]
     ) AS participant_account_ids,
-    pg_catalog.coalesce(
+    COALESCE(
       pg_catalog.array_agg(
         participants.slot_number
         ORDER BY participants.slot_number

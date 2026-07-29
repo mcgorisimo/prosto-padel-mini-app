@@ -51,7 +51,7 @@ const SEARCH_PUBLIC_PLAYER_PROFILES_SQL = `
     )
   ORDER BY
     pg_catalog.lower(details.first_name),
-    pg_catalog.lower(pg_catalog.coalesce(details.last_name, '')),
+    pg_catalog.lower(COALESCE(details.last_name, '')),
     details.account_id
   LIMIT $2::integer
 `;
