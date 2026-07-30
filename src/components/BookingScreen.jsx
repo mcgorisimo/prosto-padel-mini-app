@@ -1,29 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { CalendarDays, Clock3, LockKeyhole, UsersRound, X } from 'lucide-react';
+import { CalendarDays, Clock3, LockKeyhole, X } from 'lucide-react';
 import { BOOKING_DURATIONS, COURTS, WORKING_HOURS, checkAvailability, fromMin } from '../lib/booking';
 import { getMoscowDateRange, hasMoscowSlotStarted } from '../lib/moscowDateTime';
 import { fmtPrice, getPerPlayerPrice, getTotalPrice } from '../lib/pricing';
 
 const ANY_COURT = 'any';
-const BOOKING_FORMATS = [
-  {
-    id: 'private',
-    title: 'Частная бронь',
-    description: 'Только ваша бронь. В ленте матчей не показывается.',
-    Icon: LockKeyhole,
-  },
-  {
-    id: 'public',
-    title: 'Бронь + сбор игроков',
-    description: 'Создаём матч с кортом. Игроки смогут присоединиться.',
-    Icon: UsersRound,
-  },
-];
-
-const MATCH_TYPE_OPTIONS = [
-  { id: 'casual', title: 'Обычный матч' },
-  { id: 'rating', title: 'Рейтинговый матч' },
-];
 
 const TIME_SECTIONS = [
   { id: 'morning', title: 'Утро', from: 7 * 60, to: 12 * 60 },
@@ -78,24 +59,19 @@ function getSlotLabel(state) {
   return 'Занято';
 }
 
-export default function BookingScreen({ allMatches = [], onBookSlot, showToast, isRatingVerified = true }) {
+export default function BookingScreen({ allMatches = [], onBookSlot, showToast }) {
   const dates = useMemo(() => buildDates(14), []);
   const times = useMemo(buildTimes, []);
   const [selectedDateISO, setSelectedDateISO] = useState(dates[0]?.dateISO);
   const [duration, setDuration] = useState(1.5);
   const [courtId, setCourtId] = useState(ANY_COURT);
   const [selectedSlot, setSelectedSlot] = useState(null);
-  const [bookingFormat, setBookingFormat] = useState('private');
-  const [matchType, setMatchType] = useState('casual');
   const [isSaving, setIsSaving] = useState(false);
   const [successText, setSuccessText] = useState('');
   const isSavingRef = useRef(false);
 
   const selectedDate = dates.find((item) => item.dateISO === selectedDateISO) ?? dates[0];
   const selectedCourt = selectedSlot?.court ?? COURTS.find((court) => court.id === courtId);
-  const isPublicFormat = bookingFormat === 'public';
-  const isRatingMatchBlocked = isPublicFormat && matchType === 'rating' && !isRatingVerified;
-
   const getAvailableCourt = (time) => {
     const candidates = courtId === ANY_COURT
       ? COURTS
@@ -175,9 +151,9 @@ export default function BookingScreen({ allMatches = [], onBookSlot, showToast, 
   };
 
   const handleConfirm = async () => {
-    if (!selectedSlot || isSavingRef.current || isRatingMatchBlocked) return;
+    if (!selectedSlot || isSavingRef.current) return;
 
-    const isRatingBookingMatch = isPublicFormat && matchType === 'rating';
+    const isPublicFormat = false;
 
     isSavingRef.current = true;
     setIsSaving(true);
@@ -187,17 +163,15 @@ export default function BookingScreen({ allMatches = [], onBookSlot, showToast, 
         time: selectedSlot.time,
         dateISO: selectedDateISO,
         duration,
-        type: isPublicFormat ? 'match' : 'private',
-        isPrivate: !isPublicFormat,
-        scenario: isPublicFormat ? 'social' : 'private',
+        type: 'private',
+        isPrivate: true,
+        scenario: 'private',
         paymentStatus: isPublicFormat ? 'partial' : 'full',
-        isRatingMatch: isRatingBookingMatch,
-        is_rating_match: isRatingBookingMatch,
+        isRatingMatch: false,
+        is_rating_match: false,
         ratingMin: 0,
         ratingMax: 6,
-        description: isPublicFormat
-          ? 'Бронь корта с открытым сбором игроков'
-          : 'Частная бронь корта',
+        description: 'Частная бронь корта',
         total: totalPrice,
         pricePerPerson: perPlayerPrice,
       });
@@ -400,76 +374,17 @@ export default function BookingScreen({ allMatches = [], onBookSlot, showToast, 
                 </div>
               </div>
 
-              <div className="mb-4 grid gap-2">
-                {BOOKING_FORMATS.map((format) => {
-                  const active = bookingFormat === format.id;
-                  const Icon = format.Icon;
-                  return (
-                    <button
-                      key={format.id}
-                      type="button"
-                      onClick={() => {
-                        setBookingFormat(format.id);
-                        if (format.id === 'private') setMatchType('casual');
-                      }}
-                      className={[
-                        'booking-format-option flex items-start gap-3 p-3 text-left',
-                        active
-                          ? 'is-active'
-                          : '',
-                      ].join(' ')}
-                    >
-                      <span className={[
-                        'mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl',
-                        active ? 'bg-accent-light text-app-bg' : 'bg-white/[0.06] text-warm-white/60',
-                      ].join(' ')}>
-                        <Icon size={18} />
-                      </span>
-                      <span>
-                        <span className="block text-sm font-black">{format.title}</span>
-                        <span className="mt-1 block text-xs leading-relaxed text-warm-white/52">
-                          {format.description}
-                        </span>
-                      </span>
-                    </button>
-                  );
-                })}
+              <div className="booking-format-option is-active mb-4 flex items-start gap-3 p-3">
+                <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent-light text-app-bg">
+                  <LockKeyhole size={18} />
+                </span>
+                <span>
+                  <span className="block text-sm font-black">Частная бронь</span>
+                  <span className="mt-1 block text-xs leading-relaxed text-warm-white/52">
+                    Только ваша бронь. В ленте матчей не показывается.
+                  </span>
+                </span>
               </div>
-
-              {isPublicFormat && (
-                <div className="booking-match-type mb-4">
-                  <div className="mb-2 text-[10px] font-extrabold uppercase tracking-[0.16em] text-warm-white/42">
-                    Тип матча
-                  </div>
-                  <div className="booking-match-type-control">
-                    {MATCH_TYPE_OPTIONS.map((option) => {
-                      const active = matchType === option.id;
-                      return (
-                        <button
-                          key={option.id}
-                          type="button"
-                          onClick={() => setMatchType(option.id)}
-                          className={['booking-match-type-option', active ? 'is-active' : ''].join(' ')}
-                        >
-                          {option.title}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  {matchType === 'rating' && (
-                    <>
-                      <p className="mt-2 text-xs leading-relaxed text-warm-white/52">
-                        Рейтинг изменится после подтверждения счёта.
-                      </p>
-                      {isRatingMatchBlocked && (
-                        <p className="mt-2 text-xs font-semibold leading-relaxed text-coral">
-                          Для рейтингового матча нужен подтверждённый рейтинг.
-                        </p>
-                      )}
-                    </>
-                  )}
-                </div>
-              )}
 
               <p className="text-xs leading-relaxed text-warm-white/52">
                 Бронь создаётся без онлайн-оплаты. Администратор клуба подтвердит оплату отдельно.
@@ -479,11 +394,11 @@ export default function BookingScreen({ allMatches = [], onBookSlot, showToast, 
             <div className="booking-sheet-footer">
               <button
                 type="button"
-                disabled={isSaving || isRatingMatchBlocked}
+                disabled={isSaving}
                 onClick={handleConfirm}
                 className="booking-confirm-cta"
               >
-                {isSaving ? 'Сохраняем...' : isPublicFormat ? 'Создать матч' : 'Создать бронь'}
+                {isSaving ? 'Сохраняем...' : 'Создать бронь'}
               </button>
             </div>
           </div>

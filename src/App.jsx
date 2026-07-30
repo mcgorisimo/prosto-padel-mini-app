@@ -1286,9 +1286,7 @@ export default function App({
   };
 
   // ── Booking from BookingScreen ──
-  // Always creates a match in allMatches; the calendar derives slot statuses from it.
-  // isPrivate=true  → status='upcoming', paymentStatus='full', invisible in MatchFeed.
-  // isPrivate=false → status='open',     paymentStatus='partial', appears in MatchFeed.
+  // Creates only a private booking; the calendar derives slot statuses from it.
 const handleBookSlot = async (booking) => {
     if (!ME_ID) {
       const authError = new Error('Booking requires an authenticated user');
@@ -1297,9 +1295,22 @@ const handleBookSlot = async (booking) => {
       throw authError;
     }
 
+    const isPrivateBookingRequest =
+      booking?.type === 'private' &&
+      booking?.scenario === 'private' &&
+      booking?.isPrivate === true &&
+      booking?.isRatingMatch !== true &&
+      booking?.is_rating_match !== true;
+
+    if (!isPrivateBookingRequest) {
+      const formatError = new Error('Booking flow accepts private court bookings only');
+      console.error(formatError);
+      showToast?.('Через раздел «Бронь» можно создать только частную бронь.', 'error');
+      throw formatError;
+    }
+
     const target = new Date(booking.dateISO);
     const dateStr = target.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }).replace(' г.', '');
-    const isRated = !booking.isPrivate && (booking.isRatingMatch === true || booking.is_rating_match === true);
     const pricePerPerson = normalizeStoredPrice(
       booking.pricePerPerson ?? booking.price_per_person
     );
@@ -1320,14 +1331,14 @@ const handleBookSlot = async (booking) => {
       courtName:     booking.court?.name || 'Корт',
       courtType:     booking.court?.type || 'standard',
       isPrime:       isPrimeTime(booking?.time || '00:00', booking.dateISO),
-      type:          booking.type || 'match',
+      type:          'private',
       ratingMin:     booking.ratingMin ?? 0,
       ratingMax:     booking.ratingMax ?? 6,
       description:   booking.description || '',
-      scenario:      booking.scenario || (booking.isPrivate ? 'private' : 'community'),
-      isPrivate:     !!booking.isPrivate,
-      isRatingMatch: isRated,
-      is_rating_match: isRated,
+      scenario:      'private',
+      isPrivate:     true,
+      isRatingMatch: false,
+      is_rating_match: false,
       paymentStatus: booking.paymentStatus || 'partial',
       // Exact migration 011 JSON contract. JSON keys are case-sensitive.
       pricePerPerson,
@@ -1368,11 +1379,6 @@ const handleBookSlot = async (booking) => {
     // Re-read the canonical row instead of relying only on the RPC response.
     // This also makes any DEV price diagnostic reflect what was persisted.
     await loadMatches();
-    // Если это публичный матч — идем в ленту, если приват — остаемся в календаре
-    if (!booking.isPrivate) {
-      setActiveTab('matches');
-    }
-
     return createdMatch;
   };
 
@@ -2708,7 +2714,6 @@ const handleBookSlot = async (booking) => {
             allMatches={allMatches}
             onBookSlot={handleBookSlot}
             showToast={showToast}
-            isRatingVerified={currentUser?.isVerified === true}
           />
         )}
       </main>

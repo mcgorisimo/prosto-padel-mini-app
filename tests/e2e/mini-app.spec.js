@@ -1045,7 +1045,7 @@ test('checks bottom navigation and opens match creation smoke', async ({ page })
   await expect(page.getByRole('heading', { name: 'Создать матч' })).toBeVisible();
 });
 
-test('BOOKING creates a public booking through create_booking', async ({ page }) => {
+test('BOOKING creates only a private booking through create_booking', async ({ page }) => {
   const supabaseState = await mockSupabase(page);
   await mockTelegram(page);
   await setAuthenticatedSession(page);
@@ -1053,7 +1053,10 @@ test('BOOKING creates a public booking through create_booking', async ({ page })
   await expect(page.locator('.bottom-nav')).toBeVisible();
 
   await selectTomorrowCourtOneAtSeven(page);
-  await page.getByRole('button', { name: 'Бронь + сбор игроков' }).click();
+  await expect(page.getByRole('button', { name: 'Бронь + сбор игроков' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Создать матч' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Обычный матч' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Рейтинговый матч' })).toHaveCount(0);
   const calculatedTotalPrice = Number(
     (await page.getByTestId('booking-total-price').textContent()).replace(/[^\d]/g, '')
   );
@@ -1061,11 +1064,10 @@ test('BOOKING creates a public booking through create_booking', async ({ page })
     (await page.getByTestId('booking-per-player-price').textContent()).replace(/[^\d]/g, '')
   );
   expect(calculatedPricePerPerson).toBe(Math.round(calculatedTotalPrice / 4));
-  await page.getByRole('button', { name: 'Создать матч' }).click();
+  await page.getByRole('button', { name: 'Создать бронь' }).click();
 
   await expect.poll(() => supabaseState.bookingRequests).toBe(1);
-  await expect(page.locator('.bottom-nav').getByRole('button', { name: 'Матчи' })).toHaveAttribute('aria-current', 'page');
-  await expect(page.getByText('Открытый матч', { exact: true })).toBeVisible();
+  await expect(page.locator('.bottom-nav').getByRole('button', { name: 'Бронь' })).toHaveAttribute('aria-current', 'page');
 
   expect(supabaseState.directMatchInserts).toBe(0);
   expect(supabaseState.bookingPayloads[0]).toMatchObject({
@@ -1074,10 +1076,11 @@ test('BOOKING creates a public booking through create_booking', async ({ page })
     courtId: 'p1',
     courtName: 'Корт 1',
     courtType: 'panoramic',
-    type: 'match',
-    scenario: 'social',
-    isPrivate: false,
-    paymentStatus: 'partial',
+    type: 'private',
+    scenario: 'private',
+    isPrivate: true,
+    isRatingMatch: false,
+    is_rating_match: false,
   });
   expect(supabaseState.bookingRpcBodies[0]).toEqual({
     p_booking: expect.objectContaining({
@@ -1093,7 +1096,9 @@ test('BOOKING creates a public booking through create_booking', async ({ page })
   expect(supabaseState.matches[0]).toMatchObject({
     owner_id: testUser.id,
     participants: [testUser.id],
-    status: 'open',
+    status: 'upcoming',
+    type: 'private',
+    isPrivate: true,
     pricePerPerson: supabaseState.bookingPayloads[0].pricePerPerson,
   });
   expect(supabaseState.bookingRpcResponses[0]?.pricePerPerson).toBe(calculatedPricePerPerson);
@@ -1107,9 +1112,20 @@ test('BOOKING creates a public booking through create_booking', async ({ page })
   })).toBe(false);
 
   const savedPriceLabel = `${supabaseState.bookingPayloads[0].pricePerPerson.toLocaleString('ru-RU')} ₽`;
-  await expect(page.getByText(savedPriceLabel, { exact: true })).toBeVisible();
-  await page.getByText('Открытый матч', { exact: true }).click();
-  await expect(page.getByTestId('match-participation-price')).toHaveText(savedPriceLabel);
+  await expect(page.getByTestId('booking-per-player-price')).toHaveCount(0);
+
+  const homeTab = page.locator('.bottom-nav').getByRole('button', { name: 'Главная' });
+  await homeTab.click();
+  await expect(homeTab).toHaveAttribute('aria-current', 'page');
+  await expect(page.getByText('Частная бронь корта', { exact: true }).first()).toBeVisible();
+  await page.getByText('Частная бронь корта', { exact: true }).first().click();
+  await expect(page.getByText('Действие с бронью', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Тренировка', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Создать открытый матч', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Отмена', exact: true }).click();
+
+  await openMatchesTab(page);
+  await expect(page.getByText(savedPriceLabel, { exact: true })).toHaveCount(0);
 });
 
 base('BOOKING refreshes availability when create_booking returns BOOKING_SLOT_TAKEN', async ({ page }) => {
