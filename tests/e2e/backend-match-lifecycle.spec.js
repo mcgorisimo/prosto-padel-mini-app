@@ -7,6 +7,8 @@ const MATCH_ID = '33333333-3333-4333-8333-333333333333';
 const REQUEST_KEY = '44444444-4444-4444-8444-444444444444';
 const INVITATION_ID = '55555555-5555-4555-8555-555555555555';
 const PARTICIPANT_ID = '66666666-6666-4666-8666-666666666666';
+const MESSAGE_ID = '77777777-7777-4777-8777-777777777777';
+const OLDER_MESSAGE_ID = '88888888-8888-4888-8888-888888888888';
 
 test.describe('backend match credential lifecycle', () => {
   test('uses exact no-store contracts for feed, detail, create, join and leave', async ({
@@ -894,6 +896,33 @@ test.describe('backend match credential lifecycle', () => {
               },
             };
           },
+          async listMatchMessages(credential) {
+            credentialMatched =
+              credentialMatched &&
+              credential === parameters.credential;
+            return {
+              outcome: 'messages_loaded',
+              messages: [{
+                messageId: parameters.messageId,
+                matchId: parameters.matchId,
+              }],
+            };
+          },
+          async sendMatchMessage(credential) {
+            credentialMatched =
+              credentialMatched &&
+              credential === parameters.credential;
+            return {
+              outcome: 'message_sent',
+              message: {
+                messageId: parameters.messageId,
+                matchId: parameters.matchId,
+                sender: {
+                  playerId: parameters.accountId,
+                },
+              },
+            };
+          },
         },
         credentialStorage: {
           async read() {
@@ -937,6 +966,11 @@ test.describe('backend match credential lifecycle', () => {
         await lifecycle.acceptMatchInvitation(parameters.invitationId),
         await lifecycle.declineMatchInvitation(parameters.invitationId),
         await lifecycle.cancelMatchInvitation(parameters.invitationId),
+        await lifecycle.listMatchMessages(parameters.matchId, 50),
+        await lifecycle.sendMatchMessage(
+          parameters.matchId,
+          'Synthetic message',
+        ),
       ];
       const invalid = await lifecycle.listMatches();
       for (let attempt = 0; attempt < 50; attempt += 1) {
@@ -965,6 +999,7 @@ test.describe('backend match credential lifecycle', () => {
       otherAccountId: OTHER_ACCOUNT_ID,
       matchId: MATCH_ID,
       invitationId: INVITATION_ID,
+      messageId: MESSAGE_ID,
     });
 
     expect(summary).toEqual({
@@ -982,6 +1017,8 @@ test.describe('backend match credential lifecycle', () => {
         'invitation_accepted',
         'invitation_declined',
         'invitation_cancelled',
+        'messages_loaded',
+        'message_sent',
       ],
       invalidOutcome: 'rejected',
       invalidReason: 'session_invalid',
@@ -991,6 +1028,451 @@ test.describe('backend match credential lifecycle', () => {
       storedCleared: true,
       removeCalled: true,
     });
+  });
+
+  test('uses the private bearer boundary for paginated backend match chat', async ({
+    page,
+  }) => {
+    await page.goto('/');
+
+    const summary = await page.evaluate(async (parameters) => {
+      const {
+        createBackendSessionClient,
+        isBackendMatchMessage,
+      } = await import('/src/lib/backendSessionClient.js');
+      const {
+        mapBackendMatchMessageToApp,
+      } = await import('/src/lib/backendMatchAdapter.js');
+      const {
+        shouldUseLegacyMatchMessages,
+      } = await import('/src/App.jsx');
+      const calls = [];
+      const activeSender = {
+        playerId: parameters.accountId,
+        firstName: 'Current',
+        lastName: 'Player',
+        username: 'current_player',
+        rating: 3,
+        isVerified: true,
+      };
+      const newest = {
+        messageId: parameters.messageId,
+        matchId: parameters.matchId,
+        sender: activeSender,
+        body: 'Newest message',
+        createdAt: 1_900_000_020,
+      };
+      const older = {
+        messageId: parameters.olderMessageId,
+        matchId: parameters.matchId,
+        sender: { unavailable: true },
+        body: 'Older message',
+        createdAt: 1_900_000_010,
+      };
+      const sent = {
+        messageId: '99999999-9999-4999-8999-999999999999',
+        matchId: parameters.matchId,
+        sender: activeSender,
+        body: 'Sent message',
+        createdAt: 1_900_000_030,
+      };
+      const client = createBackendSessionClient({
+        cryptoImpl: {
+          randomUUID: () => parameters.requestKey,
+        },
+        fetchImpl: async (url, options) => {
+          calls.push({
+            url,
+            method: options.method,
+            authorizationMatches:
+              options.headers.Authorization ===
+              `Bearer ${parameters.credential}`,
+            contentType:
+              options.headers['Content-Type'] ?? null,
+            body:
+              options.body === undefined
+                ? null
+                : JSON.parse(options.body),
+            cache: options.cache,
+            credentials: options.credentials,
+            redirect: options.redirect,
+          });
+          if (options.method === 'POST') {
+            return new Response(JSON.stringify({ message: sent }), {
+              status: 201,
+            });
+          }
+          if (url.includes('beforeCreatedAt=')) {
+            return new Response(JSON.stringify({
+              messages: [{
+                ...older,
+                messageId:
+                  'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+                createdAt: 1_900_000_000,
+              }],
+            }), { status: 200 });
+          }
+          return new Response(JSON.stringify({
+            messages: [newest, older],
+            nextCursor: {
+              createdAt: older.createdAt,
+              messageId: older.messageId,
+            },
+          }), { status: 200 });
+        },
+      });
+
+      const first = await client.listMatchMessages(
+        parameters.credential,
+        parameters.matchId,
+        50,
+      );
+      const second = await client.listMatchMessages(
+        parameters.credential,
+        parameters.matchId,
+        50,
+        first.nextCursor,
+      );
+      const sendResult = await client.sendMatchMessage(
+        parameters.credential,
+        parameters.matchId,
+        sent.body,
+      );
+      const callsBeforeInvalid = calls.length;
+      const invalidSend = await client.sendMatchMessage(
+        parameters.credential,
+        parameters.matchId,
+        ' padded ',
+      );
+      const malformed = isBackendMatchMessage({
+        ...older,
+        sender: {
+          unavailable: true,
+          playerId: parameters.accountId,
+        },
+      }, parameters.matchId);
+      const mapped = first.messages
+        .map(mapBackendMatchMessageToApp)
+        .reverse();
+
+      return {
+        outcomes: [
+          first.outcome,
+          second.outcome,
+          sendResult.outcome,
+        ],
+        contracts: calls.map((call) => ({
+          ...call,
+          body: undefined,
+          exactSendBody:
+            call.method !== 'POST' ||
+            (
+              Object.keys(call.body).sort().join(',') ===
+                'body,requestKey' &&
+              call.body.requestKey === parameters.requestKey &&
+              call.body.body === sent.body
+            ),
+        })),
+        firstCursor: first.nextCursor,
+        mapped: mapped.map((message) => ({
+          id: message.id,
+          senderId: message.senderId,
+          senderName: message.senderName,
+          text: message.text,
+          timestamp: message.timestamp,
+        })),
+        invalidRejectedLocally:
+          invalidSend.outcome === 'rejected' &&
+          invalidSend.reason === 'invalid_request' &&
+          calls.length === callsBeforeInvalid,
+        malformedUnavailableSenderRejected: !malformed,
+        providerBoundary: {
+          backendSkipsSupabase:
+            !shouldUseLegacyMatchMessages(
+              { backendOwned: true },
+              true,
+            ),
+          legacyPrivatePreservedInBackendMode:
+            shouldUseLegacyMatchMessages(
+              { backendOwned: false, isPrivate: true },
+              true,
+            ),
+          legacyPreserved:
+            shouldUseLegacyMatchMessages(null, false),
+        },
+        sensitiveAbsent:
+          !JSON.stringify({
+            first,
+            second,
+            sendResult,
+            mapped,
+          }).includes(parameters.credential),
+      };
+    }, {
+      credential: SYNTHETIC_CREDENTIAL,
+      accountId: ACCOUNT_ID,
+      matchId: MATCH_ID,
+      requestKey: REQUEST_KEY,
+      messageId: MESSAGE_ID,
+      olderMessageId: OLDER_MESSAGE_ID,
+    });
+
+    expect(summary.outcomes).toEqual([
+      'messages_loaded',
+      'messages_loaded',
+      'message_sent',
+    ]);
+    expect(summary.contracts).toEqual([
+      {
+        url: `/api/v1/matches/${MATCH_ID}/messages?limit=50`,
+        method: 'GET',
+        authorizationMatches: true,
+        contentType: null,
+        cache: 'no-store',
+        credentials: 'omit',
+        redirect: 'error',
+        exactSendBody: true,
+      },
+      {
+        url:
+          `/api/v1/matches/${MATCH_ID}/messages?limit=50` +
+          `&beforeCreatedAt=1900000010&beforeMessageId=${OLDER_MESSAGE_ID}`,
+        method: 'GET',
+        authorizationMatches: true,
+        contentType: null,
+        cache: 'no-store',
+        credentials: 'omit',
+        redirect: 'error',
+        exactSendBody: true,
+      },
+      {
+        url: `/api/v1/matches/${MATCH_ID}/messages`,
+        method: 'POST',
+        authorizationMatches: true,
+        contentType: 'application/json',
+        cache: 'no-store',
+        credentials: 'omit',
+        redirect: 'error',
+        exactSendBody: true,
+      },
+    ]);
+    expect(summary.firstCursor).toEqual({
+      createdAt: 1_900_000_010,
+      messageId: OLDER_MESSAGE_ID,
+    });
+    expect(summary.mapped).toEqual([
+      {
+        id: OLDER_MESSAGE_ID,
+        senderId: null,
+        senderName: 'Игрок недоступен',
+        text: 'Older message',
+        timestamp: '2030-03-17T17:46:50.000Z',
+      },
+      {
+        id: MESSAGE_ID,
+        senderId: ACCOUNT_ID,
+        senderName: 'Current Player',
+        text: 'Newest message',
+        timestamp: '2030-03-17T17:47:00.000Z',
+      },
+    ]);
+    expect(summary.invalidRejectedLocally).toBe(true);
+    expect(summary.malformedUnavailableSenderRejected).toBe(true);
+    expect(summary.providerBoundary).toEqual({
+      backendSkipsSupabase: true,
+      legacyPrivatePreservedInBackendMode: true,
+      legacyPreserved: true,
+    });
+    expect(summary.sensitiveAbsent).toBe(true);
+  });
+
+  test('renders the backend chat lifecycle and preserves a failed draft', async ({
+    page,
+  }) => {
+    await page.goto('/');
+
+    await page.evaluate(async (parameters) => {
+      const reactModule = await import('/@id/react');
+      const React = reactModule.default ?? reactModule;
+      const reactDomClientModule = await import('/@id/react-dom/client');
+      const { createRoot } =
+        reactDomClientModule.default ?? reactDomClientModule;
+      const { default: MatchDetailsScreen } = await import(
+        '/src/components/MatchDetailsScreen.jsx'
+      );
+
+      const container = document.createElement('div');
+      container.dataset.testid = 'backend-chat-test-root';
+      document.body.append(container);
+
+      const currentUser = {
+        id: parameters.accountId,
+        role: 'user',
+        firstName: 'Current',
+        lastName: 'Player',
+        rating: 3,
+        numericRating: 3,
+        ratingIdx: 2,
+        isVerified: true,
+      };
+      const match = {
+        id: parameters.matchId,
+        backendOwned: true,
+        ownerId: parameters.accountId,
+        owner_id: parameters.accountId,
+        title: 'Backend chat match',
+        date: '1 января',
+        dateISO: '2030-01-01',
+        time: '10:00',
+        duration: 1.5,
+        courtName: 'Корт 1',
+        courtType: 'panoramic',
+        type: 'match',
+        scenario: 'social',
+        status: 'open',
+        isPrivate: false,
+        isRatingMatch: false,
+        ratingMin: 0,
+        ratingMax: 6,
+        participants: [parameters.accountId],
+        filledSlots: [{
+          ...currentUser,
+          isOrganizer: true,
+          slotIndex: 0,
+        }],
+      };
+      const initialMessage = {
+        id: parameters.messageId,
+        matchId: parameters.matchId,
+        senderId: parameters.otherAccountId,
+        senderName: 'Other Player',
+        text: 'Newest message',
+        timestamp: '2030-01-01T07:00:20.000Z',
+      };
+      const olderMessage = {
+        id: parameters.olderMessageId,
+        matchId: parameters.matchId,
+        senderId: null,
+        senderName: 'Игрок недоступен',
+        text: 'Older message',
+        timestamp: '2030-01-01T07:00:10.000Z',
+      };
+      const sentMessage = {
+        id: '99999999-9999-4999-8999-999999999999',
+        matchId: parameters.matchId,
+        senderId: parameters.accountId,
+        senderName: 'Current Player',
+        text: 'Draft survives',
+        timestamp: '2030-01-01T07:00:30.000Z',
+      };
+
+      function Harness() {
+        const [messages, setMessages] = React.useState([
+          initialMessage,
+        ]);
+        const [hasOlder, setHasOlder] = React.useState(true);
+        const failedOnce = React.useRef(false);
+
+        return React.createElement(MatchDetailsScreen, {
+          match,
+          currentUser,
+          allMessages: messages,
+          messagesLoading: false,
+          messagesLoadError: '',
+          hasOlderMessages: hasOlder,
+          olderMessagesLoading: false,
+          onLoadOlderMessages() {
+            window.__backendChatUiCalls.loadOlder += 1;
+            setMessages((previous) => [olderMessage, ...previous]);
+            setHasOlder(false);
+          },
+          onRefreshMessages() {
+            window.__backendChatUiCalls.refresh += 1;
+          },
+          onRetryMessages() {
+            window.__backendChatUiCalls.load += 1;
+          },
+          async onSendMessage(_matchId, _sender, text) {
+            window.__backendChatUiCalls.send += 1;
+            if (!failedOnce.current) {
+              failedOnce.current = true;
+              throw new Error('synthetic_send_failure');
+            }
+            setMessages((previous) => [
+              ...previous,
+              { ...sentMessage, text },
+            ]);
+          },
+          onBack() {},
+          onJoinSuccess() {},
+          onDelete() {},
+          onComplete() {},
+          onConfirmScore() {},
+          onDisputeScore() {},
+          onUpdate() {},
+          onSlotsChange() {},
+          onJoinMatch() {},
+          onLeaveMatch() {},
+          onRefreshMatch() {},
+          pendingInvitations: [],
+          invitationActions: new Set(),
+          showToast() {},
+        });
+      }
+
+      window.__backendChatUiCalls = {
+        load: 0,
+        loadOlder: 0,
+        refresh: 0,
+        send: 0,
+      };
+      const root = createRoot(container);
+      root.render(React.createElement(Harness));
+      window.__backendChatUiUnmount = () => {
+        root.unmount();
+        container.remove();
+      };
+    }, {
+      accountId: ACCOUNT_ID,
+      otherAccountId: OTHER_ACCOUNT_ID,
+      matchId: MATCH_ID,
+      messageId: MESSAGE_ID,
+      olderMessageId: OLDER_MESSAGE_ID,
+    });
+
+    const harness = page.getByTestId('backend-chat-test-root');
+    await harness.getByTestId('match-chat-open-button').click();
+    await expect.poll(() => page.evaluate(
+      () => window.__backendChatUiCalls.load,
+    )).toBe(1);
+    await expect(
+      harness.getByTestId(`chat-message-${MESSAGE_ID}`),
+    ).toContainText('Newest message');
+
+    await harness.getByTestId('chat-load-older-button').click();
+    await expect(
+      harness.getByTestId(`chat-message-${OLDER_MESSAGE_ID}`),
+    ).toContainText('Older message');
+    await expect.poll(() => page.evaluate(
+      () => window.__backendChatUiCalls.loadOlder,
+    )).toBe(1);
+
+    const draft = harness.getByPlaceholder('Написать сообщение...');
+    await draft.fill('Draft survives');
+    await harness.locator('footer button').click();
+    await expect(draft).toHaveValue('Draft survives');
+    await harness.locator('footer button').click();
+    await expect(draft).toHaveValue('');
+    await expect(
+      harness.getByTestId(
+        'chat-message-99999999-9999-4999-8999-999999999999',
+      ),
+    ).toContainText('Draft survives');
+    await expect.poll(() => page.evaluate(
+      () => window.__backendChatUiCalls.send,
+    )).toBe(2);
+
+    await page.evaluate(() => window.__backendChatUiUnmount());
   });
 
   test('maps backend match data into the existing UI without sensitive fields', async ({
@@ -1014,8 +1496,9 @@ test.describe('backend match credential lifecycle', () => {
         isPrivateMatchCreationEnabled,
       } = await import('/src/components/MatchCreationScreen.jsx');
       const {
-        refreshLegacyMatchWaitlist,
-        tryBeginMatchAction,
+         refreshLegacyMatchWaitlist,
+         supportsMatchChat,
+         tryBeginMatchAction,
         supportsLegacyMatchExtensions,
       } = await import('/src/components/MatchDetailsScreen.jsx');
       const draft = createBackendMatchDraft({
@@ -1349,12 +1832,16 @@ test.describe('backend match credential lifecycle', () => {
           legacyRequestPreserved:
             isPrivateMatchCreationEnabled(true, true),
         },
-        legacyExtensions: {
-          backendPinnedMessageHidden:
-            !supportsLegacyMatchExtensions(match),
-          legacyPinnedMessagePreserved:
-            supportsLegacyMatchExtensions({ backendOwned: false }),
-        },
+         legacyExtensions: {
+           backendPinnedMessageHidden:
+             !supportsLegacyMatchExtensions(match),
+           legacyPinnedMessagePreserved:
+             supportsLegacyMatchExtensions({ backendOwned: false }),
+           backendChatEnabled:
+             supportsMatchChat(true, () => {}, () => {}),
+           backendChatFailsClosedWithoutBoundary:
+             !supportsMatchChat(true, null, () => {}),
+         },
         match: {
           id: match.id,
           ownerId: match.ownerId,
@@ -1472,6 +1959,8 @@ test.describe('backend match credential lifecycle', () => {
     expect(summary.legacyExtensions).toEqual({
       backendPinnedMessageHidden: true,
       legacyPinnedMessagePreserved: true,
+      backendChatEnabled: true,
+      backendChatFailsClosedWithoutBoundary: true,
     });
     expect(summary.sensitiveAbsent).toBe(true);
   });

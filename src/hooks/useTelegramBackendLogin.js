@@ -1158,6 +1158,41 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
     );
   }
 
+  function listMatchMessages(matchId, limit = 50, before) {
+    return runMatchOperation(
+      (credential, signal) =>
+        matches.listMatchMessages(
+          credential,
+          matchId,
+          limit,
+          before,
+          { signal },
+        ),
+      (result) =>
+        result?.outcome === 'messages_loaded' &&
+        Array.isArray(result.messages) &&
+        result.messages.every(
+          (message) => message.matchId === matchId,
+        ),
+    );
+  }
+
+  function sendMatchMessage(matchId, body) {
+    return runMatchOperation(
+      (credential, signal) =>
+        matches.sendMatchMessage(
+          credential,
+          matchId,
+          body,
+          { signal },
+        ),
+      (result, principal) =>
+        result?.outcome === 'message_sent' &&
+        result.message?.matchId === matchId &&
+        result.message?.sender?.playerId === principal.accountId,
+    );
+  }
+
   function attach(rawInitData, listener) {
     if (teardownTimer !== null) {
       clearTimer(teardownTimer);
@@ -1233,6 +1268,8 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
     acceptMatchInvitation,
     declineMatchInvitation,
     cancelMatchInvitation,
+    listMatchMessages,
+    sendMatchMessage,
     logout,
   });
 }
@@ -1418,6 +1455,30 @@ export function useTelegramBackendLogin() {
     return telegramBackendLoginLifecycle.cancelMatchInvitation(invitationId);
   }, []);
 
+  const listMatchMessages = useCallback((matchId, limit = 50, before) => {
+    if (!FEATURE_ENABLED) {
+      return Promise.resolve(Object.freeze({
+        outcome: 'rejected',
+        reason: 'not_authenticated',
+      }));
+    }
+    return telegramBackendLoginLifecycle.listMatchMessages(
+      matchId,
+      limit,
+      before,
+    );
+  }, []);
+
+  const sendMatchMessage = useCallback((matchId, body) => {
+    if (!FEATURE_ENABLED) {
+      return Promise.resolve(Object.freeze({
+        outcome: 'rejected',
+        reason: 'not_authenticated',
+      }));
+    }
+    return telegramBackendLoginLifecycle.sendMatchMessage(matchId, body);
+  }, []);
+
   useEffect(() => {
     if (!FEATURE_ENABLED) return undefined;
 
@@ -1453,6 +1514,8 @@ export function useTelegramBackendLogin() {
     acceptMatchInvitation,
     declineMatchInvitation,
     cancelMatchInvitation,
+    listMatchMessages,
+    sendMatchMessage,
     logout,
   });
 }

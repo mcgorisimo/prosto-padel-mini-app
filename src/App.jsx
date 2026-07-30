@@ -20,6 +20,7 @@ import {
   applyBackendParticipantResult,
   isBackendOwnedMatch,
   mapBackendInvitationToApp,
+  mapBackendMatchMessageToApp,
   mapBackendMatchToApp,
   mapBackendPublicPlayerToApp,
   resolveBackendMatchMode,
@@ -245,6 +246,16 @@ function isStaleInvitationError(error) {
     || code.includes('INVITATION_SLOT_UNAVAILABLE');
 }
 
+export function shouldUseLegacyMatchMessages(
+  match,
+  usesBackendMatches,
+) {
+  if (match !== null && match !== undefined) {
+    return !isBackendOwnedMatch(match);
+  }
+  return usesBackendMatches !== true;
+}
+
 function isBackendInvitationStaleReason(reason) {
   return [
     'invitation_not_found',
@@ -335,12 +346,20 @@ export default function App({
   const [backendFeedError, setBackendFeedError] = useState('');
   const [messagesLoading, setMessagesLoading] = useState(true);
   const [messagesLoadError, setMessagesLoadError] = useState('');
+  const [backendChatMessages, setBackendChatMessages] = useState([]);
+  const [backendChatLoading, setBackendChatLoading] = useState(false);
+  const [backendChatLoadingOlder, setBackendChatLoadingOlder] = useState(false);
+  const [backendChatLoadError, setBackendChatLoadError] = useState('');
+  const [backendChatCursor, setBackendChatCursor] = useState(null);
   const [activeTab, setActiveTab]    = useState('home');
   const [toast, setToast]            = useState(null);
   const [selectedMatch, setSelected] = useState(null);
+  const [screen, setScreen] = useState(null);
   const backendDetailRequestRef = useRef(0);
   const backendFeedRequestRef = useRef(0);
   const backendInvitationRequestRef = useRef(0);
+  const backendChatRequestRef = useRef(0);
+  const backendChatMatchRef = useRef(null);
   const [incomingInvitations, setIncomingInvitations] = useState([]);
   const [outgoingInvitations, setOutgoingInvitations] = useState([]);
   const [invitationsLoading, setInvitationsLoading] = useState(true);
@@ -459,18 +478,38 @@ export default function App({
     usesBackendMatches,
   ]);
 
-  const loadMessages = useCallback(async () => {
+  const loadMessages = useCallback(async (match = null) => {
+    if (!shouldUseLegacyMatchMessages(match, usesBackendMatches)) {
+      setMessagesLoadError('');
+      setMessagesLoading(false);
+      return [];
+    }
     setMessagesLoading(true);
     setMessagesLoadError('');
 
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from('messages')
         .select('*')
         .order('created_at', { ascending: true });
+      if (match?.id) {
+        query = query.eq('match_id', match.id);
+      }
+      const { data, error } = await query;
 
       if (error) throw error;
-      setAllMessages((data ?? []).map(normalizeMessage));
+      const messages = (data ?? []).map(normalizeMessage);
+      setAllMessages((previous) => (
+        match?.id
+          ? [
+              ...previous.filter(
+                (message) =>
+                  (message.matchId ?? message.match_id) !== match.id,
+              ),
+              ...messages,
+            ]
+          : messages
+      ));
       return data ?? [];
     } catch (error) {
       console.error(`Ошибка при получении сообщений из Supabase: ${error.message}`);
@@ -479,7 +518,7 @@ export default function App({
     } finally {
       setMessagesLoading(false);
     }
-  }, []);
+  }, [usesBackendMatches]);
 
   const loadInvitations = useCallback(async () => {
     if (!ME_ID && !backendProfile?.accountId) return null;
@@ -639,12 +678,6 @@ export default function App({
       })
       .subscribe();
 
-    const messagesSubscription = supabase.channel('public:messages')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, payload => {
-        setAllMessages(prev => appendUniqueMessage(prev, payload.new));
-      })
-      .subscribe();
-
     const invitationsSubscription = usesBackendMatches
       ? null
       : supabase.channel('public:match_invitations')
@@ -660,13 +693,49 @@ export default function App({
 
     return () => {
       supabase.removeChannel(matchesSubscription);
-      supabase.removeChannel(messagesSubscription);
       if (invitationsSubscription) {
         supabase.removeChannel(invitationsSubscription);
       }
       supabase.removeChannel(notificationsSubscription);
     };
   }, [fetchData]);
+
+  useEffect(() => {
+    if (
+      screen !== 'match-details' ||
+      !selectedMatch?.id ||
+      !shouldUseLegacyMatchMessages(selectedMatch, usesBackendMatches)
+    ) {
+      return undefined;
+    }
+
+    const matchId = selectedMatch.id;
+    const messagesSubscription = supabase
+      .channel(`public:messages:${matchId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages',
+          filter: `match_id=eq.${matchId}`,
+        },
+        (payload) => {
+          setAllMessages((previous) =>
+            appendUniqueMessage(previous, payload.new));
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(messagesSubscription);
+    };
+  }, [
+    screen,
+    selectedMatch?.backendOwned,
+    selectedMatch?.id,
+    usesBackendMatches,
+  ]);
 
   useEffect(() => {
     if (activeTab === 'profile') {
@@ -795,6 +864,96 @@ export default function App({
         : previous);
     return updatedMatch;
   }, []);
+
+  const loadBackendMatchMessages = useCallback(async (
+    matchId,
+    { older = false, background = false } = {},
+  ) => {
+    if (!backendMatchesReady || !backendMatchActions || !matchId) {
+      return null;
+    }
+    if (older && backendChatMatchRef.current !== matchId) return null;
+
+    const cursor = older ? backendChatCursor : undefined;
+    if (older && cursor === null) return [];
+    const requestId = backendChatRequestRef.current + 1;
+    backendChatRequestRef.current = requestId;
+    if (!older && !background) {
+      backendChatMatchRef.current = matchId;
+      setBackendChatMessages([]);
+      setBackendChatCursor(null);
+      setBackendChatLoadError('');
+      setBackendChatLoading(true);
+    } else if (older) {
+      setBackendChatLoadingOlder(true);
+    }
+
+    try {
+      const result = await backendMatchActions.listMatchMessages(
+        matchId,
+        50,
+        cursor,
+      );
+      if (
+        backendChatRequestRef.current !== requestId ||
+        backendChatMatchRef.current !== matchId
+      ) {
+        return null;
+      }
+      if (result.outcome !== 'messages_loaded') {
+        throw new Error('BACKEND_MATCH_CHAT_LIST_REJECTED');
+      }
+      const messages = result.messages
+        .map(mapBackendMatchMessageToApp)
+        .filter(Boolean)
+        .reverse();
+      if (messages.length !== result.messages.length) {
+        throw new Error('BACKEND_MATCH_CHAT_MAPPING_REJECTED');
+      }
+      setBackendChatMessages((previous) => {
+        const combined = older
+          ? [...messages, ...previous]
+          : background
+            ? [...previous, ...messages]
+            : messages;
+        return combined.reduce(
+          (next, message) => appendUniqueMessage(next, message),
+          [],
+        );
+      });
+      if (!background) {
+        setBackendChatCursor(result.nextCursor ?? null);
+      }
+      setBackendChatLoadError('');
+      return messages;
+    } catch {
+      if (
+        backendChatRequestRef.current === requestId &&
+        backendChatMatchRef.current === matchId &&
+        !older &&
+        !background
+      ) {
+        setBackendChatLoadError(
+          'Не удалось загрузить сообщения. Попробуйте ещё раз.',
+        );
+      }
+      return null;
+    } finally {
+      if (
+        backendChatRequestRef.current === requestId &&
+        backendChatMatchRef.current === matchId
+      ) {
+        if (!background) {
+          setBackendChatLoading(false);
+          setBackendChatLoadingOlder(false);
+        }
+      }
+    }
+  }, [
+    backendChatCursor,
+    backendMatchActions,
+    backendMatchesReady,
+  ]);
 
   const isAdmin = currentUser?.role === 'admin';
 
@@ -1195,6 +1354,42 @@ const handleBookSlot = async (booking) => {
   };
 
   const handleSendMessage = async (matchId, sender, text) => {
+    if (
+      isBackendOwnedMatch(selectedMatch) &&
+      selectedMatch.id === matchId
+    ) {
+      if (!backendMatchesReady || !backendMatchActions) {
+        showToast?.(
+          'Чат пока недоступен. Попробуйте ещё раз.',
+          'error',
+        );
+        throw new Error('BACKEND_MATCH_CHAT_NOT_READY');
+      }
+      const result = await backendMatchActions.sendMatchMessage(
+        matchId,
+        text,
+      );
+      if (result.outcome !== 'message_sent') {
+        showToast?.(
+          result.reason === 'match_closed'
+            ? 'Чат этого матча уже закрыт.'
+            : 'Не удалось отправить сообщение.',
+          'error',
+        );
+        throw new Error('BACKEND_MATCH_CHAT_SEND_REJECTED');
+      }
+      const message = mapBackendMatchMessageToApp(result.message);
+      if (!message) {
+        showToast?.('Не удалось отправить сообщение.', 'error');
+        throw new Error('BACKEND_MATCH_CHAT_MAPPING_REJECTED');
+      }
+      if (backendChatMatchRef.current === matchId) {
+        setBackendChatMessages((previous) =>
+          appendUniqueMessage(previous, message));
+      }
+      return message;
+    }
+
     const senderId = sender?.id ?? ME_ID;
 
     if (!senderId) {
@@ -1537,8 +1732,6 @@ const handleBookSlot = async (booking) => {
   // --- 4. TOAST (now handled by AuthGate, but keeping this for other app-specific toasts) ---
   // The toast state and showToast function are now managed by AuthGate.
   // This local toast state is for app-specific messages that don't come from AuthGate.
-  const [screen, setScreen] = useState(null); // Moved here to be after currentUser
-
   // ── Navigation helpers ──
   const openCreateMatch = () => {
     if (usesBackendMatches && !backendMatchesReady) {
@@ -1586,6 +1779,13 @@ const handleBookSlot = async (booking) => {
   const closeMatchDetails = () => {
     backendDetailRequestRef.current += 1;
     backendInvitationRequestRef.current += 1;
+    backendChatRequestRef.current += 1;
+    backendChatMatchRef.current = null;
+    setBackendChatMessages([]);
+    setBackendChatCursor(null);
+    setBackendChatLoadError('');
+    setBackendChatLoading(false);
+    setBackendChatLoadingOlder(false);
     setOutgoingInvitations([]);
     setSelected(null);
     setScreen(null);
@@ -2217,10 +2417,47 @@ const handleBookSlot = async (booking) => {
             : null
         }
         onRemoveParticipant={handleRemoveParticipant}
-        allMessages={allMessages}
-        messagesLoading={messagesLoading}
-        messagesLoadError={messagesLoadError}
-        onRetryMessages={loadMessages}
+        allMessages={
+          isBackendOwnedMatch(selectedMatch)
+            ? backendChatMessages
+            : allMessages
+        }
+        messagesLoading={
+          isBackendOwnedMatch(selectedMatch)
+            ? backendChatLoading
+            : messagesLoading
+        }
+        messagesLoadError={
+          isBackendOwnedMatch(selectedMatch)
+            ? backendChatLoadError
+            : messagesLoadError
+        }
+        hasOlderMessages={
+          isBackendOwnedMatch(selectedMatch) &&
+          backendChatCursor !== null
+        }
+        olderMessagesLoading={backendChatLoadingOlder}
+        onLoadOlderMessages={
+          isBackendOwnedMatch(selectedMatch)
+            ? () => loadBackendMatchMessages(
+                selectedMatch.id,
+                { older: true },
+              )
+            : null
+        }
+        onRefreshMessages={
+          isBackendOwnedMatch(selectedMatch)
+            ? () => loadBackendMatchMessages(
+                selectedMatch.id,
+                { background: true },
+              )
+            : null
+        }
+        onRetryMessages={
+          isBackendOwnedMatch(selectedMatch)
+            ? () => loadBackendMatchMessages(selectedMatch.id)
+            : () => loadMessages(selectedMatch)
+        }
         onSendMessage={handleSendMessage}
         onRevertToPrivate={handleRevertToPrivate}
         showToast={showToast}

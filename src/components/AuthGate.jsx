@@ -159,6 +159,10 @@ export default function AuthGate() {
             telegramBackendLogin.declineMatchInvitation,
           cancelMatchInvitation:
             telegramBackendLogin.cancelMatchInvitation,
+          listMatchMessages:
+            telegramBackendLogin.listMatchMessages,
+          sendMatchMessage:
+            telegramBackendLogin.sendMatchMessage,
         })
       : null
   ), [
@@ -172,8 +176,10 @@ export default function AuthGate() {
     telegramBackendLogin.listIncomingMatchInvitations,
     telegramBackendLogin.listMatches,
     telegramBackendLogin.listOutgoingMatchInvitations,
+    telegramBackendLogin.listMatchMessages,
     telegramBackendLogin.loadMatch,
     telegramBackendLogin.searchPlayers,
+    telegramBackendLogin.sendMatchMessage,
     telegramBackendLogin.sessionReady,
   ]);
 

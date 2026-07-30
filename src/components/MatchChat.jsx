@@ -11,18 +11,23 @@ const C = {
   muted:   'rgba(245,241,232,0.62)',
 };
 
-export default function MatchChat({ match, currentUser, messages = [], loading = false, loadError = '', onRetry, onSendMessage, onClose }) {
+export default function MatchChat({ match, currentUser, messages = [], loading = false, loadError = '', hasOlderMessages = false, olderMessagesLoading = false, onLoadOlderMessages, onRetry, onSendMessage, onClose }) {
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const messagesEndRef = useRef(null);
+  const latestMessageIdRef = useRef(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
   useEffect(() => {
-    // Scroll to bottom on initial load and when new messages arrive
-    scrollToBottom();
+    const latestMessage = messages.at(-1);
+    const latestMessageId = latestMessage?.id ?? null;
+    if (latestMessageIdRef.current !== latestMessageId) {
+      latestMessageIdRef.current = latestMessageId;
+      scrollToBottom();
+    }
   }, [messages]);
 
   const handleSend = async () => {
@@ -101,7 +106,21 @@ export default function MatchChat({ match, currentUser, messages = [], loading =
       </button>
     </div>
   ) : safeMessages.length > 0 ? (
-    safeMessages.map((msg, index) => {
+    <>
+      {hasOlderMessages && (
+        <button
+          type="button"
+          data-testid="chat-load-older-button"
+          disabled={olderMessagesLoading}
+          onClick={onLoadOlderMessages}
+          className="self-center px-4 py-2 mb-1 rounded-xl border border-warm-white/15 text-warm-white/70 text-xs font-semibold disabled:opacity-50"
+        >
+          {olderMessagesLoading
+            ? 'Загружаем…'
+            : 'Загрузить предыдущие сообщения'}
+        </button>
+      )}
+      {safeMessages.map((msg, index) => {
       const senderId = msg.senderId ?? msg.sender_id;
       const previousSenderId = safeMessages[index - 1]?.senderId ?? safeMessages[index - 1]?.sender_id;
       const senderName = msg.senderName ?? msg.sender_name;
@@ -110,7 +129,11 @@ export default function MatchChat({ match, currentUser, messages = [], loading =
       const showName = index === 0 || previousSenderId !== senderId;
 
       return (
-        <div key={msg.id || index} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
+        <div
+          key={msg.id || index}
+          data-testid={`chat-message-${msg.id || index}`}
+          className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}
+        >
           {showName && (
             <span className={`mb-1 px-1 text-[11px] font-bold ${isMe ? 'text-accent-light/80' : 'text-warm-white/78'}`}>
               {isMe ? 'Вы' : (senderName || 'Игрок')}
@@ -126,7 +149,8 @@ export default function MatchChat({ match, currentUser, messages = [], loading =
           </div>
         </div>
       );
-    })
+      })}
+    </>
   ) : (
     <div className="flex items-center justify-center h-full text-slate-500 text-sm">
       <p>Сообщений пока нет. Начните общение!</p>

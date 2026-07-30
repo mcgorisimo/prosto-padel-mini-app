@@ -118,6 +118,43 @@ export function mapBackendPublicPlayerToApp(player) {
   });
 }
 
+export function mapBackendMatchMessageToApp(message) {
+  if (!message || typeof message !== 'object') return null;
+  const createdAt = Number(message.createdAt);
+  if (!Number.isSafeInteger(createdAt) || createdAt < 0) return null;
+  const senderUnavailable = message.sender?.unavailable === true;
+  const senderId = senderUnavailable ? null : message.sender?.playerId;
+  const senderName = senderUnavailable
+    ? 'Игрок недоступен'
+    : [
+        message.sender?.firstName,
+        message.sender?.lastName,
+      ].filter(Boolean).join(' ');
+  if (
+    typeof message.messageId !== 'string' ||
+    typeof message.matchId !== 'string' ||
+    typeof message.body !== 'string' ||
+    (!senderUnavailable &&
+      (typeof senderId !== 'string' || senderName.length === 0))
+  ) {
+    return null;
+  }
+  return Object.freeze({
+    id: message.messageId,
+    matchId: message.matchId,
+    match_id: message.matchId,
+    senderId,
+    sender_id: senderId,
+    senderName,
+    sender_name: senderName,
+    text: message.body,
+    timestamp: new Date(createdAt * 1_000).toISOString(),
+    created_at: new Date(createdAt * 1_000).toISOString(),
+    senderUnavailable,
+    backendOwned: true,
+  });
+}
+
 export function mapBackendInvitationToApp(invitation) {
   if (!invitation || typeof invitation !== 'object') return null;
   const dateTime = moscowDateTime(invitation.match?.startsAt);

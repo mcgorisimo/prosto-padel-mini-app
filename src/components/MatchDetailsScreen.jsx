@@ -75,6 +75,18 @@ export function supportsBackendMatchInvitations(
   );
 }
 
+export function supportsMatchChat(
+  isParticipant,
+  onRetryMessages,
+  onSendMessage,
+) {
+  return (
+    isParticipant === true &&
+    typeof onRetryMessages === 'function' &&
+    typeof onSendMessage === 'function'
+  );
+}
+
 export async function refreshLegacyMatchWaitlist(
   match,
   refreshWaitlist,
@@ -1104,7 +1116,7 @@ function MatchInvitationPanel({ accepting, declining, onAccept, onDecline }) {
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
-export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinSuccess, onDelete, onComplete, onConfirmScore, onDisputeScore, onUpdate, onSlotsChange, onJoinMatch, onLeaveMatch, onRefreshMatch, incomingInvitation = null, pendingInvitations = [], invitationActions = new Set(), onAcceptInvitation, onDeclineInvitation, onCreateInvitation, onCancelInvitation, onSearchPlayers, onRemoveParticipant, allMessages, messagesLoading, messagesLoadError, onRetryMessages, onSendMessage, onRevertToPrivate, showToast }) {
+export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinSuccess, onDelete, onComplete, onConfirmScore, onDisputeScore, onUpdate, onSlotsChange, onJoinMatch, onLeaveMatch, onRefreshMatch, incomingInvitation = null, pendingInvitations = [], invitationActions = new Set(), onAcceptInvitation, onDeclineInvitation, onCreateInvitation, onCancelInvitation, onSearchPlayers, onRemoveParticipant, allMessages, messagesLoading, messagesLoadError, hasOlderMessages = false, olderMessagesLoading = false, onLoadOlderMessages, onRefreshMessages, onRetryMessages, onSendMessage, onRevertToPrivate, showToast }) {
   const isOwner = canManageMatch(currentUser, match);
 
   const allBots = useMemo(() => getTestBots(), []);
@@ -1144,6 +1156,33 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
   const [waitlistListError, setWaitlistListError] = useState('');
   const [waitlistAction, setWaitlistAction] = useState(null);
   const [capacityUnavailable, setCapacityUnavailable] = useState(false);
+
+  const handleOpenChat = () => {
+    setChatOpen(true);
+    void onRetryMessages?.();
+  };
+
+  useEffect(() => {
+    if (
+      !chatOpen ||
+      match.backendOwned !== true ||
+      messagesLoading ||
+      olderMessagesLoading ||
+      typeof onRefreshMessages !== 'function'
+    ) {
+      return undefined;
+    }
+    const interval = globalThis.setInterval(() => {
+      void onRefreshMessages();
+    }, 5_000);
+    return () => globalThis.clearInterval(interval);
+  }, [
+    chatOpen,
+    match.backendOwned,
+    messagesLoading,
+    olderMessagesLoading,
+    onRefreshMessages,
+  ]);
 
   const refreshWaitlist = useCallback(async () => {
     const requestId = ++waitlistLoadRef.current;
@@ -1369,6 +1408,11 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
   // Join guard
   const isParticipant = isOwner || (match.participants ?? []).includes(currentUser.id)
     || allFilled.some(player => player?.id === currentUser.id);
+  const canUseChat = supportsMatchChat(
+    isParticipant,
+    onRetryMessages,
+    onSendMessage,
+  );
   const pendingInvitation = incomingInvitation?.match_id === match.id ? incomingInvitation : null;
   const pendingInvitationId = pendingInvitation?.invitation_id;
   const acceptingInvitation = pendingInvitationId
@@ -2094,9 +2138,14 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
           />
         )}
         
-        {usesLegacyMatchExtensions && isParticipant && (
+        {canUseChat && (
           <div className="mb-4">
-            <PadelButton variant="info" fullWidth onClick={() => setChatOpen(true)}>
+            <PadelButton
+              data-testid="match-chat-open-button"
+              variant="info"
+              fullWidth
+              onClick={handleOpenChat}
+            >
               💬 Открыть чат игры
             </PadelButton>
           </div>
@@ -2261,13 +2310,16 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
           onCancel={() => setLevelOverride(null)}
         />
       )}
-      {usesLegacyMatchExtensions && chatOpen && (
+      {canUseChat && chatOpen && (
         <MatchChat
           match={match}
           currentUser={currentUser}
           messages={allMessages.filter(m => (m.matchId ?? m.match_id) === match.id)}
           loading={messagesLoading}
           loadError={messagesLoadError}
+          hasOlderMessages={hasOlderMessages}
+          olderMessagesLoading={olderMessagesLoading}
+          onLoadOlderMessages={onLoadOlderMessages}
           onRetry={onRetryMessages}
           onSendMessage={(text) => onSendMessage(match.id, currentUser, text)}
           onClose={() => setChatOpen(false)}

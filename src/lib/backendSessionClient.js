@@ -15,6 +15,7 @@ const MAX_RESPONSE_BODY_BYTES = 32_768;
 const MAX_PLAYER_SEARCH_RESPONSE_BODY_BYTES = 65_536;
 const MAX_MATCH_FEED_RESPONSE_BODY_BYTES = 1_048_576;
 const MAX_MATCH_INVITATION_RESPONSE_BODY_BYTES = 524_288;
+const MAX_MATCH_CHAT_RESPONSE_BODY_BYTES = 524_288;
 
 const BODY_ABORTED = Symbol('backend-session-body-aborted');
 const BODY_INVALID = Symbol('backend-session-body-invalid');
@@ -67,6 +68,7 @@ const MATCH_INVITATION_STATUSES = Object.freeze([
   'declined',
   'cancelled',
 ]);
+const MATCH_CHAT_MAX_BODY_CODE_POINTS = 2_000;
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f-\u009f]/u;
 const LEGACY_PROFILE_KEYS = Object.freeze([
   'accountId',
@@ -225,6 +227,55 @@ function isBackendMatchPublicPlayer(value, slotRequired = false) {
     return false;
   }
   return !slotRequired || [2, 3, 4].includes(value.slotNumber);
+}
+
+function isBackendMatchMessageSender(value) {
+  return (
+    isBackendMatchPublicPlayer(value) ||
+    (
+      isPlainObject(value) &&
+      hasExactKeys(Object.keys(value).sort(), ['unavailable']) &&
+      value.unavailable === true
+    )
+  );
+}
+
+function isCanonicalMatchMessageBody(value) {
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    [...value].length <= MATCH_CHAT_MAX_BODY_CODE_POINTS &&
+    value.trim() === value &&
+    !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/u.test(value)
+  );
+}
+
+export function isBackendMatchMessage(value, expectedMatchId) {
+  return (
+    isPlainObject(value) &&
+    hasExactKeys(
+      Object.keys(value).sort(),
+      ['body', 'createdAt', 'matchId', 'messageId', 'sender'],
+    ) &&
+    isMatchId(value.messageId) &&
+    isMatchId(value.matchId) &&
+    (expectedMatchId === undefined || value.matchId === expectedMatchId) &&
+    isBackendMatchMessageSender(value.sender) &&
+    isCanonicalMatchMessageBody(value.body) &&
+    isUnixEpochSeconds(value.createdAt)
+  );
+}
+
+function isBackendMatchMessageCursor(value) {
+  return (
+    isPlainObject(value) &&
+    hasExactKeys(
+      Object.keys(value).sort(),
+      ['createdAt', 'messageId'],
+    ) &&
+    isUnixEpochSeconds(value.createdAt) &&
+    isMatchId(value.messageId)
+  );
 }
 
 function isBackendPublicPlayer(value) {
@@ -1015,6 +1066,80 @@ function acceptedMatchInvitationSuccess(body) {
   });
 }
 
+function freezeBackendMatchMessage(message) {
+  return Object.freeze({
+    ...message,
+    sender: Object.freeze({ ...message.sender }),
+  });
+}
+
+function matchMessageListSuccess(
+  body,
+  expectedMatchId,
+  maximumLength = 50,
+) {
+  if (
+    !isPlainObject(body) ||
+    !hasOnlyAllowedKeys(body, ['messages'], ['nextCursor']) ||
+    !Array.isArray(body.messages) ||
+    body.messages.length > maximumLength ||
+    !body.messages.every((message) =>
+      isBackendMatchMessage(message, expectedMatchId)) ||
+    new Set(body.messages.map(({ messageId }) => messageId)).size !==
+      body.messages.length ||
+    (
+      body.nextCursor !== undefined &&
+      !isBackendMatchMessageCursor(body.nextCursor)
+    )
+  ) {
+    return null;
+  }
+  for (let index = 1; index < body.messages.length; index += 1) {
+    const previous = body.messages[index - 1];
+    const current = body.messages[index];
+    if (
+      previous.createdAt < current.createdAt ||
+      (
+        previous.createdAt === current.createdAt &&
+        previous.messageId <= current.messageId
+      )
+    ) {
+      return null;
+    }
+  }
+  if (
+    body.nextCursor !== undefined &&
+    (
+      body.messages.length === 0 ||
+      body.nextCursor.createdAt !== body.messages.at(-1).createdAt ||
+      body.nextCursor.messageId !== body.messages.at(-1).messageId
+    )
+  ) {
+    return null;
+  }
+  return frozen('messages_loaded', {
+    messages: Object.freeze(
+      body.messages.map(freezeBackendMatchMessage),
+    ),
+    ...(body.nextCursor === undefined
+      ? {}
+      : { nextCursor: Object.freeze({ ...body.nextCursor }) }),
+  });
+}
+
+function matchMessageSendSuccess(body, expectedMatchId) {
+  if (
+    !isPlainObject(body) ||
+    !hasExactKeys(Object.keys(body).sort(), ['message']) ||
+    !isBackendMatchMessage(body.message, expectedMatchId)
+  ) {
+    return null;
+  }
+  return frozen('message_sent', {
+    message: freezeBackendMatchMessage(body.message),
+  });
+}
+
 function classifyRefresh(status, body) {
   const code = exactPublicCode(body);
   if (status === 401 && code === 'session_expired') {
@@ -1130,6 +1255,22 @@ function classifyMatchInvitation(status, body) {
   });
 }
 
+function classifyMatchChat(status, body) {
+  const code = exactPublicCode(body);
+  if (status === 401 && code === 'session_invalid') {
+    return frozen('rejected', { reason: 'invalid' });
+  }
+  const reasons = Object.freeze({
+    match_chat_invalid_request: 'invalid_request',
+    match_chat_not_found: 'match_not_found',
+    match_chat_closed: 'match_closed',
+    match_chat_request_conflict: 'request_conflict',
+  });
+  return frozen('rejected', {
+    reason: reasons[code] ?? 'internal_error',
+  });
+}
+
 export function createBackendSessionClient(dependencies = {}) {
   const fetchImpl = dependencies.fetchImpl ?? globalThis.fetch?.bind(globalThis);
   const cryptoImpl = dependencies.cryptoImpl ?? globalThis.crypto;
@@ -1170,6 +1311,8 @@ export function createBackendSessionClient(dependencies = {}) {
       const isMatchOperation = operation.startsWith('match_');
       const isMatchInvitationOperation =
         operation.startsWith('match_invitation_');
+      const isMatchChatOperation =
+        operation.startsWith('match_chat_');
       const isPlayerSearchOperation = operation === 'player_search';
       const isReadOnly =
         operation === 'authenticate' ||
@@ -1178,10 +1321,13 @@ export function createBackendSessionClient(dependencies = {}) {
         operation === 'match_detail' ||
         operation === 'player_search' ||
         operation === 'match_invitation_incoming' ||
-        operation === 'match_invitation_outgoing';
+        operation === 'match_invitation_outgoing' ||
+        operation === 'match_chat_list';
       const isProfileOperation =
         operation === 'profile' || operation === 'profile_update';
       const matchId = operationPayload?.matchId;
+      const matchMessagesPath =
+        `${MATCHES_PATH}/${encodeURIComponent(matchId)}/messages`;
       const url =
         operation === 'refresh'
           ? REFRESH_PATH
@@ -1207,8 +1353,16 @@ export function createBackendSessionClient(dependencies = {}) {
                         ? `${MATCH_INVITATIONS_PATH}/${encodeURIComponent(operationPayload.invitationId)}/accept`
                         : operation === 'match_invitation_decline'
                           ? `${MATCH_INVITATIONS_PATH}/${encodeURIComponent(operationPayload.invitationId)}/decline`
-                          : operation === 'match_invitation_cancel'
-                            ? `${MATCH_INVITATIONS_PATH}/${encodeURIComponent(operationPayload.invitationId)}/cancel`
+                    : operation === 'match_invitation_cancel'
+                      ? `${MATCH_INVITATIONS_PATH}/${encodeURIComponent(operationPayload.invitationId)}/cancel`
+                      : operation === 'match_chat_list'
+                        ? `${matchMessagesPath}?limit=${operationPayload.limit}${
+                            operationPayload.before === undefined
+                              ? ''
+                              : `&beforeCreatedAt=${operationPayload.before.createdAt}&beforeMessageId=${encodeURIComponent(operationPayload.before.messageId)}`
+                          }`
+                        : operation === 'match_chat_send'
+                          ? matchMessagesPath
                     : operation === 'match_join'
                       ? `${MATCHES_PATH}/${encodeURIComponent(matchId)}/join`
                       : operation === 'match_leave'
@@ -1247,7 +1401,12 @@ export function createBackendSessionClient(dependencies = {}) {
                             playerId: operationPayload.playerId,
                             slotNumber: operationPayload.slotNumber,
                           }
-                      : { requestKey },
+                        : operation === 'match_chat_send'
+                          ? {
+                              requestKey,
+                              body: operationPayload.body,
+                            }
+                        : { requestKey },
                 ),
               }),
           cache: 'no-store',
@@ -1270,6 +1429,8 @@ export function createBackendSessionClient(dependencies = {}) {
             ? MAX_PLAYER_SEARCH_RESPONSE_BODY_BYTES
             : isMatchInvitationOperation
               ? MAX_MATCH_INVITATION_RESPONSE_BODY_BYTES
+              : isMatchChatOperation
+                ? MAX_MATCH_CHAT_RESPONSE_BODY_BYTES
               : MAX_RESPONSE_BODY_BYTES,
       );
       if (operation === 'authenticate' && response.status === 200) {
@@ -1359,6 +1520,28 @@ export function createBackendSessionClient(dependencies = {}) {
           : frozen('malformed_response');
       }
       if (
+        operation === 'match_chat_list' &&
+        response.status === 200
+      ) {
+        const result = matchMessageListSuccess(
+          body,
+          matchId,
+          operationPayload.limit,
+        );
+        return result
+          ? frozen('success', { result })
+          : frozen('malformed_response');
+      }
+      if (
+        operation === 'match_chat_send' &&
+        response.status === 201
+      ) {
+        const result = matchMessageSendSuccess(body, matchId);
+        return result
+          ? frozen('success', { result })
+          : frozen('malformed_response');
+      }
+      if (
         (operation === 'match_detail' || operation === 'match_create') &&
         response.status === (
           operation === 'match_create' ? 201 : 200
@@ -1407,6 +1590,8 @@ export function createBackendSessionClient(dependencies = {}) {
               ? 'player_search_unavailable'
               : isMatchInvitationOperation
                 ? 'match_invitation_service_unavailable'
+                : isMatchChatOperation
+                  ? 'match_chat_service_unavailable'
             : isMatchOperation
               ? 'match_service_unavailable'
               : 'session_service_unavailable'
@@ -1426,6 +1611,8 @@ export function createBackendSessionClient(dependencies = {}) {
                   ? classifyPlayerSearch(response.status, body)
                   : isMatchInvitationOperation
                     ? classifyMatchInvitation(response.status, body)
+                    : isMatchChatOperation
+                      ? classifyMatchChat(response.status, body)
                 : isMatchOperation
                   ? classifyMatch(response.status, body)
                   : classifyAuthentication(response.status, body),
@@ -1500,7 +1687,23 @@ export function createBackendSessionClient(dependencies = {}) {
       ((operation === 'match_invitation_accept' ||
         operation === 'match_invitation_decline' ||
         operation === 'match_invitation_cancel') &&
-        !isMatchId(operationPayload?.invitationId))
+        !isMatchId(operationPayload?.invitationId)) ||
+      (operation === 'match_chat_list' &&
+        (
+          !isMatchId(operationPayload?.matchId) ||
+          !Number.isInteger(operationPayload?.limit) ||
+          operationPayload.limit < 1 ||
+          operationPayload.limit > 50 ||
+          (
+            operationPayload.before !== undefined &&
+            !isBackendMatchMessageCursor(operationPayload.before)
+          )
+        )) ||
+      (operation === 'match_chat_send' &&
+        (
+          !isMatchId(operationPayload?.matchId) ||
+          !isCanonicalMatchMessageBody(operationPayload?.body)
+        ))
     ) {
       return frozen('rejected', { reason: 'invalid_request' });
     }
@@ -1514,7 +1717,8 @@ export function createBackendSessionClient(dependencies = {}) {
       operation === 'match_invitation_create' ||
       operation === 'match_invitation_accept' ||
       operation === 'match_invitation_decline' ||
-      operation === 'match_invitation_cancel';
+      operation === 'match_invitation_cancel' ||
+      operation === 'match_chat_send';
     const requestKey =
       requiresRequestKey ? createRequestKey(cryptoImpl) : null;
     if (requiresRequestKey && !requestKey) {
@@ -1629,6 +1833,25 @@ export function createBackendSessionClient(dependencies = {}) {
         credential,
         options,
         { invitationId },
+      ),
+    listMatchMessages: (
+      credential,
+      matchId,
+      limit = 50,
+      before,
+      options,
+    ) => execute(
+      'match_chat_list',
+      credential,
+      options,
+      { matchId, limit, before },
+    ),
+    sendMatchMessage: (credential, matchId, body, options) =>
+      execute(
+        'match_chat_send',
+        credential,
+        options,
+        { matchId, body },
       ),
     refresh: (credential, options) =>
       execute('refresh', credential, options),
