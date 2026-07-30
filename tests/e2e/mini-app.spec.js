@@ -1365,6 +1365,66 @@ test('OPEN-MATCH organizer manages but cannot self-join or leave', async ({ page
   await expect(page.getByTestId('player-slot-remove-action')).toHaveCount(0);
 });
 
+test('OPEN-MATCH editing changes only title and comment', async ({ page }) => {
+  const match = createOpenJoinableMatch({
+    id: 'owner-editable-match',
+    owner_id: testUser.id,
+    ownerId: testUser.id,
+    title: 'Исходное название',
+    description: 'Исходный комментарий',
+    date: '20 июля',
+    dateISO: '2099-07-20',
+    time: '19:00',
+    duration: 1.5,
+    courtType: 'panoramic',
+    filledSlots: [{
+      id: testUser.id,
+      firstName: 'QA',
+      lastName: 'Player',
+      ratingIdx: 3,
+      numericRating: 3.4,
+      isVerified: true,
+      isOrganizer: true,
+    }],
+    participants: [testUser.id],
+  });
+  const state = await mockSupabase(page, { matches: [match] });
+  await mockTelegram(page);
+  await setAuthenticatedSession(page);
+  await page.goto('/');
+  await openMatchesTab(page);
+  await page.getByText(match.title, { exact: true }).click();
+
+  await page.getByRole('button', { name: 'Редактировать', exact: true }).click();
+  const editSheet = page.locator('.match-edit-sheet');
+  await expect(editSheet.getByText('Название матча', { exact: true })).toBeVisible();
+  await expect(editSheet.getByText('Комментарий', { exact: true })).toBeVisible();
+  await expect(editSheet.getByText('Дата и время', { exact: true })).toHaveCount(0);
+  await expect(editSheet.getByText('Параметры корта', { exact: true })).toHaveCount(0);
+  await expect(editSheet.locator('input[type="date"]')).toHaveCount(0);
+
+  await editSheet.locator('input').fill('Новое название');
+  await editSheet.locator('textarea').fill('Новый комментарий');
+  await editSheet.getByRole('button', { name: 'Сохранить' }).click();
+
+  await expect.poll(() => state.matchUpdates).toHaveLength(1);
+  expect(state.matchUpdates[0]).toMatchObject({
+    id: match.id,
+    body: {
+      title: 'Новое название',
+      description: 'Новый комментарий',
+    },
+  });
+  expect(Object.keys(state.matchUpdates[0].body).sort()).toEqual([
+    'description',
+    'title',
+  ]);
+  await expect(page.getByText('Новое название', { exact: true })).toBeVisible();
+  await expect(page.getByText('Новый комментарий', { exact: true })).toBeVisible();
+  await expect(page.getByText('Дата: 20 июля', { exact: true })).toBeVisible();
+  await expect(page.getByText('Время: 19:00', { exact: true })).toBeVisible();
+});
+
 test('PLAYER-SEARCH finds names case-insensitively, partially and without duplicates', async ({ page }) => {
   const profileRow = (id, firstName, lastName, username) => ({
     id,

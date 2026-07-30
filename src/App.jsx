@@ -1310,20 +1310,9 @@ const handleBookSlot = async (booking) => {
   };
 
   const handleUpdateMatch = async (matchId, updates) => {
-    const dateISO = updates.dateISO ?? updates.date;
-    const dateLabel = dateISO
-      ? new Date(dateISO).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }).replace(' г.', '')
-      : undefined;
-
     const payload = {
-      date: dateLabel,
-      dateISO,
-      time: updates.time,
-      duration: updates.duration,
-      courtType: updates.courtType,
       title: updates.title,
       description: updates.description,
-      isPrime: isPrimeTime(updates?.time || '00:00', dateISO),
     };
 
     logDevBookingMatchUpdate(matchId, 'update:edit', payload);

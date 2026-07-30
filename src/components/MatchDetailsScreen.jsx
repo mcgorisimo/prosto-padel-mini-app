@@ -1,8 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { getAvailableBots, getTestBots } from '../lib/testSeed';
-import { formatParticipationPrice, getCourtCapacity, getParticipationPrice, getPerPlayerPrice, fmtPrice as fmtPriceLib, isPrimeTime } from '../lib/pricing';
-import { HOURS, WORKING_HOURS, BOOKING_DURATIONS } from '../lib/booking';
-import { getMoscowDateISO, hasMoscowSlotStarted } from '../lib/moscowDateTime';
+import { formatParticipationPrice, getCourtCapacity, getParticipationPrice, isPrimeTime } from '../lib/pricing';
 import FinishMatchModal from './FinishMatchModal';
 import PadelCard from './ui/PadelCard';
 import MatchChat from './MatchChat';
@@ -38,26 +36,7 @@ const C = {
   loss:    '#FF6F61',
 };
 
-const TIME_SLOTS = HOURS;
-
 const PLAYER_COLORS = ['#FFD700', '#4285F4', '#34A853', '#EA4335'];
-
-const toMin = (time) => {
-  if (typeof time !== 'string' || !time.includes(':')) return 0;
-  let [h, m] = time.split(':').map(Number);
-  if (h < WORKING_HOURS.startHour) h += 24;
-  return h * 60 + m;
-};
-
-const maxDur = (time) => {
-  const remaining = (WORKING_HOURS.endHour * 60 - toMin(time)) / 60;
-  return Math.max(0.5, Math.floor(remaining * 2) / 2);
-};
-
-const calcPerPlayer = (time, duration, courtType, dateISO) =>
-  getPerPlayerPrice(time, duration, courtType, dateISO);
-
-const fmtPrice = fmtPriceLib;
 
 export function supportsLegacyMatchExtensions(match) {
   return match?.backendOwned !== true;
@@ -408,29 +387,9 @@ function PlayerSlot({ player, onTap, slotIndex = 0, onSlotClick, ratingChange })
 
 // ─── Edit Panel (bottom sheet) ────────────────────────────────────────────────
 
-function EditPanel({ initDate, initTime, initCourt, initDuration, initTitle, initDescription, onSave, onClose }) {
-  const [editDate,  setEditDate]  = useState(initDate);
-  const [editTime,  setEditTime]  = useState(initTime);
-  const [editCourt, setEditCourt] = useState(initCourt);
-  const [editDur,   setEditDur]   = useState(initDuration);
+function EditPanel({ initTitle, initDescription, onSave, onClose }) {
   const [editTitle, setEditTitle] = useState(initTitle || '');
   const [editDesc,  setEditDesc]  = useState(initDescription || '');
-  const [timeError, setTimeError] = useState('');
-
-  useEffect(() => {
-    if (hasMoscowSlotStarted(editDate, editTime)) {
-      setTimeError('Нельзя забронировать время в прошлом');
-    } else {
-      setTimeError('');
-    }
-  }, [editDate, editTime]);
-
-  const maxD   = maxDur(editTime);
-  const safeDur = Math.min(editDur, maxD);
-  const isP    = isPrimeTime(editTime, editDate);
-  const newPPl = calcPerPlayer(editTime, safeDur, editCourt, editDate);
-  // Минимальная аренда — 1 час
-  const DURATION_OPTS = BOOKING_DURATIONS.filter(d => d <= maxD);
 
   return (
     <BottomSheet onClose={onClose} variant="edit">
@@ -455,84 +414,10 @@ function EditPanel({ initDate, initTime, initCourt, initDuration, initTitle, ini
           />
         </div>
 
-        <div style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(245,241,232,0.14)', borderRadius: '20px', padding: '14px' }}>
-          <div style={{ fontSize: '10px', fontWeight: 800, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: '10px' }}>Дата и время</div>
-          <input type="date" value={editDate} min={getMoscowDateISO()} onChange={e => setEditDate(e.target.value)} style={{
-            width: '100%', padding: '13px 14px', borderRadius: '14px', background: '#0B2117', color: C.text, border: '1px solid rgba(245,241,232,0.18)', fontSize: '15px', marginBottom: '12px', boxSizing: 'border-box', outline: 'none'
-          }} />
-          <div className="flex gap-[8px] overflow-x-auto pb-2 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]" style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-x' }}>
-            {TIME_SLOTS.map(slot => {
-              const active = slot === editTime;
-              const slotP  = isPrimeTime(slot, editDate);
-              const isPast = hasMoscowSlotStarted(editDate, slot);
-              return (
-                <button key={slot} onClick={() => !isPast && setEditTime(slot)} disabled={isPast} style={{
-                  flexShrink: 0, padding: '9px 12px', borderRadius: '14px',
-                  background: active ? 'rgba(216,243,74,0.14)' : 'rgba(255,255,255,0.045)',
-                  color: active ? C.gold : (slotP ? C.gold : C.muted),
-                  border: active ? '1px solid rgba(216,243,74,0.34)' : `1px solid ${C.border}`,
-                  fontSize: '13px', fontWeight: active ? 800 : 600,
-                  ...(isPast ? { opacity: 0.25, cursor: 'not-allowed', pointerEvents: 'none', filter: 'grayscale(1)' } : { cursor: 'pointer' }),
-                }}>{slot}</button>
-              );
-            })}
-          </div>
-        </div>
-
-        <div style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(245,241,232,0.14)', borderRadius: '20px', padding: '14px' }}>
-          <div style={{ fontSize: '10px', fontWeight: 800, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: '10px' }}>Параметры корта</div>
-          <div style={{ display: 'flex', gap: '8px', marginBottom: '12px', flexWrap: 'wrap' }}>
-            {DURATION_OPTS.map(d => {
-              const active = safeDur === d;
-              return (
-                <button key={d} onClick={() => setEditDur(d)} style={{
-                  flex: '1 1 84px', padding: '10px 12px', borderRadius: '14px',
-                  background: active ? 'rgba(216,243,74,0.14)' : 'rgba(255,255,255,0.045)',
-                  color: active ? C.gold : C.muted,
-                  border: active ? '1px solid rgba(216,243,74,0.34)' : `1px solid ${C.border}`,
-                  fontSize: '13px', fontWeight: active ? 800 : 600, cursor: 'pointer',
-                }}>{d === 0.5 ? '30 мин' : `${d} ч`}</button>
-              );
-            })}
-          </div>
-          <div style={{ display: 'flex', gap: '8px' }}>
-            {[['panoramic', 'Ультрапанорама']].map(([val, label]) => {
-              const active = editCourt === val;
-              return (
-                <button key={val} onClick={() => setEditCourt(val)} style={{
-                  flex: 1, padding: '12px 10px', borderRadius: '14px',
-                  background: active ? 'rgba(216,243,74,0.12)' : 'rgba(255,255,255,0.045)',
-                  color: active ? C.gold : C.muted,
-                  border: active ? '1px solid rgba(216,243,74,0.32)' : `1px solid ${C.border}`,
-                  fontSize: '13px', fontWeight: active ? 800 : 600, cursor: 'pointer',
-                }}>{label}</button>
-              );
-            })}
-          </div>
-        </div>
-
-        <div style={{
-          background: 'rgba(216,243,74,0.06)',
-          borderRadius: '18px', padding: '14px 16px',
-          border: '1px solid rgba(216,243,74,0.18)',
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px',
-        }}>
-          <div>
-            <div style={{ color: C.gold, fontSize: '22px', fontWeight: 850, lineHeight: 1 }}>{fmtPrice(newPPl)}</div>
-            <div style={{ color: C.muted, fontSize: '11px', marginTop: '3px' }}>новая цена / участник</div>
-          </div>
-          {isP && <div style={{ color: C.gold, fontSize: '12px', fontWeight: 700 }}>Тариф выше базового</div>}
-        </div>
-
-        {timeError && (
-          <div style={{ color: C.loss, fontSize: '12px', textAlign: 'center' }}>
-            {timeError}
-          </div>
-        )}
       </div>
 
       <div style={{ display: 'flex', gap: '8px', marginTop: '18px' }}>
-        <button onClick={() => onSave({ date: editDate, time: editTime, courtType: editCourt, duration: safeDur, title: editTitle, description: editDesc })} disabled={!!timeError} style={{ flex: 1, padding: '15px', background: 'rgba(216,243,74,0.12)', color: C.gold, border: '1px solid rgba(216,243,74,0.32)', borderRadius: '16px', fontSize: '15px', fontWeight: 800, cursor: 'pointer', opacity: timeError ? 0.5 : 1 }}>
+        <button onClick={() => onSave({ title: editTitle, description: editDesc })} style={{ flex: 1, padding: '15px', background: 'rgba(216,243,74,0.12)', color: C.gold, border: '1px solid rgba(216,243,74,0.32)', borderRadius: '16px', fontSize: '15px', fontWeight: 800, cursor: 'pointer' }}>
           Сохранить
         </button>
         <button onClick={onClose} style={{ padding: '15px 20px', background: 'transparent', color: C.muted, border: `1px solid ${C.border}`, borderRadius: '16px', fontSize: '15px', cursor: 'pointer' }}>
@@ -1231,10 +1116,6 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
   }, []);
 
   // Owner-editable fields (null = use original from match prop)
-  const [localDate, setLocalDate] = useState(null);
-  const [localTime,  setLocalTime]  = useState(null);
-  const [localCourt, setLocalCourt] = useState(null);
-  const [localDur,   setLocalDur]   = useState(null);
   const [localSlots, setLocalSlots] = useState(null);
   const [localTitle, setLocalTitle] = useState(null);
   const [localDesc,  setLocalDesc]  = useState(null);
@@ -1262,12 +1143,11 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
   const isScoreConfirmed = scoreStatus === 'confirmed';
   const ratingChanges = match.ratingChanges ?? match.rating_changes ?? {};
 
-  // Effective values — local overrides original when owner edits
-  const dateISO   = localDate  ?? origDateISO;
-  const time      = localTime  ?? origTime;
-  const courtType = localCourt ?? origCourt;
+  const dateISO   = origDateISO;
+  const time      = origTime;
+  const courtType = origCourt;
   const courtName = origCourtName;
-  const duration  = localDur   ?? origDuration;
+  const duration  = origDuration;
   const title     = localTitle ?? origTitle;
   const description = localDesc ?? origDescription;
 
@@ -1614,20 +1494,12 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
     }
   };
   
-  const handleEditSave = async ({ date: dt, time: t, courtType: ct, duration: d, title: newTitle, description: newDesc }) => {
+  const handleEditSave = async ({ title: newTitle, description: newDesc }) => {
     try {
       const updatedMatch = await onUpdate?.(match.id, {
-        dateISO: dt,
-        time: t,
-        courtType: ct,
-        duration: d,
         title: newTitle,
         description: newDesc,
       });
-      setLocalDate(updatedMatch?.dateISO ?? dt);
-      setLocalTime(updatedMatch?.time ?? t);
-      setLocalCourt(updatedMatch?.courtType ?? ct);
-      setLocalDur(updatedMatch?.duration ?? d);
       setLocalTitle(updatedMatch?.title ?? newTitle);
       setLocalDesc(updatedMatch?.description ?? newDesc);
       setEditSheet(false);
@@ -2293,7 +2165,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
           removeLabel={canLeaveViewedPlayer ? 'Выйти из матча' : 'Убрать из матча'}
         />
       )}
-      {editSheet   && canEditMatch && <EditPanel initDate={dateISO} initTime={time} initCourt={courtType} initDuration={duration} initTitle={title} initDescription={description} onSave={handleEditSave} onClose={() => setEditSheet(false)} />}
+      {editSheet   && canEditMatch && <EditPanel initTitle={title} initDescription={description} onSave={handleEditSave} onClose={() => setEditSheet(false)} />}
       {cancelSheet && canEditMatch && <CancelSheet onConfirm={handleCancelConfirm} onClose={() => setCancelSheet(false)} />}
       {kickTarget  && canEditMatch && <KickConfirm player={kickTarget} onConfirm={handleKickConfirm} onCancel={() => setKickTarget(null)} />}
       {leaveTarget && (
