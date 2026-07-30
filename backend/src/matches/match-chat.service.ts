@@ -8,6 +8,7 @@ import {
   encodeLengthPrefixedUtf8,
   uuidV5FromParts,
 } from '../auth/crypto-encoding';
+import { isUserGeneratedTextAllowed } from '../common/content-moderation';
 import {
   MatchChatPersistenceError,
   MatchChatRepository,
@@ -286,6 +287,9 @@ export class MatchChatService {
       !isCanonicalMatchMessageBody(input.request.body)
     ) {
       return rejected('invalid_request');
+    }
+    if (!isUserGeneratedTextAllowed(input.request.body)) {
+      return rejected('content_not_allowed');
     }
     const parts = [
       input.request.requestKey,

@@ -50,6 +50,7 @@ export interface MatchMessageResponse {
 
 export type MatchChatApiRejection =
   | 'invalid_request'
+  | 'content_not_allowed'
   | 'match_not_found'
   | 'match_closed'
   | 'request_conflict'

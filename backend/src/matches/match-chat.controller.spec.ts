@@ -235,6 +235,11 @@ describe('MatchChatController', () => {
   });
 
   it.each([
+    [
+      'content_not_allowed',
+      422,
+      'match_chat_content_not_allowed',
+    ],
     ['match_not_found', 404, 'match_chat_not_found'],
     ['match_closed', 409, 'match_chat_closed'],
     ['request_conflict', 409, 'match_chat_request_conflict'],
@@ -260,6 +265,8 @@ describe('MatchChatController', () => {
       expect(response.statusCode).toBe(statusCode);
       expect(response.json()).toMatchObject({ statusCode, code });
       expect(JSON.stringify(response.json())).not.toContain(CREDENTIAL);
+      expect(JSON.stringify(response.json())).not.toContain(BODY);
+      expect(JSON.stringify(harness.logs)).not.toContain(BODY);
     },
   );
 });

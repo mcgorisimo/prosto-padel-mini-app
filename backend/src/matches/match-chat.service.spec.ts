@@ -331,4 +331,22 @@ describe('MatchChatService', () => {
     });
     expect(test.chat.send).not.toHaveBeenCalled();
   });
+
+  it.each([
+    'х у й',
+    'f.u.c.k',
+  ])('rejects disallowed language before persistence', async (body) => {
+    const test = harness();
+    await expect(
+      test.service.send({
+        ...actorInput(),
+        request: { requestKey: REQUEST_KEY, body },
+      }),
+    ).resolves.toEqual({
+      outcome: 'rejected',
+      reason: 'content_not_allowed',
+    });
+    expect(test.chat.send).not.toHaveBeenCalled();
+    expect(test.chat.readSenders).not.toHaveBeenCalled();
+  });
 });

@@ -48,6 +48,11 @@ function rejection(reason: MatchChatApiRejection): HttpException {
       'match_chat_invalid_request',
       'Match chat request is invalid',
     ],
+    content_not_allowed: [
+      HttpStatus.UNPROCESSABLE_ENTITY,
+      'match_chat_content_not_allowed',
+      'Match chat message contains disallowed language',
+    ],
     match_not_found: [
       HttpStatus.NOT_FOUND,
       'match_chat_not_found',
