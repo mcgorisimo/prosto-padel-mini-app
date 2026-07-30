@@ -16,6 +16,7 @@ import { PostgresAccountStatusReader } from '../database/postgres-account-status
 import { PostgresAuthenticationOperationTerminalRepository } from '../database/postgres-authentication-operation-terminal.repository';
 import { PostgresExternalIdentityResolutionRepository } from '../database/postgres-external-identity.repository';
 import { PostgresInitialSessionRepository } from '../database/postgres-initial-session.repository';
+import { PostgresMatchChatRepository } from '../database/postgres-match-chat.repository';
 import { PostgresMatchInvitationRepository } from '../database/postgres-match-invitation.repository';
 import { PostgresMatchRepository } from '../database/postgres-match.repository';
 import { PostgresPlayerAccountProvisioningRepository } from '../database/postgres-player-account-provisioning.repository';
@@ -31,6 +32,8 @@ import { PostgresTelegramAuthenticationOperationRepository } from '../database/p
 import { PostgresTransactionRunner } from '../database/postgres-transaction';
 import { PostgresTransactionExecutorAdapter } from '../database/postgres-transaction-executor.adapter';
 import { MatchApiService } from '../matches/match-api.service';
+import { MatchChatController } from '../matches/match-chat.controller';
+import { MatchChatService } from '../matches/match-chat.service';
 import { MATCH_COURT_CATALOG } from '../matches/match-court-catalog';
 import { MatchController } from '../matches/match.controller';
 import { MatchInvitationController } from '../matches/match-invitation.controller';
@@ -258,6 +261,16 @@ function getMatchInvitationControllerService(
   ).service;
 }
 
+function getMatchChatControllerService(
+  controller: MatchChatController,
+): MatchChatService {
+  return (
+    controller as unknown as {
+      readonly service: MatchChatService;
+    }
+  ).service;
+}
+
 function expectProviderNotRegistered(
   moduleRef: TestingModule,
   token: string | symbol | Type<unknown>,
@@ -390,6 +403,19 @@ describe('AuthModule Telegram login wiring', () => {
     expect(
       moduleRef.get(PostgresMatchInvitationRepository).matches,
     ).toBe(matchRepository);
+    const matchChat = moduleRef.get(MatchChatService);
+    expect(matchChat.dependencies.transactions).toBe(
+      moduleRef.get(PostgresTransactionExecutorAdapter),
+    );
+    expect(matchChat.dependencies.chat).toBe(
+      moduleRef.get(PostgresMatchChatRepository),
+    );
+    expect(matchChat.dependencies.clock).toBe(
+      moduleRef.get(SESSION_AUTHENTICATION_CLOCK),
+    );
+    expect(
+      getMatchChatControllerService(moduleRef.get(MatchChatController)),
+    ).toBe(matchChat);
     expect(() => moduleRef.get(SESSION_AUTHENTICATION_CLOCK)).not.toThrow();
     for (const token of [
       TelegramLoginService,

@@ -13,6 +13,7 @@ import { PostgresAccountStatusReader } from '../database/postgres-account-status
 import { PostgresAuthenticationOperationTerminalRepository } from '../database/postgres-authentication-operation-terminal.repository';
 import { PostgresExternalIdentityResolutionRepository } from '../database/postgres-external-identity.repository';
 import { PostgresInitialSessionRepository } from '../database/postgres-initial-session.repository';
+import { PostgresMatchChatRepository } from '../database/postgres-match-chat.repository';
 import { PostgresMatchRepository } from '../database/postgres-match.repository';
 import { PostgresMatchInvitationRepository } from '../database/postgres-match-invitation.repository';
 import { PostgresPlayerAccountProvisioningRepository } from '../database/postgres-player-account-provisioning.repository';
@@ -25,6 +26,8 @@ import { PostgresSessionCredentialLifecycleRepository } from '../database/postgr
 import { PostgresTelegramAuthenticationOperationRepository } from '../database/postgres-telegram-authentication-operation.repository';
 import { PostgresTransactionExecutorAdapter } from '../database/postgres-transaction-executor.adapter';
 import { MatchApiService } from '../matches/match-api.service';
+import { MatchChatController } from '../matches/match-chat.controller';
+import { MatchChatService } from '../matches/match-chat.service';
 import { MatchController } from '../matches/match.controller';
 import { MatchInvitationController } from '../matches/match-invitation.controller';
 import { MatchInvitationService } from '../matches/match-invitation.service';
@@ -281,6 +284,18 @@ function createMatchInvitationService(
   });
 }
 
+function createMatchChatService(
+  transactions: PostgresTransactionExecutorAdapter,
+  chat: PostgresMatchChatRepository,
+  clock: SessionAuthenticationClock,
+): MatchChatService {
+  return new MatchChatService({
+    transactions,
+    chat,
+    clock,
+  });
+}
+
 @Module({
   imports: [DatabaseModule],
   controllers: [
@@ -291,12 +306,22 @@ function createMatchInvitationService(
     PublicPlayerProfileController,
     MatchController,
     MatchInvitationController,
+    MatchChatController,
   ],
   providers: [
     TELEGRAM_LOGIN_HTTP_CLOCK_PROVIDER,
     SESSION_LIFECYCLE_HTTP_CLOCK_PROVIDER,
     SESSION_AUTHENTICATION_CLOCK_PROVIDER,
     SessionBearerGuard,
+    {
+      provide: MatchChatService,
+      inject: [
+        PostgresTransactionExecutorAdapter,
+        PostgresMatchChatRepository,
+        SESSION_AUTHENTICATION_CLOCK,
+      ],
+      useFactory: createMatchChatService,
+    },
     {
       provide: MatchInvitationService,
       inject: [
@@ -375,6 +400,7 @@ function createMatchInvitationService(
     PublicPlayerProfileService,
     MatchApiService,
     MatchInvitationService,
+    MatchChatService,
   ],
 })
 export class AuthModule {}
