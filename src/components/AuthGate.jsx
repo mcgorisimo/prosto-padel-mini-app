@@ -24,6 +24,36 @@ const normalizeTelegramUsername = (value) =>
 const isTelegramBackendSuccess = (status) =>
   status === 'authenticated' || status === 'session_restored';
 
+export function createBackendMatchActions(telegramBackendLogin) {
+  if (telegramBackendLogin?.sessionReady !== true) return null;
+
+  return Object.freeze({
+    listMatches: telegramBackendLogin.listMatches,
+    listAccountMatches: telegramBackendLogin.listAccountMatches,
+    loadMatch: telegramBackendLogin.loadMatch,
+    createMatch: telegramBackendLogin.createMatch,
+    joinMatch: telegramBackendLogin.joinMatch,
+    leaveMatch: telegramBackendLogin.leaveMatch,
+    searchPlayers: telegramBackendLogin.searchPlayers,
+    listIncomingMatchInvitations:
+      telegramBackendLogin.listIncomingMatchInvitations,
+    listOutgoingMatchInvitations:
+      telegramBackendLogin.listOutgoingMatchInvitations,
+    createMatchInvitation:
+      telegramBackendLogin.createMatchInvitation,
+    acceptMatchInvitation:
+      telegramBackendLogin.acceptMatchInvitation,
+    declineMatchInvitation:
+      telegramBackendLogin.declineMatchInvitation,
+    cancelMatchInvitation:
+      telegramBackendLogin.cancelMatchInvitation,
+    listMatchMessages:
+      telegramBackendLogin.listMatchMessages,
+    sendMatchMessage:
+      telegramBackendLogin.sendMatchMessage,
+  });
+}
+
 export default function AuthGate() {
   const telegramBackendLogin = useTelegramBackendLogin();
   const [session, setSession] = useState(null);
@@ -138,50 +168,27 @@ export default function AuthGate() {
     return result;
   }, [telegramBackendLogin.updateOwnProfile]);
 
-  const backendMatchActions = useMemo(() => (
-    telegramBackendLogin.sessionReady
-      ? Object.freeze({
-          listMatches: telegramBackendLogin.listMatches,
-          loadMatch: telegramBackendLogin.loadMatch,
-          createMatch: telegramBackendLogin.createMatch,
-          joinMatch: telegramBackendLogin.joinMatch,
-          leaveMatch: telegramBackendLogin.leaveMatch,
-          searchPlayers: telegramBackendLogin.searchPlayers,
-          listIncomingMatchInvitations:
-            telegramBackendLogin.listIncomingMatchInvitations,
-          listOutgoingMatchInvitations:
-            telegramBackendLogin.listOutgoingMatchInvitations,
-          createMatchInvitation:
-            telegramBackendLogin.createMatchInvitation,
-          acceptMatchInvitation:
-            telegramBackendLogin.acceptMatchInvitation,
-          declineMatchInvitation:
-            telegramBackendLogin.declineMatchInvitation,
-          cancelMatchInvitation:
-            telegramBackendLogin.cancelMatchInvitation,
-          listMatchMessages:
-            telegramBackendLogin.listMatchMessages,
-          sendMatchMessage:
-            telegramBackendLogin.sendMatchMessage,
-        })
-      : null
-  ), [
-    telegramBackendLogin.createMatch,
-    telegramBackendLogin.createMatchInvitation,
-    telegramBackendLogin.acceptMatchInvitation,
-    telegramBackendLogin.cancelMatchInvitation,
-    telegramBackendLogin.declineMatchInvitation,
-    telegramBackendLogin.joinMatch,
-    telegramBackendLogin.leaveMatch,
-    telegramBackendLogin.listIncomingMatchInvitations,
-    telegramBackendLogin.listMatches,
-    telegramBackendLogin.listOutgoingMatchInvitations,
-    telegramBackendLogin.listMatchMessages,
-    telegramBackendLogin.loadMatch,
-    telegramBackendLogin.searchPlayers,
-    telegramBackendLogin.sendMatchMessage,
-    telegramBackendLogin.sessionReady,
-  ]);
+  const backendMatchActions = useMemo(
+    () => createBackendMatchActions(telegramBackendLogin),
+    [
+      telegramBackendLogin.createMatch,
+      telegramBackendLogin.createMatchInvitation,
+      telegramBackendLogin.acceptMatchInvitation,
+      telegramBackendLogin.cancelMatchInvitation,
+      telegramBackendLogin.declineMatchInvitation,
+      telegramBackendLogin.joinMatch,
+      telegramBackendLogin.leaveMatch,
+      telegramBackendLogin.listIncomingMatchInvitations,
+      telegramBackendLogin.listAccountMatches,
+      telegramBackendLogin.listMatches,
+      telegramBackendLogin.listOutgoingMatchInvitations,
+      telegramBackendLogin.listMatchMessages,
+      telegramBackendLogin.loadMatch,
+      telegramBackendLogin.searchPlayers,
+      telegramBackendLogin.sendMatchMessage,
+      telegramBackendLogin.sessionReady,
+    ],
+  );
 
   const showToast = (message, variant = 'info') => {
     setToastMessage({ message, variant });

@@ -1522,6 +1522,9 @@ test.describe('backend match credential lifecycle', () => {
         reactDomClientModule.default ?? reactDomClientModule;
       const { supabase } = await import('/src/lib/supabaseClient.js');
       const { default: App } = await import('/src/App.jsx');
+      const { createBackendMatchActions } = await import(
+        '/src/components/AuthGate.jsx'
+      );
 
       const originalSupabase = {
         rpc: supabase.rpc,
@@ -1690,7 +1693,8 @@ test.describe('backend match credential lifecycle', () => {
 
       window.__accountMatchGeneration = 0;
       window.__accountMatchCalls = 0;
-      const backendMatchActions = {
+      const backendMatchActions = createBackendMatchActions({
+        sessionReady: true,
         async listMatches() {
           return {
             outcome: 'matches_loaded',
@@ -1716,7 +1720,7 @@ test.describe('backend match credential lifecycle', () => {
             invitations: [],
           };
         },
-      };
+      });
       const container = document.createElement('div');
       container.dataset.testid = 'backend-home-test-root';
       document.body.append(container);
