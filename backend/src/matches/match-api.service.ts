@@ -810,6 +810,83 @@ export class MatchApiService {
     }
   }
 
+  async listMine(
+    input: ListMatchFeedInput,
+  ): Promise<ListMatchFeedApiResult> {
+    if (
+      !validActor(input) ||
+      !hasExactlyKeys(input, ['accountId', 'role', 'request']) ||
+      !isRecord(input.request) ||
+      !hasExactlyKeys(input.request, ['limit']) ||
+      !Number.isInteger(input.request.limit) ||
+      input.request.limit < 1 ||
+      input.request.limit > 50
+    ) {
+      return rejected('invalid_request');
+    }
+    try {
+      const now = this.dependencies.clock.nowEpochSeconds();
+      if (!isUnixEpochSeconds(now)) {
+        return rejected('internal_failure');
+      }
+      const matches = await this.dependencies.transactions.run(
+        async (transaction) => {
+          const records =
+            await this.dependencies.matches.listAccountFeed(transaction, {
+              accountId: input.accountId,
+              now,
+              limit: input.request.limit,
+            });
+          if (
+            !Array.isArray(records) ||
+            records.length > input.request.limit
+          ) {
+            throw invalidReadModel();
+          }
+          const safeRecords = records.map((record) =>
+            safeFeedRecord(record, now),
+          );
+          if (
+            safeRecords.some((match) => match === undefined) ||
+            new Set(
+              safeRecords.map((match) => match?.matchId),
+            ).size !== safeRecords.length ||
+            safeRecords.some(
+              (match) =>
+                match?.ownerAccountId !== input.accountId &&
+                !match?.participants.some(
+                  (participant) =>
+                    participant.playerId === input.accountId,
+                ),
+            )
+          ) {
+            throw invalidReadModel();
+          }
+          if (safeRecords.length === 0) {
+            return Object.freeze([]) as readonly MatchFeedResponse[];
+          }
+          const typedRecords = safeRecords as MatchFeedRecord[];
+          const players = await readPublicPlayers(
+            this.dependencies.publicProfiles,
+            transaction,
+            typedRecords,
+          );
+          return Object.freeze(
+            typedRecords.map((record) => enrichFeed(record, players)),
+          );
+        },
+      );
+      return Object.freeze({
+        outcome: 'found',
+        matches,
+      });
+    } catch (error) {
+      return rejected(
+        mapPersistenceFailure(error),
+      );
+    }
+  }
+
   async detail(
     input: ReadMatchDetailInput,
   ): Promise<ReadMatchDetailApiResult> {

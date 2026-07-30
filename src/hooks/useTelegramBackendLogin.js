@@ -1003,6 +1003,24 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
     );
   }
 
+  function listAccountMatches(limit = 50) {
+    return runMatchOperation(
+      (credential, signal) =>
+        matches.listAccountMatches(credential, limit, { signal }),
+      (result, principal) =>
+        result?.outcome === 'matches_loaded' &&
+        Array.isArray(result.matches) &&
+        result.matches.every(
+          (match) =>
+            match.ownerAccountId === principal.accountId ||
+            match.participants?.some(
+              (participant) =>
+                participant.playerId === principal.accountId,
+            ),
+        ),
+    );
+  }
+
   function loadMatch(matchId) {
     return runMatchOperation(
       (credential, signal) =>
@@ -1257,6 +1275,7 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
     loadOwnProfile,
     updateOwnProfile,
     listMatches,
+    listAccountMatches,
     loadMatch,
     createMatch,
     joinMatch,
@@ -1329,6 +1348,16 @@ export function useTelegramBackendLogin() {
       }));
     }
     return telegramBackendLoginLifecycle.listMatches(limit);
+  }, []);
+
+  const listAccountMatches = useCallback((limit = 50) => {
+    if (!FEATURE_ENABLED) {
+      return Promise.resolve(Object.freeze({
+        outcome: 'rejected',
+        reason: 'not_authenticated',
+      }));
+    }
+    return telegramBackendLoginLifecycle.listAccountMatches(limit);
   }, []);
 
   const loadMatch = useCallback((matchId) => {
@@ -1503,6 +1532,7 @@ export function useTelegramBackendLogin() {
     loadOwnProfile,
     updateOwnProfile,
     listMatches,
+    listAccountMatches,
     loadMatch,
     createMatch,
     joinMatch,

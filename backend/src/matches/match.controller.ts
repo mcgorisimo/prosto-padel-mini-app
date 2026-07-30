@@ -226,6 +226,35 @@ export class MatchController {
     return Object.freeze({ matches: result.matches });
   }
 
+  @Get('mine')
+  @UseGuards(SessionBearerGuard)
+  async listMine(
+    @Query() query: unknown,
+    @Req() request: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ) {
+    disableCaching(reply);
+    const parsed = readMatchFeedRequest(query);
+    if (parsed === undefined) {
+      throw rejection('invalid_request');
+    }
+    const actor = principal(request);
+    let result;
+    try {
+      result = await this.service.listMine({
+        accountId: actor.accountId,
+        role: actor.role,
+        request: parsed,
+      });
+    } catch {
+      return serviceFailure();
+    }
+    if (result.outcome === 'rejected') {
+      throw rejection(result.reason);
+    }
+    return Object.freeze({ matches: result.matches });
+  }
+
   @Get(':matchId')
   @UseGuards(SessionBearerGuard)
   async detail(

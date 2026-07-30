@@ -11,7 +11,7 @@ const MESSAGE_ID = '77777777-7777-4777-8777-777777777777';
 const OLDER_MESSAGE_ID = '88888888-8888-4888-8888-888888888888';
 
 test.describe('backend match credential lifecycle', () => {
-  test('uses exact no-store contracts for feed, detail, create, join and leave', async ({
+  test('uses exact no-store contracts for public/account feeds, detail, create, join and leave', async ({
     page,
   }) => {
     await page.goto('/');
@@ -133,6 +133,11 @@ test.describe('backend match credential lifecycle', () => {
               status: 200,
             });
           }
+          if (url === '/api/v1/matches/mine?limit=50') {
+            return new Response(JSON.stringify({ matches: [feed] }), {
+              status: 200,
+            });
+          }
           if (url === `/api/v1/matches/${parameters.matchId}`) {
             return new Response(JSON.stringify({ match: detail }), {
               status: 200,
@@ -157,6 +162,7 @@ test.describe('backend match credential lifecycle', () => {
 
       const results = [
         await client.listMatches(parameters.credential, 20),
+        await client.listAccountMatches(parameters.credential, 50),
         await client.readMatch(parameters.credential, parameters.matchId),
         await client.createMatch(parameters.credential, draft),
         await client.joinMatch(parameters.credential, parameters.matchId),
@@ -280,8 +286,9 @@ test.describe('backend match credential lifecycle', () => {
           Object.isFrozen(results[0].matches[0].owner) &&
           Object.isFrozen(results[0].matches[0].participants) &&
           Object.isFrozen(results[0].matches[0].participants[0]) &&
-          Object.isFrozen(results[1].match.owner) &&
-          Object.isFrozen(results[1].match.participants[0]),
+          Object.isFrozen(results[1].matches[0]) &&
+          Object.isFrozen(results[2].match.owner) &&
+          Object.isFrozen(results[2].match.participants[0]),
       };
     }, {
       credential: SYNTHETIC_CREDENTIAL,
@@ -292,6 +299,7 @@ test.describe('backend match credential lifecycle', () => {
     });
 
     expect(summary.outcomes).toEqual([
+      'matches_loaded',
       'matches_loaded',
       'match_loaded',
       'match_created',
@@ -308,6 +316,17 @@ test.describe('backend match credential lifecycle', () => {
     expect(summary.contracts).toEqual([
       {
         url: '/api/v1/matches?limit=20',
+        method: 'GET',
+        bearerMatches: true,
+        contentType: null,
+        cache: 'no-store',
+        credentials: 'omit',
+        redirect: 'error',
+        exactActionBody: true,
+        exactCreateBody: true,
+      },
+      {
+        url: '/api/v1/matches/mine?limit=50',
         method: 'GET',
         bearerMatches: true,
         contentType: null,
@@ -767,6 +786,19 @@ test.describe('backend match credential lifecycle', () => {
               ? { outcome: 'matches_loaded', matches: [] }
               : { outcome: 'rejected', reason: 'invalid' };
           },
+          async listAccountMatches(credential) {
+            credentialMatched =
+              credentialMatched &&
+              credential === parameters.credential;
+            return {
+              outcome: 'matches_loaded',
+              matches: [{
+                matchId: parameters.matchId,
+                ownerAccountId: parameters.accountId,
+                participants: [],
+              }],
+            };
+          },
           async readMatch(credential) {
             credentialMatched =
               credentialMatched &&
@@ -948,6 +980,7 @@ test.describe('backend match credential lifecycle', () => {
 
       const results = [
         await lifecycle.listMatches(),
+        await lifecycle.listAccountMatches(),
         await lifecycle.loadMatch(parameters.matchId),
         await lifecycle.createMatch({}),
         await lifecycle.joinMatch(parameters.matchId),
@@ -1005,6 +1038,7 @@ test.describe('backend match credential lifecycle', () => {
     expect(summary).toEqual({
       credentialMatched: true,
       outcomes: [
+        'matches_loaded',
         'matches_loaded',
         'match_loaded',
         'match_created',
@@ -1475,6 +1509,309 @@ test.describe('backend match credential lifecycle', () => {
     await page.evaluate(() => window.__backendChatUiUnmount());
   });
 
+  test('renders account-scoped Home matches and preserves legacy private bookings', async ({
+    page,
+  }) => {
+    await page.goto('/');
+
+    await page.evaluate(async (parameters) => {
+      const reactModule = await import('/@id/react');
+      const React = reactModule.default ?? reactModule;
+      const reactDomClientModule = await import('/@id/react-dom/client');
+      const { createRoot } =
+        reactDomClientModule.default ?? reactDomClientModule;
+      const { supabase } = await import('/src/lib/supabaseClient.js');
+      const { default: App } = await import('/src/App.jsx');
+
+      const originalSupabase = {
+        rpc: supabase.rpc,
+        from: supabase.from,
+        channel: supabase.channel,
+        removeChannel: supabase.removeChannel,
+      };
+      const nativeSetTimeout = window.setTimeout.bind(window);
+      const nativeClearTimeout = window.clearTimeout.bind(window);
+      const trackedTimers = new Set();
+      window.setTimeout = (handler, delay, ...args) => {
+        let timeoutId;
+        timeoutId = nativeSetTimeout(() => {
+          trackedTimers.delete(timeoutId);
+          handler(...args);
+        }, delay);
+        if (Number(delay) >= 25) trackedTimers.add(timeoutId);
+        return timeoutId;
+      };
+      window.clearTimeout = (timeoutId) => {
+        trackedTimers.delete(timeoutId);
+        nativeClearTimeout(timeoutId);
+      };
+
+      const legacyUserId =
+        '99999999-9999-4999-8999-999999999999';
+      const legacyBooking = {
+        id: 'legacy-private-booking',
+        owner_id: legacyUserId,
+        participants: [legacyUserId],
+        filled_slots: [],
+        type: 'private',
+        isPrivate: true,
+        status: 'upcoming',
+        title: 'Legacy private booking',
+        description: '',
+        date_iso: '2035-01-02',
+        time: '10:00',
+        duration: 1.5,
+        court_id: 'legacy-court',
+        court_name: 'Legacy court',
+        court_type: 'indoor',
+        price_per_person: 0,
+      };
+      const query = {
+        select() {
+          return this;
+        },
+        order() {
+          return Promise.resolve({
+            data: [legacyBooking],
+            error: null,
+          });
+        },
+      };
+      supabase.from = () => query;
+      supabase.rpc = async (name) => {
+        if (name === 'get_my_profile') {
+          return {
+            data: [{
+              id: legacyUserId,
+              first_name: 'Legacy',
+              last_name: 'Player',
+              username: 'legacy_player',
+              rating: 3,
+              is_verified: true,
+              side_preference: 'Both',
+              role: 'user',
+            }],
+            error: null,
+          };
+        }
+        if (name === 'get_unread_notification_count') {
+          return { data: 0, error: null };
+        }
+        return { data: [], error: null };
+      };
+      supabase.channel = () => {
+        const channel = {
+          on() {
+            return channel;
+          },
+          subscribe() {
+            return channel;
+          },
+        };
+        return channel;
+      };
+      supabase.removeChannel = () => {};
+
+      const owner = {
+        playerId: parameters.accountId,
+        firstName: 'Backend',
+        lastName: 'Owner',
+        username: 'backend_owner',
+        rating: 3,
+        isVerified: true,
+      };
+      const otherOwner = {
+        playerId: parameters.otherAccountId,
+        firstName: 'Other',
+        lastName: 'Owner',
+        username: 'other_owner',
+        rating: 3,
+        isVerified: true,
+      };
+      const now = Math.floor(Date.now() / 1_000);
+      const feedRecord = ({
+        matchId,
+        ownerRecord,
+        title,
+        startsAt,
+        participants = [],
+      }) => ({
+        matchId,
+        ownerAccountId: ownerRecord.playerId,
+        startsAt,
+        durationMinutes: 90,
+        courtId: 'court-1',
+        courtName: 'Backend court',
+        courtType: 'indoor',
+        scenario: 'social',
+        status: 'open',
+        title,
+        ratingMin: 1,
+        ratingMax: 5,
+        isRatingMatch: false,
+        pricePerPersonSnapshot: 750,
+        occupiedSlots: 1 + participants.length,
+        version: 1,
+        owner: ownerRecord,
+        participants,
+      });
+      const expiringAccountMatch = feedRecord({
+        matchId: parameters.matchId,
+        ownerRecord: owner,
+        title: 'Expiring account match',
+        startsAt: now + 3,
+      });
+      const participantAccountMatch = feedRecord({
+        matchId:
+          'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        ownerRecord: otherOwner,
+        title: 'Participant account match',
+        startsAt: now + 3_600,
+        participants: [{
+          ...owner,
+          playerId: parameters.accountId,
+          slotNumber: 2,
+        }],
+      });
+      const foregroundAccountMatch = feedRecord({
+        matchId:
+          'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+        ownerRecord: owner,
+        title: 'Foreground account match',
+        startsAt: now + 7_200,
+      });
+      const publicOnlyMatch = feedRecord({
+        matchId:
+          'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+        ownerRecord: otherOwner,
+        title: 'Public-only unrelated match',
+        startsAt: now + 7_200,
+      });
+
+      window.__accountMatchGeneration = 0;
+      window.__accountMatchCalls = 0;
+      const backendMatchActions = {
+        async listMatches() {
+          return {
+            outcome: 'matches_loaded',
+            matches: [publicOnlyMatch],
+          };
+        },
+        async listAccountMatches() {
+          window.__accountMatchCalls += 1;
+          return {
+            outcome: 'matches_loaded',
+            matches: [
+              expiringAccountMatch,
+              participantAccountMatch,
+              ...(window.__accountMatchGeneration > 0
+                ? [foregroundAccountMatch]
+                : []),
+            ],
+          };
+        },
+        async listIncomingMatchInvitations() {
+          return {
+            outcome: 'invitations_loaded',
+            invitations: [],
+          };
+        },
+      };
+      const container = document.createElement('div');
+      container.dataset.testid = 'backend-home-test-root';
+      document.body.append(container);
+      const root = createRoot(container);
+      root.render(React.createElement(App, {
+        session: {
+          user: {
+            id: legacyUserId,
+            user_metadata: {},
+          },
+        },
+        backendProfile: {
+          accountId: parameters.accountId,
+          firstName: 'Backend',
+          lastName: 'Owner',
+          username: 'backend_owner',
+          photoUrl: null,
+          sidePreference: 'Both',
+          phone: null,
+          rating: 3,
+          isVerified: true,
+          role: 'player',
+        },
+        backendMatchRequired: true,
+        backendMatchLifecycleStatus: 'authenticated',
+        backendProfileStatus: 'ready',
+        backendMatchActions,
+        showToast() {},
+        onLogout() {},
+      }));
+
+      window.__refreshAccountMatches = () => {
+        window.__accountMatchGeneration = 1;
+        window.dispatchEvent(new Event('focus'));
+      };
+      window.__backendHomeTimerCount = () => trackedTimers.size;
+      window.__backendHomeUnmount = () => {
+        root.unmount();
+        container.remove();
+        supabase.rpc = originalSupabase.rpc;
+        supabase.from = originalSupabase.from;
+        supabase.channel = originalSupabase.channel;
+        supabase.removeChannel = originalSupabase.removeChannel;
+        window.setTimeout = nativeSetTimeout;
+        window.clearTimeout = nativeClearTimeout;
+      };
+    }, {
+      accountId: ACCOUNT_ID,
+      otherAccountId: OTHER_ACCOUNT_ID,
+      matchId: MATCH_ID,
+    });
+
+    const harness = page.getByTestId('backend-home-test-root');
+    await expect(
+      harness.getByText('Expiring account match').first(),
+    ).toBeVisible();
+    await expect(
+      harness.getByText('Participant account match').first(),
+    ).toBeVisible();
+    await expect(
+      harness.getByText('Legacy private booking').first(),
+    ).toBeVisible();
+    await expect(
+      harness.getByText('Public-only unrelated match'),
+    ).toHaveCount(0);
+
+    await page.evaluate(() => window.__refreshAccountMatches());
+    await expect(
+      harness.getByText('Foreground account match').first(),
+    ).toBeVisible();
+    await expect.poll(() => page.evaluate(
+      () => window.__accountMatchCalls,
+    )).toBeGreaterThanOrEqual(2);
+
+    await expect(
+      harness.getByText('Expiring account match'),
+    ).toHaveCount(0, { timeout: 5_000 });
+    await expect.poll(() => page.evaluate(
+      () => window.__backendHomeTimerCount(),
+    )).toBeGreaterThan(0);
+
+    const callsBeforeUnmount = await page.evaluate(
+      () => window.__accountMatchCalls,
+    );
+    await page.evaluate(() => window.__backendHomeUnmount());
+    await expect.poll(() => page.evaluate(
+      () => window.__backendHomeTimerCount(),
+    )).toBe(0);
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await page.waitForTimeout(50);
+    expect(await page.evaluate(
+      () => window.__accountMatchCalls,
+    )).toBe(callsBeforeUnmount);
+  });
+
   test('maps backend match data into the existing UI without sensitive fields', async ({
     page,
   }) => {
@@ -1487,8 +1824,11 @@ test.describe('backend match credential lifecycle', () => {
         createBackendMatchDraft,
         isBackendOwnedMatch,
         mapBackendMatchToApp,
+        mergeAccountUpcomingMatches,
         resolveBackendMatchMode,
         resolveMatchSource,
+        selectBackendAccountMatches,
+        selectFutureBackendMatches,
         shouldApplyBackendMatchDetail,
         shouldApplyBackendMatchFeedResponse,
       } = await import('/src/lib/backendMatchAdapter.js');
@@ -1595,6 +1935,62 @@ test.describe('backend match credential lifecycle', () => {
           rating: 3,
           isVerified: true,
         },
+      );
+      const exactStartMatch = Object.freeze({
+        ...match,
+        id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        startsAt: draft.startsAt - 1,
+      });
+      const unrelatedMatch = Object.freeze({
+        ...match,
+        id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+        ownerId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+        owner_id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+        participants: Object.freeze([
+          'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+        ]),
+      });
+      const participantMatch = Object.freeze({
+        ...match,
+        id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+        ownerId: parameters.otherAccountId,
+        owner_id: parameters.otherAccountId,
+        participants: Object.freeze([
+          parameters.otherAccountId,
+          parameters.accountId,
+        ]),
+      });
+      const terminalMatch = Object.freeze({
+        ...match,
+        id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+        status: 'completed',
+      });
+      const futureMatches = selectFutureBackendMatches(
+        [
+          match,
+          exactStartMatch,
+          unrelatedMatch,
+          participantMatch,
+          terminalMatch,
+        ],
+        draft.startsAt - 1,
+      );
+      const accountMatches = selectBackendAccountMatches(
+        [
+          match,
+          exactStartMatch,
+          unrelatedMatch,
+          participantMatch,
+          terminalMatch,
+        ],
+        parameters.accountId,
+        draft.startsAt - 1,
+      );
+      const mergedUpcomingMatches = mergeAccountUpcomingMatches(
+        [{ id: 'legacy-private-booking', type: 'private' }],
+        [match, exactStartMatch, unrelatedMatch, participantMatch],
+        parameters.accountId,
+        draft.startsAt - 1,
       );
       const joinableMatch = mapBackendMatchToApp({
         matchId: parameters.matchId,
@@ -1876,6 +2272,14 @@ test.describe('backend match credential lifecycle', () => {
           legacyFeedMatch.filledSlots
             .filter(Boolean)
             .map((player) => player.firstName),
+        accountProjection: {
+          futureIds: futureMatches.map(({ id }) => id),
+          accountIds: accountMatches.map(({ id }) => id),
+          mergedIds: mergedUpcomingMatches.map(({ id }) => id),
+          exactStartExcluded: !futureMatches.includes(exactStartMatch),
+          terminalExcluded: !futureMatches.includes(terminalMatch),
+          unrelatedExcluded: !accountMatches.includes(unrelatedMatch),
+        },
         sensitiveAbsent:
           !/credential|requestKey|digest|authorization/iu.test(
             JSON.stringify({ draft, match }),
@@ -1922,6 +2326,25 @@ test.describe('backend match credential lifecycle', () => {
       'Synthetic',
       'Игрок',
     ]);
+    expect(summary.accountProjection).toEqual({
+      futureIds: [
+        MATCH_ID,
+        'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+        'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+      ],
+      accountIds: [
+        MATCH_ID,
+        'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+      ],
+      mergedIds: [
+        'legacy-private-booking',
+        MATCH_ID,
+        'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+      ],
+      exactStartExcluded: true,
+      terminalExcluded: true,
+      unrelatedExcluded: true,
+    });
     expect(summary.routing).toEqual({
       backendSelectedWithLegacyCollision: true,
       legacySelectedWhileBackendAvailable: true,

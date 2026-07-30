@@ -4,6 +4,12 @@ const LEVELS = Object.freeze(['D', 'D+', 'C', 'C+', 'B', 'B+', 'A']);
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/u;
 const TIME_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/u;
 const MOSCOW_OFFSET = '+03:00';
+const BACKEND_FEED_STATUSES = Object.freeze([
+  'open',
+  'searching',
+  'confirmed',
+  'upcoming',
+]);
 
 export const BACKEND_PRIVATE_MATCH_CREATION_ENABLED = false;
 
@@ -102,6 +108,58 @@ export function applyBackendParticipantResult(
 
 export function isBackendOwnedMatch(match) {
   return match?.backendOwned === true;
+}
+
+export function selectFutureBackendMatches(
+  matches,
+  nowEpochSeconds,
+) {
+  if (
+    !Array.isArray(matches) ||
+    !Number.isSafeInteger(nowEpochSeconds) ||
+    nowEpochSeconds < 0
+  ) {
+    return [];
+  }
+
+  return matches.filter((match) => (
+    isBackendOwnedMatch(match) &&
+    BACKEND_FEED_STATUSES.includes(match.status) &&
+    Number.isSafeInteger(match.startsAt) &&
+    match.startsAt > nowEpochSeconds
+  ));
+}
+
+export function selectBackendAccountMatches(
+  matches,
+  accountId,
+  nowEpochSeconds,
+) {
+  if (typeof accountId !== 'string' || accountId.length === 0) {
+    return [];
+  }
+
+  return selectFutureBackendMatches(matches, nowEpochSeconds)
+    .filter((match) => (
+      match.ownerId === accountId ||
+      match.participants?.includes(accountId)
+    ));
+}
+
+export function mergeAccountUpcomingMatches(
+  legacyMatches,
+  backendMatches,
+  accountId,
+  nowEpochSeconds,
+) {
+  return [
+    ...(Array.isArray(legacyMatches) ? legacyMatches : []),
+    ...selectBackendAccountMatches(
+      backendMatches,
+      accountId,
+      nowEpochSeconds,
+    ),
+  ];
 }
 
 export function mapBackendPublicPlayerToApp(player) {

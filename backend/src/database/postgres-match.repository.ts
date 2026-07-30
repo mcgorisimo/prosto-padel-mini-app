@@ -49,6 +49,7 @@ import {
   JoinMatchInput,
   JoinMatchResult,
   LeaveMatchResult,
+  ListAccountMatchFeedInput,
   ListPublicMatchFeedInput,
   MatchDetailRecord,
   MatchCommandRejection,
@@ -305,6 +306,64 @@ const SELECT_PUBLIC_FEED_SQL = `
   GROUP BY matches.id
   ORDER BY matches.starts_at, matches.id
   LIMIT $2::integer
+`;
+
+const SELECT_ACCOUNT_FEED_SQL = `
+  SELECT
+    matches.id,
+    matches.owner_account_id,
+    matches.starts_at,
+    matches.duration_minutes,
+    matches.court_id,
+    matches.court_name,
+    matches.court_type,
+    matches.scenario,
+    matches.status,
+    matches.title,
+    matches.rating_min,
+    matches.rating_max,
+    matches.is_rating_match,
+    matches.price_per_person_snapshot,
+    matches.version,
+    1 + pg_catalog.count(participants.id)
+      AS occupied_slots,
+    COALESCE(
+      pg_catalog.array_agg(
+        participants.account_id
+        ORDER BY participants.slot_number
+      ) FILTER (WHERE participants.id IS NOT NULL),
+      ARRAY[]::uuid[]
+    ) AS participant_account_ids,
+    COALESCE(
+      pg_catalog.array_agg(
+        participants.slot_number
+        ORDER BY participants.slot_number
+      ) FILTER (WHERE participants.id IS NOT NULL),
+      ARRAY[]::smallint[]
+    ) AS participant_slot_numbers
+  FROM backend_match.matches AS matches
+  LEFT JOIN backend_match.match_participants AS participants
+    ON participants.match_id = matches.id
+   AND participants.status = 'active'
+  WHERE matches.visibility = 'public'
+    AND matches.kind = 'match'
+    AND matches.status = ANY (
+      ARRAY['open', 'searching', 'confirmed', 'upcoming']::text[]
+    )
+    AND matches.starts_at > $1
+    AND (
+      matches.owner_account_id = $2
+      OR EXISTS (
+        SELECT 1
+        FROM backend_match.match_participants AS account_participants
+        WHERE account_participants.match_id = matches.id
+          AND account_participants.account_id = $2
+          AND account_participants.status = 'active'
+      )
+    )
+  GROUP BY matches.id
+  ORDER BY matches.starts_at, matches.id
+  LIMIT $3::integer
 `;
 
 const SELECT_VISIBLE_MATCH_SQL = `
@@ -1097,6 +1156,23 @@ function assertFeedInput(
   return input;
 }
 
+function assertAccountFeedInput(
+  input: ListAccountMatchFeedInput,
+): ListAccountMatchFeedInput {
+  if (
+    !isPlainRecord(input) ||
+    Object.keys(input).length !== 3 ||
+    !isAccountId(input.accountId) ||
+    !isUnixEpochSeconds(input.now) ||
+    !Number.isInteger(input.limit) ||
+    input.limit < 1 ||
+    input.limit > MAX_FEED_RESULTS
+  ) {
+    throw invalidInput();
+  }
+  return input;
+}
+
 function assertFindInput(
   input: FindVisibleMatchInput,
 ): FindVisibleMatchInput {
@@ -1476,6 +1552,43 @@ export class PostgresMatchRepository implements MatchRepository {
       if (
         new Set(result.map((match) => match.matchId)).size !==
         result.length
+      ) {
+        throw invalidPersistedState();
+      }
+      return Object.freeze(result);
+    } catch (error) {
+      throw mapPersistenceError(error);
+    }
+  }
+
+  async listAccountFeed(
+    transaction: PostgresTransaction,
+    input: ListAccountMatchFeedInput,
+  ): Promise<readonly MatchFeedRecord[]> {
+    const validated = assertAccountFeedInput(input);
+    try {
+      const selected = await transaction.query<FeedRow>(
+        SELECT_ACCOUNT_FEED_SQL,
+        [validated.now, validated.accountId, validated.limit],
+      );
+      if (
+        selected.rowCount !== selected.rows.length ||
+        selected.rows.length > validated.limit
+      ) {
+        throw invalidPersistedState();
+      }
+      const result = selected.rows.map(hydrateFeed);
+      if (
+        new Set(result.map((match) => match.matchId)).size !==
+        result.length ||
+        result.some(
+          (match) =>
+            match.ownerAccountId !== validated.accountId &&
+            !match.participants.some(
+              (participant) =>
+                participant.playerId === validated.accountId,
+            ),
+        )
       ) {
         throw invalidPersistedState();
       }

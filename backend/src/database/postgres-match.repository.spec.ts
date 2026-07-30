@@ -706,6 +706,97 @@ describe('PostgresMatchRepository', () => {
     expect(transaction.calls[0].values).toEqual([1_800_000_000, 20]);
   });
 
+  it('lists future matches scoped to the authenticated owner or active participant', async () => {
+    const transaction = new FakeTransaction([
+      queryResult([
+        {
+          id: MATCH_ID,
+          owner_account_id: OWNER_ID,
+          starts_at: '1800003600',
+          duration_minutes: 90,
+          court_id: 'court-1',
+          court_name: 'Synthetic court',
+          court_type: 'indoor',
+          scenario: 'community',
+          status: 'open',
+          title: 'Synthetic match',
+          rating_min: 2,
+          rating_max: 4,
+          is_rating_match: true,
+          price_per_person_snapshot: '1000.00',
+          version: '2',
+          occupied_slots: '2',
+          participant_account_ids: [PLAYER_ID],
+          participant_slot_numbers: [2],
+        },
+      ]),
+    ]);
+
+    const result = await repository().listAccountFeed(transaction, {
+      accountId: PLAYER_ID,
+      now: unixEpochSeconds(1_800_000_000),
+      limit: 50,
+    });
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      matchId: MATCH_ID,
+      ownerAccountId: OWNER_ID,
+      participants: [{ playerId: PLAYER_ID, slotNumber: 2 }],
+    });
+    const sql = normalizeSql(transaction.calls[0].text);
+    expect(sql).toContain('matches.starts_at > $1');
+    expect(sql).toContain('matches.owner_account_id = $2');
+    expect(sql).toContain(
+      'account_participants.account_id = $2',
+    );
+    expect(sql).toContain(
+      "account_participants.status = 'active'",
+    );
+    expect(transaction.calls[0].values).toEqual([
+      1_800_000_000,
+      PLAYER_ID,
+      50,
+    ]);
+  });
+
+  it('fails closed when account feed returns an unrelated aggregate', async () => {
+    const transaction = new FakeTransaction([
+      queryResult([
+        {
+          id: MATCH_ID,
+          owner_account_id: OWNER_ID,
+          starts_at: '1800003600',
+          duration_minutes: 90,
+          court_id: 'court-1',
+          court_name: 'Synthetic court',
+          court_type: 'indoor',
+          scenario: 'community',
+          status: 'open',
+          title: 'Synthetic match',
+          rating_min: 2,
+          rating_max: 4,
+          is_rating_match: true,
+          price_per_person_snapshot: '1000.00',
+          version: '2',
+          occupied_slots: '1',
+          participant_account_ids: [],
+          participant_slot_numbers: [],
+        },
+      ]),
+    ]);
+
+    await expect(
+      repository().listAccountFeed(transaction, {
+        accountId: VIEWER_ID,
+        now: unixEpochSeconds(1_800_000_000),
+        limit: 50,
+      }),
+    ).rejects.toMatchObject({
+      reason: 'invalid_persisted_state',
+    });
+  });
+
   it('returns one active-only visible detail snapshot and hides missing/private rows as null', async () => {
     const transaction = new FakeTransaction([
       queryResult([

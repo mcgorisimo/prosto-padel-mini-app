@@ -1313,11 +1313,13 @@ export function createBackendSessionClient(dependencies = {}) {
         operation.startsWith('match_invitation_');
       const isMatchChatOperation =
         operation.startsWith('match_chat_');
+      const isMatchListOperation =
+        operation === 'match_list' || operation === 'match_list_mine';
       const isPlayerSearchOperation = operation === 'player_search';
       const isReadOnly =
         operation === 'authenticate' ||
         operation === 'profile' ||
-        operation === 'match_list' ||
+        isMatchListOperation ||
         operation === 'match_detail' ||
         operation === 'player_search' ||
         operation === 'match_invitation_incoming' ||
@@ -1337,6 +1339,8 @@ export function createBackendSessionClient(dependencies = {}) {
               ? PROFILE_PATH
               : operation === 'match_list'
                 ? `${MATCHES_PATH}?limit=${operationPayload.limit}`
+                : operation === 'match_list_mine'
+                  ? `${MATCHES_PATH}/mine?limit=${operationPayload.limit}`
                 : operation === 'player_search'
                   ? `${PLAYER_SEARCH_PATH}?q=${encodeURIComponent(operationPayload.query)}&limit=${operationPayload.limit}`
                   : operation === 'match_invitation_incoming'
@@ -1423,7 +1427,7 @@ export function createBackendSessionClient(dependencies = {}) {
       const body = await readBoundedJson(
         response,
         controller.signal,
-        operation === 'match_list'
+        isMatchListOperation
           ? MAX_MATCH_FEED_RESPONSE_BODY_BYTES
           : isPlayerSearchOperation
             ? MAX_PLAYER_SEARCH_RESPONSE_BODY_BYTES
@@ -1451,7 +1455,7 @@ export function createBackendSessionClient(dependencies = {}) {
           ? frozen('success', { result })
           : frozen('malformed_response');
       }
-      if (operation === 'match_list' && response.status === 200) {
+      if (isMatchListOperation && response.status === 200) {
         const result = matchListSuccess(body);
         return result
           ? frozen('success', { result })
@@ -1647,7 +1651,7 @@ export function createBackendSessionClient(dependencies = {}) {
       return frozen('rejected', { reason: 'invalid_request' });
     }
     if (
-      (operation === 'match_list' &&
+      ((operation === 'match_list' || operation === 'match_list_mine') &&
         (!Number.isInteger(operationPayload?.limit) ||
           operationPayload.limit < 1 ||
           operationPayload.limit > 50)) ||
@@ -1778,6 +1782,8 @@ export function createBackendSessionClient(dependencies = {}) {
       execute('profile_update', credential, options, profilePatch),
     listMatches: (credential, limit = 20, options) =>
       execute('match_list', credential, options, { limit }),
+    listAccountMatches: (credential, limit = 50, options) =>
+      execute('match_list_mine', credential, options, { limit }),
     readMatch: (credential, matchId, options) =>
       execute('match_detail', credential, options, { matchId }),
     createMatch: (credential, matchDraft, options) =>

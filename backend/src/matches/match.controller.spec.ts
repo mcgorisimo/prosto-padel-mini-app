@@ -67,6 +67,10 @@ interface Harness {
   readonly app: NestFastifyApplication;
   readonly create: jest.Mock<Promise<CreateMatchApiResult>, [unknown]>;
   readonly list: jest.Mock<Promise<ListMatchFeedApiResult>, [unknown]>;
+  readonly listMine: jest.Mock<
+    Promise<ListMatchFeedApiResult>,
+    [unknown]
+  >;
   readonly detail: jest.Mock<Promise<ReadMatchDetailApiResult>, [unknown]>;
   readonly join: jest.Mock<
     Promise<MutateMatchParticipationApiResult>,
@@ -111,6 +115,13 @@ async function createHarness(): Promise<Harness> {
   >().mockResolvedValue({
     outcome: 'found',
     matches: [],
+  });
+  const listMine = jest.fn<
+    Promise<ListMatchFeedApiResult>,
+    [unknown]
+  >().mockResolvedValue({
+    outcome: 'found',
+    matches: [{ ...match(), occupiedSlots: 1 }],
   });
   const detail = jest.fn<
     Promise<ReadMatchDetailApiResult>,
@@ -161,7 +172,14 @@ async function createHarness(): Promise<Harness> {
       SessionBearerGuard,
       {
         provide: MatchApiService,
-        useValue: { create, list, detail, join, leave },
+        useValue: {
+          create,
+          list,
+          listMine,
+          detail,
+          join,
+          leave,
+        },
       },
       {
         provide: SessionAuthenticationService,
@@ -185,6 +203,7 @@ async function createHarness(): Promise<Harness> {
     app,
     create,
     list,
+    listMine,
     detail,
     join,
     leave,
@@ -222,7 +241,7 @@ describe('MatchController HTTP boundary', () => {
     jest.restoreAllMocks();
   });
 
-  it('exposes create/feed/detail/join/leave behind the same bearer boundary', async () => {
+  it('exposes create/feed/account-feed/detail/join/leave behind the same bearer boundary', async () => {
     const createResponse = await harness.app.inject({
       method: 'POST',
       url: '/api/v1/matches',
@@ -242,6 +261,11 @@ describe('MatchController HTTP boundary', () => {
     const feedResponse = await harness.app.inject({
       method: 'GET',
       url: '/api/v1/matches?limit=10',
+      headers: { authorization: `Bearer ${CREDENTIAL}` },
+    });
+    const accountFeedResponse = await harness.app.inject({
+      method: 'GET',
+      url: '/api/v1/matches/mine?limit=50',
       headers: { authorization: `Bearer ${CREDENTIAL}` },
     });
     const detailResponse = await harness.app.inject({
@@ -267,12 +291,20 @@ describe('MatchController HTTP boundary', () => {
       statusCode: feedResponse.statusCode,
       body: feedResponse.json(),
     }).toEqual({ statusCode: 200, body: { matches: [] } });
+    expect({
+      statusCode: accountFeedResponse.statusCode,
+      body: accountFeedResponse.json(),
+    }).toEqual({
+      statusCode: 200,
+      body: { matches: [{ ...match(), occupiedSlots: 1 }] },
+    });
     expect(detailResponse.statusCode).toBe(200);
     expect(joinResponse.statusCode).toBe(200);
     expect(leaveResponse.statusCode).toBe(200);
     for (const response of [
       createResponse,
       feedResponse,
+      accountFeedResponse,
       detailResponse,
       joinResponse,
       leaveResponse,
@@ -292,6 +324,11 @@ describe('MatchController HTTP boundary', () => {
       role: 'player',
       request: { limit: 10 },
     });
+    expect(harness.listMine).toHaveBeenCalledWith({
+      accountId: ACCOUNT_ID,
+      role: 'player',
+      request: { limit: 50 },
+    });
     expect(harness.detail).toHaveBeenCalledWith({
       accountId: ACCOUNT_ID,
       role: 'player',
@@ -299,7 +336,7 @@ describe('MatchController HTTP boundary', () => {
     });
     expect(harness.join).toHaveBeenCalledTimes(1);
     expect(harness.leave).toHaveBeenCalledTimes(1);
-    expect(harness.authenticate).toHaveBeenCalledTimes(5);
+    expect(harness.authenticate).toHaveBeenCalledTimes(6);
   });
 
   it.each([
@@ -344,6 +381,11 @@ describe('MatchController HTTP boundary', () => {
       url: '/api/v1/matches?cursor=secret',
       headers: { authorization: `Bearer ${CREDENTIAL}` },
     });
+    const invalidAccountFeed = await harness.app.inject({
+      method: 'GET',
+      url: '/api/v1/matches/mine?accountId=forged',
+      headers: { authorization: `Bearer ${CREDENTIAL}` },
+    });
     const invalidJoin = await harness.app.inject({
       method: 'POST',
       url: '/api/v1/matches/not-a-uuid/join',
@@ -354,6 +396,7 @@ describe('MatchController HTTP boundary', () => {
     for (const response of [
       invalidCreate,
       invalidFeed,
+      invalidAccountFeed,
       invalidJoin,
     ]) {
       expect(response.statusCode).toBe(400);
@@ -364,6 +407,7 @@ describe('MatchController HTTP boundary', () => {
     }
     expect(harness.create).not.toHaveBeenCalled();
     expect(harness.list).not.toHaveBeenCalled();
+    expect(harness.listMine).not.toHaveBeenCalled();
     expect(harness.join).not.toHaveBeenCalled();
   });
 

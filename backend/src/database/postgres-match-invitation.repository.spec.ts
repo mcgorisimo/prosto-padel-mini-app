@@ -173,6 +173,7 @@ function matches(): jest.Mocked<MatchRepository> {
   return {
     create: jest.fn(),
     listPublicFeed: jest.fn(),
+    listAccountFeed: jest.fn(),
     findVisibleById: jest.fn(),
     join: jest.fn(),
     leave: jest.fn(),

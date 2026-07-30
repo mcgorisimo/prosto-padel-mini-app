@@ -86,6 +86,11 @@ export interface ListPublicMatchFeedInput {
   readonly limit: number;
 }
 
+export interface ListAccountMatchFeedInput
+  extends ListPublicMatchFeedInput {
+  readonly accountId: AccountId;
+}
+
 export interface FindVisibleMatchInput {
   readonly matchId: MatchId;
   readonly viewerAccountId: AccountId;
@@ -179,6 +184,11 @@ export interface MatchRepository {
   listPublicFeed(
     transaction: PostgresTransaction,
     input: ListPublicMatchFeedInput,
+  ): Promise<readonly MatchFeedRecord[]>;
+
+  listAccountFeed(
+    transaction: PostgresTransaction,
+    input: ListAccountMatchFeedInput,
   ): Promise<readonly MatchFeedRecord[]>;
 
   findVisibleById(

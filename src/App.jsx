@@ -23,8 +23,10 @@ import {
   mapBackendMatchMessageToApp,
   mapBackendMatchToApp,
   mapBackendPublicPlayerToApp,
+  mergeAccountUpcomingMatches,
   resolveBackendMatchMode,
   resolveMatchSource,
+  selectFutureBackendMatches,
   shouldApplyBackendMatchDetail,
   shouldApplyBackendMatchFeedResponse,
 } from './lib/backendMatchAdapter';
@@ -344,6 +346,10 @@ export default function App({
   const [backendFeedMatches, setBackendFeedMatches] = useState([]);
   const [backendFeedLoading, setBackendFeedLoading] = useState(false);
   const [backendFeedError, setBackendFeedError] = useState('');
+  const [backendAccountMatches, setBackendAccountMatches] = useState([]);
+  const [backendMatchNow, setBackendMatchNow] = useState(
+    () => Math.floor(Date.now() / 1_000),
+  );
   const [messagesLoading, setMessagesLoading] = useState(true);
   const [messagesLoadError, setMessagesLoadError] = useState('');
   const [backendChatMessages, setBackendChatMessages] = useState([]);
@@ -357,6 +363,7 @@ export default function App({
   const [screen, setScreen] = useState(null);
   const backendDetailRequestRef = useRef(0);
   const backendFeedRequestRef = useRef(0);
+  const backendAccountRequestRef = useRef(0);
   const backendInvitationRequestRef = useRef(0);
   const backendChatRequestRef = useRef(0);
   const backendChatMatchRef = useRef(null);
@@ -451,6 +458,7 @@ export default function App({
       const matches = result.matches
         .map((record) => mapBackendMatchToApp(record, backendProfile))
         .filter(Boolean);
+      setBackendMatchNow(Math.floor(Date.now() / 1_000));
       setBackendFeedMatches(matches);
       return matches;
     } catch {
@@ -473,6 +481,41 @@ export default function App({
   }, [
     backendMatchActions,
     backendMatchMode,
+    backendMatchesReady,
+    backendProfile,
+    usesBackendMatches,
+  ]);
+
+  const loadBackendAccountMatches = useCallback(async () => {
+    const requestId = backendAccountRequestRef.current + 1;
+    backendAccountRequestRef.current = requestId;
+    if (!usesBackendMatches || !backendMatchesReady) {
+      setBackendAccountMatches([]);
+      return null;
+    }
+
+    try {
+      const result = await backendMatchActions.listAccountMatches(50);
+      if (!shouldApplyBackendMatchFeedResponse(
+        backendAccountRequestRef.current,
+        requestId,
+      )) {
+        return null;
+      }
+      if (result.outcome !== 'matches_loaded') {
+        throw new Error('BACKEND_ACCOUNT_MATCHES_REJECTED');
+      }
+      const matches = result.matches
+        .map((record) => mapBackendMatchToApp(record, backendProfile))
+        .filter(Boolean);
+      setBackendMatchNow(Math.floor(Date.now() / 1_000));
+      setBackendAccountMatches(matches);
+      return matches;
+    } catch {
+      return null;
+    }
+  }, [
+    backendMatchActions,
     backendMatchesReady,
     backendProfile,
     usesBackendMatches,
@@ -635,6 +678,7 @@ export default function App({
         fetchProfile(),
         loadMatches(),
         loadBackendMatchFeed(),
+        loadBackendAccountMatches(),
         loadMessages(),
         loadInvitations(),
         loadNotifications(),
@@ -647,6 +691,7 @@ export default function App({
     fetchProfile,
     loadMatches,
     loadBackendMatchFeed,
+    loadBackendAccountMatches,
     loadMessages,
     loadInvitations,
     loadNotifications,
@@ -756,6 +801,9 @@ export default function App({
       if (document.visibilityState === 'visible') {
         fetchProfile();
         if (usesBackendMatches) {
+          setBackendMatchNow(Math.floor(Date.now() / 1_000));
+          void loadBackendMatchFeed();
+          void loadBackendAccountMatches();
           void loadInvitations();
         }
       }
@@ -774,7 +822,46 @@ export default function App({
         refreshVisibleAccountData,
       );
     };
-  }, [fetchProfile, loadInvitations, usesBackendMatches]);
+  }, [
+    fetchProfile,
+    loadBackendAccountMatches,
+    loadBackendMatchFeed,
+    loadInvitations,
+    usesBackendMatches,
+  ]);
+
+  useEffect(() => {
+    if (!usesBackendMatches) return undefined;
+
+    const nowMilliseconds = Date.now();
+    const nextStartsAt = [
+      ...backendFeedMatches,
+      ...backendAccountMatches,
+    ].reduce((next, match) => {
+      const startsAt = Number(match?.startsAt);
+      if (!Number.isSafeInteger(startsAt)) return next;
+      const startsAtMilliseconds = startsAt * 1_000;
+      if (startsAtMilliseconds <= nowMilliseconds) return next;
+      return next === null || startsAtMilliseconds < next
+        ? startsAtMilliseconds
+        : next;
+    }, null);
+    if (nextStartsAt === null) return undefined;
+
+    const timeoutId = window.setTimeout(
+      () => setBackendMatchNow(Math.floor(Date.now() / 1_000)),
+      Math.min(
+        Math.max(nextStartsAt - nowMilliseconds + 25, 25),
+        2_147_000_000,
+      ),
+    );
+    return () => window.clearTimeout(timeoutId);
+  }, [
+    backendAccountMatches,
+    backendFeedMatches,
+    backendMatchNow,
+    usesBackendMatches,
+  ]);
 
   // --- 3. ПОЛЬЗОВАТЕЛЬ ---
   const currentUser = useMemo(() => {
@@ -818,18 +905,21 @@ export default function App({
     resolveMatchSource(
       matchId,
       explicitMatch ?? selectedMatch,
-      backendFeedMatches,
+      [...backendAccountMatches, ...backendFeedMatches],
       allMatches,
     )
   ), [
     allMatches,
+    backendAccountMatches,
     backendFeedMatches,
     selectedMatch,
   ]);
   const storeBackendMatch = useCallback((updatedMatch) => {
     if (!isBackendOwnedMatch(updatedMatch)) return null;
     backendFeedRequestRef.current += 1;
+    backendAccountRequestRef.current += 1;
     setBackendFeedLoading(false);
+    setBackendMatchNow(Math.floor(Date.now() / 1_000));
     setBackendFeedMatches((previous) => {
       const existing = previous.find(
         (match) => match.id === updatedMatch.id,
@@ -854,6 +944,35 @@ export default function App({
             match.id === updatedMatch.id ? updatedMatch : match)
         : [updatedMatch, ...previous];
     });
+    setBackendAccountMatches((previous) => {
+      const existing = previous.find(
+        (match) => match.id === updatedMatch.id,
+      );
+      if (
+        existing &&
+        !shouldApplyBackendMatchDetail(
+          existing,
+          updatedMatch.id,
+          updatedMatch,
+        )
+      ) {
+        return previous;
+      }
+      const belongsToAccount =
+        updatedMatch.ownerId === backendProfile?.accountId ||
+        updatedMatch.participants?.includes(
+          backendProfile?.accountId,
+        );
+      if (updatedMatch.isPrivate || !belongsToAccount) {
+        return previous.filter(
+          (match) => match.id !== updatedMatch.id,
+        );
+      }
+      return existing
+        ? previous.map((match) =>
+            match.id === updatedMatch.id ? updatedMatch : match)
+        : [updatedMatch, ...previous];
+    });
     setSelected((previous) =>
       shouldApplyBackendMatchDetail(
         previous,
@@ -863,7 +982,7 @@ export default function App({
         ? updatedMatch
         : previous);
     return updatedMatch;
-  }, []);
+  }, [backendProfile?.accountId]);
 
   const loadBackendMatchMessages = useCallback(async (
     matchId,
@@ -2288,7 +2407,7 @@ const handleBookSlot = async (booking) => {
   };
 
   // Upcoming = ALL non-completed matches user participates in (open / upcoming / private booking).
-  const upcomingMatches  = allMatches.filter(m => {
+  const legacyUpcomingMatches = allMatches.filter(m => {
     if (!Array.isArray(m.participants) || !m.participants.includes(ME_ID) || m.status === 'completed') {
       return false;
     }
@@ -2296,6 +2415,14 @@ const handleBookSlot = async (booking) => {
     const matchEndDateTime = new Date(matchStartDateTime.getTime() + (m.duration || 1.5) * 3600 * 1000);
     return matchEndDateTime > new Date();
   });
+  const upcomingMatches = usesBackendMatches
+    ? mergeAccountUpcomingMatches(
+        legacyUpcomingMatches,
+        backendAccountMatches,
+        backendProfile?.accountId,
+        backendMatchNow,
+      )
+    : legacyUpcomingMatches;
   const completedMatches = getUserMatchHistory(allMatches, ME_ID);
   const profileResultMatches = allMatches.filter((match) => {
     if (!Array.isArray(match.participants) || !match.participants.includes(ME_ID)) return false;
@@ -2316,7 +2443,7 @@ const handleBookSlot = async (booking) => {
     return matchEndDateTime > new Date();
   });
   const openMatches = usesBackendMatches
-    ? backendFeedMatches
+    ? selectFutureBackendMatches(backendFeedMatches, backendMatchNow)
     : legacyOpenMatches;
 
   // Real profile stats derived from allMatches + live rating.

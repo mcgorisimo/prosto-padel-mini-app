@@ -40,6 +40,9 @@ interface Harness {
   readonly listPublicFeed: jest.MockedFunction<
     MatchRepository['listPublicFeed']
   >;
+  readonly listAccountFeed: jest.MockedFunction<
+    MatchRepository['listAccountFeed']
+  >;
   readonly findVisibleById: jest.MockedFunction<
     MatchRepository['findVisibleById']
   >;
@@ -104,6 +107,10 @@ function createHarness(): Harness {
     ReturnType<MatchRepository['listPublicFeed']>,
     Parameters<MatchRepository['listPublicFeed']>
   >();
+  const listAccountFeed = jest.fn<
+    ReturnType<MatchRepository['listAccountFeed']>,
+    Parameters<MatchRepository['listAccountFeed']>
+  >();
   const findVisibleById = jest.fn<
     ReturnType<MatchRepository['findVisibleById']>,
     Parameters<MatchRepository['findVisibleById']>
@@ -155,6 +162,7 @@ function createHarness(): Harness {
     matches: {
       create,
       listPublicFeed,
+      listAccountFeed,
       findVisibleById,
       join,
       leave,
@@ -167,6 +175,7 @@ function createHarness(): Harness {
     run,
     create,
     listPublicFeed,
+    listAccountFeed,
     findVisibleById,
     join,
     leave,
@@ -335,16 +344,16 @@ describe('MatchApiService', () => {
         slotNumber: 2 as const,
       }),
     ]);
-    harness.listPublicFeed.mockResolvedValue([
-      {
-        ...detail(),
-        scenario: 'social',
-        ratingMin: 2,
-        ratingMax: 4,
-        occupiedSlots: 2,
-        participants,
-      },
-    ]);
+    const feedRecord = {
+      ...detail(),
+      scenario: 'social' as const,
+      ratingMin: 2,
+      ratingMax: 4,
+      occupiedSlots: 2,
+      participants,
+    };
+    harness.listPublicFeed.mockResolvedValue([feedRecord]);
+    harness.listAccountFeed.mockResolvedValue([feedRecord]);
     harness.findVisibleById.mockResolvedValue({
       ...detail(),
       participants,
@@ -354,6 +363,11 @@ describe('MatchApiService', () => {
       accountId: ACCOUNT_ID,
       role: 'club_admin',
       request: { limit: 20 },
+    });
+    const mine = await harness.service.listMine({
+      accountId: ACCOUNT_ID,
+      role: 'player',
+      request: { limit: 50 },
     });
     const found = await harness.service.detail({
       accountId: ACCOUNT_ID,
@@ -411,9 +425,31 @@ describe('MatchApiService', () => {
         ],
       },
     });
+    expect(mine).toMatchObject({
+      outcome: 'found',
+      matches: [
+        {
+          owner: {
+            playerId: ACCOUNT_ID,
+            firstName: 'Synthetic',
+          },
+          participants: [
+            {
+              playerId: OTHER_ACCOUNT_ID,
+              slotNumber: 2,
+            },
+          ],
+        },
+      ],
+    });
     expect(harness.listPublicFeed).toHaveBeenCalledWith(TRANSACTION, {
       now: NOW,
       limit: 20,
+    });
+    expect(harness.listAccountFeed).toHaveBeenCalledWith(TRANSACTION, {
+      accountId: ACCOUNT_ID,
+      now: NOW,
+      limit: 50,
     });
     expect(harness.findVisibleById).toHaveBeenCalledWith(TRANSACTION, {
       matchId: MATCH_ID,
@@ -429,7 +465,12 @@ describe('MatchApiService', () => {
       TRANSACTION,
       { playerIds: [ACCOUNT_ID, OTHER_ACCOUNT_ID] },
     );
-    expect(JSON.stringify({ feed, found })).not.toMatch(
+    expect(harness.findByPlayerIds).toHaveBeenNthCalledWith(
+      3,
+      TRANSACTION,
+      { playerIds: [ACCOUNT_ID, OTHER_ACCOUNT_ID] },
+    );
+    expect(JSON.stringify({ feed, mine, found })).not.toMatch(
       /phone|photoUrl|languageCode|sidePreference/iu,
     );
   });
@@ -516,6 +557,32 @@ describe('MatchApiService', () => {
       outcome: 'rejected',
       reason: 'internal_failure',
     });
+  });
+
+  it('fails closed when account feed contains an unrelated match', async () => {
+    const harness = createHarness();
+    harness.listAccountFeed.mockResolvedValue([
+      {
+        ...detail(MATCH_ID, OTHER_ACCOUNT_ID),
+        scenario: 'social',
+        ratingMin: 2,
+        ratingMax: 4,
+        occupiedSlots: 1,
+        participants: [],
+      },
+    ]);
+
+    await expect(
+      harness.service.listMine({
+        accountId: ACCOUNT_ID,
+        role: 'player',
+        request: { limit: 50 },
+      }),
+    ).resolves.toEqual({
+      outcome: 'rejected',
+      reason: 'internal_failure',
+    });
+    expect(harness.findByPlayerIds).not.toHaveBeenCalled();
   });
 
   it('derives distinct stable join/leave commands and exposes only participant allowlist', async () => {
