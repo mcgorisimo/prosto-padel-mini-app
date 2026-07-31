@@ -36,18 +36,29 @@ begin
     where constraint_row.conrelid = v_commands
       and constraint_row.conname = 'match_commands_result_check'
       and constraint_row.contype = 'c'
-      and constraint_row.conkey = array(
-        select attribute.attnum::smallint
-        from pg_catalog.pg_attribute attribute
-        where attribute.attrelid = v_commands
-          and attribute.attname in (
-            'command_type',
-            'participant_id',
-            'result_type'
-          )
-          and not attribute.attisdropped
-        order by attribute.attnum
-      )
+      and constraint_row.conkey = array[
+        (
+          select attribute.attnum::smallint
+          from pg_catalog.pg_attribute attribute
+          where attribute.attrelid = v_commands
+            and attribute.attname = 'command_type'
+            and not attribute.attisdropped
+        ),
+        (
+          select attribute.attnum::smallint
+          from pg_catalog.pg_attribute attribute
+          where attribute.attrelid = v_commands
+            and attribute.attname = 'result_type'
+            and not attribute.attisdropped
+        ),
+        (
+          select attribute.attnum::smallint
+          from pg_catalog.pg_attribute attribute
+          where attribute.attrelid = v_commands
+            and attribute.attname = 'participant_id'
+            and not attribute.attisdropped
+        )
+      ]
       and not constraint_row.condeferrable
       and not constraint_row.condeferred
       and constraint_row.convalidated
