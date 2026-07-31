@@ -330,9 +330,6 @@ function MatchCard({ match, currentUser, onViewDetails }) {
       </div>
 
       <div style={{ marginBottom: '14px' }}>
-        <h2 style={{ margin: '0 0 6px 0', fontSize: '20px', fontWeight: '900', color: C.text, lineHeight: 1.15 }}>
-          {match.ownerName || match.title || 'Открытый матч'}
-        </h2>
         <div style={{ color: C.muted, fontSize: '13px', fontWeight: '650', display: 'flex', alignItems: 'center', gap: '6px' }}>
           <MapPin size={14} strokeWidth={2} />
           <span>{match.courtName || `Корт ${match.courtId}`}</span>
@@ -344,6 +341,22 @@ function MatchCard({ match, currentUser, onViewDetails }) {
         <span style={{ color: C.muted }}>·</span>
         <span>{match.time} — {calculateEndTime(match.time, match.duration)}</span>
       </div>
+      {match.description && (
+        <div style={{
+          color: C.muted,
+          fontSize: '12px',
+          lineHeight: 1.4,
+          margin: '-6px 0 16px',
+          display: '-webkit-box',
+          WebkitLineClamp: 2,
+          WebkitBoxOrient: 'vertical',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          maxHeight: '2.8em',
+        }}>
+          {match.description}
+        </div>
+      )}
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', marginBottom: '10px', color: C.muted, fontSize: '12px', fontWeight: 800 }}>
         <span data-testid={`match-free-spots-${match.id}`}>Свободно: {freeCount}</span>

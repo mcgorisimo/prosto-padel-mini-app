@@ -9,6 +9,7 @@ import {
   decodeTelegramCryptoSecret,
 } from '../config/telegram-login.config';
 import { DatabaseModule } from '../database/database.module';
+import { ContentModerationController } from '../common/content-moderation.controller';
 import { PostgresAccountStatusReader } from '../database/postgres-account-status.reader';
 import { PostgresAuthenticationOperationTerminalRepository } from '../database/postgres-authentication-operation-terminal.repository';
 import { PostgresExternalIdentityResolutionRepository } from '../database/postgres-external-identity.repository';
@@ -307,6 +308,7 @@ function createMatchChatService(
     MatchController,
     MatchInvitationController,
     MatchChatController,
+    ContentModerationController,
   ],
   providers: [
     TELEGRAM_LOGIN_HTTP_CLOCK_PROVIDER,

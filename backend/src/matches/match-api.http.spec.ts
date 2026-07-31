@@ -4,6 +4,7 @@ import {
   readMatchActionRequest,
   readMatchFeedRequest,
   readMatchId,
+  readUpdateMatchDescriptionRequest,
 } from './match-api.http';
 
 const REQUEST_KEY = deterministicUuid('match-api-http-request');
@@ -16,7 +17,6 @@ function publicRequest(): Record<string, unknown> {
     durationMinutes: 90,
     courtId: 'p1',
     scenario: 'social',
-    title: 'Evening padel',
     description: '',
     ratingMin: 2,
     ratingMax: 4,
@@ -30,6 +30,21 @@ describe('match API HTTP parsers', () => {
 
     expect(result).toEqual(publicRequest());
     expect(Object.isFrozen(result)).toBe(true);
+  });
+
+  it('accepts a 240-code-point comment and rejects a longer comment', () => {
+    expect(
+      readCreateMatchRequest({
+        ...publicRequest(),
+        description: 'я'.repeat(240),
+      }),
+    ).toBeDefined();
+    expect(
+      readCreateMatchRequest({
+        ...publicRequest(),
+        description: 'я'.repeat(241),
+      }),
+    ).toBeUndefined();
   });
 
   it('accepts private create only without public rating controls', () => {
@@ -52,6 +67,7 @@ describe('match API HTTP parsers', () => {
 
   it.each([
     ['unknown field', { ...publicRequest(), status: 'confirmed' }],
+    ['retired title field', { ...publicRequest(), title: 'Evening padel' }],
     ['client match id', { ...publicRequest(), matchId: MATCH_ID }],
     ['client command id', { ...publicRequest(), commandId: MATCH_ID }],
     ['client actor id', { ...publicRequest(), actorAccountId: MATCH_ID }],
@@ -93,6 +109,29 @@ describe('match API HTTP parsers', () => {
         participantId: MATCH_ID,
       }),
     ).toBeUndefined();
+  });
+
+  it('accepts only a request key and bounded comment for description updates', () => {
+    const value = {
+      requestKey: REQUEST_KEY,
+      description: 'Updated comment',
+    };
+    const parsed = readUpdateMatchDescriptionRequest(value);
+
+    expect(parsed).toEqual(value);
+    expect(Object.isFrozen(parsed)).toBe(true);
+    expect(readUpdateMatchDescriptionRequest({
+      ...value,
+      title: 'Retired title',
+    })).toBeUndefined();
+    expect(readUpdateMatchDescriptionRequest({
+      ...value,
+      description: 'x'.repeat(241),
+    })).toBeUndefined();
+    expect(readUpdateMatchDescriptionRequest({
+      ...value,
+      description: 'x\u0000y',
+    })).toBeUndefined();
   });
 
   it('parses an empty/default or canonical bounded feed query', () => {

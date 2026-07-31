@@ -13,6 +13,7 @@ import {
   MatchState,
   MatchStatus,
   MatchVisibility,
+  UpdateMatchDescriptionCommand,
 } from '../matches/match.types';
 import { PostgresTransaction } from './postgres-transaction';
 
@@ -24,6 +25,7 @@ export type MatchCommandRejection =
   | 'match_closed'
   | 'match_not_joinable'
   | 'match_started'
+  | 'not_match_owner'
   | 'rating_verification_required'
   | 'rating_out_of_range'
   | 'owner_cannot_join'
@@ -81,6 +83,19 @@ export type LeaveMatchResult =
       readonly reason: MatchCommandRejection;
     };
 
+export type UpdateMatchDescriptionResult =
+  | {
+      readonly outcome: 'match_description_updated';
+      readonly persistence: MatchCommandPersistence;
+      readonly matchId: MatchId;
+      readonly description: string;
+      readonly matchVersion: number;
+    }
+  | {
+      readonly outcome: 'rejected';
+      readonly reason: MatchCommandRejection;
+    };
+
 export interface ListPublicMatchFeedInput {
   readonly now: UnixEpochSeconds;
   readonly limit: number;
@@ -107,6 +122,7 @@ export interface MatchFeedRecord {
   readonly scenario: Exclude<MatchScenario, 'private'>;
   readonly status: MatchStatus;
   readonly title?: string;
+  readonly description: string;
   readonly ratingMin: number;
   readonly ratingMax: number;
   readonly isRatingMatch: boolean;
@@ -205,6 +221,11 @@ export interface MatchRepository {
     transaction: PostgresTransaction,
     command: LeaveMatchCommand,
   ): Promise<LeaveMatchResult>;
+
+  updateDescription(
+    transaction: PostgresTransaction,
+    command: UpdateMatchDescriptionCommand,
+  ): Promise<UpdateMatchDescriptionResult>;
 }
 
 export function matchDetailFromState(state: MatchState): MatchDetailRecord {

@@ -85,12 +85,13 @@ const OUTCOME_UI = {
 };
 
 function UpcomingMatchCard({ match, onClick }) {
-  const title = match.title || (match.type === 'match' ? 'Матч' : 'Бронь');
+  const title = match.type === 'match' ? 'Матч' : 'Бронь';
   const meta = [match.date, match.time, match.courtName || 'Корт'].filter(Boolean).join(' · ');
 
   return (
     <button
       type="button"
+      data-testid={`profile-upcoming-match-${match.id}`}
       onClick={() => onClick?.(match)}
       style={{
         width: '100%',
@@ -193,7 +194,7 @@ function ResultCard({ match, userId, onClick }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', alignItems: 'flex-start', marginBottom: '12px' }}>
         <div style={{ minWidth: 0 }}>
           <div style={{ color: C.muted, fontSize: '10px', fontWeight: 700 }}>{date}</div>
-          <div style={{ fontSize: '15px', fontWeight: 850, marginTop: '3px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{match.title || 'Матч'}</div>
+          <div style={{ fontSize: '15px', fontWeight: 850, marginTop: '3px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Матч</div>
         </div>
         <span style={{ flexShrink: 0, color: ui.color, fontSize: '11px', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.08em' }}>{resultLabel}</span>
       </div>

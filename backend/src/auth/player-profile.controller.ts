@@ -39,11 +39,17 @@ function publicError(
 
 function rejection(
   reason: Extract<
-    ReadOwnPlayerProfileResult,
+    ReadOwnPlayerProfileResult | UpdateOwnPlayerProfileResult,
     { readonly outcome: 'rejected' }
   >['reason'],
 ): HttpException {
   switch (reason) {
+    case 'content_not_allowed':
+      return publicError(
+        HttpStatus.UNPROCESSABLE_ENTITY,
+        'profile_content_not_allowed',
+        'Profile contains disallowed language',
+      );
     case 'profile_not_found':
       return publicError(
         HttpStatus.NOT_FOUND,

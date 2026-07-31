@@ -888,9 +888,11 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
               ? 'profile_not_found'
               : allowedReason === 'invalid_request'
                 ? 'invalid_request'
-                : allowedReason === 'temporary_unavailable'
-                  ? 'temporary_unavailable'
-                  : 'internal_error',
+                : allowedReason === 'content_not_allowed'
+                  ? 'content_not_allowed'
+                  : allowedReason === 'temporary_unavailable'
+                    ? 'temporary_unavailable'
+                    : 'internal_error',
         });
       } finally {
         presentedCredential = null;
@@ -1038,6 +1040,30 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
       (result, principal) =>
         result?.outcome === 'match_created' &&
         result.match?.ownerAccountId === principal.accountId,
+    );
+  }
+
+  function updateMatchDescription(matchId, description) {
+    return runMatchOperation(
+      (credential, signal) =>
+        matches.updateMatchDescription(
+          credential,
+          matchId,
+          description,
+          { signal },
+        ),
+      (result) =>
+        result?.outcome === 'match_description_updated' &&
+        result.match?.matchId === matchId &&
+        result.match?.description === description,
+    );
+  }
+
+  function moderateText(text) {
+    return runMatchOperation(
+      (credential, signal) =>
+        matches.moderateText(credential, text, { signal }),
+      (result) => result?.outcome === 'content_allowed',
     );
   }
 
@@ -1278,6 +1304,8 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
     listAccountMatches,
     loadMatch,
     createMatch,
+    updateMatchDescription,
+    moderateText,
     joinMatch,
     leaveMatch,
     searchPlayers,
@@ -1378,6 +1406,29 @@ export function useTelegramBackendLogin() {
       }));
     }
     return telegramBackendLoginLifecycle.createMatch(draft);
+  }, []);
+
+  const updateMatchDescription = useCallback((matchId, description) => {
+    if (!FEATURE_ENABLED) {
+      return Promise.resolve(Object.freeze({
+        outcome: 'rejected',
+        reason: 'not_authenticated',
+      }));
+    }
+    return telegramBackendLoginLifecycle.updateMatchDescription(
+      matchId,
+      description,
+    );
+  }, []);
+
+  const moderateText = useCallback((text) => {
+    if (!FEATURE_ENABLED) {
+      return Promise.resolve(Object.freeze({
+        outcome: 'rejected',
+        reason: 'not_authenticated',
+      }));
+    }
+    return telegramBackendLoginLifecycle.moderateText(text);
   }, []);
 
   const joinMatch = useCallback((matchId) => {
@@ -1535,6 +1586,8 @@ export function useTelegramBackendLogin() {
     listAccountMatches,
     loadMatch,
     createMatch,
+    updateMatchDescription,
+    moderateText,
     joinMatch,
     leaveMatch,
     searchPlayers,

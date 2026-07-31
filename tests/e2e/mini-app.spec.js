@@ -771,6 +771,14 @@ async function mockSupabase(page, options = {}) {
 }
 
 async function mockTelegram(page) {
+  await page.route(
+    'https://telegram.org/js/telegram-web-app.js',
+    (route) => route.fulfill({
+      status: 200,
+      contentType: 'application/javascript',
+      body: '',
+    }),
+  );
   await page.addInitScript(() => {
     class MockWebSocket extends EventTarget {
       static CONNECTING = 0;
@@ -878,6 +886,12 @@ async function openAuthenticatedApp(page) {
 async function openMatchesTab(page) {
   await page.locator('.bottom-nav').getByRole('button', { name: 'Матчи' }).click();
   await expect(page.locator('.bottom-nav').getByRole('button', { name: 'Матчи' })).toHaveAttribute('aria-current', 'page');
+}
+
+async function openMatchFromFeed(page, matchId) {
+  const marker = page.getByTestId(`match-free-spots-${matchId}`);
+  await expect(marker).toBeVisible();
+  await marker.locator('xpath=ancestor::button[1]').click();
 }
 
 async function openBookingTab(page) {
@@ -1043,6 +1057,16 @@ test('checks bottom navigation and opens match creation smoke', async ({ page })
   await expect(createMatchButton).toBeEnabled();
   await createMatchButton.click();
   await expect(page.getByRole('heading', { name: 'Создать матч' })).toBeVisible();
+  await page.getByRole('button', { name: /Только сбор игроков/ }).click();
+  const comment = page.getByPlaceholder(
+    'Например: играем в спокойном темпе, для удовольствия.',
+  );
+  const emojiBoundary = '😀'.repeat(240);
+  await comment.fill(emojiBoundary);
+  await expect(comment).toHaveValue(emojiBoundary);
+  await expect(page.getByText('240/240', { exact: true })).toBeVisible();
+  await comment.pressSequentially('😀');
+  await expect(comment).toHaveValue(emojiBoundary);
 });
 
 test('BOOKING creates only a private booking through create_booking', async ({ page }) => {
@@ -1199,7 +1223,7 @@ test('BOOKING saved per-player snapshot is not recalculated from the current tar
   await openMatchesTab(page);
 
   await expect(page.getByText('913 ₽', { exact: true })).toBeVisible();
-  await page.getByText(match.title, { exact: true }).click();
+  await openMatchFromFeed(page, match.id);
   await expect(page.getByTestId('match-participation-price')).toHaveText('913 ₽');
 });
 
@@ -1223,7 +1247,7 @@ test('MATCH without a stored price uses the same calculated fallback in feed and
   await expect(page.getByText(calculatedPriceLabel, { exact: true })).toBeVisible();
   await expect(page.getByText('Стоимость уточняется', { exact: true })).toHaveCount(0);
   await expect(page.getByText('0 ₽', { exact: true })).toHaveCount(0);
-  await page.getByText(match.title, { exact: true }).click();
+  await openMatchFromFeed(page, match.id);
   await expect(page.getByTestId('match-participation-price')).toHaveText(calculatedPriceLabel);
   await expect(page.getByTestId('match-participation-price')).not.toHaveText('0 ₽');
 });
@@ -1245,7 +1269,7 @@ test('MATCH invalid pricing data shows clarification and never becomes 0 ₽', a
 
   await expect(page.getByText('Стоимость уточняется', { exact: true })).toBeVisible();
   await expect(page.getByText('0 ₽', { exact: true })).toHaveCount(0);
-  await page.getByText(match.title, { exact: true }).click();
+  await openMatchFromFeed(page, match.id);
   await expect(page.getByTestId('match-participation-price')).toHaveText('Стоимость уточняется');
   await expect(page.getByTestId('match-participation-price')).not.toHaveText('0 ₽');
 });
@@ -1275,13 +1299,13 @@ test('MATCH cancellation still works when the displayed price uses fallback', as
   await setAuthenticatedSession(page);
   await page.goto('/');
   await openMatchesTab(page);
-  await page.getByText(match.title, { exact: true }).click();
+  await openMatchFromFeed(page, match.id);
 
   await page.getByRole('button', { name: 'Отменить игру' }).click();
   await page.getByRole('button', { name: 'Да, отменить игру' }).click();
 
   await expect.poll(() => state.deleteMatchRequests).toEqual([match.id]);
-  await expect(page.getByText(match.title, { exact: true })).toHaveCount(0);
+  await expect(page.getByTestId(`match-free-spots-${match.id}`)).toHaveCount(0);
   await expect(page.getByText('Пока нет открытых матчей', { exact: true })).toBeVisible();
   expect(state.matches.some(item => item.id === match.id)).toBe(false);
 });
@@ -1338,7 +1362,7 @@ test('OPEN-MATCH renders facts, full state and mobile layout', async ({ page }) 
   const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   expect(horizontalOverflow).toBeLessThanOrEqual(0);
 
-  await page.getByText('Заполненный матч QA', { exact: true }).click();
+  await openMatchFromFeed(page, fullMatch.id);
   await expect(page.getByText('Дата: 17 июля', { exact: true })).toBeVisible();
   await expect(page.getByText('Время: 19:00', { exact: true })).toBeVisible();
   await expect(page.getByText('777 ₽', { exact: true })).toBeVisible();
@@ -1371,7 +1395,7 @@ test('OPEN-MATCH organizer manages but cannot self-join or leave', async ({ page
   await openMatchesTab(page);
 
   await expect(page.getByText('Ваш матч', { exact: true })).toBeVisible();
-  await page.getByText('Матч организатора QA', { exact: true }).click();
+  await openMatchFromFeed(page, ownerMatch.id);
   await expect(page.getByText('Организатор', { exact: true })).toBeVisible();
   await expect(page.getByText('Вы управляете этой игрой', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Открыть чат игры' })).toBeVisible();
@@ -1381,13 +1405,15 @@ test('OPEN-MATCH organizer manages but cannot self-join or leave', async ({ page
   await expect(page.getByTestId('player-slot-remove-action')).toHaveCount(0);
 });
 
-test('OPEN-MATCH editing changes only title and comment', async ({ page }) => {
+test('OPEN-MATCH hides retired titles and disables unmoderated legacy editing', async ({ page }) => {
+  const comment = 'Спокойная игра для всех участников. '.repeat(6).trim();
   const match = createOpenJoinableMatch({
     id: 'owner-editable-match',
     owner_id: testUser.id,
     ownerId: testUser.id,
     title: 'Исходное название',
-    description: 'Исходный комментарий',
+    ownerName: 'Скрытое имя организатора',
+    description: comment,
     date: '20 июля',
     dateISO: '2099-07-20',
     time: '19:00',
@@ -1409,34 +1435,25 @@ test('OPEN-MATCH editing changes only title and comment', async ({ page }) => {
   await setAuthenticatedSession(page);
   await page.goto('/');
   await openMatchesTab(page);
-  await page.getByText(match.title, { exact: true }).click();
 
-  await page.getByRole('button', { name: 'Редактировать', exact: true }).click();
-  const editSheet = page.locator('.match-edit-sheet');
-  await expect(editSheet.getByText('Название матча', { exact: true })).toBeVisible();
-  await expect(editSheet.getByText('Комментарий', { exact: true })).toBeVisible();
-  await expect(editSheet.getByText('Дата и время', { exact: true })).toHaveCount(0);
-  await expect(editSheet.getByText('Параметры корта', { exact: true })).toHaveCount(0);
-  await expect(editSheet.locator('input[type="date"]')).toHaveCount(0);
+  const matchCard = page.locator('button').filter({ hasText: comment }).first();
+  await expect(matchCard).toBeVisible();
+  await expect(matchCard.getByText(comment, { exact: true })).toHaveCSS(
+    '-webkit-line-clamp',
+    '2',
+  );
+  await expect(page.getByText(match.title, { exact: true })).toHaveCount(0);
+  await expect(
+    page.getByText('Скрытое имя организатора', { exact: true }),
+  ).toHaveCount(0);
+  await matchCard.click();
 
-  await editSheet.locator('input').fill('Новое название');
-  await editSheet.locator('textarea').fill('Новый комментарий');
-  await editSheet.getByRole('button', { name: 'Сохранить' }).click();
-
-  await expect.poll(() => state.matchUpdates).toHaveLength(1);
-  expect(state.matchUpdates[0]).toMatchObject({
-    id: match.id,
-    body: {
-      title: 'Новое название',
-      description: 'Новый комментарий',
-    },
-  });
-  expect(Object.keys(state.matchUpdates[0].body).sort()).toEqual([
-    'description',
-    'title',
-  ]);
-  await expect(page.getByText('Новое название', { exact: true })).toBeVisible();
-  await expect(page.getByText('Новый комментарий', { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Редактировать', exact: true }),
+  ).toHaveCount(0);
+  await expect(page.getByText(match.title, { exact: true })).toHaveCount(0);
+  await expect(page.getByText(comment, { exact: true })).toBeVisible();
+  expect(state.matchUpdates).toEqual([]);
   await expect(page.getByText('Дата: 20 июля', { exact: true })).toBeVisible();
   await expect(page.getByText('Время: 19:00', { exact: true })).toBeVisible();
 });
@@ -1480,7 +1497,7 @@ test('PLAYER-SEARCH finds names case-insensitively, partially and without duplic
   await expect(page.locator('.bottom-nav')).toBeVisible();
 
   await openMatchesTab(page);
-  await page.getByText(ownerMatch.title, { exact: true }).click();
+  await openMatchFromFeed(page, ownerMatch.id);
   await page.getByTestId('match-empty-slot-1').click();
 
   const input = page.getByTestId('player-search-input');
@@ -1539,7 +1556,7 @@ base('OPEN-MATCH chat shows a retryable load error', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('.bottom-nav')).toBeVisible();
   await openMatchesTab(page);
-  await page.getByText('Чат с повторной загрузкой', { exact: true }).click();
+  await openMatchFromFeed(page, match.id);
   await page.getByRole('button', { name: 'Открыть чат игры' }).click();
 
   await expect(page.getByTestId('chat-load-error')).toBeVisible();
@@ -1559,7 +1576,7 @@ test('JOIN open match with a free slot works once, leaves, reloads and can join 
   await expect(page.locator('.bottom-nav')).toBeVisible();
 
   await openMatchesTab(page);
-  await page.getByText('Join smoke match').click();
+  await openMatchFromFeed(page, supabaseState.matches[0].id);
   const joinButton = page.getByTestId('match-self-join-button');
   await joinButton.evaluate(button => {
     button.click();
@@ -1589,7 +1606,7 @@ test('JOIN open match with a free slot works once, leaves, reloads and can join 
   await page.reload();
   await expect(page.locator('.bottom-nav')).toBeVisible();
   await openMatchesTab(page);
-  await page.getByText('Join smoke match').click();
+  await openMatchFromFeed(page, supabaseState.matches[0].id);
   await expect(page.getByTestId('match-self-join-button')).toBeVisible();
 
   await page.getByTestId('match-self-join-button').click();
@@ -1601,6 +1618,14 @@ test('JOIN open match with a free slot works once, leaves, reloads and can join 
 
 test('does not crash in a browser without Telegram.WebApp', async ({ page }) => {
   await mockSupabase(page);
+  await page.route(
+    'https://telegram.org/js/telegram-web-app.js',
+    (route) => route.fulfill({
+      status: 200,
+      contentType: 'application/javascript',
+      body: '',
+    }),
+  );
   await page.goto('/');
 
   await expect(page.getByRole('heading').first()).toBeVisible();
@@ -1667,7 +1692,7 @@ test('OPEN-MATCH chat sends once, stays scoped and persists after reload', async
   const chatButton = page.getByRole('button', { name: 'Открыть чат игры' });
 
   await openMatchesTab(page);
-  await page.getByText('Chat smoke match').click();
+  await openMatchFromFeed(page, chatMatch.id);
   await chatButton.click();
   await expect(page.getByText(otherMessageText, { exact: true })).toHaveCount(0);
 
@@ -1686,7 +1711,7 @@ test('OPEN-MATCH chat sends once, stays scoped and persists after reload', async
 
   await page.getByRole('button', { name: 'Закрыть' }).click();
   await page.getByRole('button', { name: '←' }).click();
-  await page.getByText('Other chat match').click();
+  await openMatchFromFeed(page, otherMatch.id);
   await chatButton.click();
   await expect(page.getByText(otherMessageText, { exact: true })).toBeVisible();
   await expect(page.getByText(messageText, { exact: true })).toHaveCount(0);
@@ -1694,7 +1719,7 @@ test('OPEN-MATCH chat sends once, stays scoped and persists after reload', async
   await page.reload();
   await expect(page.locator('.bottom-nav')).toBeVisible();
   await openMatchesTab(page);
-  await page.getByText('Chat smoke match').click();
+  await openMatchFromFeed(page, chatMatch.id);
   await chatButton.click();
   await expect(page.getByText(messageText, { exact: true })).toHaveCount(1);
 });
@@ -1751,17 +1776,17 @@ test.describe('WAITLIST frontend flow', () => {
     await page.goto('/');
     await openMatchesTab(page);
 
-    await page.getByText(ownerMatch.title, { exact: true }).click();
+    await openMatchFromFeed(page, ownerMatch.id);
     await expect(page.getByTestId('match-waitlist-list')).toContainText('Ольга С.');
     await expect(page.getByTestId('match-waitlist-join-button')).toHaveCount(0);
     await page.getByRole('button', { name: '←' }).click();
 
-    await page.getByText(participantMatch.title, { exact: true }).click();
+    await openMatchFromFeed(page, participantMatch.id);
     await expect(page.getByTestId('match-waitlist-list')).toContainText('Павел К.');
     await expect(page.getByTestId('match-waitlist-join-button')).toHaveCount(0);
     await page.getByRole('button', { name: '←' }).click();
 
-    await page.getByText(ordinaryMatch.title, { exact: true }).click();
+    await openMatchFromFeed(page, ordinaryMatch.id);
     await expect(page.getByTestId('match-waitlist-list')).toContainText('Анна Л.');
     await expect(page.getByTestId('match-waitlist-join-button')).toBeVisible();
   });
@@ -1779,7 +1804,7 @@ test.describe('WAITLIST frontend flow', () => {
     await setAuthenticatedSession(page);
     await page.goto('/');
     await openMatchesTab(page);
-    await page.getByText(match.title, { exact: true }).click();
+    await openMatchFromFeed(page, match.id);
 
     await expect(page.getByTestId('match-waitlist-player-position')).toHaveText(['1', '2']);
     const currentRow = page.getByTestId(`match-waitlist-player-${testUser.id}`);
@@ -1803,7 +1828,7 @@ test.describe('WAITLIST frontend flow', () => {
     await setAuthenticatedSession(page);
     await page.goto('/');
     await openMatchesTab(page);
-    await page.getByText(match.title, { exact: true }).click();
+    await openMatchFromFeed(page, match.id);
 
     await expect(page.getByTestId('match-waitlist-list-error')).toBeVisible();
     await expect(page.getByText('technical get_match_waitlist failure')).toHaveCount(0);
@@ -1836,12 +1861,12 @@ test.describe('WAITLIST frontend flow', () => {
     await page.goto('/');
 
     await openMatchesTab(page);
-    await page.getByText(publicMatch.title, { exact: true }).click();
+    await openMatchFromFeed(page, publicMatch.id);
     await expect(page.getByTestId('match-waitlist-join-button')).toBeVisible();
     await expect(page.getByTestId('match-waitlist-join-button')).toHaveText('Встать в лист ожидания');
     await page.getByRole('button', { name: '←' }).click();
     await openProfileTab(page);
-    await page.getByText(privateMatch.title, { exact: true }).click();
+    await page.getByTestId(`profile-upcoming-match-${privateMatch.id}`).click();
     await expect(page.getByTestId('match-waitlist-list')).toHaveCount(0);
     await expect(page.getByTestId('match-waitlist-action')).toHaveCount(0);
   });
@@ -1860,7 +1885,7 @@ test.describe('WAITLIST frontend flow', () => {
     await setAuthenticatedSession(page);
     await page.goto('/');
     await openMatchesTab(page);
-    await page.getByText(match.title, { exact: true }).click();
+    await openMatchFromFeed(page, match.id);
 
     const joinButton = page.getByTestId('match-waitlist-join-button');
     await expect(joinButton).toBeVisible();
@@ -1904,7 +1929,7 @@ test.describe('WAITLIST frontend flow', () => {
     await setAuthenticatedSession(page);
     await page.goto('/');
     await openMatchesTab(page);
-    await page.getByText(match.title, { exact: true }).click();
+    await openMatchFromFeed(page, match.id);
 
     await expect(page.getByTestId(`match-waitlist-player-${firstWaiting.user_id}`)).toBeVisible();
     await page.getByTestId('match-invitation-decline-button').click();
@@ -1925,7 +1950,7 @@ test.describe('WAITLIST frontend flow', () => {
     await setAuthenticatedSession(page);
     await page.goto('/');
     await openMatchesTab(page);
-    await page.getByText(match.title, { exact: true }).click();
+    await openMatchFromFeed(page, match.id);
     await expect(page.getByTestId('match-waitlist-position')).toHaveText('Вы 1-й в очереди');
     await page.waitForTimeout(300);
 
@@ -1956,7 +1981,7 @@ test.describe('WAITLIST frontend flow', () => {
     await page.reload();
     await expect(page.locator('.bottom-nav')).toBeVisible();
     await openMatchesTab(page);
-    await page.getByText(match.title, { exact: true }).click();
+    await openMatchFromFeed(page, match.id);
     await expect(page.getByTestId('match-joined-state')).toBeVisible();
     await expect(page.getByTestId('match-waitlist-list')).toContainText('Лист ожидания пока пуст');
     await expect(page.getByTestId('match-filled-slot-3')).toContainText('QP');
@@ -1966,7 +1991,7 @@ test.describe('WAITLIST frontend flow', () => {
     await expect(page.getByTestId('profile-notification-badge')).toHaveText('1');
     await openProfileTab(page);
     await page.getByTestId(`notification-card-${notification.notification_id}`).click();
-    await expect(page.getByText(match.title, { exact: true }).first()).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Детали матча' })).toBeVisible();
   });
 });
 
@@ -2018,7 +2043,7 @@ test.describe('INVITATION frontend flow', () => {
     await page.goto('/');
     await expect(page.locator('.bottom-nav')).toBeVisible();
     await openMatchesTab(page);
-    await page.getByText(match.title, { exact: true }).click();
+    await openMatchFromFeed(page, match.id);
     await page.getByTestId('match-empty-slot-1').click();
     await page.getByTestId('player-search-input').fill('Анна');
     const result = page.getByTestId(`player-search-result-${invitedPlayer.id}`);
@@ -2156,7 +2181,7 @@ test.describe('INVITATION frontend flow', () => {
     await setAuthenticatedSession(page);
     await page.goto('/');
     await openMatchesTab(page);
-    await page.getByText(match.title, { exact: true }).click();
+    await openMatchFromFeed(page, match.id);
 
     const panel = page.getByTestId('match-invitation-panel');
     await expect(panel).toContainText('Вас пригласили в эту игру');
@@ -2185,7 +2210,7 @@ test.describe('INVITATION frontend flow', () => {
     await setAuthenticatedSession(page);
     await page.goto('/');
     await openMatchesTab(page);
-    await page.getByText(match.title, { exact: true }).click();
+    await openMatchFromFeed(page, match.id);
 
     await page.getByTestId('match-empty-slot-1').click();
     await expect(page.getByTestId('match-joined-state')).toBeVisible();
@@ -2204,7 +2229,7 @@ test.describe('INVITATION frontend flow', () => {
     await setAuthenticatedSession(page);
     await page.goto('/');
     await openMatchesTab(page);
-    await page.getByText(match.title, { exact: true }).click();
+    await openMatchFromFeed(page, match.id);
 
     await page.getByTestId('match-invitation-decline-button').click();
     await expect(page.getByTestId('match-invitation-panel')).toHaveCount(0);
@@ -2244,7 +2269,7 @@ test.describe('INVITATION frontend flow', () => {
     await setAuthenticatedSession(page);
     await page.goto('/');
     await openMatchesTab(page);
-    await page.getByText(match.title, { exact: true }).click();
+    await openMatchFromFeed(page, match.id);
 
     await page.getByTestId('match-invitation-decline-button').click();
     await expect(page.getByTestId('match-invitation-panel')).toHaveCount(0);
@@ -2265,7 +2290,7 @@ test.describe('INVITATION frontend flow', () => {
     await setAuthenticatedSession(page);
     await page.goto('/');
     await openMatchesTab(page);
-    await page.getByText(match.title, { exact: true }).click();
+    await openMatchFromFeed(page, match.id);
     await expect(page.getByTestId('match-invitation-panel')).toBeVisible();
     await page.waitForTimeout(300);
 
@@ -2273,7 +2298,7 @@ test.describe('INVITATION frontend flow', () => {
     await page.reload();
     await expect(page.locator('.bottom-nav')).toBeVisible();
     await openMatchesTab(page);
-    await page.getByText(match.title, { exact: true }).click();
+    await openMatchFromFeed(page, match.id);
     await expect(page.getByTestId('match-invitation-panel')).toHaveCount(0);
     await expect(page.getByTestId('match-self-join-button')).toHaveText('Присоединиться к игре');
     expect(state.joinRequests).toBe(0);
@@ -2298,7 +2323,7 @@ test.describe('INVITATION frontend flow', () => {
     await expect.poll(() => state.acceptInvitationRequests).toBe(1);
     await expect.poll(() => state.markNotificationReadRequests).toBe(1);
     await expect(page.getByRole('button', { name: '←' })).toBeVisible();
-    await expect(page.getByText(match.title, { exact: true }).first()).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Детали матча' })).toBeVisible();
     await expect(page.getByTestId('match-participation-price')).toHaveText('990 ₽');
     expect(state.matches[0].participants).toContain(testUser.id);
     expect(state.matches[0].filledSlots.some((slot) => slot?.id === testUser.id)).toBe(true);
@@ -2310,7 +2335,7 @@ test.describe('INVITATION frontend flow', () => {
     await openProfileTab(page);
     await expect(page.getByTestId(`invitation-card-${invitation.id}`)).toHaveCount(0);
     await expect(page.getByTestId(`notification-card-${notification.notification_id}`)).toHaveCount(0);
-    await expect(page.getByText(match.title, { exact: true }).first()).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Детали матча' })).toBeVisible();
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(200);
   });
@@ -2385,7 +2410,7 @@ test.describe('INVITATION frontend flow', () => {
     await setAuthenticatedSession(page);
     await page.goto('/');
     await openMatchesTab(page);
-    await page.getByText(match.title, { exact: true }).click();
+    await openMatchFromFeed(page, match.id);
 
     await expect(page.getByTestId(`pending-invitation-${invitation.id}`)).toBeVisible();
     await page.getByTestId(`cancel-invitation-${invitation.id}`).click();
@@ -2489,7 +2514,7 @@ test('WAITLIST promotion notification opens its match and becomes read', async (
 
   await page.getByTestId(`notification-card-${notification.notification_id}`).click();
   await expect(page.getByRole('button', { name: '←' })).toBeVisible();
-  await expect(page.getByText(match.title, { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Детали матча' })).toBeVisible();
   expect(state.markNotificationReadRequests).toBe(1);
   await page.getByRole('button', { name: '←' }).click();
   await expect(page.getByTestId('profile-notification-badge')).toHaveCount(0);

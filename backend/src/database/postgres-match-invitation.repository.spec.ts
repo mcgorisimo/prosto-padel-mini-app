@@ -177,6 +177,7 @@ function matches(): jest.Mocked<MatchRepository> {
     findVisibleById: jest.fn(),
     join: jest.fn(),
     leave: jest.fn(),
+    updateDescription: jest.fn(),
   };
 }
 

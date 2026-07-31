@@ -409,10 +409,6 @@ export function createBackendMatchDraft(value) {
   const scenario = value.isPrivate === true
     ? 'private'
     : value.scenario;
-  const title =
-    typeof value.title === 'string' && value.title.trim().length > 0
-      ? value.title.trim()
-      : undefined;
   const description =
     typeof value.description === 'string' ? value.description : '';
 
@@ -431,7 +427,6 @@ export function createBackendMatchDraft(value) {
       ? { courtId: value.courtId }
       : {}),
     scenario,
-    ...(title === undefined ? {} : { title }),
     description,
     ...(scenario === 'private'
       ? {}
@@ -497,7 +492,6 @@ export function mapBackendMatchToApp(record, profile = null) {
     visibility: record.visibility ?? 'public',
     scenario: record.scenario,
     status: record.status,
-    title: record.title,
     description: record.description ?? '',
     ratingMin: record.ratingMin,
     ratingMax: record.ratingMax,

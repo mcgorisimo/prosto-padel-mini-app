@@ -18,6 +18,7 @@ import {
   CreateMatchCommand,
   JoinMatchCommand,
   LeaveMatchCommand,
+  MATCH_COMMENT_MAX_CODE_POINTS,
   MATCH_STATUSES,
   MatchCommand,
   MatchCommandId,
@@ -30,6 +31,7 @@ import {
   MatchScenario,
   MatchState,
   MatchStatus,
+  UpdateMatchDescriptionCommand,
   isMatchCommandId,
   isMatchId,
   isMatchInvitationId,
@@ -57,6 +59,7 @@ import {
   MatchPersistenceError,
   MatchPersistenceFailure,
   MatchRepository,
+  UpdateMatchDescriptionResult,
   matchDetailFromState,
 } from './match.repository';
 import {
@@ -243,6 +246,17 @@ const UPDATE_MATCH_VERSION_SQL = `
   RETURNING id, version
 `;
 
+const UPDATE_MATCH_DESCRIPTION_SQL = `
+  UPDATE backend_match.matches
+  SET
+    updated_at = $2,
+    version = $3,
+    description = $4
+  WHERE id = $1
+    AND version = $5
+  RETURNING id, version
+`;
+
 const INSERT_COMMAND_SQL = `
   INSERT INTO backend_match.match_commands (
     command_id,
@@ -272,6 +286,7 @@ const SELECT_PUBLIC_FEED_SQL = `
     matches.scenario,
     matches.status,
     matches.title,
+    matches.description,
     matches.rating_min,
     matches.rating_max,
     matches.is_rating_match,
@@ -320,6 +335,7 @@ const SELECT_ACCOUNT_FEED_SQL = `
     matches.scenario,
     matches.status,
     matches.title,
+    matches.description,
     matches.rating_min,
     matches.rating_max,
     matches.is_rating_match,
@@ -503,6 +519,7 @@ interface FeedRow extends QueryResultRow {
   readonly scenario: unknown;
   readonly status: unknown;
   readonly title: unknown;
+  readonly description: unknown;
   readonly rating_min: unknown;
   readonly rating_max: unknown;
   readonly is_rating_match: unknown;
@@ -548,6 +565,17 @@ function readPositiveSafeInteger(value: unknown): number {
     throw invalidPersistedState();
   }
   return decoded;
+}
+
+function readMatchDescription(value: unknown): string {
+  if (
+    typeof value !== 'string' ||
+    [...value].length > MATCH_COMMENT_MAX_CODE_POINTS ||
+    CONTROL_CHARACTER_PATTERN.test(value)
+  ) {
+    throw invalidPersistedState();
+  }
+  return value;
 }
 
 function readSmallInteger(
@@ -722,9 +750,11 @@ function hydrateCommand(row: CommandRow, matchId?: MatchId): AppliedMatchCommand
   const resultType = row.result_type;
   if (
     (commandType !== 'create_match' &&
+      commandType !== 'update_match_description' &&
       commandType !== 'join_match' &&
       commandType !== 'leave_match') ||
     (resultType !== 'match_created' &&
+      resultType !== 'match_description_updated' &&
       resultType !== 'participant_joined' &&
       resultType !== 'participant_left')
   ) {
@@ -739,8 +769,11 @@ function hydrateCommand(row: CommandRow, matchId?: MatchId): AppliedMatchCommand
             throw invalidPersistedState();
           })();
   if (
-    (commandType === 'create_match') !== (participantId === undefined) ||
+    ((commandType === 'join_match' || commandType === 'leave_match') ===
+      (participantId === undefined)) ||
     (commandType === 'create_match' && resultType !== 'match_created') ||
+    (commandType === 'update_match_description' &&
+      resultType !== 'match_description_updated') ||
     (commandType === 'join_match' && resultType !== 'participant_joined') ||
     (commandType === 'leave_match' && resultType !== 'participant_left')
   ) {
@@ -847,13 +880,7 @@ function hydrateMatchBase(row: MatchRow): Omit<
     ...(row.title === null
       ? {}
       : { title: readOptionalText(row.title, 160) as string }),
-    description:
-      typeof row.description === 'string' &&
-      [...row.description].length <= 2000
-        ? row.description
-        : (() => {
-            throw invalidPersistedState();
-          })(),
+    description: readMatchDescription(row.description),
     ...(ratingMin === undefined ? {} : { ratingMin }),
     ...(ratingMax === undefined ? {} : { ratingMax }),
     isRatingMatch: row.is_rating_match,
@@ -909,7 +936,10 @@ function hydrateAggregate(
       (participant) => participant.accountId === base.ownerAccountId,
     ) ||
     commands.some((command) => {
-      if (command.commandType === 'create_match') {
+      if (
+        command.commandType === 'create_match' ||
+        command.commandType === 'update_match_description'
+      ) {
         return (
           command.actorAccountId !== base.ownerAccountId ||
           command.participantId !== undefined
@@ -1010,6 +1040,7 @@ function hydrateFeed(row: FeedRow): MatchFeedRecord {
     ...(row.title === null
       ? {}
       : { title: readOptionalText(row.title, 160) as string }),
+    description: readMatchDescription(row.description),
     ratingMin,
     ratingMax,
     isRatingMatch: row.is_rating_match,
@@ -1075,6 +1106,7 @@ function trustedCreateCommand(
 function originalCreateDetail(
   state: MatchState,
   command: AppliedMatchCommand,
+  originalDescription: string,
 ): MatchDetailRecord {
   if (
     command.commandType !== 'create_match' ||
@@ -1107,7 +1139,7 @@ function originalCreateDetail(
     scenario: state.scenario,
     status,
     ...(state.title === undefined ? {} : { title: state.title }),
-    description: state.description,
+    description: originalDescription,
     ...(state.ratingMin === undefined
       ? {}
       : { ratingMin: state.ratingMin }),
@@ -1425,7 +1457,11 @@ export class PostgresMatchRepository implements MatchRepository {
         return Object.freeze({
           outcome: 'match_created',
           persistence: 'idempotent_retry',
-          match: originalCreateDetail(state, persisted),
+          match: originalCreateDetail(
+            state,
+            persisted,
+            command.description,
+          ),
         });
       }
       if (command.startsAt <= command.now) {
@@ -1662,6 +1698,69 @@ export class PostgresMatchRepository implements MatchRepository {
     command: LeaveMatchCommand,
   ): Promise<LeaveMatchResult> {
     return this.applyParticipantCommand(transaction, command);
+  }
+
+  async updateDescription(
+    transaction: PostgresTransaction,
+    command: UpdateMatchDescriptionCommand,
+  ): Promise<UpdateMatchDescriptionResult> {
+    assertCommand(command);
+    try {
+      const previous = await this.lockAndHydrate(
+        transaction,
+        command.matchId,
+      );
+      if (previous === null) {
+        return Object.freeze({
+          outcome: 'rejected',
+          reason: 'match_not_found',
+        });
+      }
+      const transition = transitionMatch(previous, command);
+      if (transition.outcome === 'rejected') {
+        return Object.freeze({
+          outcome: 'rejected',
+          reason: mapRejection(transition.reason),
+        });
+      }
+      if (transition.outcome === 'idempotent_retry') {
+        return Object.freeze({
+          outcome: 'match_description_updated',
+          persistence: 'idempotent_retry',
+          matchId: command.matchId,
+          description: command.description,
+          matchVersion: transition.originalCommand.matchVersion,
+        });
+      }
+      if (transition.transition !== 'match_description_updated') {
+        throw invalidPersistedState();
+      }
+      const updated = await transaction.query(
+        UPDATE_MATCH_DESCRIPTION_SQL,
+        [
+          command.matchId,
+          transition.state.updatedAt,
+          transition.state.version,
+          transition.state.description,
+          previous.version,
+        ],
+      );
+      exactOne(updated.rowCount, updated.rows);
+      const commandInserted = await transaction.query(
+        INSERT_COMMAND_SQL,
+        commandValues(transition.command),
+      );
+      exactOne(commandInserted.rowCount, commandInserted.rows);
+      return Object.freeze({
+        outcome: 'match_description_updated',
+        persistence: 'applied',
+        matchId: command.matchId,
+        description: transition.state.description,
+        matchVersion: transition.state.version,
+      });
+    } catch (error) {
+      throw mapPersistenceError(error);
+    }
   }
 
   private async applyParticipantCommand(

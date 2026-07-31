@@ -11,6 +11,7 @@ import {
 import {
   isUnixEpochSeconds,
 } from '../auth/auth.types';
+import { isUserGeneratedTextAllowed } from '../common/content-moderation';
 import {
   MatchDetailRecord,
   MatchFeedRecord,
@@ -24,6 +25,7 @@ import {
   PublicPlayerProfileSearchRepository,
 } from '../database/public-player-profile-search.repository';
 import {
+  MATCH_COMMENT_MAX_CODE_POINTS,
   MatchCommandId,
   MatchId,
   MatchParticipantId,
@@ -46,10 +48,13 @@ import {
   MutateMatchParticipationInput,
   ReadMatchDetailApiResult,
   ReadMatchDetailInput,
+  UpdateMatchDescriptionApiResult,
+  UpdateMatchDescriptionInput,
 } from './match-api.types';
 import {
   readCreateMatchRequest,
   readMatchActionRequest,
+  readUpdateMatchDescriptionRequest,
 } from './match-api.http';
 
 const UUID_URL_NAMESPACE = '6ba7b811-9dad-11d1-80b4-00c04fd430c8';
@@ -67,6 +72,10 @@ const BINDING_DOMAINS = Object.freeze({
   leave: Object.freeze({
     command: 'prosto-padel.matches.leave.command.v1',
     request: 'prosto-padel.matches.leave.request.v1',
+  }),
+  updateDescription: Object.freeze({
+    command: 'prosto-padel.matches.update-description.command.v1',
+    request: 'prosto-padel.matches.update-description.request.v1',
   }),
 } as const);
 
@@ -159,6 +168,8 @@ function mapRepositoryRejection(
     case 'match_full':
     case 'participant_not_active':
       return reason;
+    case 'not_match_owner':
+      return 'forbidden';
     default:
       return 'internal_failure';
   }
@@ -211,6 +222,14 @@ function optionalSafeText(
     (typeof value === 'string' &&
       value.length > 0 &&
       [...value].length <= maximum)
+  );
+}
+
+function isSafeMatchDescription(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    [...value].length <= MATCH_COMMENT_MAX_CODE_POINTS &&
+    (value.length === 0 || isUserGeneratedTextAllowed(value))
   );
 }
 
@@ -349,6 +368,7 @@ function enrichDetail(
   record: MatchDetailRecord,
   players: ReadonlyMap<AccountId, MatchPublicPlayerResponse>,
 ): MatchDetailResponse {
+  const { title: _retiredTitle, ...publicRecord } = record;
   const owner = players.get(record.ownerAccountId);
   const participants = record.participants.map((participant) => {
     const player = players.get(participant.playerId);
@@ -364,7 +384,7 @@ function enrichDetail(
     throw invalidReadModel();
   }
   return Object.freeze({
-    ...record,
+    ...publicRecord,
     owner,
     participants: Object.freeze(participants),
   });
@@ -374,6 +394,7 @@ function enrichFeed(
   record: MatchFeedRecord,
   players: ReadonlyMap<AccountId, MatchPublicPlayerResponse>,
 ): MatchFeedResponse {
+  const { title: _retiredTitle, ...publicRecord } = record;
   const owner = players.get(record.ownerAccountId);
   const participants = record.participants.map((participant) => {
     const player = players.get(participant.playerId);
@@ -389,7 +410,7 @@ function enrichFeed(
     throw invalidReadModel();
   }
   return Object.freeze({
-    ...record,
+    ...publicRecord,
     owner,
     participants: Object.freeze(participants),
   });
@@ -421,7 +442,7 @@ function safeMatchDetail(value: unknown): MatchDetailRecord | undefined {
       'cancelled',
     ].includes(value.status as string) ||
     !optionalSafeText(value.title, 160) ||
-    typeof value.description !== 'string' ||
+    !isSafeMatchDescription(value.description) ||
     !isOptionalRatingLevel(value.ratingMin) ||
     !isOptionalRatingLevel(value.ratingMax) ||
     typeof value.isRatingMatch !== 'boolean' ||
@@ -496,7 +517,6 @@ function safeMatchDetail(value: unknown): MatchDetailRecord | undefined {
     visibility: value.visibility as MatchDetailRecord['visibility'],
     scenario: value.scenario as MatchDetailRecord['scenario'],
     status: value.status as MatchDetailRecord['status'],
-    ...(value.title === undefined ? {} : { title: value.title }),
     description: value.description,
     ...(ratingMin === undefined
       ? {}
@@ -531,7 +551,7 @@ function safeFeedRecord(
     updatedAt: value.startsAt,
     kind: 'match',
     visibility: 'public',
-    description: '',
+    description: value.description,
     participants: value.participants,
   });
   if (
@@ -559,7 +579,7 @@ function safeFeedRecord(
     courtType: detail.courtType,
     scenario: detail.scenario,
     status: detail.status,
-    ...(detail.title === undefined ? {} : { title: detail.title }),
+    description: detail.description,
     ratingMin: value.ratingMin as number,
     ratingMax: value.ratingMax as number,
     isRatingMatch: detail.isRatingMatch,
@@ -629,6 +649,12 @@ export class MatchApiService {
           : 'invalid_request',
       );
     }
+    if (
+      request.description.length > 0 &&
+      !isUserGeneratedTextAllowed(request.description)
+    ) {
+      return rejected('content_not_allowed');
+    }
     try {
       const now = this.dependencies.clock.nowEpochSeconds();
       if (!isUnixEpochSeconds(now)) {
@@ -651,7 +677,6 @@ export class MatchApiService {
         String(request.durationMinutes),
         request.courtId ?? '',
         request.scenario,
-        request.title ?? '',
         request.description,
         request.ratingMin === undefined
           ? ''
@@ -683,9 +708,6 @@ export class MatchApiService {
             : request.scenario === 'community'
               ? 'searching'
               : 'confirmed',
-        ...(request.title === undefined
-          ? {}
-          : { title: request.title }),
         description: request.description,
         ...(request.ratingMin === undefined
           ? {}
@@ -934,6 +956,91 @@ export class MatchApiService {
     input: MutateMatchParticipationInput,
   ): Promise<MutateMatchParticipationApiResult> {
     return this.mutateParticipation('join', input);
+  }
+
+  async updateDescription(
+    input: UpdateMatchDescriptionInput,
+  ): Promise<UpdateMatchDescriptionApiResult> {
+    const request = readUpdateMatchDescriptionRequest(input.request);
+    if (
+      !validActor(input) ||
+      !hasExactlyKeys(input, [
+        'accountId',
+        'role',
+        'matchId',
+        'request',
+      ]) ||
+      input.role !== 'player' ||
+      !isMatchId(input.matchId) ||
+      request === undefined
+    ) {
+      return rejected(
+        validActor(input) && input.role !== 'player'
+          ? 'forbidden'
+          : 'invalid_request',
+      );
+    }
+    if (
+      request.description.length > 0 &&
+      !isUserGeneratedTextAllowed(request.description)
+    ) {
+      return rejected('content_not_allowed');
+    }
+    try {
+      const now = this.dependencies.clock.nowEpochSeconds();
+      if (!isUnixEpochSeconds(now)) {
+        return rejected('internal_failure');
+      }
+      const parts = [
+        input.accountId,
+        input.matchId,
+        request.requestKey,
+      ];
+      const commandId = bindingUuid(
+        BINDING_DOMAINS.updateDescription.command,
+        parts,
+      ) as MatchCommandId;
+      const digest = requestDigest([
+        BINDING_DOMAINS.updateDescription.request,
+        request.requestKey,
+        input.accountId,
+        input.matchId,
+        request.description,
+      ]);
+      const result = await this.dependencies.transactions.run(
+        (transaction) =>
+          this.dependencies.matches.updateDescription(transaction, {
+            type: 'update_match_description',
+            matchId: input.matchId,
+            commandId,
+            actorAccountId: input.accountId,
+            requestDigest: digest,
+            now,
+            description: request.description,
+          }),
+      );
+      if (result.outcome === 'rejected') {
+        return rejected(mapRepositoryRejection(result.reason));
+      }
+      if (
+        result.matchId !== input.matchId ||
+        result.description !== request.description ||
+        !Number.isSafeInteger(result.matchVersion) ||
+        result.matchVersion < 1
+      ) {
+        return rejected('internal_failure');
+      }
+      return Object.freeze({
+        outcome: 'updated',
+        match: Object.freeze({
+          matchId: result.matchId,
+          description: result.description,
+          matchVersion: result.matchVersion,
+        }),
+      });
+    } catch (error) {
+      return rejected(mapPersistenceFailure(error));
+    }
   }
 
   async leave(

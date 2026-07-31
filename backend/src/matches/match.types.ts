@@ -13,6 +13,7 @@ declare const matchRequestDigestBrand: unique symbol;
 declare const matchInvitationIdBrand: unique symbol;
 
 const SHA_256_HEX_PATTERN = /^[0-9a-f]{64}$/u;
+export const MATCH_COMMENT_MAX_CODE_POINTS = 240;
 
 export type MatchId = InternalUuid & {
   readonly [matchIdBrand]: 'MatchId';
@@ -53,10 +54,12 @@ export type MatchSlotNumber = 2 | 3 | 4;
 export type MatchParticipantStatus = 'active' | 'left' | 'removed';
 export type MatchCommandType =
   | 'create_match'
+  | 'update_match_description'
   | 'join_match'
   | 'leave_match';
 export type MatchCommandResultType =
   | 'match_created'
+  | 'match_description_updated'
   | 'participant_joined'
   | 'participant_left';
 
@@ -129,7 +132,6 @@ export interface CreateMatchCommand extends MatchCommandBase {
   readonly visibility: MatchVisibility;
   readonly scenario: MatchScenario;
   readonly status: 'open' | 'searching' | 'confirmed' | 'upcoming';
-  readonly title?: string;
   readonly description: string;
   readonly ratingMin?: number;
   readonly ratingMax?: number;
@@ -147,12 +149,18 @@ export interface JoinMatchCommand extends MatchCommandBase {
   readonly reservedSlotNumbers?: readonly MatchSlotNumber[];
 }
 
+export interface UpdateMatchDescriptionCommand extends MatchCommandBase {
+  readonly type: 'update_match_description';
+  readonly description: string;
+}
+
 export interface LeaveMatchCommand extends MatchCommandBase {
   readonly type: 'leave_match';
 }
 
 export type MatchCommand =
   | CreateMatchCommand
+  | UpdateMatchDescriptionCommand
   | JoinMatchCommand
   | LeaveMatchCommand;
 

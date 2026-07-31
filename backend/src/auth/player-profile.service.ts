@@ -2,6 +2,7 @@ import {
   USER_ROLES,
   isAccountId,
 } from '../accounts/account.types';
+import { isUserGeneratedTextAllowed } from '../common/content-moderation';
 import {
   PlayerProfileReadPersistenceError,
   PlayerProfileReader,
@@ -170,15 +171,14 @@ function publicProfile(
   });
 }
 
-function rejected(
-  reason: Extract<
-    ReadOwnPlayerProfileResult,
-    { readonly outcome: 'rejected' }
-  >['reason'],
-): Extract<
-  ReadOwnPlayerProfileResult,
+type PlayerProfileRejectionReason = Extract<
+  ReadOwnPlayerProfileResult | UpdateOwnPlayerProfileResult,
   { readonly outcome: 'rejected' }
-> {
+>['reason'];
+
+function rejected<Reason extends PlayerProfileRejectionReason>(
+  reason: Reason,
+): Readonly<{ readonly outcome: 'rejected'; readonly reason: Reason }> {
   return Object.freeze({ outcome: 'rejected', reason });
 }
 
@@ -199,6 +199,18 @@ function validUpdateInput(
     hasExactlyKeys(value, ['accountId', 'role', 'changes']) &&
     validInput({ accountId: value.accountId, role: value.role }) &&
     readOwnPlayerProfilePatch(value.changes) !== undefined
+  );
+}
+
+function containsDisallowedProfileText(
+  changes: UpdateOwnPlayerProfileInput['changes'],
+): boolean {
+  return (
+    (changes.firstName !== undefined &&
+      !isUserGeneratedTextAllowed(changes.firstName)) ||
+    (changes.lastName !== undefined &&
+      changes.lastName !== null &&
+      !isUserGeneratedTextAllowed(changes.lastName))
   );
 }
 
@@ -258,6 +270,9 @@ export class PlayerProfileService {
   ): Promise<UpdateOwnPlayerProfileResult> {
     if (!validUpdateInput(input) || input.role !== 'player') {
       return rejected('invalid_request');
+    }
+    if (containsDisallowedProfileText(input.changes)) {
+      return rejected('content_not_allowed');
     }
 
     try {

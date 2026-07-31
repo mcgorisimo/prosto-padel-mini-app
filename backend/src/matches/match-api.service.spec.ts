@@ -48,6 +48,9 @@ interface Harness {
   >;
   readonly join: jest.MockedFunction<MatchRepository['join']>;
   readonly leave: jest.MockedFunction<MatchRepository['leave']>;
+  readonly updateDescription: jest.MockedFunction<
+    MatchRepository['updateDescription']
+  >;
   readonly findByPlayerIds: jest.MockedFunction<
     PublicPlayerProfileSearchRepository['findByPlayerIds']
   >;
@@ -63,7 +66,6 @@ function request(
     durationMinutes: 90,
     courtId: 'p1',
     scenario: 'social',
-    title: 'Synthetic match',
     description: '',
     ratingMin: 2,
     ratingMax: 4,
@@ -123,6 +125,10 @@ function createHarness(): Harness {
     ReturnType<MatchRepository['leave']>,
     Parameters<MatchRepository['leave']>
   >();
+  const updateDescription = jest.fn<
+    ReturnType<MatchRepository['updateDescription']>,
+    Parameters<MatchRepository['updateDescription']>
+  >();
   const findByPlayerIds = jest.fn<
     ReturnType<PublicPlayerProfileSearchRepository['findByPlayerIds']>,
     Parameters<PublicPlayerProfileSearchRepository['findByPlayerIds']>
@@ -166,6 +172,7 @@ function createHarness(): Harness {
       findVisibleById,
       join,
       leave,
+      updateDescription,
     },
     publicProfiles: { findByPlayerIds },
     clock: { nowEpochSeconds: clockNow },
@@ -179,6 +186,7 @@ function createHarness(): Harness {
     findVisibleById,
     join,
     leave,
+    updateDescription,
     findByPlayerIds,
     clockNow,
   };
@@ -205,6 +213,8 @@ describe('MatchApiService', () => {
 
     expect(first.outcome).toBe('created');
     expect(second.outcome).toBe('created');
+    expect(first).not.toHaveProperty('match.title');
+    expect(second).not.toHaveProperty('match.title');
     expect(harness.run).toHaveBeenCalledTimes(2);
     expect(harness.create.mock.calls[0][0]).toBe(TRANSACTION);
     expect(firstCommand).toMatchObject({
@@ -226,6 +236,100 @@ describe('MatchApiService', () => {
     expect(secondCommand.commandId).toBe(firstCommand.commandId);
     expect(secondCommand.requestDigest).toBe(firstCommand.requestDigest);
     expect(JSON.stringify(firstCommand)).not.toContain(PRIVATE_MARKER);
+  });
+
+  it('rejects the retired title field before opening a transaction', async () => {
+    const harness = createHarness();
+
+    const result = await harness.service.create({
+      accountId: ACCOUNT_ID,
+      role: 'player',
+      request: {
+        ...request(),
+        title: 'Synthetic match',
+      } as unknown as CreateMatchRequest,
+    });
+
+    expect(result).toEqual({
+      outcome: 'rejected',
+      reason: 'invalid_request',
+    });
+    expect(harness.run).not.toHaveBeenCalled();
+    expect(harness.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects a disallowed comment before opening a transaction', async () => {
+    const harness = createHarness();
+    const disallowedComment = 'fuck this match';
+
+    const result = await harness.service.create({
+      accountId: ACCOUNT_ID,
+      role: 'player',
+      request: request({ description: disallowedComment }),
+    });
+
+    expect(result).toEqual({
+      outcome: 'rejected',
+      reason: 'content_not_allowed',
+    });
+    expect(harness.run).not.toHaveBeenCalled();
+    expect(harness.create).not.toHaveBeenCalled();
+    expect(JSON.stringify(result)).not.toContain(disallowedComment);
+  });
+
+  it('moderates and deterministically persists a comment-only update', async () => {
+    const harness = createHarness();
+    harness.updateDescription.mockImplementation(
+      async (_transaction, command) => ({
+        outcome: 'match_description_updated',
+        persistence: 'applied',
+        matchId: command.matchId,
+        description: command.description,
+        matchVersion: 2,
+      }),
+    );
+    const input = {
+      accountId: ACCOUNT_ID,
+      role: 'player' as const,
+      matchId: MATCH_ID,
+      request: {
+        requestKey: REQUEST_KEY,
+        description: 'Updated match comment',
+      },
+    };
+
+    const first = await harness.service.updateDescription(input);
+    const second = await harness.service.updateDescription(input);
+    const firstCommand = harness.updateDescription.mock.calls[0][1];
+    const secondCommand = harness.updateDescription.mock.calls[1][1];
+
+    expect(first).toEqual({
+      outcome: 'updated',
+      match: {
+        matchId: MATCH_ID,
+        description: 'Updated match comment',
+        matchVersion: 2,
+      },
+    });
+    expect(second).toEqual(first);
+    expect(firstCommand.commandId).toBe(secondCommand.commandId);
+    expect(firstCommand.requestDigest).toBe(secondCommand.requestDigest);
+    expect(isInternalUuid(firstCommand.commandId)).toBe(true);
+    expect(isMatchRequestDigest(firstCommand.requestDigest)).toBe(true);
+    expect(harness.run).toHaveBeenCalledTimes(2);
+
+    const rejected = await harness.service.updateDescription({
+      ...input,
+      request: {
+        requestKey: REQUEST_KEY,
+        description: 'fuck this match',
+      },
+    });
+    expect(rejected).toEqual({
+      outcome: 'rejected',
+      reason: 'content_not_allowed',
+    });
+    expect(harness.updateDescription).toHaveBeenCalledTimes(2);
   });
 
   it('passes community without a selected court through the private repository boundary', async () => {
@@ -473,6 +577,7 @@ describe('MatchApiService', () => {
     expect(JSON.stringify({ feed, mine, found })).not.toMatch(
       /phone|photoUrl|languageCode|sidePreference/iu,
     );
+    expect(JSON.stringify({ feed, mine, found })).not.toContain('title');
   });
 
   it('fails closed when a participant public profile is missing', async () => {
@@ -534,6 +639,8 @@ describe('MatchApiService', () => {
   it.each([
     ['terminal status', { status: 'completed' as const }],
     ['start boundary', { startsAt: NOW }],
+    ['oversized comment', { description: 'x'.repeat(241) }],
+    ['disallowed comment', { description: 'fuck this match' }],
   ])('rejects malformed feed output with %s', async (_case, override) => {
     const harness = createHarness();
     harness.listPublicFeed.mockResolvedValue([

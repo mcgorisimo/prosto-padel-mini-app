@@ -58,6 +58,7 @@ export type UpdateOwnPlayerProfileResult =
       readonly outcome: 'rejected';
       readonly reason:
         | 'invalid_request'
+        | 'content_not_allowed'
         | 'profile_not_found'
         | 'temporary_unavailable'
         | 'internal_failure';
@@ -95,6 +96,7 @@ function isRating(value: unknown): value is number {
 }
 
 const PHONE_PATTERN = /^\+[1-9][0-9]{6,14}$/u;
+const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f-\u009f]/u;
 const PATCH_KEYS = Object.freeze([
   'firstName',
   'lastName',
@@ -119,7 +121,8 @@ function isTrimmedBoundedString(
     typeof value === 'string' &&
     value.length > 0 &&
     value.trim() === value &&
-    [...value].length <= maximumCodePoints
+    [...value].length <= maximumCodePoints &&
+    !CONTROL_CHARACTER_PATTERN.test(value)
   );
 }
 

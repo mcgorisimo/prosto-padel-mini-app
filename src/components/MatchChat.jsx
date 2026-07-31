@@ -77,7 +77,7 @@ export default function MatchChat({ match, currentUser, messages = [], loading =
         <header className="flex items-center justify-between p-4 border-b border-slate-800 shrink-0">
           <div>
             <h2 className="text-base font-bold text-white">
-              Чат матча: {match.title || 'Обсуждение'}
+              Чат матча
             </h2>
             <p className="text-xs text-slate-400 mt-0.5">
               {match.date}, {match.time}

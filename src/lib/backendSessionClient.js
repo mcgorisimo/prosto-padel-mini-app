@@ -7,6 +7,7 @@ const PROFILE_PATH = '/api/v1/profile/me';
 const MATCHES_PATH = '/api/v1/matches';
 const PLAYER_SEARCH_PATH = '/api/v1/players/search';
 const MATCH_INVITATIONS_PATH = '/api/v1/match-invitations';
+const CONTENT_MODERATION_PATH = '/api/v1/content/moderation';
 const REQUEST_TIMEOUT_MS = 8_000;
 const MAX_REQUESTS = 3;
 const BACKOFF_BASE_MS = 250;
@@ -58,10 +59,10 @@ const MATCH_CREATE_REQUIRED_KEYS = Object.freeze([
 ]);
 const MATCH_CREATE_OPTIONAL_KEYS = Object.freeze([
   'courtId',
-  'title',
   'ratingMin',
   'ratingMax',
 ]);
+const MATCH_COMMENT_MAX_CODE_POINTS = 240;
 const MATCH_INVITATION_STATUSES = Object.freeze([
   'pending',
   'accepted',
@@ -174,10 +175,8 @@ export function isBackendCreateMatchDraft(value) {
     (value.courtId !== undefined &&
       (!isBoundedString(value.courtId, 64) ||
         value.courtId.trim() !== value.courtId)) ||
-    !isOptionalMatchTitle(value.title) ||
-    (value.title !== undefined && value.title.trim() !== value.title) ||
     typeof value.description !== 'string' ||
-    [...value.description].length > 2_000 ||
+    [...value.description].length > MATCH_COMMENT_MAX_CODE_POINTS ||
     typeof value.isRatingMatch !== 'boolean'
   ) {
     return false;
@@ -426,6 +425,7 @@ export function isBackendMatchFeedRecord(value) {
           'courtType',
           'scenario',
           'status',
+          'description',
           'ratingMin',
           'ratingMax',
           'isRatingMatch',
@@ -433,7 +433,6 @@ export function isBackendMatchFeedRecord(value) {
           'version',
         ],
         [
-          'title',
           'pricePerPersonSnapshot',
           'owner',
           'participants',
@@ -449,7 +448,8 @@ export function isBackendMatchFeedRecord(value) {
       (value.scenario === 'community' ||
         value.scenario === 'social') &&
       MATCH_FEED_STATUSES.includes(value.status) &&
-      isOptionalMatchTitle(value.title) &&
+      typeof value.description === 'string' &&
+      [...value.description].length <= MATCH_COMMENT_MAX_CODE_POINTS &&
       isMatchRating(value.ratingMin) &&
       isMatchRating(value.ratingMax) &&
       value.ratingMin <= value.ratingMax &&
@@ -519,7 +519,6 @@ export function isBackendMatchDetailRecord(value) {
         'participants',
       ],
       [
-        'title',
         'ratingMin',
         'ratingMax',
         'pricePerPersonSnapshot',
@@ -540,9 +539,8 @@ export function isBackendMatchDetailRecord(value) {
     (value.visibility !== 'public' && value.visibility !== 'private') ||
     !MATCH_SCENARIOS.includes(value.scenario) ||
     !MATCH_STATUSES.includes(value.status) ||
-    !isOptionalMatchTitle(value.title) ||
     typeof value.description !== 'string' ||
-    [...value.description].length > 2_000 ||
+    [...value.description].length > MATCH_COMMENT_MAX_CODE_POINTS ||
     typeof value.isRatingMatch !== 'boolean' ||
     !isOptionalSafePrice(value.pricePerPersonSnapshot) ||
     !Number.isSafeInteger(value.version) ||
@@ -1140,6 +1138,28 @@ function matchMessageSendSuccess(body, expectedMatchId) {
   });
 }
 
+function matchDescriptionUpdateSuccess(body, expectedMatchId) {
+  if (
+    !isPlainObject(body) ||
+    !hasExactKeys(Object.keys(body).sort(), ['match']) ||
+    !isPlainObject(body.match) ||
+    !hasExactKeys(
+      Object.keys(body.match).sort(),
+      ['description', 'matchId', 'matchVersion'],
+    ) ||
+    body.match.matchId !== expectedMatchId ||
+    typeof body.match.description !== 'string' ||
+    [...body.match.description].length > MATCH_COMMENT_MAX_CODE_POINTS ||
+    !Number.isSafeInteger(body.match.matchVersion) ||
+    body.match.matchVersion < 1
+  ) {
+    return null;
+  }
+  return frozen('match_description_updated', {
+    match: Object.freeze({ ...body.match }),
+  });
+}
+
 function classifyRefresh(status, body) {
   const code = exactPublicCode(body);
   if (status === 401 && code === 'session_expired') {
@@ -1187,6 +1207,9 @@ function classifyProfile(status, body) {
   if (status === 400 && code === 'profile_invalid_request') {
     return frozen('rejected', { reason: 'invalid_request' });
   }
+  if (status === 422 && code === 'profile_content_not_allowed') {
+    return frozen('rejected', { reason: 'content_not_allowed' });
+  }
   return frozen('rejected', { reason: 'internal_error' });
 }
 
@@ -1202,6 +1225,7 @@ function classifyMatch(status, body) {
     match_closed: 'match_closed',
     match_not_joinable: 'match_not_joinable',
     match_started: 'match_started',
+    match_content_not_allowed: 'content_not_allowed',
     match_rating_verification_required: 'rating_verification_required',
     match_rating_out_of_range: 'rating_out_of_range',
     match_owner_cannot_join: 'owner_cannot_join',
@@ -1337,6 +1361,8 @@ export function createBackendSessionClient(dependencies = {}) {
             ? LOGOUT_PATH
             : isProfileOperation
               ? PROFILE_PATH
+              : operation === 'content_moderation'
+                ? CONTENT_MODERATION_PATH
               : operation === 'match_list'
                 ? `${MATCHES_PATH}?limit=${operationPayload.limit}`
                 : operation === 'match_list_mine'
@@ -1349,6 +1375,8 @@ export function createBackendSessionClient(dependencies = {}) {
                       ? `${MATCHES_PATH}/${encodeURIComponent(matchId)}/invitations?limit=${operationPayload.limit}`
                 : operation === 'match_detail'
                   ? `${MATCHES_PATH}/${encodeURIComponent(matchId)}`
+                  : operation === 'match_update_description'
+                    ? `${MATCHES_PATH}/${encodeURIComponent(matchId)}`
                   : operation === 'match_create'
                     ? MATCHES_PATH
                     : operation === 'match_invitation_create'
@@ -1380,6 +1408,8 @@ export function createBackendSessionClient(dependencies = {}) {
               ? 'GET'
               : operation === 'profile_update'
                 ? 'PATCH'
+                : operation === 'match_update_description'
+                  ? 'PATCH'
                 : 'POST',
           headers: isReadOnly
             ? {
@@ -1397,6 +1427,13 @@ export function createBackendSessionClient(dependencies = {}) {
                 body: JSON.stringify(
                   operation === 'profile_update'
                     ? operationPayload
+                    : operation === 'content_moderation'
+                      ? { text: operationPayload.text }
+                    : operation === 'match_update_description'
+                      ? {
+                          requestKey,
+                          description: operationPayload.description,
+                        }
                     : operation === 'match_create'
                       ? { ...operationPayload, requestKey }
                       : operation === 'match_invitation_create'
@@ -1422,6 +1459,9 @@ export function createBackendSessionClient(dependencies = {}) {
 
       if (operation === 'logout' && response.status === 204) {
         return frozen('success', { result: frozen('logged_out') });
+      }
+      if (operation === 'content_moderation' && response.status === 204) {
+        return frozen('success', { result: frozen('content_allowed') });
       }
 
       const body = await readBoundedJson(
@@ -1559,6 +1599,15 @@ export function createBackendSessionClient(dependencies = {}) {
           ? frozen('success', { result })
           : frozen('malformed_response');
       }
+      if (
+        operation === 'match_update_description' &&
+        response.status === 200
+      ) {
+        const result = matchDescriptionUpdateSuccess(body, matchId);
+        return result
+          ? frozen('success', { result })
+          : frozen('malformed_response');
+      }
       if (operation === 'match_join' && response.status === 200) {
         const result = matchParticipantSuccess(
           body,
@@ -1615,8 +1664,19 @@ export function createBackendSessionClient(dependencies = {}) {
                   ? classifyPlayerSearch(response.status, body)
                   : isMatchInvitationOperation
                     ? classifyMatchInvitation(response.status, body)
-                    : isMatchChatOperation
+                  : isMatchChatOperation
                       ? classifyMatchChat(response.status, body)
+                  : operation === 'content_moderation'
+                    ? frozen('rejected', {
+                        reason:
+                          response.status === 401 &&
+                          exactPublicCode(body) === 'session_invalid'
+                            ? 'invalid'
+                            : response.status === 422 &&
+                                exactPublicCode(body) === 'content_not_allowed'
+                              ? 'content_not_allowed'
+                              : 'internal_error',
+                      })
                 : isMatchOperation
                   ? classifyMatch(response.status, body)
                   : classifyAuthentication(response.status, body),
@@ -1651,16 +1711,33 @@ export function createBackendSessionClient(dependencies = {}) {
       return frozen('rejected', { reason: 'invalid_request' });
     }
     if (
+      operation === 'content_moderation' &&
+      (
+        typeof operationPayload?.text !== 'string' ||
+        [...operationPayload.text].length > 2_000 ||
+        CONTROL_CHARACTER_PATTERN.test(operationPayload.text)
+      )
+    ) {
+      return frozen('rejected', { reason: 'invalid_request' });
+    }
+    if (
       ((operation === 'match_list' || operation === 'match_list_mine') &&
         (!Number.isInteger(operationPayload?.limit) ||
           operationPayload.limit < 1 ||
           operationPayload.limit > 50)) ||
       ((operation === 'match_detail' ||
+        operation === 'match_update_description' ||
         operation === 'match_join' ||
         operation === 'match_leave') &&
         !isMatchId(operationPayload?.matchId)) ||
       (operation === 'match_create' &&
         !isBackendCreateMatchDraft(operationPayload)) ||
+      (operation === 'match_update_description' &&
+        (
+          typeof operationPayload?.description !== 'string' ||
+          [...operationPayload.description].length > MATCH_COMMENT_MAX_CODE_POINTS ||
+          CONTROL_CHARACTER_PATTERN.test(operationPayload.description)
+        )) ||
       (operation === 'player_search' &&
         (
           typeof operationPayload?.query !== 'string' ||
@@ -1716,6 +1793,7 @@ export function createBackendSessionClient(dependencies = {}) {
       operation === 'refresh' ||
       operation === 'logout' ||
       operation === 'match_create' ||
+      operation === 'match_update_description' ||
       operation === 'match_join' ||
       operation === 'match_leave' ||
       operation === 'match_invitation_create' ||
@@ -1780,6 +1858,8 @@ export function createBackendSessionClient(dependencies = {}) {
       execute('profile', credential, options),
     updateOwnProfile: (credential, profilePatch, options) =>
       execute('profile_update', credential, options, profilePatch),
+    moderateText: (credential, text, options) =>
+      execute('content_moderation', credential, options, { text }),
     listMatches: (credential, limit = 20, options) =>
       execute('match_list', credential, options, { limit }),
     listAccountMatches: (credential, limit = 50, options) =>
@@ -1788,6 +1868,13 @@ export function createBackendSessionClient(dependencies = {}) {
       execute('match_detail', credential, options, { matchId }),
     createMatch: (credential, matchDraft, options) =>
       execute('match_create', credential, options, matchDraft),
+    updateMatchDescription: (credential, matchId, description, options) =>
+      execute(
+        'match_update_description',
+        credential,
+        options,
+        { matchId, description },
+      ),
     joinMatch: (credential, matchId, options) =>
       execute('match_join', credential, options, { matchId }),
     leaveMatch: (credential, matchId, options) =>

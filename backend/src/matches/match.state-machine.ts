@@ -5,11 +5,13 @@ import {
   CreateMatchCommand,
   JoinMatchCommand,
   LeaveMatchCommand,
+  MATCH_COMMENT_MAX_CODE_POINTS,
   MatchCommand,
   MatchCommandResultType,
   MatchParticipantState,
   MatchSlotNumber,
   MatchState,
+  UpdateMatchDescriptionCommand,
   isMatchCommandId,
   isMatchId,
   isMatchParticipantId,
@@ -33,6 +35,7 @@ export type MatchTransitionRejection =
   | 'match_closed'
   | 'match_not_joinable'
   | 'match_started'
+  | 'not_match_owner'
   | 'rating_verification_required'
   | 'rating_out_of_range'
   | 'owner_cannot_join'
@@ -45,6 +48,7 @@ export type MatchTransitionResult =
       readonly outcome: 'transitioned';
       readonly transition:
         | 'match_created'
+        | 'match_description_updated'
         | 'participant_joined'
         | 'participant_left';
       readonly state: MatchState;
@@ -82,13 +86,6 @@ function isBoundedText(
     value.trim() === value &&
     !CONTROL_CHARACTER_PATTERN.test(value)
   );
-}
-
-function isOptionalBoundedText(
-  value: unknown,
-  maximum: number,
-): value is string | undefined {
-  return value === undefined || isBoundedText(value, 1, maximum);
 }
 
 function isSafeVersion(value: unknown): value is number {
@@ -141,9 +138,9 @@ function isValidCreateCommand(command: CreateMatchCommand): boolean {
     isBoundedText(command.courtId, 1, 64) &&
     isBoundedText(command.courtName, 1, 128) &&
     isBoundedText(command.courtType, 1, 64) &&
-    isOptionalBoundedText(command.title, 160) &&
     typeof command.description === 'string' &&
-    [...command.description].length <= 2000 &&
+    [...command.description].length <= MATCH_COMMENT_MAX_CODE_POINTS &&
+    !CONTROL_CHARACTER_PATTERN.test(command.description) &&
     typeof command.isRatingMatch === 'boolean' &&
     typeof command.actorIsVerified === 'boolean' &&
     (command.pricePerPersonSnapshot === undefined ||
@@ -181,6 +178,17 @@ function isValidLeaveCommand(command: LeaveMatchCommand): boolean {
   return isValidCommandBase(command);
 }
 
+function isValidUpdateDescriptionCommand(
+  command: UpdateMatchDescriptionCommand,
+): boolean {
+  return (
+    isValidCommandBase(command) &&
+    typeof command.description === 'string' &&
+    [...command.description].length <= MATCH_COMMENT_MAX_CODE_POINTS &&
+    !CONTROL_CHARACTER_PATTERN.test(command.description)
+  );
+}
+
 export function isValidMatchCommand(command: MatchCommand): boolean {
   switch (command.type) {
     case 'create_match':
@@ -189,6 +197,8 @@ export function isValidMatchCommand(command: MatchCommand): boolean {
       return isValidJoinCommand(command);
     case 'leave_match':
       return isValidLeaveCommand(command);
+    case 'update_match_description':
+      return isValidUpdateDescriptionCommand(command);
   }
 }
 
@@ -315,7 +325,6 @@ function createMatch(
     visibility: command.visibility,
     scenario: command.scenario,
     status: command.status,
-    ...(command.title === undefined ? {} : { title: command.title }),
     description: command.description,
     ...(command.ratingMin === undefined
       ? {}
@@ -524,6 +533,52 @@ function leaveMatch(
   });
 }
 
+function updateMatchDescription(
+  state: MatchState,
+  command: UpdateMatchDescriptionCommand,
+): MatchTransitionResult {
+  if (!isValidUpdateDescriptionCommand(command)) {
+    return Object.freeze({
+      outcome: 'rejected',
+      reason: 'invalid_match_command',
+    });
+  }
+  if (command.now < state.updatedAt) {
+    return Object.freeze({
+      outcome: 'rejected',
+      reason: 'invalid_match_command',
+    });
+  }
+  if (!ACTIVE_MATCH_STATUSES.has(state.status)) {
+    return Object.freeze({ outcome: 'rejected', reason: 'match_closed' });
+  }
+  if (command.now >= state.startsAt) {
+    return Object.freeze({ outcome: 'rejected', reason: 'match_started' });
+  }
+  if (state.ownerAccountId !== command.actorAccountId) {
+    return Object.freeze({
+      outcome: 'rejected',
+      reason: 'not_match_owner',
+    });
+  }
+  const sequence = state.version + 1;
+  const persistedCommand = appliedCommand(
+    command,
+    sequence,
+    'match_description_updated',
+  );
+  const nextState = Object.freeze({
+    ...appendCommand(state, persistedCommand, state.participants),
+    description: command.description,
+  });
+  return Object.freeze({
+    outcome: 'transitioned',
+    transition: 'match_description_updated',
+    state: nextState,
+    command: persistedCommand,
+  });
+}
+
 export function transitionMatch(
   state: MatchState | null,
   command: MatchCommand,
@@ -575,5 +630,7 @@ export function transitionMatch(
       return joinMatch(state, command);
     case 'leave_match':
       return leaveMatch(state, command);
+    case 'update_match_description':
+      return updateMatchDescription(state, command);
   }
 }

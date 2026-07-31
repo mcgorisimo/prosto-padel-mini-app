@@ -1434,37 +1434,17 @@ const handleBookSlot = async (booking) => {
     setActiveTab('home'); 
   };
 
-  const handleUpdateMatch = async (matchId, updates) => {
-    const payload = {
-      title: updates.title,
-      description: updates.description,
-    };
-
-    logDevBookingMatchUpdate(matchId, 'update:edit', payload);
-    const { data, error } = await supabase
-      .from('matches')
-      .update(payload)
-      .eq('id', matchId)
-      .not('status', 'in', '("completed","finished")')
-      .select();
-
-    if (error) {
-      showToast?.('Не удалось сохранить изменения матча. Попробуйте еще раз.', 'error');
-      throw error;
-    }
-
-    const updatedRow = data?.[0];
-    if (!updatedRow) {
-      const emptyUpdateError = new Error('Match edit returned no rows');
-      showToast?.('Изменения не сохранены. Проверьте права доступа или статус матча.', 'error');
-      throw emptyUpdateError;
-    }
-
-    const updatedMatch = normalizeMatch(updatedRow);
-    setAllMatches(prev => prev.map(m => m.id === updatedMatch.id ? updatedMatch : m));
-    setSelected(prev => prev?.id === updatedMatch.id ? updatedMatch : prev);
-    showToast?.('Матч обновлен', 'success');
-    return updatedMatch;
+  const requireAllowedLegacyText = async (text) => {
+    if (text.length === 0) return;
+    const result = await backendMatchActions?.moderateText?.(text);
+    if (result?.outcome === 'content_allowed') return;
+    showToast?.(
+      result?.reason === 'content_not_allowed'
+        ? 'Текст содержит недопустимые слова. Исправьте его.'
+        : 'Не удалось безопасно проверить текст. Попробуйте ещё раз.',
+      'error',
+    );
+    throw new Error(result?.reason ?? 'content_moderation_unavailable');
   };
 
   const handleSendMessage = async (matchId, sender, text) => {
@@ -1503,6 +1483,8 @@ const handleBookSlot = async (booking) => {
       }
       return message;
     }
+
+    await requireAllowedLegacyText(text);
 
     const senderId = sender?.id ?? ME_ID;
 
@@ -1837,6 +1819,45 @@ const handleBookSlot = async (booking) => {
     if (!usesCoordinatedLogout) {
       window.location.reload();
     }
+  };
+
+  const handleUpdateMatchDescription = async (matchId, description) => {
+    if (!backendMatchesReady || !backendMatchActions) {
+      showToast?.('Сервис матчей временно недоступен.', 'error');
+      throw new Error('BACKEND_MATCH_UPDATE_UNAVAILABLE');
+    }
+    const result = await backendMatchActions.updateMatchDescription(
+      matchId,
+      description,
+    );
+    if (result.outcome !== 'match_description_updated') {
+      showToast?.(
+        result.reason === 'content_not_allowed'
+          ? 'Комментарий содержит недопустимые слова. Исправьте текст.'
+          : 'Не удалось сохранить комментарий матча.',
+        'error',
+      );
+      throw new Error(result.reason ?? 'match_update_failed');
+    }
+    const updated = result.match;
+    const apply = (candidate) =>
+      candidate?.id === matchId
+        ? {
+            ...candidate,
+            description: updated.description,
+            version: updated.matchVersion,
+          }
+        : candidate;
+    setBackendFeedMatches((previous) => previous.map(apply));
+    setBackendAccountMatches((previous) => previous.map(apply));
+    setAllMatches((previous) => previous.map(apply));
+    setSelected((previous) => apply(previous));
+    showToast?.('Комментарий матча обновлён', 'success');
+    return Object.freeze({
+      id: matchId,
+      description: updated.description,
+      version: updated.matchVersion,
+    });
   };
 
   const handleProfileSaved = (updatedProfile) => {
@@ -2331,7 +2352,12 @@ const handleBookSlot = async (booking) => {
         const safeError = new Error(
           result.reason ?? 'match_create_failed',
         );
-        showToast?.('Не удалось создать матч. Попробуйте ещё раз.', 'error');
+        showToast?.(
+          result.reason === 'content_not_allowed'
+            ? 'Комментарий содержит недопустимые слова. Исправьте текст.'
+            : 'Не удалось создать матч. Попробуйте ещё раз.',
+          'error',
+        );
         throw safeError;
       }
       const createdMatch = mapBackendMatchToApp(
@@ -2353,6 +2379,8 @@ const handleBookSlot = async (booking) => {
       setScreen('match-details');
       return;
     }
+
+    await requireAllowedLegacyText(data.description ?? '');
 
     const ownerSlot = {
       id:          ME_ID,
@@ -2380,7 +2408,6 @@ const handleBookSlot = async (booking) => {
       ratingMax:    data.ratingMax ?? 6,
       players:      1,
       scenario:     data.scenario,
-      title:        data.title,
       description:  data.description,
       // Lifecycle
       status:       data.status,
@@ -2521,7 +2548,7 @@ const handleBookSlot = async (booking) => {
         onComplete={handleCompleteMatch}
         onConfirmScore={handleConfirmScore}
         onDisputeScore={handleDisputeScore}
-        onUpdate={handleUpdateMatch}
+        onUpdateDescription={handleUpdateMatchDescription}
         onSlotsChange={handleSlotsChange}
         onJoinMatch={handleJoinMatch}
         onLeaveMatch={handleLeaveMatch}

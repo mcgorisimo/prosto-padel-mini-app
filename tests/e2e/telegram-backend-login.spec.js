@@ -451,6 +451,14 @@ test.describe('Telegram backend login feature enabled', () => {
           noCookie:
             !Object.prototype.hasOwnProperty.call(headers, 'cookie'),
         };
+        if (body.firstName === 'fuck') {
+          await fulfillJson(route, 422, {
+            statusCode: 422,
+            code: 'profile_content_not_allowed',
+            message: 'Profile contains disallowed language',
+          });
+          return;
+        }
         await fulfillJson(route, 200, {
           accountId: SYNTHETIC_ACCOUNT_ID,
           role: 'player',
@@ -522,6 +530,12 @@ test.describe('Telegram backend login feature enabled', () => {
     const inputs = page.locator('input');
     await expect(inputs.nth(0)).toHaveValue('Backend');
     await expect(inputs.nth(2)).toHaveValue('+79990000000');
+    await inputs.nth(0).fill('fuck');
+    await page.getByRole('button', { name: 'Сохранить' }).click();
+    await expect.poll(() => profilePatches).toBe(1);
+    await expect(
+      page.getByText('Имя или фамилия содержит недопустимые слова.').first(),
+    ).toBeVisible();
     await inputs.nth(0).fill('Updated');
     await inputs.nth(1).fill('');
     await inputs.nth(2).fill('+7 (999) 111-22-33');
@@ -532,7 +546,7 @@ test.describe('Telegram backend login feature enabled', () => {
     await sideButtons.nth(0).click();
     await page.getByRole('button', { name: 'Сохранить' }).click();
 
-    await expect.poll(() => profilePatches).toBe(1);
+    await expect.poll(() => profilePatches).toBe(2);
     expect(patchContract).toEqual({
       exactKeys: true,
       hasAccountId: false,

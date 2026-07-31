@@ -143,9 +143,6 @@ function UpcomingRow({ match, onClick }) {
           <div className="text-sm text-warm-white/62">
             {getDisplayDate(match.dateISO)}, {courtLabel}
           </div>
-          {match.title && (
-            <div className="mt-2 text-sm font-semibold text-warm-white">{match.title}</div>
-          )}
           {match.description && (
             <div className="mt-2 line-clamp-2 text-sm leading-relaxed text-warm-white/56">
               {match.description}

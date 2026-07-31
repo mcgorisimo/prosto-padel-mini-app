@@ -4,8 +4,10 @@ import {
   CreateMatchRequest,
   MatchActionRequest,
   MatchFeedRequest,
+  UpdateMatchDescriptionRequest,
 } from './match-api.types';
 import {
+  MATCH_COMMENT_MAX_CODE_POINTS,
   MatchDurationMinutes,
   MatchId,
   MatchScenario,
@@ -23,7 +25,6 @@ const CREATE_REQUIRED_KEYS = Object.freeze([
 ] as const);
 const CREATE_OPTIONAL_KEYS = Object.freeze([
   'courtId',
-  'title',
   'ratingMin',
   'ratingMax',
 ] as const);
@@ -63,13 +64,9 @@ function isBoundedText(
 function isDescription(value: unknown): value is string {
   return (
     typeof value === 'string' &&
-    [...value].length <= 2_000 &&
+    [...value].length <= MATCH_COMMENT_MAX_CODE_POINTS &&
     !CONTROL_CHARACTER_PATTERN.test(value)
   );
-}
-
-function isOptionalTitle(value: unknown): value is string | undefined {
-  return value === undefined || isBoundedText(value, 1, 160);
 }
 
 function isPublicRatingRange(
@@ -118,7 +115,6 @@ export function readCreateMatchRequest(
     !['community', 'social', 'private'].includes(
       value.scenario as string,
     ) ||
-    !isOptionalTitle(value.title) ||
     !isDescription(value.description) ||
     typeof value.isRatingMatch !== 'boolean'
   ) {
@@ -146,7 +142,6 @@ export function readCreateMatchRequest(
     durationMinutes: value.durationMinutes as MatchDurationMinutes,
     ...(value.courtId === undefined ? {} : { courtId: value.courtId }),
     scenario,
-    ...(value.title === undefined ? {} : { title: value.title }),
     description: value.description,
     ...(scenario === 'private'
       ? {}
@@ -170,6 +165,25 @@ export function readMatchActionRequest(
     return undefined;
   }
   return Object.freeze({ requestKey: value.requestKey });
+}
+
+export function readUpdateMatchDescriptionRequest(
+  value: unknown,
+): UpdateMatchDescriptionRequest | undefined {
+  if (
+    !isRecord(value) ||
+    Object.keys(value).length !== 2 ||
+    !Object.prototype.hasOwnProperty.call(value, 'requestKey') ||
+    !Object.prototype.hasOwnProperty.call(value, 'description') ||
+    !isInternalUuid(value.requestKey) ||
+    !isDescription(value.description)
+  ) {
+    return undefined;
+  }
+  return Object.freeze({
+    requestKey: value.requestKey,
+    description: value.description,
+  });
 }
 
 export function readMatchFeedRequest(

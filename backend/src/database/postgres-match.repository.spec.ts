@@ -8,6 +8,7 @@ import {
   MatchInvitationId,
   MatchParticipantId,
   MatchRequestDigest,
+  UpdateMatchDescriptionCommand,
 } from '../matches/match.types';
 import {
   MatchCourtCatalog,
@@ -37,6 +38,9 @@ const JOIN_COMMAND_ID = deterministicUuid(
 const LEAVE_COMMAND_ID = deterministicUuid(
   'repository-leave-command',
 ) as MatchCommandId;
+const UPDATE_DESCRIPTION_COMMAND_ID = deterministicUuid(
+  'repository-update-description-command',
+) as MatchCommandId;
 const PARTICIPANT_ID = deterministicUuid(
   'repository-participant',
 ) as MatchParticipantId;
@@ -46,6 +50,7 @@ const INVITATION_ID = deterministicUuid(
 const CREATE_DIGEST = '1'.repeat(64) as MatchRequestDigest;
 const JOIN_DIGEST = '2'.repeat(64) as MatchRequestDigest;
 const LEAVE_DIGEST = '3'.repeat(64) as MatchRequestDigest;
+const UPDATE_DESCRIPTION_DIGEST = '4'.repeat(64) as MatchRequestDigest;
 const PRIVATE_MARKER = 'SYNTHETIC_MATCH_PRIVATE_CREDENTIAL';
 
 interface QueryCall {
@@ -210,6 +215,21 @@ function leaveCommandRow(
   });
 }
 
+function updateDescriptionCommandRow(
+  overrides: Record<string, unknown> = {},
+): QueryResultRow {
+  return commandRow({
+    command_id: UPDATE_DESCRIPTION_COMMAND_ID,
+    command_sequence: '2',
+    request_digest: Buffer.from(UPDATE_DESCRIPTION_DIGEST, 'hex'),
+    command_type: 'update_match_description',
+    applied_at: '1800000100',
+    result_type: 'match_description_updated',
+    match_version: '2',
+    ...overrides,
+  });
+}
+
 function createCommandLockResult(): QueryResult<QueryResultRow> {
   return queryResult([{ locked: '' }]);
 }
@@ -238,7 +258,6 @@ function createCommand(
     visibility: 'public',
     scenario: 'social',
     status: 'confirmed',
-    title: 'Synthetic match',
     description: '',
     ratingMin: 2,
     ratingMax: 4,
@@ -323,6 +342,21 @@ function leaveCommand(
     actorAccountId: PLAYER_ID,
     requestDigest: LEAVE_DIGEST,
     now: unixEpochSeconds(1_800_000_200),
+    ...overrides,
+  };
+}
+
+function updateDescriptionCommand(
+  overrides: Partial<UpdateMatchDescriptionCommand> = {},
+): UpdateMatchDescriptionCommand {
+  return {
+    type: 'update_match_description',
+    matchId: MATCH_ID,
+    commandId: UPDATE_DESCRIPTION_COMMAND_ID,
+    actorAccountId: OWNER_ID,
+    requestDigest: UPDATE_DESCRIPTION_DIGEST,
+    now: unixEpochSeconds(1_800_000_100),
+    description: 'Updated match comment',
     ...overrides,
   };
 }
@@ -496,7 +530,7 @@ describe('PostgresMatchRepository', () => {
     expect(harness.findProfile).not.toHaveBeenCalled();
   });
 
-  it('reconstructs the original create result after later join and leave changes', async () => {
+  it('reconstructs the original create result after later join, leave and description changes', async () => {
     const matchRepository = repository();
     const applied = await matchRepository.create(
       new FakeTransaction([
@@ -512,10 +546,12 @@ describe('PostgresMatchRepository', () => {
       queryResult([commandRow()]),
       queryResult([
         matchRow({
-          updated_at: '1800000200',
+          updated_at: '1800000300',
           status: 'open',
-          version: '3',
+          version: '4',
           scenario: 'social',
+          title: null,
+          description: 'Edited later comment',
         }),
       ]),
       queryResult([
@@ -526,7 +562,16 @@ describe('PostgresMatchRepository', () => {
           version: '2',
         }),
       ]),
-      queryResult([commandRow(), joinCommandRow(), leaveCommandRow()]),
+      queryResult([
+        commandRow(),
+        joinCommandRow(),
+        leaveCommandRow(),
+        updateDescriptionCommandRow({
+          command_sequence: '4',
+          applied_at: '1800000300',
+          match_version: '4',
+        }),
+      ]),
     ]);
 
     const retryHarness = repositoryHarness({
@@ -646,6 +691,7 @@ describe('PostgresMatchRepository', () => {
           scenario: 'community',
           status: 'open',
           title: 'Synthetic match',
+          description: 'Feed comment',
           rating_min: 2,
           rating_max: 4,
           is_rating_match: true,
@@ -675,6 +721,7 @@ describe('PostgresMatchRepository', () => {
         scenario: 'community',
         status: 'open',
         title: 'Synthetic match',
+        description: 'Feed comment',
         ratingMin: 2,
         ratingMax: 4,
         isRatingMatch: true,
@@ -706,6 +753,39 @@ describe('PostgresMatchRepository', () => {
     expect(transaction.calls[0].values).toEqual([1_800_000_000, 20]);
   });
 
+  it('fails closed when a persisted feed comment exceeds the public limit', async () => {
+    const transaction = new FakeTransaction([
+      queryResult([{
+        id: MATCH_ID,
+        owner_account_id: OWNER_ID,
+        starts_at: '1800003600',
+        duration_minutes: 90,
+        court_id: 'court-1',
+        court_name: 'Synthetic court',
+        court_type: 'indoor',
+        scenario: 'community',
+        status: 'open',
+        title: 'Synthetic match',
+        description: 'x'.repeat(241),
+        rating_min: 2,
+        rating_max: 4,
+        is_rating_match: true,
+        price_per_person_snapshot: '1000.00',
+        version: '2',
+        occupied_slots: '1',
+        participant_account_ids: [],
+        participant_slot_numbers: [],
+      }]),
+    ]);
+
+    await expect(
+      repository().listPublicFeed(transaction, {
+        now: unixEpochSeconds(1_800_000_000),
+        limit: 20,
+      }),
+    ).rejects.toMatchObject({ reason: 'invalid_persisted_state' });
+  });
+
   it('lists future matches scoped to the authenticated owner or active participant', async () => {
     const transaction = new FakeTransaction([
       queryResult([
@@ -720,6 +800,7 @@ describe('PostgresMatchRepository', () => {
           scenario: 'community',
           status: 'open',
           title: 'Synthetic match',
+          description: 'Account feed comment',
           rating_min: 2,
           rating_max: 4,
           is_rating_match: true,
@@ -774,6 +855,7 @@ describe('PostgresMatchRepository', () => {
           scenario: 'community',
           status: 'open',
           title: 'Synthetic match',
+          description: '',
           rating_min: 2,
           rating_max: 4,
           is_rating_match: true,
@@ -841,6 +923,87 @@ describe('PostgresMatchRepository', () => {
         { matchId: MATCH_ID, viewerAccountId: VIEWER_ID },
       ),
     ).toBeNull();
+  });
+
+  it('locks the aggregate, updates only the description and appends one immutable command', async () => {
+    const transaction = new FakeTransaction([
+      queryResult([matchRow({ description: 'Old comment' })]),
+      queryResult([]),
+      queryResult([commandRow()]),
+      queryResult([{ id: MATCH_ID, version: '2' }], 1, 'UPDATE'),
+      queryResult([{ command_id: UPDATE_DESCRIPTION_COMMAND_ID }], 1, 'INSERT'),
+    ]);
+
+    const result = await repository().updateDescription(
+      transaction,
+      updateDescriptionCommand(),
+    );
+
+    expect(result).toEqual({
+      outcome: 'match_description_updated',
+      persistence: 'applied',
+      matchId: MATCH_ID,
+      description: 'Updated match comment',
+      matchVersion: 2,
+    });
+    expect(transaction.calls).toHaveLength(5);
+    expect(normalizeSql(transaction.calls[0].text)).toContain(
+      'FROM backend_match.matches WHERE id = $1 FOR UPDATE',
+    );
+    expect(normalizeSql(transaction.calls[3].text)).toContain(
+      'UPDATE backend_match.matches SET updated_at = $2, version = $3, description = $4',
+    );
+    expect(transaction.calls[3].values).toEqual([
+      MATCH_ID,
+      1_800_000_100,
+      2,
+      'Updated match comment',
+      1,
+    ]);
+    expect(normalizeSql(transaction.calls[4].text)).toContain(
+      'INSERT INTO backend_match.match_commands',
+    );
+    expect(transaction.calls[4].values).toEqual(expect.arrayContaining([
+      UPDATE_DESCRIPTION_COMMAND_ID,
+      'update_match_description',
+      'match_description_updated',
+    ]));
+  });
+
+  it('returns the original description update on an exact retry without a second write', async () => {
+    const transaction = new FakeTransaction([
+      queryResult([matchRow({
+        updated_at: '1800000200',
+        description: 'A later comment',
+        version: '3',
+      })]),
+      queryResult([]),
+      queryResult([
+        commandRow(),
+        updateDescriptionCommandRow(),
+        updateDescriptionCommandRow({
+          command_id: deterministicUuid('later-update-command'),
+          command_sequence: '3',
+          request_digest: Buffer.from('5'.repeat(64), 'hex'),
+          applied_at: '1800000200',
+          match_version: '3',
+        }),
+      ]),
+    ]);
+
+    await expect(
+      repository().updateDescription(
+        transaction,
+        updateDescriptionCommand(),
+      ),
+    ).resolves.toEqual({
+      outcome: 'match_description_updated',
+      persistence: 'idempotent_retry',
+      matchId: MATCH_ID,
+      description: 'Updated match comment',
+      matchVersion: 2,
+    });
+    expect(transaction.calls).toHaveLength(3);
   });
 
   it('locks, hydrates, joins, advances the aggregate and appends a command', async () => {

@@ -424,6 +424,32 @@ describe('PlayerProfileController HTTP boundary', () => {
     expect(JSON.stringify(response.json())).not.toContain(CREDENTIAL);
   });
 
+  it('maps rejected profile text to a fixed safe response', async () => {
+    harness.updateOwnProfile.mockResolvedValueOnce({
+      outcome: 'rejected',
+      reason: 'content_not_allowed',
+    });
+    const privateText = 'fuck PRIVATE_PROFILE_MARKER';
+
+    const response = await inject(
+      harness,
+      `Bearer ${CREDENTIAL}`,
+      '',
+      undefined,
+      'PATCH',
+      { firstName: privateText },
+    );
+
+    expect(response.statusCode).toBe(422);
+    expectNoStore(response);
+    expect(response.json()).toEqual({
+      statusCode: 422,
+      code: 'profile_content_not_allowed',
+      message: 'Profile contains disallowed language',
+    });
+    expect(response.body).not.toContain(privateText);
+  });
+
   it.each([
     null,
     {},

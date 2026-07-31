@@ -32,6 +32,9 @@ export function createBackendMatchActions(telegramBackendLogin) {
     listAccountMatches: telegramBackendLogin.listAccountMatches,
     loadMatch: telegramBackendLogin.loadMatch,
     createMatch: telegramBackendLogin.createMatch,
+    updateMatchDescription:
+      telegramBackendLogin.updateMatchDescription,
+    moderateText: telegramBackendLogin.moderateText,
     joinMatch: telegramBackendLogin.joinMatch,
     leaveMatch: telegramBackendLogin.leaveMatch,
     searchPlayers: telegramBackendLogin.searchPlayers,
@@ -172,6 +175,8 @@ export default function AuthGate() {
     () => createBackendMatchActions(telegramBackendLogin),
     [
       telegramBackendLogin.createMatch,
+      telegramBackendLogin.updateMatchDescription,
+      telegramBackendLogin.moderateText,
       telegramBackendLogin.createMatchInvitation,
       telegramBackendLogin.acceptMatchInvitation,
       telegramBackendLogin.cancelMatchInvitation,

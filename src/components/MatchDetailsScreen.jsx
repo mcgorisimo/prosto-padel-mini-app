@@ -385,50 +385,47 @@ function PlayerSlot({ player, onTap, slotIndex = 0, onSlotClick, ratingChange })
   );
 }
 
-// ─── Edit Panel (bottom sheet) ────────────────────────────────────────────────
+// ─── Cancel Sheet ─────────────────────────────────────────────────────────────
 
-function EditPanel({ initTitle, initDescription, onSave, onClose }) {
-  const [editTitle, setEditTitle] = useState(initTitle || '');
-  const [editDesc,  setEditDesc]  = useState(initDescription || '');
+function DescriptionEditPanel({ initialValue, saving, onSave, onClose }) {
+  const [draft, setDraft] = useState(initialValue || '');
 
   return (
     <BottomSheet onClose={onClose} variant="edit">
-      <div style={{ color: C.text, fontSize: '20px', fontWeight: 850, marginBottom: '18px' }}>Редактировать матч</div>
-
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-        <div style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(245,241,232,0.14)', borderRadius: '20px', padding: '14px' }}>
-          <div style={{ fontSize: '10px', fontWeight: 800, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: '8px' }}>Название матча</div>
-          <input
-            value={editTitle}
-            onChange={e => setEditTitle(e.target.value)}
-            placeholder="Например: Турнир выходного дня"
-            style={{ width: '100%', padding: '13px 14px', borderRadius: '14px', background: '#0B2117', color: C.text, border: '1px solid rgba(245,241,232,0.18)', fontSize: '15px', boxSizing: 'border-box', outline: 'none' }}
-          />
-          <div style={{ fontSize: '10px', fontWeight: 800, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.12em', margin: '14px 0 8px' }}>Комментарий</div>
-          <textarea
-            value={editDesc}
-            onChange={e => setEditDesc(e.target.value)}
-            placeholder="Например: играем в спокойном темпе"
-            rows={3}
-            style={{ width: '100%', padding: '13px 14px', borderRadius: '14px', background: '#0B2117', color: C.text, border: '1px solid rgba(245,241,232,0.18)', fontSize: '15px', boxSizing: 'border-box', resize: 'vertical', minHeight: '92px', outline: 'none', lineHeight: 1.45 }}
-          />
-        </div>
-
+      <div style={{ color: C.text, fontSize: '20px', fontWeight: 850, marginBottom: '18px' }}>
+        Редактировать комментарий
       </div>
-
+      <textarea
+        data-testid="match-description-edit-input"
+        value={draft}
+        onChange={(event) => {
+          if ([...event.target.value].length <= 240) {
+            setDraft(event.target.value);
+          }
+        }}
+        placeholder="Например: играем в спокойном темпе"
+        rows={4}
+        style={{ width: '100%', padding: '13px 14px', borderRadius: '14px', background: '#0B2117', color: C.text, border: '1px solid rgba(245,241,232,0.18)', fontSize: '15px', boxSizing: 'border-box', resize: 'vertical', minHeight: '108px', outline: 'none', lineHeight: 1.45 }}
+      />
+      <div style={{ color: C.muted, fontSize: '11px', marginTop: '6px', textAlign: 'right' }}>
+        {[...draft].length}/240
+      </div>
       <div style={{ display: 'flex', gap: '8px', marginTop: '18px' }}>
-        <button onClick={() => onSave({ title: editTitle, description: editDesc })} style={{ flex: 1, padding: '15px', background: 'rgba(216,243,74,0.12)', color: C.gold, border: '1px solid rgba(216,243,74,0.32)', borderRadius: '16px', fontSize: '15px', fontWeight: 800, cursor: 'pointer' }}>
-          Сохранить
+        <button
+          data-testid="match-description-edit-save"
+          disabled={saving || [...draft].length > 240}
+          onClick={() => onSave(draft)}
+          style={{ flex: 1, padding: '15px', background: 'rgba(216,243,74,0.12)', color: C.gold, border: '1px solid rgba(216,243,74,0.32)', borderRadius: '16px', fontSize: '15px', fontWeight: 800, cursor: saving ? 'default' : 'pointer', opacity: saving ? 0.6 : 1 }}
+        >
+          {saving ? 'Сохраняем…' : 'Сохранить'}
         </button>
-        <button onClick={onClose} style={{ padding: '15px 20px', background: 'transparent', color: C.muted, border: `1px solid ${C.border}`, borderRadius: '16px', fontSize: '15px', cursor: 'pointer' }}>
+        <button disabled={saving} onClick={onClose} style={{ padding: '15px 20px', background: 'transparent', color: C.muted, border: `1px solid ${C.border}`, borderRadius: '16px', fontSize: '15px', cursor: saving ? 'default' : 'pointer' }}>
           Отмена
         </button>
       </div>
     </BottomSheet>
   );
 }
-
-// ─── Cancel Sheet ─────────────────────────────────────────────────────────────
 
 function CancelSheet({ onConfirm, onClose }) {
   return (
@@ -714,52 +711,6 @@ function SlotActionSheet({ slotIndex, isOwner, currentUser, matchId, onAddGuest,
 
 // ─── Pinned Message Block ─────────────────────────────────────────────────────
 
-function PinnedBlock({ msg, isOwner, onSave }) {
-  const [editing, setEditing] = useState(false);
-  const [draft,   setDraft]   = useState(msg || '');
-
-  if (!isOwner && !msg) return null;
-
-  return (
-    <div style={{ marginBottom: '16px' }}>
-      <div style={{ fontSize: '10px', fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: '8px' }}>
-        Сообщение организатора
-      </div>
-      {editing ? (
-        <div>
-          <textarea
-            value={draft}
-            onChange={e => setDraft(e.target.value)}
-            placeholder="Например: Собираемся у 7-го корта, форма чёрная 🖤"
-            maxLength={200}
-            rows={3}
-            style={{ width: '100%', background: C.surface, border: `1px solid ${C.accent}`, borderRadius: '10px', padding: '10px 12px', color: C.text, fontSize: '13px', resize: 'none', boxSizing: 'border-box', outline: 'none', lineHeight: 1.5 }}
-          />
-          <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
-            <button onClick={() => { onSave(draft); setEditing(false); }} style={{ flex: 1, padding: '10px', background: C.accent, color: '#fff', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>
-              Закрепить
-            </button>
-            <button onClick={() => { setDraft(msg || ''); setEditing(false); }} style={{ padding: '10px 14px', background: 'transparent', color: C.muted, border: `1px solid ${C.border}`, borderRadius: '10px', fontSize: '13px', cursor: 'pointer' }}>
-              Отмена
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div style={{ background: C.surface, borderRadius: '10px', padding: '12px 14px', border: `1px solid ${C.border}`, position: 'relative', minHeight: '44px', display: 'flex', alignItems: 'center' }}>
-          <div style={{ color: msg ? C.text : C.muted, fontSize: '13px', lineHeight: 1.5, flex: 1, fontStyle: msg ? 'normal' : 'italic', paddingRight: isOwner ? '28px' : 0 }}>
-            {msg || 'Нажмите кнопку редактирования, чтобы добавить сообщение для участников'}
-          </div>
-          {isOwner && (
-            <button onClick={() => setEditing(true)} style={{ position: 'absolute', top: '10px', right: '10px', background: 'none', border: 'none', color: C.muted, fontSize: '15px', cursor: 'pointer', padding: '2px' }}>
-              Edit
-            </button>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ─── Scenario Info Block ──────────────────────────────────────────────────────
 
 function ScenarioInfoBlock({ match }) {
@@ -1001,7 +952,7 @@ function MatchInvitationPanel({ accepting, declining, onAccept, onDecline }) {
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
-export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinSuccess, onDelete, onComplete, onConfirmScore, onDisputeScore, onUpdate, onSlotsChange, onJoinMatch, onLeaveMatch, onRefreshMatch, incomingInvitation = null, pendingInvitations = [], invitationActions = new Set(), onAcceptInvitation, onDeclineInvitation, onCreateInvitation, onCancelInvitation, onSearchPlayers, onRemoveParticipant, allMessages, messagesLoading, messagesLoadError, hasOlderMessages = false, olderMessagesLoading = false, onLoadOlderMessages, onRefreshMessages, onRetryMessages, onSendMessage, onRevertToPrivate, showToast }) {
+export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinSuccess, onDelete, onComplete, onConfirmScore, onDisputeScore, onUpdateDescription, onSlotsChange, onJoinMatch, onLeaveMatch, onRefreshMatch, incomingInvitation = null, pendingInvitations = [], invitationActions = new Set(), onAcceptInvitation, onDeclineInvitation, onCreateInvitation, onCancelInvitation, onSearchPlayers, onRemoveParticipant, allMessages, messagesLoading, messagesLoadError, hasOlderMessages = false, olderMessagesLoading = false, onLoadOlderMessages, onRefreshMessages, onRetryMessages, onSendMessage, onRevertToPrivate, showToast }) {
   const isOwner = canManageMatch(currentUser, match);
 
   const allBots = useMemo(() => getTestBots(), []);
@@ -1017,11 +968,11 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
   const [joining,     setJoining]     = useState(false);
   const [leaving,     setLeaving]     = useState(false);
   const [cancelled,   setCancelled]   = useState(false);
-  const [editSheet,   setEditSheet]   = useState(false);
+  const [editDescription, setEditDescription] = useState(false);
+  const [descriptionSaving, setDescriptionSaving] = useState(false);
   const [cancelSheet, setCancelSheet] = useState(false);
   const [kickTarget,  setKickTarget]  = useState(null);
   const [leaveTarget, setLeaveTarget] = useState(null);
-  const [pinnedMsg,   setPinnedMsg]   = useState('');
   const [targetSlot,  setTargetSlot]  = useState(null); // index of tapped empty slot
   const [finished,    setFinished]    = useState(match.status === 'completed');
   const [finishToast, setFinishToast] = useState(null);
@@ -1115,17 +1066,14 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
     if (joinSuccessTimerRef.current) clearTimeout(joinSuccessTimerRef.current);
   }, []);
 
-  // Owner-editable fields (null = use original from match prop)
   const [localSlots, setLocalSlots] = useState(null);
-  const [localTitle, setLocalTitle] = useState(null);
-  const [localDesc,  setLocalDesc]  = useState(null);
+  const [localDescription, setLocalDescription] = useState(null);
 
   const {
     host, date, ratingMin, ratingMax,
     dateISO:     origDateISO,
     filledSlots: origFilledSlots,
     players      = 0,
-    title:       origTitle,
     description: origDescription,
     status,
     scenario,
@@ -1148,8 +1096,12 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
   const courtType = origCourt;
   const courtName = origCourtName;
   const duration  = origDuration;
-  const title     = localTitle ?? origTitle;
-  const description = localDesc ?? origDescription;
+  const description = localDescription ?? origDescription;
+
+  useEffect(() => {
+    setLocalDescription(null);
+    setEditDescription(false);
+  }, [match.id, origDescription]);
 
   const isActuallyPrime = isPrimeTime(time, dateISO);
   const isPanoramic     = courtType === 'panoramic';
@@ -1248,6 +1200,13 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
     onSearchPlayers,
   );
   const canEditMatch = usesLegacyMatchExtensions && isOwner && !isCompletedMatch && !isScorePending && !isScoreDisputed;
+  const canEditDescription = match.backendOwned === true &&
+    isOwner &&
+    matchHasNotStarted &&
+    !isCompletedMatch &&
+    !isScorePending &&
+    !isScoreDisputed &&
+    typeof onUpdateDescription === 'function';
   const canInvitePlayers = (
     usesLegacyMatchExtensions ||
     usesBackendMatchInvitations
@@ -1494,21 +1453,6 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
     }
   };
   
-  const handleEditSave = async ({ title: newTitle, description: newDesc }) => {
-    try {
-      const updatedMatch = await onUpdate?.(match.id, {
-        title: newTitle,
-        description: newDesc,
-      });
-      setLocalTitle(updatedMatch?.title ?? newTitle);
-      setLocalDesc(updatedMatch?.description ?? newDesc);
-      setEditSheet(false);
-      await refreshWaitlist();
-    } catch {
-      showToast?.('Изменения не сохранены. Попробуйте еще раз.', 'error');
-    }
-  };
-
   // Persist slot mutations both locally (instant UI) and up to allMatches (status/participants).
   const commitSlots = async (nextFilled) => {
     const updatedMatch = await onSlotsChange?.(match.id, nextFilled);
@@ -1576,6 +1520,23 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
     } finally {
       leaveInFlightRef.current = false;
       setLeaving(false);
+    }
+  };
+
+  const handleDescriptionSave = async (nextDescription) => {
+    if (!canEditDescription || descriptionSaving) return;
+    setDescriptionSaving(true);
+    try {
+      const updated = await onUpdateDescription(
+        match.id,
+        nextDescription,
+      );
+      setLocalDescription(updated?.description ?? nextDescription);
+      setEditDescription(false);
+    } catch {
+      // Parent owns the public, sanitized error message.
+    } finally {
+      setDescriptionSaving(false);
     }
   };
 
@@ -1841,31 +1802,28 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
             )}
           </div>
           {description && <div style={{ color: C.muted, fontSize: '12px', marginTop: '8px', lineHeight: 1.5 }}>{description}</div>}
-          {title && (
-            <div style={{
-              marginTop: '12px', paddingTop: '12px', borderTop: `1px solid ${isActuallyPrime ? 'rgba(212,175,55,0.25)' : C.border}`
-            }}>
-              <div style={{ color: C.text, fontWeight: 700, fontSize: '18px' }}>{title}</div>
-            </div>
-          )}
         </div>
       </div>
 
       {/* ── Owner action bar ───────────────────────────────────────────────── */}
-      {canEditMatch && (
+      {(canEditMatch || canEditDescription) && (
         <div style={{ padding: '12px 16px', display: 'flex', gap: '8px', borderBottom: `1px solid ${C.border}`, background: 'rgba(216,243,74,0.04)' }}>
-          {match.type === 'match' ? (
-            <PadelButton variant="dark" size="md" onClick={() => setEditSheet(true)}>
-              Редактировать
-            </PadelButton>
-          ) : (
-            <PadelButton variant="dark" size="md" onClick={() => setEditSheet(true)} fullWidth>
-              Редактировать бронь
+          {canEditDescription && (
+            <PadelButton
+              data-testid="match-description-edit-open"
+              variant="dark"
+              size="md"
+              fullWidth={!canEditMatch}
+              onClick={() => setEditDescription(true)}
+            >
+              Редактировать комментарий
             </PadelButton>
           )}
-          <PadelButton variant="danger" size="md" fullWidth={match.type !== 'match'} onClick={() => setCancelSheet(true)}>
-            Отменить игру
-          </PadelButton>
+          {canEditMatch && (
+            <PadelButton variant="danger" size="md" fullWidth onClick={() => setCancelSheet(true)}>
+              Отменить игру
+            </PadelButton>
+          )}
         </div>
       )}
 
@@ -2024,11 +1982,6 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
         )}
 
 
-        {/* ── Pinned message ────────────────────────────────────────────────── */}
-        {usesLegacyMatchExtensions && (
-          <PinnedBlock msg={pinnedMsg} isOwner={isOwner} onSave={setPinnedMsg} />
-        )}
-
         {/* ── Price ────────────────────────────────────────────────────────── */}
         <div style={{ background: 'rgba(216,243,74,0.06)', borderRadius: '12px', padding: '12px 16px', marginBottom: '20px', border: '1px solid rgba(216,243,74,0.18)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
@@ -2165,8 +2118,17 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
           removeLabel={canLeaveViewedPlayer ? 'Выйти из матча' : 'Убрать из матча'}
         />
       )}
-      {editSheet   && canEditMatch && <EditPanel initTitle={title} initDescription={description} onSave={handleEditSave} onClose={() => setEditSheet(false)} />}
       {cancelSheet && canEditMatch && <CancelSheet onConfirm={handleCancelConfirm} onClose={() => setCancelSheet(false)} />}
+      {editDescription && canEditDescription && (
+        <DescriptionEditPanel
+          initialValue={description}
+          saving={descriptionSaving}
+          onSave={handleDescriptionSave}
+          onClose={() => {
+            if (!descriptionSaving) setEditDescription(false);
+          }}
+        />
+      )}
       {kickTarget  && canEditMatch && <KickConfirm player={kickTarget} onConfirm={handleKickConfirm} onCancel={() => setKickTarget(null)} />}
       {leaveTarget && (
         <LeaveConfirm

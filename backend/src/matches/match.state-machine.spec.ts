@@ -11,6 +11,7 @@ import {
   MatchParticipantId,
   MatchRequestDigest,
   MatchState,
+  UpdateMatchDescriptionCommand,
 } from './match.types';
 
 const OWNER_ID = deterministicUuid('match-owner') as AccountId;
@@ -25,6 +26,9 @@ const JOIN_COMMAND_ID = deterministicUuid(
 ) as MatchCommandId;
 const LEAVE_COMMAND_ID = deterministicUuid(
   'match-leave-command',
+) as MatchCommandId;
+const UPDATE_DESCRIPTION_COMMAND_ID = deterministicUuid(
+  'match-update-description-command',
 ) as MatchCommandId;
 const PARTICIPANT_ID = deterministicUuid(
   'match-participant',
@@ -50,7 +54,6 @@ function createCommand(
     visibility: 'public',
     scenario: 'social',
     status: 'confirmed',
-    title: 'Synthetic match',
     description: '',
     ratingMin: 2,
     ratingMax: 4,
@@ -93,6 +96,21 @@ function joinedState(): MatchState {
   return result.state;
 }
 
+function updateDescriptionCommand(
+  overrides: Partial<UpdateMatchDescriptionCommand> = {},
+): UpdateMatchDescriptionCommand {
+  return {
+    type: 'update_match_description',
+    matchId: MATCH_ID,
+    commandId: UPDATE_DESCRIPTION_COMMAND_ID,
+    actorAccountId: OWNER_ID,
+    requestDigest: '4'.repeat(64) as MatchRequestDigest,
+    now: unixEpochSeconds(1_800_000_100),
+    description: 'Updated match comment',
+    ...overrides,
+  };
+}
+
 describe('match state machine', () => {
   it('creates a public match at version and command sequence one', () => {
     const result = transitionMatch(null, createCommand());
@@ -118,6 +136,18 @@ describe('match state machine', () => {
       expect(Object.isFrozen(result.state)).toBe(true);
       expect(Object.isFrozen(result.state.appliedCommands)).toBe(true);
     }
+  });
+
+  it('rejects a create command whose comment contains control characters', () => {
+    expect(
+      transitionMatch(
+        null,
+        createCommand({ description: 'Unsafe\u0000comment' }),
+      ),
+    ).toEqual({
+      outcome: 'rejected',
+      reason: 'invalid_match_command',
+    });
   });
 
   it('uses the exact product status for social and community creation', () => {
@@ -226,6 +256,71 @@ describe('match state machine', () => {
         matchVersion: 2,
         resultType: 'participant_joined',
       },
+    });
+  });
+
+  it('updates only the active pre-start match comment for its owner', () => {
+    const previous = createdState();
+    const result = transitionMatch(previous, updateDescriptionCommand());
+
+    expect(result).toMatchObject({
+      outcome: 'transitioned',
+      transition: 'match_description_updated',
+      state: {
+        description: 'Updated match comment',
+        startsAt: previous.startsAt,
+        durationMinutes: previous.durationMinutes,
+        courtId: previous.courtId,
+        version: 2,
+      },
+      command: {
+        commandType: 'update_match_description',
+        resultType: 'match_description_updated',
+        commandSequence: 2,
+        matchVersion: 2,
+      },
+    });
+    expect(previous.description).toBe('');
+  });
+
+  it('makes comment updates idempotent and rejects non-owner, started and invalid text', () => {
+    const applied = transitionMatch(
+      createdState(),
+      updateDescriptionCommand(),
+    );
+    if (applied.outcome !== 'transitioned') {
+      throw new Error('Synthetic comment update failed');
+    }
+
+    expect(
+      transitionMatch(applied.state, updateDescriptionCommand()),
+    ).toMatchObject({
+      outcome: 'idempotent_retry',
+      originalCommand: {
+        resultType: 'match_description_updated',
+        matchVersion: 2,
+      },
+    });
+    expect(
+      transitionMatch(
+        createdState(),
+        updateDescriptionCommand({ actorAccountId: PLAYER_ID }),
+      ),
+    ).toEqual({ outcome: 'rejected', reason: 'not_match_owner' });
+    expect(
+      transitionMatch(
+        createdState(),
+        updateDescriptionCommand({ now: createdState().startsAt }),
+      ),
+    ).toEqual({ outcome: 'rejected', reason: 'match_started' });
+    expect(
+      transitionMatch(
+        createdState(),
+        updateDescriptionCommand({ description: 'x'.repeat(241) }),
+      ),
+    ).toEqual({
+      outcome: 'rejected',
+      reason: 'invalid_match_command',
     });
   });
 

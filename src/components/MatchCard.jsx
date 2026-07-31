@@ -136,7 +136,6 @@ function PlayerSlots({ filledSlots = [], total }) {
 
 export default function MatchCard({ match, playerRating, onJoin, onViewDetails }) {
   const {
-    title,
     description,
     date,
     time,
@@ -203,11 +202,6 @@ export default function MatchCard({ match, playerRating, onJoin, onViewDetails }
 
       {/* Row 2: host + court */}
       <div style={{ marginBottom: '12px' }}>
-        {title && (
-          <div style={{ color: C.text, fontSize: '16px', fontWeight: 700, marginBottom: '3px' }}>
-            {title}
-          </div>
-        )}
         <div style={{ color: isPanoramic && isPrime ? C.gold : C.muted, fontSize: '12px', fontWeight: 500 }}>
           {courtName ? `📍 ${courtName}` : (isPanoramic ? '✦ Ультрапанорама' : 'Корт')}
         </div>

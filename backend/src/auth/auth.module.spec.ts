@@ -31,6 +31,7 @@ import { PostgresService } from '../database/postgres.service';
 import { PostgresTelegramAuthenticationOperationRepository } from '../database/postgres-telegram-authentication-operation.repository';
 import { PostgresTransactionRunner } from '../database/postgres-transaction';
 import { PostgresTransactionExecutorAdapter } from '../database/postgres-transaction-executor.adapter';
+import { ContentModerationController } from '../common/content-moderation.controller';
 import { MatchApiService } from '../matches/match-api.service';
 import { MatchChatController } from '../matches/match-chat.controller';
 import { MatchChatService } from '../matches/match-chat.service';
@@ -416,6 +417,9 @@ describe('AuthModule Telegram login wiring', () => {
     expect(
       getMatchChatControllerService(moduleRef.get(MatchChatController)),
     ).toBe(matchChat);
+    expect(moduleRef.get(ContentModerationController)).toBeInstanceOf(
+      ContentModerationController,
+    );
     expect(() => moduleRef.get(SESSION_AUTHENTICATION_CLOCK)).not.toThrow();
     for (const token of [
       TelegramLoginService,

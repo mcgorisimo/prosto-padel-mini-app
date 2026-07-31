@@ -6,6 +6,7 @@ import {
   HttpException,
   HttpStatus,
   Param,
+  Patch,
   Post,
   Query,
   Req,
@@ -23,6 +24,7 @@ import {
   readMatchActionRequest,
   readMatchFeedRequest,
   readMatchId,
+  readUpdateMatchDescriptionRequest,
 } from './match-api.http';
 import { MatchApiService } from './match-api.service';
 import { MatchApiRejection } from './match-api.types';
@@ -77,6 +79,12 @@ function rejection(reason: MatchApiRejection): HttpException {
         HttpStatus.CONFLICT,
         'match_started',
         'Match has already started',
+      );
+    case 'content_not_allowed':
+      return publicError(
+        HttpStatus.UNPROCESSABLE_ENTITY,
+        'match_content_not_allowed',
+        'Match comment contains disallowed language',
       );
     case 'rating_verification_required':
       return publicError(
@@ -300,6 +308,39 @@ export class MatchController {
       request,
       reply,
     );
+  }
+
+  @Patch(':matchId')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(SessionBearerGuard)
+  async updateDescription(
+    @Param('matchId') rawMatchId: unknown,
+    @Body() body: unknown,
+    @Req() request: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ) {
+    disableCaching(reply);
+    const matchId = readMatchId(rawMatchId);
+    const parsed = readUpdateMatchDescriptionRequest(body);
+    if (matchId === undefined || parsed === undefined) {
+      throw rejection('invalid_request');
+    }
+    const actor = principal(request);
+    let result;
+    try {
+      result = await this.service.updateDescription({
+        accountId: actor.accountId,
+        role: actor.role,
+        matchId,
+        request: parsed,
+      });
+    } catch {
+      return serviceFailure();
+    }
+    if (result.outcome === 'rejected') {
+      throw rejection(result.reason);
+    }
+    return Object.freeze({ match: result.match });
   }
 
   @Post(':matchId/leave')

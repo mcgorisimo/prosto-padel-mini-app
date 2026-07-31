@@ -18,6 +18,7 @@ import {
   ListMatchFeedApiResult,
   MutateMatchParticipationApiResult,
   ReadMatchDetailApiResult,
+  UpdateMatchDescriptionApiResult,
 } from './match-api.types';
 import { MatchController } from './match.controller';
 import { MatchId } from './match.types';
@@ -78,6 +79,10 @@ interface Harness {
   >;
   readonly leave: jest.Mock<
     Promise<MutateMatchParticipationApiResult>,
+    [unknown]
+  >;
+  readonly updateDescription: jest.Mock<
+    Promise<UpdateMatchDescriptionApiResult>,
     [unknown]
   >;
   readonly authenticate: jest.Mock<
@@ -156,6 +161,17 @@ async function createHarness(): Promise<Harness> {
       matchVersion: 3,
     },
   });
+  const updateDescription = jest.fn<
+    Promise<UpdateMatchDescriptionApiResult>,
+    [unknown]
+  >().mockResolvedValue({
+    outcome: 'updated',
+    match: {
+      matchId: MATCH_ID,
+      description: 'Updated match comment',
+      matchVersion: 2,
+    },
+  });
   const authenticate = jest
     .fn<Promise<SessionAuthenticationResult>, [unknown]>()
     .mockResolvedValue({
@@ -179,6 +195,7 @@ async function createHarness(): Promise<Harness> {
           detail,
           join,
           leave,
+          updateDescription,
         },
       },
       {
@@ -207,6 +224,7 @@ async function createHarness(): Promise<Harness> {
     detail,
     join,
     leave,
+    updateDescription,
     authenticate,
     logs,
   };
@@ -241,7 +259,7 @@ describe('MatchController HTTP boundary', () => {
     jest.restoreAllMocks();
   });
 
-  it('exposes create/feed/account-feed/detail/join/leave behind the same bearer boundary', async () => {
+  it('exposes create/feed/account-feed/detail/update/join/leave behind the same bearer boundary', async () => {
     const createResponse = await harness.app.inject({
       method: 'POST',
       url: '/api/v1/matches',
@@ -279,6 +297,15 @@ describe('MatchController HTTP boundary', () => {
       headers: headers(),
       payload: { requestKey: REQUEST_KEY },
     });
+    const updateResponse = await harness.app.inject({
+      method: 'PATCH',
+      url: `/api/v1/matches/${MATCH_ID}`,
+      headers: headers(),
+      payload: {
+        requestKey: REQUEST_KEY,
+        description: 'Updated match comment',
+      },
+    });
     const leaveResponse = await harness.app.inject({
       method: 'POST',
       url: `/api/v1/matches/${MATCH_ID}/leave`,
@@ -299,6 +326,7 @@ describe('MatchController HTTP boundary', () => {
       body: { matches: [{ ...match(), occupiedSlots: 1 }] },
     });
     expect(detailResponse.statusCode).toBe(200);
+    expect(updateResponse.statusCode).toBe(200);
     expect(joinResponse.statusCode).toBe(200);
     expect(leaveResponse.statusCode).toBe(200);
     for (const response of [
@@ -306,6 +334,7 @@ describe('MatchController HTTP boundary', () => {
       feedResponse,
       accountFeedResponse,
       detailResponse,
+      updateResponse,
       joinResponse,
       leaveResponse,
     ]) {
@@ -334,9 +363,18 @@ describe('MatchController HTTP boundary', () => {
       role: 'player',
       matchId: MATCH_ID,
     });
+    expect(harness.updateDescription).toHaveBeenCalledWith({
+      accountId: ACCOUNT_ID,
+      role: 'player',
+      matchId: MATCH_ID,
+      request: {
+        requestKey: REQUEST_KEY,
+        description: 'Updated match comment',
+      },
+    });
     expect(harness.join).toHaveBeenCalledTimes(1);
     expect(harness.leave).toHaveBeenCalledTimes(1);
-    expect(harness.authenticate).toHaveBeenCalledTimes(6);
+    expect(harness.authenticate).toHaveBeenCalledTimes(7);
   });
 
   it.each([
@@ -381,6 +419,23 @@ describe('MatchController HTTP boundary', () => {
       url: '/api/v1/matches?cursor=secret',
       headers: { authorization: `Bearer ${CREDENTIAL}` },
     });
+    const retiredTitleCreate = await harness.app.inject({
+      method: 'POST',
+      url: '/api/v1/matches',
+      headers: headers(),
+      payload: {
+        requestKey: REQUEST_KEY,
+        startsAt: NOW + 3_600,
+        durationMinutes: 90,
+        courtId: 'p1',
+        scenario: 'social',
+        title: 'Retired title',
+        description: '',
+        ratingMin: 2,
+        ratingMax: 4,
+        isRatingMatch: true,
+      },
+    });
     const invalidAccountFeed = await harness.app.inject({
       method: 'GET',
       url: '/api/v1/matches/mine?accountId=forged',
@@ -395,6 +450,7 @@ describe('MatchController HTTP boundary', () => {
 
     for (const response of [
       invalidCreate,
+      retiredTitleCreate,
       invalidFeed,
       invalidAccountFeed,
       invalidJoin,
@@ -457,5 +513,40 @@ describe('MatchController HTTP boundary', () => {
     });
     expect(JSON.stringify(response.json())).not.toContain(PRIVATE_MARKER);
     expect(JSON.stringify(response.json())).not.toContain(CREDENTIAL);
+  });
+
+  it('maps disallowed match text to a safe no-store 422 response', async () => {
+    harness.create.mockResolvedValueOnce({
+      outcome: 'rejected',
+      reason: 'content_not_allowed',
+    });
+    const privateText = `${PRIVATE_MARKER} forbidden`;
+
+    const response = await harness.app.inject({
+      method: 'POST',
+      url: '/api/v1/matches',
+      headers: headers(),
+      payload: {
+        requestKey: REQUEST_KEY,
+        startsAt: NOW + 3_600,
+        durationMinutes: 90,
+        courtId: 'p1',
+        scenario: 'social',
+        description: privateText,
+        ratingMin: 2,
+        ratingMax: 4,
+        isRatingMatch: true,
+      },
+    });
+
+    expect(response.statusCode).toBe(422);
+    expect(response.json()).toEqual({
+      statusCode: 422,
+      code: 'match_content_not_allowed',
+      message: 'Match comment contains disallowed language',
+    });
+    expectNoStore(response);
+    expect(response.body).not.toContain(privateText);
+    expect(JSON.stringify(harness.logs)).not.toContain(privateText);
   });
 });

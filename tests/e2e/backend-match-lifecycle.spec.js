@@ -39,7 +39,6 @@ test.describe('backend match credential lifecycle', () => {
         visibility: 'public',
         scenario: 'social',
         status: 'confirmed',
-        title: 'Synthetic match',
         description: '',
         ratingMin: 1,
         ratingMax: 5,
@@ -74,7 +73,7 @@ test.describe('backend match credential lifecycle', () => {
         courtType: detail.courtType,
         scenario: detail.scenario,
         status: detail.status,
-        title: detail.title,
+        description: detail.description,
         ratingMin: detail.ratingMin,
         ratingMax: detail.ratingMax,
         isRatingMatch: detail.isRatingMatch,
@@ -153,7 +152,6 @@ test.describe('backend match credential lifecycle', () => {
         durationMinutes: detail.durationMinutes,
         courtId: detail.courtId,
         scenario: detail.scenario,
-        title: detail.title,
         description: detail.description,
         ratingMin: detail.ratingMin,
         ratingMax: detail.ratingMax,
@@ -233,7 +231,7 @@ test.describe('backend match credential lifecycle', () => {
             contract.url !== '/api/v1/matches' ||
             (
               Object.keys(contract.body).sort().join(',') ===
-                'courtId,description,durationMinutes,isRatingMatch,ratingMax,ratingMin,requestKey,scenario,startsAt,title' &&
+                'courtId,description,durationMinutes,isRatingMatch,ratingMax,ratingMin,requestKey,scenario,startsAt' &&
               contract.body.requestKey === parameters.requestKey &&
               !Object.prototype.hasOwnProperty.call(
                 contract.body,
@@ -379,6 +377,112 @@ test.describe('backend match credential lifecycle', () => {
         redirect: 'error',
         exactActionBody: true,
         exactCreateBody: true,
+      },
+    ]);
+  });
+
+  test('uses exact private contracts for comment update and legacy text moderation', async ({
+    page,
+  }) => {
+    await page.goto('/');
+
+    const summary = await page.evaluate(async (parameters) => {
+      const { createBackendSessionClient } = await import(
+        '/src/lib/backendSessionClient.js'
+      );
+      const calls = [];
+      const client = createBackendSessionClient({
+        cryptoImpl: { randomUUID: () => parameters.requestKey },
+        fetchImpl: async (url, options) => {
+          const body = JSON.parse(options.body);
+          calls.push({
+            url,
+            method: options.method,
+            bearer: options.headers.Authorization,
+            body,
+            cache: options.cache,
+            credentials: options.credentials,
+          });
+          if (url === '/api/v1/content/moderation') {
+            return body.text === 'safe legacy text'
+              ? new Response(null, { status: 204 })
+              : new Response(JSON.stringify({
+                  statusCode: 422,
+                  code: 'content_not_allowed',
+                  message: 'Content contains disallowed language',
+                }), { status: 422 });
+          }
+          return new Response(JSON.stringify({
+            match: {
+              matchId: parameters.matchId,
+              description: body.description,
+              matchVersion: 2,
+            },
+          }), { status: 200 });
+        },
+      });
+
+      const updated = await client.updateMatchDescription(
+        parameters.credential,
+        parameters.matchId,
+        'Updated comment',
+      );
+      const allowed = await client.moderateText(
+        parameters.credential,
+        'safe legacy text',
+      );
+      const rejected = await client.moderateText(
+        parameters.credential,
+        'disallowed legacy text',
+      );
+
+      return { calls, updated, allowed, rejected };
+    }, {
+      credential: SYNTHETIC_CREDENTIAL,
+      matchId: MATCH_ID,
+      requestKey: REQUEST_KEY,
+    });
+
+    expect(summary.updated).toEqual({
+      outcome: 'match_description_updated',
+      match: {
+        matchId: MATCH_ID,
+        description: 'Updated comment',
+        matchVersion: 2,
+      },
+    });
+    expect(summary.allowed).toEqual({ outcome: 'content_allowed' });
+    expect(summary.rejected).toEqual({
+      outcome: 'rejected',
+      reason: 'content_not_allowed',
+    });
+    expect(summary.calls).toEqual([
+      {
+        url: `/api/v1/matches/${MATCH_ID}`,
+        method: 'PATCH',
+        bearer: `Bearer ${SYNTHETIC_CREDENTIAL}`,
+        body: {
+          requestKey: REQUEST_KEY,
+          description: 'Updated comment',
+        },
+        cache: 'no-store',
+        credentials: 'omit',
+      },
+      {
+        url: '/api/v1/content/moderation',
+        method: 'POST',
+        bearer: `Bearer ${SYNTHETIC_CREDENTIAL}`,
+        body: { text: 'safe legacy text' },
+        cache: 'no-store',
+        credentials: 'omit',
+      },
+      {
+        url: '/api/v1/content/moderation',
+        method: 'POST',
+        bearer: `Bearer ${SYNTHETIC_CREDENTIAL}`,
+        body: { text: 'disallowed legacy text' },
+        cache: 'no-store',
+        credentials: 'omit',
       },
     ]);
   });
@@ -811,6 +915,25 @@ test.describe('backend match credential lifecycle', () => {
               credential === parameters.credential;
             return { outcome: 'match_created', match: detail };
           },
+          async updateMatchDescription(credential) {
+            credentialMatched =
+              credentialMatched &&
+              credential === parameters.credential;
+            return {
+              outcome: 'match_description_updated',
+              match: {
+                matchId: parameters.matchId,
+                description: 'Updated comment',
+                matchVersion: 2,
+              },
+            };
+          },
+          async moderateText(credential) {
+            credentialMatched =
+              credentialMatched &&
+              credential === parameters.credential;
+            return { outcome: 'content_allowed' };
+          },
           async joinMatch(credential) {
             credentialMatched =
               credentialMatched &&
@@ -983,6 +1106,11 @@ test.describe('backend match credential lifecycle', () => {
         await lifecycle.listAccountMatches(),
         await lifecycle.loadMatch(parameters.matchId),
         await lifecycle.createMatch({}),
+        await lifecycle.updateMatchDescription(
+          parameters.matchId,
+          'Updated comment',
+        ),
+        await lifecycle.moderateText('Safe legacy text'),
         await lifecycle.joinMatch(parameters.matchId),
         await lifecycle.leaveMatch(parameters.matchId),
         await lifecycle.searchPlayers('Invited', 5),
@@ -1042,6 +1170,8 @@ test.describe('backend match credential lifecycle', () => {
         'matches_loaded',
         'match_loaded',
         'match_created',
+        'match_description_updated',
+        'content_allowed',
         'participant_joined',
         'participant_left',
         'players_loaded',
@@ -1355,6 +1485,7 @@ test.describe('backend match credential lifecycle', () => {
         ownerId: parameters.accountId,
         owner_id: parameters.accountId,
         title: 'Backend chat match',
+        description: 'Initial backend comment',
         date: '1 января',
         dateISO: '2030-01-01',
         time: '10:00',
@@ -1437,6 +1568,12 @@ test.describe('backend match credential lifecycle', () => {
               { ...sentMessage, text },
             ]);
           },
+          async onUpdateDescription(matchId, description) {
+            window.__backendChatUiCalls.update += 1;
+            window.__backendChatUiCalls.updatedMatchId = matchId;
+            window.__backendChatUiCalls.updatedDescription = description;
+            return { id: matchId, description, version: 2 };
+          },
           onBack() {},
           onJoinSuccess() {},
           onDelete() {},
@@ -1459,6 +1596,9 @@ test.describe('backend match credential lifecycle', () => {
         loadOlder: 0,
         refresh: 0,
         send: 0,
+        update: 0,
+        updatedMatchId: null,
+        updatedDescription: null,
       };
       const root = createRoot(container);
       root.render(React.createElement(Harness));
@@ -1475,6 +1615,35 @@ test.describe('backend match credential lifecycle', () => {
     });
 
     const harness = page.getByTestId('backend-chat-test-root');
+    await expect(
+      harness.getByText('Initial backend comment', { exact: true }),
+    ).toBeVisible();
+    await harness.getByTestId('match-description-edit-open').click();
+    const commentEditor = harness.getByTestId('match-description-edit-input');
+    await expect(commentEditor).toBeVisible();
+    await expect(harness.locator('input[type="date"]')).toHaveCount(0);
+    const emojiBoundary = '😀'.repeat(240);
+    await commentEditor.fill(emojiBoundary);
+    await expect(commentEditor).toHaveValue(emojiBoundary);
+    await expect(harness.getByText('240/240', { exact: true })).toBeVisible();
+    await commentEditor.pressSequentially('😀');
+    await expect(commentEditor).toHaveValue(emojiBoundary);
+    await commentEditor.fill('Updated backend comment');
+    await harness.getByTestId('match-description-edit-save').click();
+    await expect(
+      harness.getByText('Updated backend comment', { exact: true }),
+    ).toBeVisible();
+    await expect.poll(() => page.evaluate(
+      () => window.__backendChatUiCalls.update,
+    )).toBe(1);
+    expect(await page.evaluate(() => ({
+      matchId: window.__backendChatUiCalls.updatedMatchId,
+      description: window.__backendChatUiCalls.updatedDescription,
+    }))).toEqual({
+      matchId: MATCH_ID,
+      description: 'Updated backend comment',
+    });
+
     await harness.getByTestId('match-chat-open-button').click();
     await expect.poll(() => page.evaluate(
       () => window.__backendChatUiCalls.load,
@@ -1560,7 +1729,7 @@ test.describe('backend match credential lifecycle', () => {
         isPrivate: true,
         status: 'upcoming',
         title: 'Legacy private booking',
-        description: '',
+        description: 'Legacy private booking comment',
         date_iso: '2035-01-02',
         time: '10:00',
         duration: 1.5,
@@ -1649,6 +1818,7 @@ test.describe('backend match credential lifecycle', () => {
         scenario: 'social',
         status: 'open',
         title,
+        description: `${title} comment`,
         ratingMin: 1,
         ratingMax: 5,
         isRatingMatch: false,
@@ -1775,28 +1945,28 @@ test.describe('backend match credential lifecycle', () => {
 
     const harness = page.getByTestId('backend-home-test-root');
     await expect(
-      harness.getByText('Expiring account match').first(),
+      harness.getByText('Expiring account match comment').first(),
     ).toBeVisible();
     await expect(
-      harness.getByText('Participant account match').first(),
+      harness.getByText('Participant account match comment').first(),
     ).toBeVisible();
     await expect(
-      harness.getByText('Legacy private booking').first(),
+      harness.getByText('Legacy private booking comment').first(),
     ).toBeVisible();
     await expect(
-      harness.getByText('Public-only unrelated match'),
+      harness.getByText('Public-only unrelated match comment'),
     ).toHaveCount(0);
 
     await page.evaluate(() => window.__refreshAccountMatches());
     await expect(
-      harness.getByText('Foreground account match').first(),
+      harness.getByText('Foreground account match comment').first(),
     ).toBeVisible();
     await expect.poll(() => page.evaluate(
       () => window.__accountMatchCalls,
     )).toBeGreaterThanOrEqual(2);
 
     await expect(
-      harness.getByText('Expiring account match'),
+      harness.getByText('Expiring account match comment'),
     ).toHaveCount(0, { timeout: 5_000 });
     await expect.poll(() => page.evaluate(
       () => window.__backendHomeTimerCount(),
@@ -2248,7 +2418,6 @@ test.describe('backend match credential lifecycle', () => {
           dateISO: match.dateISO,
           time: match.time,
           duration: match.duration,
-          title: match.title,
           isRatingMatch: match.isRatingMatch,
           backendOwned: match.backendOwned,
           participants: match.participants,
@@ -2300,7 +2469,6 @@ test.describe('backend match credential lifecycle', () => {
       durationMinutes: 90,
       courtId: 'court-1',
       scenario: 'social',
-      title: 'Match title',
       description: 'Synthetic description',
       ratingMin: 1,
       ratingMax: 5,
@@ -2312,7 +2480,6 @@ test.describe('backend match credential lifecycle', () => {
       dateISO: '2030-01-02',
       time: '10:30',
       duration: 1.5,
-      title: 'Match title',
       isRatingMatch: true,
       backendOwned: true,
       participants: [ACCOUNT_ID, OTHER_ACCOUNT_ID],

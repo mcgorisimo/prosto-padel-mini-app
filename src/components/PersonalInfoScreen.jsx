@@ -162,6 +162,9 @@ export default function PersonalInfoScreen({
           sidePreference: preferredSide,
         });
         if (result?.outcome !== 'profile_updated') {
+          if (result?.reason === 'content_not_allowed') {
+            throw new Error('PROFILE_CONTENT_NOT_ALLOWED');
+          }
           throw new Error('Backend profile update was not persisted');
         }
       } else {
@@ -186,7 +189,9 @@ export default function PersonalInfoScreen({
       showToast?.('Профиль сохранен', 'success');
       onBack?.();
     } catch (err) {
-      const message = 'Профиль не сохранен. Проверьте подключение и попробуйте еще раз.';
+      const message = err?.message === 'PROFILE_CONTENT_NOT_ALLOWED'
+        ? 'Имя или фамилия содержит недопустимые слова.'
+        : 'Профиль не сохранен. Проверьте подключение и попробуйте еще раз.';
       setSaveError(message);
       showToast?.(message, 'error');
     } finally {

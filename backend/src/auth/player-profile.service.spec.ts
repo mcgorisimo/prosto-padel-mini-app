@@ -385,11 +385,28 @@ describe('PlayerProfileService', () => {
     expect(harness.findByAccountId).not.toHaveBeenCalled();
   });
 
+  it('rejects disallowed profile text before opening a transaction', async () => {
+    const harness = createHarness();
+
+    await expect(
+      harness.service.updateOwnProfile({
+        ...input(),
+        changes: { firstName: 'fuck' },
+      }),
+    ).resolves.toEqual({
+      outcome: 'rejected',
+      reason: 'content_not_allowed',
+    });
+    expect(harness.transactions.calls).toBe(0);
+    expect(harness.updateByAccountId).not.toHaveBeenCalled();
+  });
+
   it.each([
     null,
     {},
     { ...input(), changes: {} },
     { ...input(), changes: { firstName: '' } },
+    { ...input(), changes: { firstName: 'Unsafe\u0000name' } },
     { ...input(), changes: { phone: '79990000000' } },
     { ...input(), changes: { sidePreference: 'Center' } },
     { ...input(), changes: { username: PRIVATE_MARKER } },

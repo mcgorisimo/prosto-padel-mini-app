@@ -6,6 +6,8 @@ import { getTotalPrice, isPrimeTime, fmtPrice as fmtPriceLib } from '../lib/pric
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const RATINGS = ['D', 'D+', 'C', 'C+', 'B', 'B+', 'A'];
+const MATCH_COMMENT_MAX_LENGTH = 240;
+const commentCodePointLength = (value) => [...String(value ?? '')].length;
 
 const START_HOUR = WORKING_HOURS.startHour;
 const END_HOUR   = WORKING_HOURS.endHour;
@@ -490,7 +492,6 @@ export default function MatchCreationScreen({
   const [showSocial, setShowSocial] = useState(false);
   const [selectedDate, setSelectedDate] = useState(generateDates()[0]); // Default to today
   const [timeError,   setTimeError]   = useState('');
-  const [title,       setTitle]      = useState('');
   const [description, setDescription] = useState('');
   const [isPrivate, setIsPrivate] = useState(false);
   const [isRatingMatch, setIsRatingMatch] = useState(false);
@@ -557,7 +558,6 @@ export default function MatchCreationScreen({
       isRatingMatch,
       dateISO: selectedDate.dateISO,
       date: formatMoscowDateISO(selectedDate.dateISO, { day: 'numeric', month: 'long' }).replace(' г.', ''),
-      title,
       description,
       });
     } catch {
@@ -597,7 +597,6 @@ export default function MatchCreationScreen({
       courtName: selectedCourt.name,
   dateISO: selectedDate.dateISO,
   date: formatMoscowDateISO(selectedDate.dateISO, { day: 'numeric', month: 'long' }).replace(' г.', ''),
-      title,
       description,
       });
       setShowSocial(false);
@@ -692,23 +691,17 @@ export default function MatchCreationScreen({
               minIdx={ratingMin} maxIdx={ratingMax}
               onChange={(a, b) => { setRatingMin(a); setRatingMax(b); }}
             />
-            <Section title="Название матча (необязательно)">
-              <input
-                value={title}
-                onChange={e => setTitle(e.target.value)}
-                placeholder="Например: Турнир выходного дня"
-                style={{
-                  width: '100%', padding: '12px 14px',
-                  background: T.surface, border: `1px solid ${T.border}`,
-                  borderRadius: '12px', color: T.text, fontSize: '15px',
-                  outline: 'none', boxSizing: 'border-box',
-                }}
-              />
-            </Section>
             <Section title="Комментарий (необязательно)">
               <textarea
                 value={description}
-                onChange={e => setDescription(e.target.value)}
+                onChange={(event) => {
+                  if (
+                    commentCodePointLength(event.target.value) <=
+                    MATCH_COMMENT_MAX_LENGTH
+                  ) {
+                    setDescription(event.target.value);
+                  }
+                }}
                 placeholder="Например: играем в спокойном темпе, для удовольствия."
                 rows={2}
                 style={{
@@ -718,6 +711,9 @@ export default function MatchCreationScreen({
                   outline: 'none', boxSizing: 'border-box', resize: 'none',
                 }}
               />
+              <div style={{ marginTop: '6px', color: T.muted, fontSize: '11px', textAlign: 'right' }}>
+                {commentCodePointLength(description)}/{MATCH_COMMENT_MAX_LENGTH}
+              </div>
             </Section>
           </div>
 

@@ -17,7 +17,6 @@ export interface CreateMatchRequest {
   readonly durationMinutes: MatchDurationMinutes;
   readonly courtId?: string;
   readonly scenario: MatchScenario;
-  readonly title?: string;
   readonly description: string;
   readonly ratingMin?: number;
   readonly ratingMax?: number;
@@ -26,6 +25,10 @@ export interface CreateMatchRequest {
 
 export interface MatchActionRequest {
   readonly requestKey: string;
+}
+
+export interface UpdateMatchDescriptionRequest extends MatchActionRequest {
+  readonly description: string;
 }
 
 export interface MatchFeedRequest {
@@ -54,6 +57,17 @@ export interface MutateMatchParticipationInput extends MatchApiActor {
   readonly request: MatchActionRequest;
 }
 
+export interface UpdateMatchDescriptionInput extends MatchApiActor {
+  readonly matchId: MatchId;
+  readonly request: UpdateMatchDescriptionRequest;
+}
+
+export interface MatchDescriptionUpdateResponse {
+  readonly matchId: MatchId;
+  readonly description: string;
+  readonly matchVersion: number;
+}
+
 export interface MatchParticipationResponse {
   readonly matchId: MatchId;
   readonly playerId: AccountId;
@@ -77,13 +91,13 @@ export interface MatchPublicParticipantResponse
 }
 
 export interface MatchFeedResponse
-  extends Omit<MatchFeedRecord, 'participants'> {
+  extends Omit<MatchFeedRecord, 'participants' | 'title'> {
   readonly owner: MatchPublicPlayerResponse;
   readonly participants: readonly MatchPublicParticipantResponse[];
 }
 
 export interface MatchDetailResponse
-  extends Omit<MatchDetailRecord, 'participants'> {
+  extends Omit<MatchDetailRecord, 'participants' | 'title'> {
   readonly owner: MatchPublicPlayerResponse;
   readonly participants: readonly MatchPublicParticipantResponse[];
 }
@@ -95,6 +109,7 @@ export type MatchApiRejection =
   | 'match_closed'
   | 'match_not_joinable'
   | 'match_started'
+  | 'content_not_allowed'
   | 'rating_verification_required'
   | 'rating_out_of_range'
   | 'owner_cannot_join'
@@ -141,6 +156,16 @@ export type MutateMatchParticipationApiResult =
   | {
       readonly outcome: 'updated';
       readonly participant: MatchParticipationResponse;
+    }
+  | {
+      readonly outcome: 'rejected';
+      readonly reason: MatchApiRejection;
+    };
+
+export type UpdateMatchDescriptionApiResult =
+  | {
+      readonly outcome: 'updated';
+      readonly match: MatchDescriptionUpdateResponse;
     }
   | {
       readonly outcome: 'rejected';
