@@ -11,6 +11,7 @@ import { PostgresInitialSessionRepository } from './postgres-initial-session.rep
 import { PostgresMatchChatRepository } from './postgres-match-chat.repository';
 import { PostgresMatchRepository } from './postgres-match.repository';
 import { PostgresMatchInvitationRepository } from './postgres-match-invitation.repository';
+import { PostgresMatchWaitlistRepository } from './postgres-match-waitlist.repository';
 import { PostgresPlayerAccountProvisioningRepository } from './postgres-player-account-provisioning.repository';
 import { PostgresPlayerProfileDetailsRepository } from './postgres-player-profile-details.repository';
 import { PostgresPlayerProfileReader } from './postgres-player-profile-reader';
@@ -34,6 +35,7 @@ const DATABASE_WORKFLOW_PROVIDERS: Provider[] = [
   PostgresPublicPlayerProfileSearchRepository,
   PostgresSessionAuthenticationRepository,
   PostgresMatchChatRepository,
+  PostgresMatchWaitlistRepository,
   {
     provide: MATCH_COURT_CATALOG,
     useFactory: (): MatchCourtCatalog =>
@@ -127,6 +129,7 @@ const DATABASE_WORKFLOW_EXPORTS = [
   PostgresPlayerProfileWriter,
   PostgresPublicPlayerProfileSearchRepository,
   PostgresMatchChatRepository,
+  PostgresMatchWaitlistRepository,
   PostgresMatchRepository,
   PostgresMatchInvitationRepository,
   MATCH_COURT_CATALOG,

@@ -19,6 +19,7 @@ import { PostgresInitialSessionRepository } from '../database/postgres-initial-s
 import { PostgresMatchChatRepository } from '../database/postgres-match-chat.repository';
 import { PostgresMatchInvitationRepository } from '../database/postgres-match-invitation.repository';
 import { PostgresMatchRepository } from '../database/postgres-match.repository';
+import { PostgresMatchWaitlistRepository } from '../database/postgres-match-waitlist.repository';
 import { PostgresPlayerAccountProvisioningRepository } from '../database/postgres-player-account-provisioning.repository';
 import { PostgresPlayerProfileDetailsRepository } from '../database/postgres-player-profile-details.repository';
 import { PostgresPlayerProfileReader } from '../database/postgres-player-profile-reader';
@@ -39,6 +40,8 @@ import { MATCH_COURT_CATALOG } from '../matches/match-court-catalog';
 import { MatchController } from '../matches/match.controller';
 import { MatchInvitationController } from '../matches/match-invitation.controller';
 import { MatchInvitationService } from '../matches/match-invitation.service';
+import { MatchWaitlistController } from '../matches/match-waitlist.controller';
+import { MatchWaitlistService } from '../matches/match-waitlist.service';
 import {
   AuthenticationProofFingerprint,
   VerifiedTelegramProof,
@@ -272,6 +275,16 @@ function getMatchChatControllerService(
   ).service;
 }
 
+function getMatchWaitlistControllerService(
+  controller: MatchWaitlistController,
+): MatchWaitlistService {
+  return (
+    controller as unknown as {
+      readonly service: MatchWaitlistService;
+    }
+  ).service;
+}
+
 function expectProviderNotRegistered(
   moduleRef: TestingModule,
   token: string | symbol | Type<unknown>,
@@ -364,6 +377,25 @@ describe('AuthModule Telegram login wiring', () => {
     ).toBe(publicPlayerProfile);
     const matchApi = moduleRef.get(MatchApiService);
     const matchRepository = moduleRef.get(PostgresMatchRepository);
+    const matchWaitlist = moduleRef.get(MatchWaitlistService);
+    expect(matchWaitlist.dependencies.transactions).toBe(
+      moduleRef.get(PostgresTransactionExecutorAdapter),
+    );
+    expect(matchWaitlist.dependencies.waitlist).toBe(
+      moduleRef.get(PostgresMatchWaitlistRepository),
+    );
+    expect(matchWaitlist.dependencies.matches).toBe(matchRepository);
+    expect(matchWaitlist.dependencies.publicProfiles).toBe(
+      moduleRef.get(PostgresPublicPlayerProfileSearchRepository),
+    );
+    expect(matchWaitlist.dependencies.clock).toBe(
+      moduleRef.get(SESSION_AUTHENTICATION_CLOCK),
+    );
+    expect(
+      getMatchWaitlistControllerService(
+        moduleRef.get(MatchWaitlistController),
+      ),
+    ).toBe(matchWaitlist);
     expect(matchApi.dependencies.transactions).toBe(
       moduleRef.get(PostgresTransactionExecutorAdapter),
     );
@@ -371,6 +403,7 @@ describe('AuthModule Telegram login wiring', () => {
       expect(matchApi.dependencies.publicProfiles).toBe(
         moduleRef.get(PostgresPublicPlayerProfileSearchRepository),
       );
+    expect(matchApi.dependencies.waitlist).toBe(matchWaitlist);
     expect(matchRepository.profiles).toBe(
       moduleRef.get(PostgresPlayerProfileReader),
     );
@@ -393,6 +426,7 @@ describe('AuthModule Telegram login wiring', () => {
     expect(matchInvitations.dependencies.publicProfiles).toBe(
       moduleRef.get(PostgresPublicPlayerProfileSearchRepository),
     );
+    expect(matchInvitations.dependencies.waitlist).toBe(matchWaitlist);
     expect(matchInvitations.dependencies.clock).toBe(
       moduleRef.get(SESSION_AUTHENTICATION_CLOCK),
     );

@@ -104,15 +104,20 @@ function service(
   invitations = repository(),
   publicProfiles = profiles(),
 ) {
+  const promoteAvailable = jest.fn().mockResolvedValue(0);
+  const closeForParticipant = jest.fn().mockResolvedValue(false);
   return {
     invitations,
     publicProfiles,
+    promoteAvailable,
+    closeForParticipant,
     service: new MatchInvitationService({
       transactions: {
         run: (operation) => operation(transaction),
       },
       invitations,
       publicProfiles,
+      waitlist: { promoteAvailable, closeForParticipant },
       clock: { nowEpochSeconds: () => NOW },
     }),
   };
@@ -250,6 +255,12 @@ describe('MatchInvitationService', () => {
     expect(input.commandId).not.toBe(input.matchCommandId);
     expect(input.requestDigest).not.toBe(input.matchRequestDigest);
     expect(input.participantId).toMatch(/^[0-9a-f-]{36}$/u);
+    expect(harness.closeForParticipant).toHaveBeenCalledWith(
+      transaction,
+      MATCH_ID,
+      PLAYER_ID,
+      NOW,
+    );
   });
 
   it('maps conflicts and storage failures without exposing internals', async () => {
@@ -285,6 +296,36 @@ describe('MatchInvitationService', () => {
     });
     expect(JSON.stringify(result)).not.toContain('permission');
   });
+
+  it.each(['decline', 'cancel'] as const)(
+    'promotes the FIFO waitlist after an applied %s frees a reserved slot',
+    async (operation) => {
+      const harness = service();
+      harness.invitations[operation].mockResolvedValue({
+        outcome:
+          operation === 'decline'
+            ? 'invitation_declined'
+            : 'invitation_cancelled',
+        persistence: 'applied',
+        invitation: invitation({
+          status: operation === 'decline' ? 'declined' : 'cancelled',
+          respondedAt: NOW,
+          version: 2,
+        }),
+      });
+      await harness.service[operation]({
+        accountId: operation === 'decline' ? PLAYER_ID : OWNER_ID,
+        role: 'player',
+        invitationId: INVITATION_ID,
+        request: { requestKey: REQUEST_KEY },
+      });
+      expect(harness.promoteAvailable).toHaveBeenCalledWith(
+        transaction,
+        MATCH_ID,
+        NOW,
+      );
+    },
+  );
 
   it('rejects non-player mutation actors and malformed inputs before persistence', async () => {
     const harness = service();

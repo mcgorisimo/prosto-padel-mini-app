@@ -19,6 +19,7 @@ import {
   MatchPersistenceError,
   MatchRepository,
 } from '../database/match.repository';
+import { MatchWaitlistPersistenceError } from '../database/match-waitlist.repository';
 import { PostgresTransaction } from '../database/postgres-transaction';
 import {
   PublicPlayerProfileSearchPersistenceError,
@@ -56,6 +57,7 @@ import {
   readMatchActionRequest,
   readUpdateMatchDescriptionRequest,
 } from './match-api.http';
+import { MatchWaitlistService } from './match-waitlist.service';
 
 const UUID_URL_NAMESPACE = '6ba7b811-9dad-11d1-80b4-00c04fd430c8';
 const BINDING_DOMAINS = Object.freeze({
@@ -90,6 +92,10 @@ export interface MatchApiServiceDependencies {
   readonly publicProfiles: Pick<
     PublicPlayerProfileSearchRepository,
     'findByPlayerIds'
+  >;
+  readonly waitlist: Pick<
+    MatchWaitlistService,
+    'promoteAvailable' | 'closeForParticipant'
   >;
   readonly clock: {
     nowEpochSeconds(): import('../auth/auth.types').UnixEpochSeconds;
@@ -176,6 +182,12 @@ function mapRepositoryRejection(
 }
 
 function mapPersistenceFailure(error: unknown): MatchApiRejection {
+  if (error instanceof MatchWaitlistPersistenceError) {
+    return error.reason === 'database_unavailable' ||
+      error.reason === 'transaction_conflict'
+      ? 'temporary_unavailable'
+      : 'internal_failure';
+  }
   if (error instanceof PublicPlayerProfileSearchPersistenceError) {
     switch (error.reason) {
       case 'database_unavailable':
@@ -1108,8 +1120,8 @@ export class MatchApiService {
       ]);
       const result =
         operation === 'join'
-          ? await this.dependencies.transactions.run((transaction) =>
-              this.dependencies.matches.join(transaction, {
+          ? await this.dependencies.transactions.run(async (transaction) => {
+              const joined = await this.dependencies.matches.join(transaction, {
                 type: 'join_match',
                 matchId: input.matchId,
                 commandId,
@@ -1120,18 +1132,41 @@ export class MatchApiService {
                 ) as MatchParticipantId,
                 requestDigest: digest,
                 now,
-              }),
-            )
-          : await this.dependencies.transactions.run((transaction) =>
-              this.dependencies.matches.leave(transaction, {
+              });
+              if (
+                joined.outcome === 'participant_joined' &&
+                joined.persistence === 'applied'
+              ) {
+                await this.dependencies.waitlist.closeForParticipant(
+                  transaction,
+                  input.matchId,
+                  input.accountId,
+                  now,
+                );
+              }
+              return joined;
+            })
+          : await this.dependencies.transactions.run(async (transaction) => {
+              const left = await this.dependencies.matches.leave(transaction, {
                 type: 'leave_match',
                 matchId: input.matchId,
                 commandId,
                 actorAccountId: input.accountId,
                 requestDigest: digest,
                 now,
-              }),
-            );
+              });
+              if (
+                left.outcome === 'participant_left' &&
+                left.persistence === 'applied'
+              ) {
+                await this.dependencies.waitlist.promoteAvailable(
+                  transaction,
+                  input.matchId,
+                  now,
+                );
+              }
+              return left;
+            });
       if (result.outcome === 'rejected') {
         return rejected(
           mapRepositoryRejection(result.reason),

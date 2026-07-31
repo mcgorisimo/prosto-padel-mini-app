@@ -55,6 +55,8 @@ interface Harness {
     PublicPlayerProfileSearchRepository['findByPlayerIds']
   >;
   readonly clockNow: jest.Mock;
+  readonly promoteAvailable: jest.Mock;
+  readonly closeForParticipant: jest.Mock;
 }
 
 function request(
@@ -157,6 +159,8 @@ function createHarness(): Harness {
     ) => operation(TRANSACTION),
   );
   const clockNow = jest.fn(() => NOW);
+  const promoteAvailable = jest.fn().mockResolvedValue(0);
+  const closeForParticipant = jest.fn().mockResolvedValue(false);
   const service = new MatchApiService({
     transactions: {
       run: <T>(
@@ -175,6 +179,7 @@ function createHarness(): Harness {
       updateDescription,
     },
     publicProfiles: { findByPlayerIds },
+    waitlist: { promoteAvailable, closeForParticipant },
     clock: { nowEpochSeconds: clockNow },
   });
   return {
@@ -189,6 +194,8 @@ function createHarness(): Harness {
     updateDescription,
     findByPlayerIds,
     clockNow,
+    promoteAvailable,
+    closeForParticipant,
   };
 }
 
@@ -819,6 +826,44 @@ describe('MatchApiService', () => {
     );
     expect(joined).not.toHaveProperty('participant.participantId');
     expect(joined).not.toHaveProperty('persistence');
+    expect(harness.closeForParticipant).toHaveBeenCalledWith(
+      TRANSACTION,
+      MATCH_ID,
+      ACCOUNT_ID,
+      NOW,
+    );
+    expect(harness.promoteAvailable).toHaveBeenCalledWith(
+      TRANSACTION,
+      MATCH_ID,
+      NOW,
+    );
+  });
+
+  it('does not rerun FIFO promotion for an idempotent leave retry', async () => {
+    const harness = createHarness();
+    harness.leave.mockResolvedValue({
+      outcome: 'participant_left',
+      persistence: 'idempotent_retry',
+      participant: {
+        participantId: PARTICIPANT_ID,
+        accountId: ACCOUNT_ID,
+        slotNumber: 2,
+        status: 'left',
+        joinedAt: NOW,
+        updatedAt: NOW,
+        leftAt: NOW,
+        version: 2,
+      },
+      matchVersion: 3,
+    });
+    await harness.service.leave({
+      accountId: ACCOUNT_ID,
+      role: 'player',
+      matchId: MATCH_ID,
+      request: { requestKey: REQUEST_KEY },
+    });
+    expect(harness.promoteAvailable).not.toHaveBeenCalled();
+    expect(harness.closeForParticipant).not.toHaveBeenCalled();
   });
 
   it('returns idempotent repository results as the same public success shape', async () => {

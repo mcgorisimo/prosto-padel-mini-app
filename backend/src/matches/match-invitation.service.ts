@@ -13,6 +13,7 @@ import {
   MatchInvitationPersistenceError,
   MatchInvitationRepository,
 } from '../database/match-invitation.repository';
+import { MatchWaitlistPersistenceError } from '../database/match-waitlist.repository';
 import { PostgresTransaction } from '../database/postgres-transaction';
 import {
   PublicPlayerProfileSearchPersistenceError,
@@ -50,6 +51,7 @@ import {
   readMatchInvitationActionRequest,
 } from './match-invitation.http';
 import { MatchPublicPlayerResponse } from './match-api.types';
+import { MatchWaitlistService } from './match-waitlist.service';
 
 const UUID_URL_NAMESPACE = '6ba7b811-9dad-11d1-80b4-00c04fd430c8';
 const DOMAINS = Object.freeze({
@@ -90,6 +92,10 @@ export interface MatchInvitationServiceDependencies {
   readonly publicProfiles: Pick<
     PublicPlayerProfileSearchRepository,
     'findByPlayerIds'
+  >;
+  readonly waitlist: Pick<
+    MatchWaitlistService,
+    'promoteAvailable' | 'closeForParticipant'
   >;
   readonly clock: {
     nowEpochSeconds(): import('../auth/auth.types').UnixEpochSeconds;
@@ -177,6 +183,12 @@ function mapRejection(reason: string): MatchInvitationApiRejection {
 }
 
 function mapPersistence(error: unknown): MatchInvitationApiRejection {
+  if (error instanceof MatchWaitlistPersistenceError) {
+    return error.reason === 'database_unavailable' ||
+      error.reason === 'transaction_conflict'
+      ? 'temporary_unavailable'
+      : 'internal_failure';
+  }
   if (error instanceof PublicPlayerProfileSearchPersistenceError) {
     return error.reason === 'database_unavailable' ||
       error.reason === 'transaction_conflict'
@@ -547,6 +559,28 @@ export class MatchInvitationService {
                     common,
                   );
           if (mutation.outcome === 'rejected') return mutation;
+          if (
+            operation === 'accept' &&
+            mutation.outcome === 'invitation_accepted' &&
+            mutation.persistence === 'applied'
+          ) {
+            await this.dependencies.waitlist.closeForParticipant(
+              transaction,
+              mutation.invitation.matchId,
+              mutation.invitation.invitedAccountId,
+              now,
+            );
+          }
+          if (
+            (operation === 'decline' || operation === 'cancel') &&
+            mutation.persistence === 'applied'
+          ) {
+            await this.dependencies.waitlist.promoteAvailable(
+              transaction,
+              mutation.invitation.matchId,
+              now,
+            );
+          }
           const [invitation] = await enrich(
             this.dependencies.publicProfiles,
             transaction,
