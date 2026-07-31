@@ -1237,6 +1237,59 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
     );
   }
 
+  function listMatchWaitlist(matchId, limit = 50) {
+    return runMatchOperation(
+      (credential, signal) =>
+        matches.listMatchWaitlist(
+          credential,
+          matchId,
+          limit,
+          { signal },
+        ),
+      (result, principal) =>
+        result?.outcome === 'waitlist_loaded' &&
+        Array.isArray(result.entries) &&
+        result.entries.every((entry) => {
+          const playerId = entry.player?.playerId;
+          return entry.isCurrentPlayer
+            ? playerId === undefined || playerId === principal.accountId
+            : playerId !== principal.accountId;
+        }) &&
+        (
+          result.current === undefined ||
+          (
+            result.current.isCurrentPlayer === true &&
+            (
+              result.current.player?.playerId === undefined ||
+              result.current.player.playerId === principal.accountId
+            )
+          )
+        ),
+    );
+  }
+
+  function joinMatchWaitlist(matchId) {
+    return runMatchOperation(
+      (credential, signal) =>
+        matches.joinMatchWaitlist(credential, matchId, { signal }),
+      (result) =>
+        result?.outcome === 'waitlist_joined' &&
+        result.entry?.matchId === matchId &&
+        result.entry?.status === 'waiting',
+    );
+  }
+
+  function leaveMatchWaitlist(matchId) {
+    return runMatchOperation(
+      (credential, signal) =>
+        matches.leaveMatchWaitlist(credential, matchId, { signal }),
+      (result) =>
+        result?.outcome === 'waitlist_left' &&
+        result.entry?.matchId === matchId &&
+        result.entry?.status === 'left',
+    );
+  }
+
   function attach(rawInitData, listener) {
     if (teardownTimer !== null) {
       clearTimer(teardownTimer);
@@ -1317,6 +1370,9 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
     cancelMatchInvitation,
     listMatchMessages,
     sendMatchMessage,
+    listMatchWaitlist,
+    joinMatchWaitlist,
+    leaveMatchWaitlist,
     logout,
   });
 }
@@ -1559,6 +1615,36 @@ export function useTelegramBackendLogin() {
     return telegramBackendLoginLifecycle.sendMatchMessage(matchId, body);
   }, []);
 
+  const listMatchWaitlist = useCallback((matchId, limit = 50) => {
+    if (!FEATURE_ENABLED) {
+      return Promise.resolve(Object.freeze({
+        outcome: 'rejected',
+        reason: 'not_authenticated',
+      }));
+    }
+    return telegramBackendLoginLifecycle.listMatchWaitlist(matchId, limit);
+  }, []);
+
+  const joinMatchWaitlist = useCallback((matchId) => {
+    if (!FEATURE_ENABLED) {
+      return Promise.resolve(Object.freeze({
+        outcome: 'rejected',
+        reason: 'not_authenticated',
+      }));
+    }
+    return telegramBackendLoginLifecycle.joinMatchWaitlist(matchId);
+  }, []);
+
+  const leaveMatchWaitlist = useCallback((matchId) => {
+    if (!FEATURE_ENABLED) {
+      return Promise.resolve(Object.freeze({
+        outcome: 'rejected',
+        reason: 'not_authenticated',
+      }));
+    }
+    return telegramBackendLoginLifecycle.leaveMatchWaitlist(matchId);
+  }, []);
+
   useEffect(() => {
     if (!FEATURE_ENABLED) return undefined;
 
@@ -1599,6 +1685,9 @@ export function useTelegramBackendLogin() {
     cancelMatchInvitation,
     listMatchMessages,
     sendMatchMessage,
+    listMatchWaitlist,
+    joinMatchWaitlist,
+    leaveMatchWaitlist,
     logout,
   });
 }

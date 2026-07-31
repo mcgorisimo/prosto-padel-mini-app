@@ -17,6 +17,7 @@ const MAX_PLAYER_SEARCH_RESPONSE_BODY_BYTES = 65_536;
 const MAX_MATCH_FEED_RESPONSE_BODY_BYTES = 1_048_576;
 const MAX_MATCH_INVITATION_RESPONSE_BODY_BYTES = 524_288;
 const MAX_MATCH_CHAT_RESPONSE_BODY_BYTES = 524_288;
+const MAX_MATCH_WAITLIST_RESPONSE_BODY_BYTES = 524_288;
 
 const BODY_ABORTED = Symbol('backend-session-body-aborted');
 const BODY_INVALID = Symbol('backend-session-body-invalid');
@@ -1138,6 +1139,141 @@ function matchMessageSendSuccess(body, expectedMatchId) {
   });
 }
 
+function isBackendMatchWaitlistPlayer(value) {
+  return (
+    isBackendMatchPublicPlayer(value) ||
+    (
+      isPlainObject(value) &&
+      hasExactKeys(Object.keys(value).sort(), ['unavailable']) &&
+      value.unavailable === true
+    )
+  );
+}
+
+function isBackendMatchWaitlistEntry(value) {
+  return (
+    isPlainObject(value) &&
+    hasExactKeys(
+      Object.keys(value).sort(),
+      [
+        'entryId',
+        'isCurrentPlayer',
+        'joinedAt',
+        'player',
+        'queuePosition',
+      ],
+    ) &&
+    isMatchId(value.entryId) &&
+    isBackendMatchWaitlistPlayer(value.player) &&
+    Number.isSafeInteger(value.queuePosition) &&
+    value.queuePosition > 0 &&
+    isUnixEpochSeconds(value.joinedAt) &&
+    typeof value.isCurrentPlayer === 'boolean'
+  );
+}
+
+function freezeBackendMatchWaitlistEntry(entry) {
+  return Object.freeze({
+    ...entry,
+    player: Object.freeze({ ...entry.player }),
+  });
+}
+
+function sameBackendMatchWaitlistEntry(left, right) {
+  return (
+    left.entryId === right.entryId &&
+    left.queuePosition === right.queuePosition &&
+    left.joinedAt === right.joinedAt &&
+    left.isCurrentPlayer === right.isCurrentPlayer &&
+    JSON.stringify(left.player) === JSON.stringify(right.player)
+  );
+}
+
+function matchWaitlistListSuccess(body, maximumLength = 50) {
+  if (
+    !isPlainObject(body) ||
+    !hasOnlyAllowedKeys(body, ['entries', 'count'], ['current']) ||
+    !Array.isArray(body.entries) ||
+    body.entries.length > maximumLength ||
+    !body.entries.every(isBackendMatchWaitlistEntry) ||
+    !Number.isSafeInteger(body.count) ||
+    body.count < body.entries.length ||
+    body.entries.length !== Math.min(body.count, maximumLength) ||
+    new Set(body.entries.map(({ entryId }) => entryId)).size !==
+      body.entries.length ||
+    new Set(
+      body.entries
+        .map(({ player }) => player.playerId)
+        .filter((playerId) => playerId !== undefined),
+    ).size !==
+      body.entries.filter(({ player }) => player.playerId !== undefined).length ||
+    body.entries.some(
+      (entry, index) =>
+        entry.queuePosition !== index + 1 ||
+        entry.queuePosition > body.count,
+    ) ||
+    body.entries.filter(({ isCurrentPlayer }) => isCurrentPlayer).length > 1 ||
+    (
+      body.current !== undefined &&
+      (
+        !isBackendMatchWaitlistEntry(body.current) ||
+        body.current.isCurrentPlayer !== true ||
+        body.current.queuePosition > body.count ||
+        (
+          body.current.queuePosition <= body.entries.length &&
+          !sameBackendMatchWaitlistEntry(
+            body.current,
+            body.entries[body.current.queuePosition - 1],
+          )
+        )
+      )
+    ) ||
+    (
+      body.current === undefined &&
+      body.entries.some(({ isCurrentPlayer }) => isCurrentPlayer)
+    )
+  ) {
+    return null;
+  }
+  const entries = Object.freeze(
+    body.entries.map(freezeBackendMatchWaitlistEntry),
+  );
+  return frozen('waitlist_loaded', {
+    entries,
+    ...(body.current === undefined
+      ? {}
+      : { current: freezeBackendMatchWaitlistEntry(body.current) }),
+    count: body.count,
+  });
+}
+
+function matchWaitlistMutationSuccess(
+  body,
+  expectedMatchId,
+  outcome,
+  status,
+) {
+  if (
+    !isPlainObject(body) ||
+    !hasExactKeys(Object.keys(body).sort(), ['entry']) ||
+    !isPlainObject(body.entry) ||
+    !hasExactKeys(
+      Object.keys(body.entry).sort(),
+      ['appliedAt', 'entryId', 'matchId', 'status', 'version'],
+    ) ||
+    !isMatchId(body.entry.entryId) ||
+    body.entry.matchId !== expectedMatchId ||
+    body.entry.status !== status ||
+    !isUnixEpochSeconds(body.entry.appliedAt) ||
+    body.entry.version !== (status === 'waiting' ? 1 : 2)
+  ) {
+    return null;
+  }
+  return frozen(outcome, {
+    entry: Object.freeze({ ...body.entry }),
+  });
+}
+
 function matchDescriptionUpdateSuccess(body, expectedMatchId) {
   if (
     !isPlainObject(body) ||
@@ -1295,6 +1431,33 @@ function classifyMatchChat(status, body) {
   });
 }
 
+function classifyMatchWaitlist(status, body) {
+  const code = exactPublicCode(body);
+  if (status === 401 && code === 'session_invalid') {
+    return frozen('rejected', { reason: 'invalid' });
+  }
+  const reasons = Object.freeze({
+    match_waitlist_invalid_request: 'invalid_request',
+    match_waitlist_forbidden: 'forbidden',
+    match_waitlist_not_found: 'match_not_found',
+    match_waitlist_closed: 'match_closed',
+    match_waitlist_started: 'match_started',
+    match_waitlist_not_full: 'match_not_full',
+    match_waitlist_owner: 'owner_cannot_join',
+    match_waitlist_already_joined: 'already_joined',
+    match_waitlist_invitation_pending: 'invitation_pending',
+    match_waitlist_already_waiting: 'already_waiting',
+    match_waitlist_not_waiting: 'not_waiting',
+    match_waitlist_player_not_found: 'player_not_found',
+    match_waitlist_verification_required: 'rating_verification_required',
+    match_waitlist_rating_out_of_range: 'rating_out_of_range',
+    match_waitlist_request_conflict: 'request_conflict',
+  });
+  return frozen('rejected', {
+    reason: reasons[code] ?? 'internal_error',
+  });
+}
+
 export function createBackendSessionClient(dependencies = {}) {
   const fetchImpl = dependencies.fetchImpl ?? globalThis.fetch?.bind(globalThis);
   const cryptoImpl = dependencies.cryptoImpl ?? globalThis.crypto;
@@ -1337,6 +1500,8 @@ export function createBackendSessionClient(dependencies = {}) {
         operation.startsWith('match_invitation_');
       const isMatchChatOperation =
         operation.startsWith('match_chat_');
+      const isMatchWaitlistOperation =
+        operation.startsWith('match_waitlist_');
       const isMatchListOperation =
         operation === 'match_list' || operation === 'match_list_mine';
       const isPlayerSearchOperation = operation === 'player_search';
@@ -1348,12 +1513,15 @@ export function createBackendSessionClient(dependencies = {}) {
         operation === 'player_search' ||
         operation === 'match_invitation_incoming' ||
         operation === 'match_invitation_outgoing' ||
-        operation === 'match_chat_list';
+        operation === 'match_chat_list' ||
+        operation === 'match_waitlist_list';
       const isProfileOperation =
         operation === 'profile' || operation === 'profile_update';
       const matchId = operationPayload?.matchId;
       const matchMessagesPath =
         `${MATCHES_PATH}/${encodeURIComponent(matchId)}/messages`;
+      const matchWaitlistPath =
+        `${MATCHES_PATH}/${encodeURIComponent(matchId)}/waitlist`;
       const url =
         operation === 'refresh'
           ? REFRESH_PATH
@@ -1393,8 +1561,14 @@ export function createBackendSessionClient(dependencies = {}) {
                               ? ''
                               : `&beforeCreatedAt=${operationPayload.before.createdAt}&beforeMessageId=${encodeURIComponent(operationPayload.before.messageId)}`
                           }`
-                        : operation === 'match_chat_send'
+                      : operation === 'match_chat_send'
                           ? matchMessagesPath
+                        : operation === 'match_waitlist_list'
+                          ? `${matchWaitlistPath}?limit=${operationPayload.limit}`
+                        : operation === 'match_waitlist_join'
+                          ? `${matchWaitlistPath}/join`
+                        : operation === 'match_waitlist_leave'
+                          ? `${matchWaitlistPath}/leave`
                     : operation === 'match_join'
                       ? `${MATCHES_PATH}/${encodeURIComponent(matchId)}/join`
                       : operation === 'match_leave'
@@ -1475,6 +1649,8 @@ export function createBackendSessionClient(dependencies = {}) {
               ? MAX_MATCH_INVITATION_RESPONSE_BODY_BYTES
               : isMatchChatOperation
                 ? MAX_MATCH_CHAT_RESPONSE_BODY_BYTES
+              : isMatchWaitlistOperation
+                ? MAX_MATCH_WAITLIST_RESPONSE_BODY_BYTES
               : MAX_RESPONSE_BODY_BYTES,
       );
       if (operation === 'authenticate' && response.status === 200) {
@@ -1586,6 +1762,34 @@ export function createBackendSessionClient(dependencies = {}) {
           : frozen('malformed_response');
       }
       if (
+        operation === 'match_waitlist_list' &&
+        response.status === 200
+      ) {
+        const result = matchWaitlistListSuccess(
+          body,
+          operationPayload.limit,
+        );
+        return result
+          ? frozen('success', { result })
+          : frozen('malformed_response');
+      }
+      if (
+        (operation === 'match_waitlist_join' ||
+          operation === 'match_waitlist_leave') &&
+        response.status === 201
+      ) {
+        const joining = operation === 'match_waitlist_join';
+        const result = matchWaitlistMutationSuccess(
+          body,
+          matchId,
+          joining ? 'waitlist_joined' : 'waitlist_left',
+          joining ? 'waiting' : 'left',
+        );
+        return result
+          ? frozen('success', { result })
+          : frozen('malformed_response');
+      }
+      if (
         (operation === 'match_detail' || operation === 'match_create') &&
         response.status === (
           operation === 'match_create' ? 201 : 200
@@ -1643,8 +1847,10 @@ export function createBackendSessionClient(dependencies = {}) {
               ? 'player_search_unavailable'
               : isMatchInvitationOperation
                 ? 'match_invitation_service_unavailable'
-                : isMatchChatOperation
+              : isMatchChatOperation
                   ? 'match_chat_service_unavailable'
+                : isMatchWaitlistOperation
+                  ? 'match_waitlist_service_unavailable'
             : isMatchOperation
               ? 'match_service_unavailable'
               : 'session_service_unavailable'
@@ -1666,6 +1872,8 @@ export function createBackendSessionClient(dependencies = {}) {
                     ? classifyMatchInvitation(response.status, body)
                   : isMatchChatOperation
                       ? classifyMatchChat(response.status, body)
+                    : isMatchWaitlistOperation
+                      ? classifyMatchWaitlist(response.status, body)
                   : operation === 'content_moderation'
                     ? frozen('rejected', {
                         reason:
@@ -1784,7 +1992,17 @@ export function createBackendSessionClient(dependencies = {}) {
         (
           !isMatchId(operationPayload?.matchId) ||
           !isCanonicalMatchMessageBody(operationPayload?.body)
-        ))
+        )) ||
+      (operation === 'match_waitlist_list' &&
+        (
+          !isMatchId(operationPayload?.matchId) ||
+          !Number.isInteger(operationPayload?.limit) ||
+          operationPayload.limit < 1 ||
+          operationPayload.limit > 50
+        )) ||
+      ((operation === 'match_waitlist_join' ||
+        operation === 'match_waitlist_leave') &&
+        !isMatchId(operationPayload?.matchId))
     ) {
       return frozen('rejected', { reason: 'invalid_request' });
     }
@@ -1800,7 +2018,9 @@ export function createBackendSessionClient(dependencies = {}) {
       operation === 'match_invitation_accept' ||
       operation === 'match_invitation_decline' ||
       operation === 'match_invitation_cancel' ||
-      operation === 'match_chat_send';
+      operation === 'match_chat_send' ||
+      operation === 'match_waitlist_join' ||
+      operation === 'match_waitlist_leave';
     const requestKey =
       requiresRequestKey ? createRequestKey(cryptoImpl) : null;
     if (requiresRequestKey && !requestKey) {
@@ -1945,6 +2165,27 @@ export function createBackendSessionClient(dependencies = {}) {
         credential,
         options,
         { matchId, body },
+      ),
+    listMatchWaitlist: (credential, matchId, limit = 50, options) =>
+      execute(
+        'match_waitlist_list',
+        credential,
+        options,
+        { matchId, limit },
+      ),
+    joinMatchWaitlist: (credential, matchId, options) =>
+      execute(
+        'match_waitlist_join',
+        credential,
+        options,
+        { matchId },
+      ),
+    leaveMatchWaitlist: (credential, matchId, options) =>
+      execute(
+        'match_waitlist_leave',
+        credential,
+        options,
+        { matchId },
       ),
     refresh: (credential, options) =>
       execute('refresh', credential, options),

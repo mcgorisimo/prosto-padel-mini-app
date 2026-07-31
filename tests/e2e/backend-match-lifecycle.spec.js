@@ -9,6 +9,7 @@ const INVITATION_ID = '55555555-5555-4555-8555-555555555555';
 const PARTICIPANT_ID = '66666666-6666-4666-8666-666666666666';
 const MESSAGE_ID = '77777777-7777-4777-8777-777777777777';
 const OLDER_MESSAGE_ID = '88888888-8888-4888-8888-888888888888';
+const WAITLIST_ENTRY_ID = '99999999-9999-4999-8999-999999999999';
 
 test.describe('backend match credential lifecycle', () => {
   test('uses exact no-store contracts for public/account feeds, detail, create, join and leave', async ({
@@ -835,6 +836,187 @@ test.describe('backend match credential lifecycle', () => {
     expect(summary.publicResultsHideCredential).toBe(true);
   });
 
+  test('uses exact private contracts for backend match waitlist', async ({
+    page,
+  }) => {
+    await page.goto('/');
+
+    const summary = await page.evaluate(async (parameters) => {
+      const { createBackendSessionClient } = await import(
+        '/src/lib/backendSessionClient.js'
+      );
+      const { normalizeBackendMatchWaitlist } = await import(
+        '/src/components/MatchDetailsScreen.jsx'
+      );
+      const contracts = [];
+      const current = {
+        entryId: parameters.waitlistEntryId,
+        player: {
+          playerId: parameters.accountId,
+          firstName: 'Current',
+          lastName: 'Player',
+          username: 'current_player',
+          rating: 3,
+          isVerified: true,
+        },
+        queuePosition: 2,
+        joinedAt: 1_900_000_010,
+        isCurrentPlayer: true,
+      };
+      const first = {
+        entryId: parameters.firstWaitlistEntryId,
+        player: {
+          playerId: parameters.otherAccountId,
+          firstName: 'First',
+          lastName: 'Player',
+          username: 'first_player',
+          rating: 3.5,
+          isVerified: false,
+        },
+        queuePosition: 1,
+        joinedAt: 1_900_000_000,
+        isCurrentPlayer: false,
+      };
+      const client = createBackendSessionClient({
+        cryptoImpl: { randomUUID: () => parameters.requestKey },
+        fetchImpl: async (url, options) => {
+          contracts.push({
+            url,
+            method: options.method,
+            bearerMatches:
+              options.headers.Authorization ===
+              `Bearer ${parameters.credential}`,
+            contentType: options.headers['Content-Type'] ?? null,
+            body: options.body === undefined
+              ? null
+              : JSON.parse(options.body),
+            cache: options.cache,
+            credentials: options.credentials,
+            redirect: options.redirect,
+          });
+          if (url.endsWith('/waitlist?limit=50')) {
+            return new Response(JSON.stringify({
+              entries: [first, current],
+              current,
+              count: 2,
+            }), { status: 200 });
+          }
+          if (url.endsWith('/waitlist/join')) {
+            return new Response(JSON.stringify({
+              entry: {
+                entryId: parameters.waitlistEntryId,
+                matchId: parameters.matchId,
+                status: 'waiting',
+                appliedAt: 1_900_000_010,
+                version: 1,
+              },
+            }), { status: 201 });
+          }
+          return new Response(JSON.stringify({
+            entry: {
+              entryId: parameters.waitlistEntryId,
+              matchId: parameters.matchId,
+              status: 'left',
+              appliedAt: 1_900_000_020,
+              version: 2,
+            },
+          }), { status: 201 });
+        },
+      });
+
+      const listed = await client.listMatchWaitlist(
+        parameters.credential,
+        parameters.matchId,
+        50,
+      );
+      const joined = await client.joinMatchWaitlist(
+        parameters.credential,
+        parameters.matchId,
+      );
+      const left = await client.leaveMatchWaitlist(
+        parameters.credential,
+        parameters.matchId,
+      );
+      const malformed = await createBackendSessionClient({
+        fetchImpl: async () => new Response(JSON.stringify({
+          entries: [current, first],
+          current,
+          count: 2,
+        }), { status: 200 }),
+      }).listMatchWaitlist(
+        parameters.credential,
+        parameters.matchId,
+        50,
+      );
+      const normalized = normalizeBackendMatchWaitlist(listed);
+
+      return {
+        contracts,
+        outcomes: [listed.outcome, joined.outcome, left.outcome],
+        malformed,
+        normalized: {
+          playerIds: normalized?.players.map(({ user_id }) => user_id),
+          positions: normalized?.players.map(
+            ({ queue_position }) => queue_position,
+          ),
+          currentPosition: normalized?.position?.queue_position,
+          count: normalized?.count,
+        },
+        publicResultsHideCredential:
+          !JSON.stringify([listed, joined, left]).includes(
+            parameters.credential,
+          ),
+      };
+    }, {
+      credential: SYNTHETIC_CREDENTIAL,
+      accountId: ACCOUNT_ID,
+      otherAccountId: OTHER_ACCOUNT_ID,
+      matchId: MATCH_ID,
+      requestKey: REQUEST_KEY,
+      waitlistEntryId: WAITLIST_ENTRY_ID,
+      firstWaitlistEntryId: OLDER_MESSAGE_ID,
+    });
+
+    expect(summary.contracts).toEqual([
+      {
+        url: `/api/v1/matches/${MATCH_ID}/waitlist?limit=50`,
+        method: 'GET',
+        bearerMatches: true,
+        contentType: null,
+        body: null,
+        cache: 'no-store',
+        credentials: 'omit',
+        redirect: 'error',
+      },
+      ...['join', 'leave'].map((action) => ({
+        url: `/api/v1/matches/${MATCH_ID}/waitlist/${action}`,
+        method: 'POST',
+        bearerMatches: true,
+        contentType: 'application/json',
+        body: { requestKey: REQUEST_KEY },
+        cache: 'no-store',
+        credentials: 'omit',
+        redirect: 'error',
+      })),
+    ]);
+    expect(summary.outcomes).toEqual([
+      'waitlist_loaded',
+      'waitlist_joined',
+      'waitlist_left',
+    ]);
+    expect(summary.malformed).toEqual({
+      outcome: 'rejected',
+      reason: 'internal_error',
+    });
+    expect(summary.normalized).toEqual({
+      playerIds: [OTHER_ACCOUNT_ID, ACCOUNT_ID],
+      positions: [1, 2],
+      currentPosition: 2,
+      count: 2,
+    });
+    expect(summary.publicResultsHideCredential).toBe(true);
+  });
+
   test('keeps the credential private and clears the boundary on invalid match session', async ({
     page,
   }) => {
@@ -1078,6 +1260,48 @@ test.describe('backend match credential lifecycle', () => {
               },
             };
           },
+          async listMatchWaitlist(credential) {
+            credentialMatched =
+              credentialMatched &&
+              credential === parameters.credential;
+            const current = {
+              entryId: parameters.waitlistEntryId,
+              player: { playerId: parameters.accountId },
+              queuePosition: 1,
+              joinedAt: 1_900_000_000,
+              isCurrentPlayer: true,
+            };
+            return {
+              outcome: 'waitlist_loaded',
+              entries: [current],
+              current,
+              count: 1,
+            };
+          },
+          async joinMatchWaitlist(credential) {
+            credentialMatched =
+              credentialMatched &&
+              credential === parameters.credential;
+            return {
+              outcome: 'waitlist_joined',
+              entry: {
+                matchId: parameters.matchId,
+                status: 'waiting',
+              },
+            };
+          },
+          async leaveMatchWaitlist(credential) {
+            credentialMatched =
+              credentialMatched &&
+              credential === parameters.credential;
+            return {
+              outcome: 'waitlist_left',
+              entry: {
+                matchId: parameters.matchId,
+                status: 'left',
+              },
+            };
+          },
         },
         credentialStorage: {
           async read() {
@@ -1132,6 +1356,9 @@ test.describe('backend match credential lifecycle', () => {
           parameters.matchId,
           'Synthetic message',
         ),
+        await lifecycle.listMatchWaitlist(parameters.matchId, 50),
+        await lifecycle.joinMatchWaitlist(parameters.matchId),
+        await lifecycle.leaveMatchWaitlist(parameters.matchId),
       ];
       const invalid = await lifecycle.listMatches();
       for (let attempt = 0; attempt < 50; attempt += 1) {
@@ -1161,6 +1388,7 @@ test.describe('backend match credential lifecycle', () => {
       matchId: MATCH_ID,
       invitationId: INVITATION_ID,
       messageId: MESSAGE_ID,
+      waitlistEntryId: WAITLIST_ENTRY_ID,
     });
 
     expect(summary).toEqual({
@@ -1183,6 +1411,9 @@ test.describe('backend match credential lifecycle', () => {
         'invitation_cancelled',
         'messages_loaded',
         'message_sent',
+        'waitlist_loaded',
+        'waitlist_joined',
+        'waitlist_left',
       ],
       invalidOutcome: 'rejected',
       invalidReason: 'session_invalid',
@@ -1676,6 +1907,278 @@ test.describe('backend match credential lifecycle', () => {
     )).toBe(2);
 
     await page.evaluate(() => window.__backendChatUiUnmount());
+  });
+
+  test('renders backend waitlist join, leave and FIFO promotion without Supabase RPC calls', async ({
+    page,
+  }) => {
+    let legacyWaitlistCalls = 0;
+    await page.route(/\/rest\/v1\/rpc\/.*waitlist/iu, async (route) => {
+      legacyWaitlistCalls += 1;
+      await route.fulfill({
+        status: 500,
+        contentType: 'application/json',
+        body: JSON.stringify({ message: 'legacy waitlist must not run' }),
+      });
+    });
+    await page.goto('/');
+
+    await page.evaluate(async (parameters) => {
+      const reactModule = await import('/@id/react');
+      const React = reactModule.default ?? reactModule;
+      const reactDomClientModule = await import('/@id/react-dom/client');
+      const { createRoot } =
+        reactDomClientModule.default ?? reactDomClientModule;
+      const { default: MatchDetailsScreen } = await import(
+        '/src/components/MatchDetailsScreen.jsx'
+      );
+
+      const container = document.createElement('div');
+      container.dataset.testid = 'backend-waitlist-test-root';
+      document.body.append(container);
+      const currentUser = {
+        id: parameters.accountId,
+        role: 'user',
+        firstName: 'Waiting',
+        lastName: 'Player',
+        rating: 3,
+        numericRating: 3,
+        ratingIdx: 2,
+        isVerified: true,
+      };
+      const playerIds = [
+        parameters.ownerAccountId,
+        'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+        'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+      ];
+      const initialMatch = {
+        id: parameters.matchId,
+        backendOwned: true,
+        ownerId: parameters.ownerAccountId,
+        owner_id: parameters.ownerAccountId,
+        title: 'Backend waitlist match',
+        description: '',
+        date: '1 января',
+        dateISO: '2030-01-01',
+        time: '10:00',
+        duration: 1.5,
+        courtName: 'Корт 1',
+        courtType: 'panoramic',
+        type: 'match',
+        scenario: 'social',
+        status: 'upcoming',
+        isPrivate: false,
+        isRatingMatch: false,
+        ratingMin: 0,
+        ratingMax: 6,
+        participants: playerIds,
+        filledSlots: playerIds.map((id, slotIndex) => ({
+          id,
+          firstName: `Player ${slotIndex + 1}`,
+          lastName: '',
+          numericRating: 3,
+          ratingIdx: 2,
+          isVerified: true,
+          isOrganizer: slotIndex === 0,
+          slotIndex,
+        })),
+      };
+      const currentEntry = {
+        entryId: parameters.waitlistEntryId,
+        player: {
+          playerId: parameters.accountId,
+          firstName: 'Waiting',
+          lastName: 'Player',
+          username: 'waiting_player',
+          rating: 3,
+          isVerified: true,
+        },
+        queuePosition: 1,
+        joinedAt: 1_900_000_000,
+        isCurrentPlayer: true,
+      };
+
+      function Harness() {
+        const [match, setMatch] = React.useState(initialMatch);
+        const entriesRef = React.useRef([]);
+        const listResult = () => ({
+          outcome: 'waitlist_loaded',
+          entries: entriesRef.current,
+          ...(entriesRef.current.length === 0
+            ? {}
+            : { current: currentEntry }),
+          count: entriesRef.current.length,
+        });
+
+        return React.createElement(MatchDetailsScreen, {
+          match,
+          currentUser,
+          onLoadWaitlist() {
+            window.__backendWaitlistUiCalls.load += 1;
+            return Promise.resolve(listResult());
+          },
+          async onJoinWaitlist() {
+            window.__backendWaitlistUiCalls.join += 1;
+            entriesRef.current = [currentEntry];
+            return {
+              outcome: 'waitlist_joined',
+              entry: {
+                entryId: parameters.waitlistEntryId,
+                matchId: parameters.matchId,
+                status: 'waiting',
+                appliedAt: 1_900_000_000,
+                version: 1,
+              },
+            };
+          },
+          async onLeaveWaitlist() {
+            window.__backendWaitlistUiCalls.leave += 1;
+            entriesRef.current = [];
+            return {
+              outcome: 'waitlist_left',
+              entry: {
+                entryId: parameters.waitlistEntryId,
+                matchId: parameters.matchId,
+                status: 'left',
+                appliedAt: 1_900_000_010,
+                version: 2,
+              },
+            };
+          },
+          onBack() {},
+          onJoinSuccess() {},
+          onDelete() {},
+          onComplete() {},
+          onConfirmScore() {},
+          onDisputeScore() {},
+          onSlotsChange() {},
+          onJoinMatch() {},
+          onLeaveMatch() {},
+          onRefreshMatch() {
+            window.__backendWaitlistUiCalls.refresh += 1;
+            if (
+              window.__backendWaitlistPromoteOnRefresh !== true ||
+              entriesRef.current.length === 0
+            ) {
+              return Promise.resolve(match);
+            }
+            window.__backendWaitlistPromoteOnRefresh = false;
+            entriesRef.current = [];
+            const promotedMatch = {
+              ...match,
+              participants: [
+                ...match.participants.slice(0, 3),
+                parameters.accountId,
+              ],
+              filledSlots: [
+                ...match.filledSlots.slice(0, 3),
+                {
+                  id: parameters.accountId,
+                  firstName: 'Waiting',
+                  lastName: 'Player',
+                  numericRating: 3,
+                  ratingIdx: 2,
+                  isVerified: true,
+                  isOrganizer: false,
+                  slotIndex: 3,
+                },
+              ],
+            };
+            setMatch(promotedMatch);
+            return Promise.resolve(promotedMatch);
+          },
+          pendingInvitations: [],
+          invitationActions: new Set(),
+          allMessages: [],
+          messagesLoading: false,
+          messagesLoadError: '',
+          showToast() {},
+        });
+      }
+
+      const originalSetInterval = globalThis.setInterval;
+      const originalClearInterval = globalThis.clearInterval;
+      const waitlistPollers = new Map();
+      let nextPollerId = -1;
+      globalThis.setInterval = (callback, delay, ...args) => {
+        if (delay !== 5_000) {
+          return originalSetInterval(callback, delay, ...args);
+        }
+        const id = nextPollerId;
+        nextPollerId -= 1;
+        waitlistPollers.set(id, () => callback(...args));
+        return id;
+      };
+      globalThis.clearInterval = (id) => {
+        if (!waitlistPollers.delete(id)) originalClearInterval(id);
+      };
+      window.__backendWaitlistUiCalls = {
+        load: 0,
+        join: 0,
+        leave: 0,
+        refresh: 0,
+      };
+      window.__backendWaitlistPromoteOnRefresh = false;
+      window.__runBackendWaitlistPoll = () => {
+        [...waitlistPollers.values()].forEach((poll) => poll());
+      };
+      window.__backendWaitlistPollerCount = () => waitlistPollers.size;
+      const root = createRoot(container);
+      root.render(React.createElement(Harness));
+      window.__backendWaitlistUiUnmount = () => {
+        root.unmount();
+        globalThis.setInterval = originalSetInterval;
+        globalThis.clearInterval = originalClearInterval;
+        waitlistPollers.clear();
+        container.remove();
+      };
+    }, {
+      accountId: ACCOUNT_ID,
+      ownerAccountId: OTHER_ACCOUNT_ID,
+      matchId: MATCH_ID,
+      waitlistEntryId: WAITLIST_ENTRY_ID,
+    });
+
+    const harness = page.getByTestId('backend-waitlist-test-root');
+    const joinButton = harness.getByTestId('match-waitlist-join-button');
+    await expect(joinButton).toBeVisible();
+    await joinButton.click();
+    await expect(harness.getByTestId('match-waitlist-position')).toContainText('1');
+    await expect(
+      harness.getByTestId(`match-waitlist-player-${ACCOUNT_ID}`),
+    ).toContainText('Waiting Player');
+    await harness.getByTestId('match-waitlist-leave-button').click();
+    await expect(joinButton).toBeVisible();
+    await expect(harness.getByTestId('match-waitlist-position')).toHaveCount(0);
+    await joinButton.click();
+    await expect(harness.getByTestId('match-waitlist-position')).toContainText('1');
+    await expect.poll(() => page.evaluate(
+      () => window.__backendWaitlistPollerCount(),
+    )).toBe(1);
+    await page.evaluate(() => {
+      window.__backendWaitlistPromoteOnRefresh = true;
+      window.__runBackendWaitlistPoll();
+    });
+    await expect(harness.getByTestId('match-joined-state')).toBeVisible();
+    await expect(harness.getByTestId('match-waitlist-position')).toHaveCount(0);
+    await expect.poll(() => page.evaluate(
+      () => window.__backendWaitlistPollerCount(),
+    )).toBe(0);
+    const refreshCallsAfterPromotion = await page.evaluate(
+      () => window.__backendWaitlistUiCalls.refresh,
+    );
+    await page.evaluate(() => window.__runBackendWaitlistPoll());
+    const waitlistUiCalls = await page.evaluate(
+      () => window.__backendWaitlistUiCalls,
+    );
+    expect(waitlistUiCalls.load).toBeGreaterThanOrEqual(5);
+    expect(waitlistUiCalls.join).toBe(2);
+    expect(waitlistUiCalls.leave).toBe(1);
+    expect(waitlistUiCalls.refresh).toBe(1);
+    expect(waitlistUiCalls.refresh).toBe(refreshCallsAfterPromotion);
+    expect(legacyWaitlistCalls).toBe(0);
+    await page.evaluate(() => window.__backendWaitlistUiUnmount());
   });
 
   test('renders account-scoped Home matches and preserves legacy private bookings', async ({

@@ -1366,8 +1366,10 @@ test('OPEN-MATCH renders facts, full state and mobile layout', async ({ page }) 
   await expect(page.getByText('Дата: 17 июля', { exact: true })).toBeVisible();
   await expect(page.getByText('Время: 19:00', { exact: true })).toBeVisible();
   await expect(page.getByText('777 ₽', { exact: true })).toBeVisible();
-  await expect(page.getByTestId('match-self-join-button')).toBeDisabled();
-  await expect(page.getByTestId('match-self-join-button')).toHaveText('Матч заполнен');
+  await expect(page.getByTestId('match-self-join-button')).toHaveCount(0);
+  await expect(page.getByTestId('match-waitlist-join-button')).toHaveText(
+    'Встать в лист ожидания',
+  );
 });
 
 test('OPEN-MATCH organizer manages but cannot self-join or leave', async ({ page }) => {

@@ -54,6 +54,12 @@ export function createBackendMatchActions(telegramBackendLogin) {
       telegramBackendLogin.listMatchMessages,
     sendMatchMessage:
       telegramBackendLogin.sendMatchMessage,
+    listMatchWaitlist:
+      telegramBackendLogin.listMatchWaitlist,
+    joinMatchWaitlist:
+      telegramBackendLogin.joinMatchWaitlist,
+    leaveMatchWaitlist:
+      telegramBackendLogin.leaveMatchWaitlist,
   });
 }
 
@@ -188,7 +194,10 @@ export default function AuthGate() {
       telegramBackendLogin.listMatches,
       telegramBackendLogin.listOutgoingMatchInvitations,
       telegramBackendLogin.listMatchMessages,
+      telegramBackendLogin.listMatchWaitlist,
       telegramBackendLogin.loadMatch,
+      telegramBackendLogin.joinMatchWaitlist,
+      telegramBackendLogin.leaveMatchWaitlist,
       telegramBackendLogin.searchPlayers,
       telegramBackendLogin.sendMatchMessage,
       telegramBackendLogin.sessionReady,

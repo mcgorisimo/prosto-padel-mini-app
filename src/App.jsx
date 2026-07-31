@@ -2553,6 +2553,21 @@ const handleBookSlot = async (booking) => {
         onJoinMatch={handleJoinMatch}
         onLeaveMatch={handleLeaveMatch}
         onRefreshMatch={handleRefreshMatch}
+        onLoadWaitlist={
+          isBackendOwnedMatch(selectedMatch)
+            ? backendMatchActions?.listMatchWaitlist
+            : null
+        }
+        onJoinWaitlist={
+          isBackendOwnedMatch(selectedMatch)
+            ? backendMatchActions?.joinMatchWaitlist
+            : null
+        }
+        onLeaveWaitlist={
+          isBackendOwnedMatch(selectedMatch)
+            ? backendMatchActions?.leaveMatchWaitlist
+            : null
+        }
         incomingInvitation={incomingInvitations.find((invitation) => invitation.match_id === selectedMatch.id) ?? null}
         pendingInvitations={outgoingInvitations.filter((invitation) => invitation.match_id === selectedMatch.id)}
         invitationActions={invitationActions}
