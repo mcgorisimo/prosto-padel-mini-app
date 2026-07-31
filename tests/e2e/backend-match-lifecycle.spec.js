@@ -2502,6 +2502,7 @@ test.describe('backend match credential lifecycle', () => {
         isBackendOwnedMatch,
         mapBackendMatchToApp,
         mergeAccountUpcomingMatches,
+        preferConfirmedBackendMatchMutation,
         resolveBackendMatchMode,
         resolveMatchSource,
         selectBackendAccountMatches,
@@ -2743,6 +2744,14 @@ test.describe('backend match credential lifecycle', () => {
         },
         joiningPlayer,
       );
+      const staleAfterLeave = {
+        ...joinedMatch,
+        version: 3,
+      };
+      const refreshedAfterLeave = {
+        ...leftMatch,
+        version: 5,
+      };
       const leaveActionRef = { current: false };
       const firstLeaveStarted = tryBeginMatchAction(leaveActionRef);
       const secondLeaveStarted = tryBeginMatchAction(leaveActionRef);
@@ -2884,6 +2893,16 @@ test.describe('backend match credential lifecycle', () => {
               },
               joiningPlayer,
             ) === null,
+          staleRefreshCannotRestoreParticipant:
+            preferConfirmedBackendMatchMutation(
+              leftMatch,
+              staleAfterLeave,
+            ) === leftMatch,
+          newerRefreshAccepted:
+            preferConfirmedBackendMatchMutation(
+              leftMatch,
+              refreshedAfterLeave,
+            ) === refreshedAfterLeave,
         },
         leaveSingleFlight: {
           firstLeaveStarted,
@@ -3038,6 +3057,8 @@ test.describe('backend match credential lifecycle', () => {
       joinApplied: true,
       leaveApplied: true,
       staleParticipantRejected: true,
+      staleRefreshCannotRestoreParticipant: true,
+      newerRefreshAccepted: true,
     });
     expect(summary.leaveSingleFlight).toEqual({
       firstLeaveStarted: true,

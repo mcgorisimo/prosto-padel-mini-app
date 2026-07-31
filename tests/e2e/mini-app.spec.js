@@ -1586,6 +1586,7 @@ test('JOIN open match with a free slot works once, leaves, reloads and can join 
   });
 
   await expect(page.getByTestId('match-joined-state')).toBeVisible();
+  await expect(page.getByTestId('match-leave-button')).toBeVisible();
   await expect.poll(() => supabaseState.joinRequests).toBe(1);
   expect(supabaseState.matches[0].filledSlots).toHaveLength(2);
   expect(supabaseState.matches[0].filledSlots[1]).toMatchObject({
@@ -1596,10 +1597,11 @@ test('JOIN open match with a free slot works once, leaves, reloads and can join 
   });
   expect(supabaseState.matches[0].participants).toContain(testUser.id);
 
-  await page.getByTestId('match-filled-slot-1').click();
-  await page.getByTestId('player-slot-remove-action').click();
+  await page.getByTestId('match-leave-button').click();
   await page.getByTestId('match-leave-confirm-button').click();
   await expect(page.getByTestId('match-self-join-button')).toBeVisible();
+  await expect(page.getByTestId('match-joined-state')).toHaveCount(0);
+  await expect(page.getByTestId('match-leave-button')).toHaveCount(0);
   await expect.poll(() => supabaseState.leaveRequests).toBe(1);
   await page.waitForTimeout(1700);
   await expect(page.getByRole('heading', { name: 'Детали матча' })).toBeVisible();

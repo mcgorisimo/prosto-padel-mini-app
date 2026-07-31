@@ -106,6 +106,25 @@ export function applyBackendParticipantResult(
   });
 }
 
+export function preferConfirmedBackendMatchMutation(
+  confirmedMatch,
+  refreshedMatch,
+) {
+  if (!isBackendOwnedMatch(confirmedMatch)) {
+    return refreshedMatch ?? confirmedMatch ?? null;
+  }
+  if (
+    isBackendOwnedMatch(refreshedMatch) &&
+    refreshedMatch.id === confirmedMatch.id &&
+    Number.isSafeInteger(refreshedMatch.version) &&
+    Number.isSafeInteger(confirmedMatch.version) &&
+    refreshedMatch.version >= confirmedMatch.version
+  ) {
+    return refreshedMatch;
+  }
+  return confirmedMatch;
+}
+
 export function isBackendOwnedMatch(match) {
   return match?.backendOwned === true;
 }

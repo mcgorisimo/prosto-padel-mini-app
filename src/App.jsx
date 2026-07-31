@@ -24,6 +24,7 @@ import {
   mapBackendMatchToApp,
   mapBackendPublicPlayerToApp,
   mergeAccountUpcomingMatches,
+  preferConfirmedBackendMatchMutation,
   resolveBackendMatchMode,
   resolveMatchSource,
   selectFutureBackendMatches,
@@ -1749,21 +1750,27 @@ const handleBookSlot = async (booking) => {
         showToast?.('Не удалось выйти из матча. Попробуйте ещё раз.', 'error');
         throw safeError;
       }
-      const updatedMatch = await handleRefreshMatch(matchId, matchSource);
-      if (!updatedMatch) {
-        const optimisticMatch = applyBackendParticipantResult(
-          matchSource,
-          result.participant,
-          backendMatchCurrentUser,
-        );
-        if (optimisticMatch) storeBackendMatch(optimisticMatch);
+      const confirmedMatch = applyBackendParticipantResult(
+        matchSource,
+        result.participant,
+        backendMatchCurrentUser,
+      );
+      if (confirmedMatch) storeBackendMatch(confirmedMatch);
+      const refreshedMatch = await handleRefreshMatch(
+        matchId,
+        confirmedMatch ?? matchSource,
+      );
+      const updatedMatch = preferConfirmedBackendMatchMutation(
+        confirmedMatch,
+        refreshedMatch,
+      );
+      if (!refreshedMatch) {
         showToast?.(
           'Вы вышли из матча. Детали обновятся после перезагрузки ленты.',
           'info',
         );
-        return optimisticMatch ?? matchSource;
       }
-      return updatedMatch;
+      return updatedMatch ?? matchSource;
     }
 
     const { data, error } = await supabase.rpc('leave_match', { p_match_id: matchId });
@@ -1961,8 +1968,13 @@ const handleBookSlot = async (booking) => {
         backendProfile,
       );
       if (!updatedMatch) return null;
-      storeBackendMatch(updatedMatch);
-      return updatedMatch;
+      const acceptedMatch = preferConfirmedBackendMatchMutation(
+        matchSource,
+        updatedMatch,
+      );
+      if (acceptedMatch !== updatedMatch) return acceptedMatch;
+      storeBackendMatch(acceptedMatch);
+      return acceptedMatch;
     }
 
     const rows = await loadMatches();

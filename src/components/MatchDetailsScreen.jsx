@@ -1342,6 +1342,23 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
   // Join guard
   const isParticipant = isOwner || (match.participants ?? []).includes(currentUser.id)
     || allFilled.some(player => player?.id === currentUser.id);
+  const currentParticipant = allFilled.find(
+    (player) => player?.id === currentUser.id,
+  ) ?? (
+    isParticipant && !isOwner
+      ? { id: currentUser.id, isOrganizer: false }
+      : null
+  );
+  const canLeaveCurrentUser = !!currentParticipant
+    && isParticipant
+    && !isOwner
+    && !currentParticipant.isOrganizer
+    && matchHasNotStarted
+    && !isCompletedMatch
+    && !isScorePending
+    && !isScoreDisputed
+    && !isPaidParticipation(currentParticipant)
+    && typeof onLeaveMatch === 'function';
   const canUseChat = supportsMatchChat(
     isParticipant,
     onRetryMessages,
@@ -1642,14 +1659,12 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
 
   const canLeaveViewedPlayer = !!viewPlayer
     && viewPlayer.id === currentUser.id
-    && isParticipant
-    && !isOwner
-    && !viewPlayer.isOrganizer
-    && matchHasNotStarted
-    && !isCompletedMatch
-    && !isScorePending
-    && !isScoreDisputed
-    && !isPaidParticipation(viewPlayer);
+    && canLeaveCurrentUser;
+
+  const handleLeaveCurrentUser = () => {
+    if (!canLeaveCurrentUser) return;
+    setLeaveTarget(currentParticipant);
+  };
 
   const handleLeaveViewedPlayer = () => {
     if (!canLeaveViewedPlayer) return;
@@ -2213,9 +2228,24 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
             </PadelButton>
           </>
         ) : (joined || isParticipant) ? (
-          <div data-testid="match-joined-state" style={{ textAlign: 'center', padding: '20px', background: 'rgba(34,197,94,0.08)', borderRadius: '14px', border: '1px solid rgba(34,197,94,0.25)' }}>
-            <div style={{ color: C.win, fontWeight: 700, fontSize: '17px' }}>Вы присоединились к матчу!</div>
-            <div style={{ color: C.muted, fontSize: '12px', marginTop: '4px' }}>Место сохранено в матче</div>
+          <div>
+            <div data-testid="match-joined-state" style={{ textAlign: 'center', padding: '20px', background: 'rgba(34,197,94,0.08)', borderRadius: '14px', border: '1px solid rgba(34,197,94,0.25)' }}>
+              <div style={{ color: C.win, fontWeight: 700, fontSize: '17px' }}>Вы присоединились к матчу!</div>
+              <div style={{ color: C.muted, fontSize: '12px', marginTop: '4px' }}>Место сохранено в матче</div>
+            </div>
+            {canLeaveCurrentUser && (
+              <PadelButton
+                data-testid="match-leave-button"
+                variant="danger"
+                size="lg"
+                fullWidth
+                className="mt-2.5"
+                disabled={leaving}
+                onClick={handleLeaveCurrentUser}
+              >
+                {leaving ? 'Выходим…' : 'Выйти из матча'}
+              </PadelButton>
+            )}
           </div>
         ) : pendingInvitation ? (
           <MatchInvitationPanel
