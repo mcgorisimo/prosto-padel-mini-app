@@ -615,6 +615,66 @@ describe('MatchApiService', () => {
     });
   });
 
+  it('redacts legacy invalid comments without rejecting read flows', async () => {
+    const harness = createHarness();
+    const disallowedComment = 'fuck this match';
+    const oversizedComment = 'x'.repeat(241);
+    const feedRecord = {
+      ...detail(),
+      description: disallowedComment,
+      scenario: 'social' as const,
+      ratingMin: 2,
+      ratingMax: 4,
+      occupiedSlots: 1,
+    };
+    harness.listPublicFeed.mockResolvedValue([feedRecord]);
+    harness.listAccountFeed.mockResolvedValue([
+      {
+        ...feedRecord,
+        description: oversizedComment,
+      },
+    ]);
+    harness.findVisibleById.mockResolvedValue({
+      ...detail(),
+      description: disallowedComment,
+    });
+
+    const feed = await harness.service.list({
+      accountId: ACCOUNT_ID,
+      role: 'player',
+      request: { limit: 20 },
+    });
+    const mine = await harness.service.listMine({
+      accountId: ACCOUNT_ID,
+      role: 'player',
+      request: { limit: 20 },
+    });
+    const found = await harness.service.detail({
+      accountId: ACCOUNT_ID,
+      role: 'player',
+      matchId: MATCH_ID,
+    });
+
+    expect(feed).toMatchObject({
+      outcome: 'found',
+      matches: [{ description: '' }],
+    });
+    expect(mine).toMatchObject({
+      outcome: 'found',
+      matches: [{ description: '' }],
+    });
+    expect(found).toMatchObject({
+      outcome: 'found',
+      match: { description: '' },
+    });
+    expect(JSON.stringify({ feed, mine, found })).not.toContain(
+      disallowedComment,
+    );
+    expect(JSON.stringify({ feed, mine, found })).not.toContain(
+      oversizedComment,
+    );
+  });
+
   it('hides public profile persistence failures', async () => {
     const harness = createHarness();
     harness.findVisibleById.mockResolvedValue(detail());
@@ -639,8 +699,6 @@ describe('MatchApiService', () => {
   it.each([
     ['terminal status', { status: 'completed' as const }],
     ['start boundary', { startsAt: NOW }],
-    ['oversized comment', { description: 'x'.repeat(241) }],
-    ['disallowed comment', { description: 'fuck this match' }],
   ])('rejects malformed feed output with %s', async (_case, override) => {
     const harness = createHarness();
     harness.listPublicFeed.mockResolvedValue([

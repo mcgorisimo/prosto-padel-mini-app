@@ -233,6 +233,15 @@ function isSafeMatchDescription(value: unknown): value is string {
   );
 }
 
+function safePersistedMatchDescription(
+  value: unknown,
+): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  return isSafeMatchDescription(value) ? value : '';
+}
+
 function isSafePrice(value: unknown): value is number | undefined {
   return (
     value === undefined ||
@@ -417,8 +426,11 @@ function enrichFeed(
 }
 
 function safeMatchDetail(value: unknown): MatchDetailRecord | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const description = safePersistedMatchDescription(value.description);
   if (
-    !isRecord(value) ||
     !isMatchId(value.matchId) ||
     !isAccountId(value.ownerAccountId) ||
     !isUnixEpochSeconds(value.createdAt) ||
@@ -442,7 +454,7 @@ function safeMatchDetail(value: unknown): MatchDetailRecord | undefined {
       'cancelled',
     ].includes(value.status as string) ||
     !optionalSafeText(value.title, 160) ||
-    !isSafeMatchDescription(value.description) ||
+    description === undefined ||
     !isOptionalRatingLevel(value.ratingMin) ||
     !isOptionalRatingLevel(value.ratingMax) ||
     typeof value.isRatingMatch !== 'boolean' ||
@@ -517,7 +529,7 @@ function safeMatchDetail(value: unknown): MatchDetailRecord | undefined {
     visibility: value.visibility as MatchDetailRecord['visibility'],
     scenario: value.scenario as MatchDetailRecord['scenario'],
     status: value.status as MatchDetailRecord['status'],
-    description: value.description,
+    description,
     ...(ratingMin === undefined
       ? {}
       : { ratingMin: ratingMin as number }),
