@@ -267,7 +267,7 @@ begin
         ('match_rating_applications', 'match_rating_applications_time_check', 'check (applied_at >= 0 and applied_at <= ''9007199254740991''::bigint)'),
         ('match_rating_changes', 'match_rating_changes_team_check', 'check (team_number = 1 or team_number = 2)'),
         ('match_rating_changes', 'match_rating_changes_side_check', 'check (court_side = ''left''::text or court_side = ''right''::text)'),
-        ('match_rating_changes', 'match_rating_changes_rating_check', 'check (rating_before >= 0.00 and rating_before <= 10.00 and rating_after >= 0.00 and rating_after <= 10.00 and rating_delta >= ''-10.00''::numeric and rating_delta <= 10.00 and rating_after = rating_before + rating_delta)'),
+        ('match_rating_changes', 'match_rating_changes_rating_check', 'check (rating_before >= 0.00 and rating_before <= 10.00 and rating_after >= 0.00 and rating_after <= 10.00 and rating_delta >= ''-10.00''::numeric and rating_delta <= 10.00 and rating_after = (rating_before + rating_delta))'),
         ('match_rating_changes', 'match_rating_changes_count_check', 'check (rated_matches_before >= 0 and rated_matches_before <= ''9007199254740991''::bigint)'),
         ('match_rating_changes', 'match_rating_changes_k_factor_check', 'check (rated_matches_before < 10 and k_factor = 0.4 or rated_matches_before >= 10 and k_factor = 0.1)'),
         ('match_rating_changes', 'match_rating_changes_expected_check', 'check (expected_score > 0.000000 and expected_score < 1.000000)'),
