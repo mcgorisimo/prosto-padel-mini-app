@@ -115,12 +115,17 @@ export function preferConfirmedBackendMatchMutation(
   }
   if (
     isBackendOwnedMatch(refreshedMatch) &&
-    refreshedMatch.id === confirmedMatch.id &&
-    Number.isSafeInteger(refreshedMatch.version) &&
-    Number.isSafeInteger(confirmedMatch.version) &&
-    refreshedMatch.version >= confirmedMatch.version
+    refreshedMatch.id === confirmedMatch.id
   ) {
-    return refreshedMatch;
+    if (!Number.isSafeInteger(confirmedMatch.version)) {
+      return refreshedMatch;
+    }
+    if (
+      Number.isSafeInteger(refreshedMatch.version) &&
+      refreshedMatch.version >= confirmedMatch.version
+    ) {
+      return refreshedMatch;
+    }
   }
   return confirmedMatch;
 }

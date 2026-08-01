@@ -1661,6 +1661,232 @@ test.describe('backend match credential lifecycle', () => {
     });
   });
 
+  test('opens a complete backend match after accepting an invitation', async ({
+    page,
+  }) => {
+    const pageErrors = [];
+    const dialogs = [];
+    page.on('pageerror', (error) => pageErrors.push(error.message));
+    page.on('dialog', async (dialog) => {
+      dialogs.push(dialog.message());
+      await dialog.dismiss();
+    });
+    await page.route('**/rest/v1/**', async (route) => {
+      const pathname = new URL(route.request().url()).pathname;
+      let body = [];
+      if (pathname.endsWith('/rpc/get_my_profile')) {
+        body = [{
+          id: ACCOUNT_ID,
+          first_name: 'Invited',
+          last_name: 'Player',
+          username: 'invited_player',
+          role: 'user',
+          rating: 3,
+          is_verified: true,
+        }];
+      } else if (pathname.endsWith('/rpc/get_unread_notification_count')) {
+        body = [0];
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(body),
+      });
+    });
+    await page.goto('/');
+
+    await page.evaluate(async (parameters) => {
+      const reactModule = await import('/@id/react');
+      const React = reactModule.default ?? reactModule;
+      const reactDomClientModule = await import('/@id/react-dom/client');
+      const { createRoot } =
+        reactDomClientModule.default ?? reactDomClientModule;
+      const { default: App } = await import('/src/App.jsx');
+
+      const container = document.createElement('div');
+      container.dataset.testid = 'backend-invitation-app-root';
+      document.body.append(container);
+      const startsAt = Math.floor(Date.now() / 1_000) + 86_400;
+      const owner = {
+        playerId: parameters.otherAccountId,
+        firstName: 'Match',
+        lastName: 'Owner',
+        username: 'match_owner',
+        rating: 3,
+        isVerified: true,
+      };
+      const invitedPlayer = {
+        playerId: parameters.accountId,
+        firstName: 'Invited',
+        lastName: 'Player',
+        username: 'invited_player',
+        rating: 3,
+        isVerified: true,
+      };
+      const detail = {
+        matchId: parameters.matchId,
+        ownerAccountId: parameters.otherAccountId,
+        createdAt: startsAt - 3_600,
+        updatedAt: startsAt - 30,
+        startsAt,
+        durationMinutes: 90,
+        courtId: 'court-1',
+        courtName: 'Court 1',
+        courtType: 'panoramic',
+        kind: 'match',
+        visibility: 'public',
+        scenario: 'social',
+        status: 'open',
+        description: 'Invitation regression match',
+        ratingMin: 1,
+        ratingMax: 5,
+        isRatingMatch: false,
+        pricePerPersonSnapshot: 750,
+        version: 2,
+        owner,
+        participants: [{
+          ...invitedPlayer,
+          slotNumber: 2,
+        }],
+      };
+      const invitation = {
+        invitationId: parameters.invitationId,
+        matchId: parameters.matchId,
+        invitedByAccountId: parameters.otherAccountId,
+        invitedAccountId: parameters.accountId,
+        slotNumber: 2,
+        status: 'pending',
+        createdAt: startsAt - 600,
+        updatedAt: startsAt - 600,
+        version: 1,
+        invitedPlayer,
+        match: {
+          startsAt,
+          courtName: detail.courtName,
+          ratingMin: detail.ratingMin,
+          ratingMax: detail.ratingMax,
+          isRatingMatch: detail.isRatingMatch,
+          pricePerPersonSnapshot: detail.pricePerPersonSnapshot,
+          owner,
+        },
+      };
+      let accepted = false;
+      window.__backendInvitationUiCalls = {
+        accept: 0,
+        loadMatch: 0,
+      };
+      const backendMatchActions = {
+        async listMatches() {
+          return { outcome: 'matches_loaded', matches: [] };
+        },
+        async listAccountMatches() {
+          return { outcome: 'matches_loaded', matches: [] };
+        },
+        async listIncomingMatchInvitations() {
+          return {
+            outcome: 'invitations_loaded',
+            invitations: accepted ? [] : [invitation],
+          };
+        },
+        async listOutgoingMatchInvitations() {
+          return { outcome: 'invitations_loaded', invitations: [] };
+        },
+        async acceptMatchInvitation(invitationId) {
+          window.__backendInvitationUiCalls.accept += 1;
+          accepted = true;
+          return {
+            outcome: 'invitation_accepted',
+            invitation: {
+              ...invitation,
+              invitationId,
+              status: 'accepted',
+              version: 2,
+            },
+            participant: {
+              matchId: parameters.matchId,
+              playerId: parameters.accountId,
+              slotNumber: 2,
+              status: 'active',
+              matchVersion: 2,
+            },
+          };
+        },
+        async loadMatch(matchId) {
+          window.__backendInvitationUiCalls.loadMatch += 1;
+          return {
+            outcome: 'match_loaded',
+            match: { ...detail, matchId },
+          };
+        },
+      };
+      const session = {
+        user: {
+          id: parameters.accountId,
+          email: 'invited-player@prostopadel.test',
+          user_metadata: {
+            first_name: invitedPlayer.firstName,
+            last_name: invitedPlayer.lastName,
+            username: invitedPlayer.username,
+          },
+        },
+      };
+      const backendProfile = {
+        accountId: parameters.accountId,
+        role: 'player',
+        firstName: invitedPlayer.firstName,
+        lastName: invitedPlayer.lastName,
+        username: invitedPlayer.username,
+        photoUrl: null,
+        languageCode: 'ru',
+        phone: null,
+        sidePreference: null,
+        rating: invitedPlayer.rating,
+        isVerified: invitedPlayer.isVerified,
+      };
+      const root = createRoot(container);
+      root.render(React.createElement(App, {
+        session,
+        backendProfile,
+        backendMatchRequired: true,
+        backendMatchLifecycleStatus: 'authenticated',
+        backendProfileStatus: 'ready',
+        backendMatchActions,
+        showToast() {},
+        onLogout() {},
+      }));
+      window.__backendInvitationUiUnmount = () => {
+        root.unmount();
+        container.remove();
+      };
+    }, {
+      accountId: ACCOUNT_ID,
+      otherAccountId: OTHER_ACCOUNT_ID,
+      matchId: MATCH_ID,
+      invitationId: INVITATION_ID,
+    });
+
+    const harness = page.getByTestId('backend-invitation-app-root');
+    await expect(harness.locator('.bottom-nav button')).toHaveCount(5);
+    await harness.locator('.bottom-nav button').last().click();
+    const acceptButton = harness.getByTestId(
+      `invitation-accept-${INVITATION_ID}`,
+    );
+    await expect(acceptButton).toBeVisible();
+    await acceptButton.click();
+    await expect(harness.getByTestId('match-joined-state')).toBeVisible();
+    await expect(harness.getByText('Court 1', { exact: true })).toBeVisible();
+    await expect(harness).toContainText('Invitation regression match');
+    await expect.poll(() => page.evaluate(
+      () => window.__backendInvitationUiCalls.accept,
+    )).toBe(1);
+    await expect.poll(() => page.evaluate(
+      () => window.__backendInvitationUiCalls.loadMatch,
+    )).toBeGreaterThanOrEqual(1);
+    expect(pageErrors).toEqual([]);
+    expect(dialogs).toEqual([]);
+    await page.evaluate(() => window.__backendInvitationUiUnmount());
+  });
+
   test('uses the private bearer boundary for paginated backend match chat', async ({
     page,
   }) => {
@@ -3449,6 +3675,13 @@ test.describe('backend match credential lifecycle', () => {
               leftMatch,
               refreshedAfterLeave,
             ) === refreshedAfterLeave,
+          invitationPlaceholderUsesRefreshedDetail: (() => {
+            const refreshed = preferConfirmedBackendMatchMutation(
+              { id: parameters.matchId, backendOwned: true },
+              match,
+            );
+            return refreshed === match && refreshed.time === '10:30';
+          })(),
         },
         leaveSingleFlight: {
           firstLeaveStarted,
@@ -3605,6 +3838,7 @@ test.describe('backend match credential lifecycle', () => {
       staleParticipantRejected: true,
       staleRefreshCannotRestoreParticipant: true,
       newerRefreshAccepted: true,
+      invitationPlaceholderUsesRefreshedDetail: true,
     });
     expect(summary.leaveSingleFlight).toEqual({
       firstLeaveStarted: true,
