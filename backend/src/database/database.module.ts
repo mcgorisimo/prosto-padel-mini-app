@@ -10,6 +10,7 @@ import { PostgresExternalIdentityResolutionRepository } from './postgres-externa
 import { PostgresInitialSessionRepository } from './postgres-initial-session.repository';
 import { PostgresMatchChatRepository } from './postgres-match-chat.repository';
 import { PostgresMatchLineupRepository } from './postgres-match-lineup.repository';
+import { PostgresMatchResultRepository } from './postgres-match-result.repository';
 import { PostgresMatchRepository } from './postgres-match.repository';
 import { PostgresMatchInvitationRepository } from './postgres-match-invitation.repository';
 import { PostgresMatchWaitlistRepository } from './postgres-match-waitlist.repository';
@@ -37,6 +38,7 @@ const DATABASE_WORKFLOW_PROVIDERS: Provider[] = [
   PostgresSessionAuthenticationRepository,
   PostgresMatchChatRepository,
   PostgresMatchLineupRepository,
+  PostgresMatchResultRepository,
   PostgresMatchWaitlistRepository,
   {
     provide: MATCH_COURT_CATALOG,
@@ -132,6 +134,7 @@ const DATABASE_WORKFLOW_EXPORTS = [
   PostgresPublicPlayerProfileSearchRepository,
   PostgresMatchChatRepository,
   PostgresMatchLineupRepository,
+  PostgresMatchResultRepository,
   PostgresMatchWaitlistRepository,
   PostgresMatchRepository,
   PostgresMatchInvitationRepository,

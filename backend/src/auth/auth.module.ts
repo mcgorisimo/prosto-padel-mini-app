@@ -16,6 +16,7 @@ import { PostgresExternalIdentityResolutionRepository } from '../database/postgr
 import { PostgresInitialSessionRepository } from '../database/postgres-initial-session.repository';
 import { PostgresMatchChatRepository } from '../database/postgres-match-chat.repository';
 import { PostgresMatchLineupRepository } from '../database/postgres-match-lineup.repository';
+import { PostgresMatchResultRepository } from '../database/postgres-match-result.repository';
 import { PostgresMatchRepository } from '../database/postgres-match.repository';
 import { PostgresMatchInvitationRepository } from '../database/postgres-match-invitation.repository';
 import { PostgresMatchWaitlistRepository } from '../database/postgres-match-waitlist.repository';
@@ -36,6 +37,8 @@ import { MatchInvitationController } from '../matches/match-invitation.controlle
 import { MatchInvitationService } from '../matches/match-invitation.service';
 import { MatchLineupController } from '../matches/match-lineup.controller';
 import { MatchLineupService } from '../matches/match-lineup.service';
+import { MatchResultController } from '../matches/match-result.controller';
+import { MatchResultService } from '../matches/match-result.service';
 import { MatchWaitlistController } from '../matches/match-waitlist.controller';
 import { MatchWaitlistService } from '../matches/match-waitlist.service';
 import { NodeSessionCredentialIssuer } from './session-credential-issuer.adapter';
@@ -339,6 +342,18 @@ function createMatchLineupService(
   });
 }
 
+function createMatchResultService(
+  transactions: PostgresTransactionExecutorAdapter,
+  results: PostgresMatchResultRepository,
+  clock: SessionAuthenticationClock,
+): MatchResultService {
+  return new MatchResultService({
+    transactions,
+    results,
+    clock,
+  });
+}
+
 @Module({
   imports: [DatabaseModule],
   controllers: [
@@ -352,6 +367,7 @@ function createMatchLineupService(
     MatchChatController,
     MatchWaitlistController,
     MatchLineupController,
+    MatchResultController,
     ContentModerationController,
   ],
   providers: [
@@ -359,6 +375,15 @@ function createMatchLineupService(
     SESSION_LIFECYCLE_HTTP_CLOCK_PROVIDER,
     SESSION_AUTHENTICATION_CLOCK_PROVIDER,
     SessionBearerGuard,
+    {
+      provide: MatchResultService,
+      inject: [
+        PostgresTransactionExecutorAdapter,
+        PostgresMatchResultRepository,
+        SESSION_AUTHENTICATION_CLOCK,
+      ],
+      useFactory: createMatchResultService,
+    },
     {
       provide: MatchLineupService,
       inject: [
@@ -473,6 +498,7 @@ function createMatchLineupService(
     MatchChatService,
     MatchWaitlistService,
     MatchLineupService,
+    MatchResultService,
   ],
 })
 export class AuthModule {}

@@ -19,6 +19,7 @@ import { PostgresInitialSessionRepository } from '../database/postgres-initial-s
 import { PostgresMatchChatRepository } from '../database/postgres-match-chat.repository';
 import { PostgresMatchInvitationRepository } from '../database/postgres-match-invitation.repository';
 import { PostgresMatchLineupRepository } from '../database/postgres-match-lineup.repository';
+import { PostgresMatchResultRepository } from '../database/postgres-match-result.repository';
 import { PostgresMatchRepository } from '../database/postgres-match.repository';
 import { PostgresMatchWaitlistRepository } from '../database/postgres-match-waitlist.repository';
 import { PostgresPlayerAccountProvisioningRepository } from '../database/postgres-player-account-provisioning.repository';
@@ -43,6 +44,8 @@ import { MatchInvitationController } from '../matches/match-invitation.controlle
 import { MatchInvitationService } from '../matches/match-invitation.service';
 import { MatchLineupController } from '../matches/match-lineup.controller';
 import { MatchLineupService } from '../matches/match-lineup.service';
+import { MatchResultController } from '../matches/match-result.controller';
+import { MatchResultService } from '../matches/match-result.service';
 import { MatchWaitlistController } from '../matches/match-waitlist.controller';
 import { MatchWaitlistService } from '../matches/match-waitlist.service';
 import {
@@ -298,6 +301,16 @@ function getMatchLineupControllerService(
   ).service;
 }
 
+function getMatchResultControllerService(
+  controller: MatchResultController,
+): MatchResultService {
+  return (
+    controller as unknown as {
+      readonly service: MatchResultService;
+    }
+  ).service;
+}
+
 function expectProviderNotRegistered(
   moduleRef: TestingModule,
   token: string | symbol | Type<unknown>,
@@ -392,6 +405,21 @@ describe('AuthModule Telegram login wiring', () => {
     const matchRepository = moduleRef.get(PostgresMatchRepository);
     const matchWaitlist = moduleRef.get(MatchWaitlistService);
     const matchLineup = moduleRef.get(MatchLineupService);
+    const matchResult = moduleRef.get(MatchResultService);
+    expect(matchResult.dependencies.transactions).toBe(
+      moduleRef.get(PostgresTransactionExecutorAdapter),
+    );
+    expect(matchResult.dependencies.results).toBe(
+      moduleRef.get(PostgresMatchResultRepository),
+    );
+    expect(matchResult.dependencies.clock).toBe(
+      moduleRef.get(SESSION_AUTHENTICATION_CLOCK),
+    );
+    expect(
+      getMatchResultControllerService(
+        moduleRef.get(MatchResultController),
+      ),
+    ).toBe(matchResult);
     expect(matchLineup.dependencies.transactions).toBe(
       moduleRef.get(PostgresTransactionExecutorAdapter),
     );
