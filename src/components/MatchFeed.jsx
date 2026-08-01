@@ -7,12 +7,11 @@ import { isRatingMatch, requiresVerifiedRating } from '../lib/matchRating';
 
 const C = {
   bg: '#050F0B',
-  card: 'rgba(255,255,255,0.045)',
-  border: 'rgba(245,241,232,0.10)',
+  card: 'linear-gradient(180deg, rgba(18,56,42,0.78) 0%, rgba(7,31,22,0.98) 100%)',
+  border: 'rgba(245,241,232,0.17)',
   text: '#F5F1E8',
-  muted: 'rgba(245,241,232,0.58)',
-  lime: '#D8F34A',
-  coral: '#FF6F61',
+  muted: 'rgba(245,241,232,0.62)',
+  lime: 'rgba(216,243,74,0.84)',
 };
 
 const getSideBadge = (sideStr) => {
@@ -102,31 +101,10 @@ const canCurrentUserJoin = (match, currentUser) => {
   return levelOk && verifiedOk;
 };
 
-function JoinButton({ onClick, disabled = false, label = 'Присоединиться' }) {
-  const [pressed, setPressed] = useState(false);
-
+function JoinButton({ disabled = false, label = 'Присоединиться' }) {
   return (
     <span
-      role="button"
-      tabIndex={0}
-      onMouseDown={() => !disabled && setPressed(true)}
-      onMouseUp={() => setPressed(false)}
-      onMouseLeave={() => setPressed(false)}
-      onTouchStart={() => !disabled && setPressed(true)}
-      onTouchEnd={() => setPressed(false)}
-      onClick={(e) => {
-        e.stopPropagation();
-        if (disabled) return;
-        onClick();
-      }}
-      onKeyDown={(e) => {
-        if (e.key !== 'Enter' && e.key !== ' ') return;
-        e.preventDefault();
-        e.stopPropagation();
-        if (disabled) return;
-        onClick();
-      }}
-      aria-disabled={disabled}
+      className="match-feed-card-action"
       style={{
         background: disabled ? 'rgba(245,241,232,0.06)' : 'rgba(216,243,74,0.10)',
         color: disabled ? 'rgba(245,241,232,0.46)' : C.lime,
@@ -135,12 +113,7 @@ function JoinButton({ onClick, disabled = false, label = 'Присоединит
         border: disabled ? '1px solid rgba(245,241,232,0.12)' : '1px solid rgba(216,243,74,0.34)',
         fontSize: '14px',
         fontWeight: '800',
-        cursor: disabled ? 'not-allowed' : 'pointer',
-        transition: 'all 0.15s ease-out',
-        transform: pressed && !disabled ? 'scale(0.97)' : 'scale(1)',
         boxShadow: disabled ? 'none' : '0 12px 30px rgba(0,0,0,0.18)',
-        outline: 'none',
-        WebkitTapHighlightColor: 'transparent',
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -272,6 +245,7 @@ function MatchCard({ match, currentUser, onViewDetails }) {
 
   return (
     <button
+      className="match-feed-card"
       type="button"
       onClick={() => onViewDetails(match)}
       style={{
@@ -280,11 +254,12 @@ function MatchCard({ match, currentUser, onViewDetails }) {
         background: C.card,
         borderRadius: '26px',
         padding: '18px',
-        marginBottom: '12px',
+        marginBottom: '14px',
         border: `1px solid ${C.border}`,
         position: 'relative',
+        cursor: 'pointer',
         transition: 'transform 0.15s ease, background 0.2s ease',
-        boxShadow: '0 18px 54px rgba(0,0,0,0.26)',
+        boxShadow: '0 20px 52px rgba(0,0,0,0.34), inset 0 1px rgba(245,241,232,0.035)',
         overflow: 'visible',
       }}
     >
@@ -295,8 +270,8 @@ function MatchCard({ match, currentUser, onViewDetails }) {
           borderRadius: '999px',
           fontSize: '11px',
           fontWeight: '750',
-          border: `1px solid ${bookingStatus.isBooked ? 'rgba(216,243,74,0.24)' : 'rgba(245,241,232,0.16)'}`,
-          background: bookingStatus.isBooked ? 'rgba(216,243,74,0.08)' : 'rgba(245,241,232,0.06)',
+          border: `1px solid ${bookingStatus.isBooked ? 'rgba(216,243,74,0.18)' : 'rgba(245,241,232,0.15)'}`,
+          background: bookingStatus.isBooked ? 'rgba(216,243,74,0.06)' : 'rgba(245,241,232,0.05)',
         }}>
           {statusText}
         </div>
@@ -309,8 +284,8 @@ function MatchCard({ match, currentUser, onViewDetails }) {
               borderRadius: '999px',
               fontSize: '11px',
               fontWeight: '800',
-              background: 'rgba(216,243,74,0.08)',
-              border: '1px solid rgba(216,243,74,0.20)',
+              background: 'rgba(216,243,74,0.06)',
+              border: '1px solid rgba(216,243,74,0.16)',
             }}>
               Рейтинговая
             </div>
@@ -321,8 +296,8 @@ function MatchCard({ match, currentUser, onViewDetails }) {
             borderRadius: '999px',
             fontSize: '11px',
             fontWeight: '800',
-            background: 'rgba(216,243,74,0.08)',
-            border: '1px solid rgba(216,243,74,0.20)',
+            background: 'rgba(216,243,74,0.06)',
+            border: '1px solid rgba(216,243,74,0.16)',
           }}>
             {levelRequirement.summaryLabel}
           </div>
@@ -336,9 +311,9 @@ function MatchCard({ match, currentUser, onViewDetails }) {
         </div>
       </div>
 
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginBottom: '16px', color: C.text, fontSize: '13px', fontWeight: '700' }}>
-        <span>{getDisplayDate(match)}</span>
-        <span style={{ color: C.muted }}>·</span>
+      <div className="match-feed-schedule" style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginBottom: '16px', color: C.text, fontSize: '13px', fontWeight: '700' }}>
+        <span className="match-feed-date-chip">{getDisplayDate(match)}</span>
+        <span className="match-feed-schedule-divider" style={{ color: C.muted }}>·</span>
         <span>{match.time} — {calculateEndTime(match.time, match.duration)}</span>
       </div>
       {match.description && (
@@ -377,7 +352,7 @@ function MatchCard({ match, currentUser, onViewDetails }) {
 
       <div style={{ height: '1px', background: 'rgba(245,241,232,0.08)', marginBottom: '16px' }} />
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
+      <div className="match-feed-card-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
         <div>
           <div style={{ fontSize: '20px', fontWeight: '900', color: C.text }}>
             {priceLabel}
@@ -388,7 +363,6 @@ function MatchCard({ match, currentUser, onViewDetails }) {
         </div>
 
         <JoinButton
-          onClick={() => onViewDetails(match)}
           disabled={isFull}
           label={actionLabel}
         />
@@ -430,7 +404,7 @@ export default function MatchFeed({ matches = [], currentUser, onViewDetails, on
   return (
     <div style={{
       padding: '20px 16px 104px',
-      background: 'radial-gradient(circle at 50% -8%, rgba(216,243,74,0.07), transparent 24rem), #050F0B',
+      background: 'radial-gradient(circle at 50% -8%, rgba(216,243,74,0.05), transparent 24rem), #050F0B',
       minHeight: '100dvh',
       overflowX: 'hidden',
     }}>
@@ -449,11 +423,11 @@ export default function MatchFeed({ matches = [], currentUser, onViewDetails, on
             width: '46px',
             height: '46px',
             borderRadius: '16px',
-            background: 'rgba(216,243,74,0.12)',
-            border: '1px solid rgba(216,243,74,0.36)',
+            background: 'rgba(216,243,74,0.08)',
+            border: '1px solid rgba(216,243,74,0.24)',
             color: C.lime,
             cursor: 'pointer',
-            boxShadow: '0 14px 34px rgba(216,243,74,0.15)',
+            boxShadow: '0 14px 34px rgba(216,243,74,0.08)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -485,14 +459,14 @@ export default function MatchFeed({ matches = [], currentUser, onViewDetails, on
                 flex: '0 0 auto',
                 padding: '9px 13px',
                 borderRadius: '999px',
-                border: isActive ? '1px solid rgba(216,243,74,0.62)' : `1px solid ${C.border}`,
-                background: isActive ? 'rgba(216,243,74,0.14)' : 'rgba(255,255,255,0.035)',
+                border: isActive ? '1px solid rgba(216,243,74,0.28)' : `1px solid ${C.border}`,
+                background: isActive ? 'rgba(216,243,74,0.08)' : 'rgba(255,255,255,0.035)',
                 color: isActive ? C.lime : C.muted,
                 fontSize: '12px',
                 fontWeight: 850,
                 cursor: 'pointer',
                 whiteSpace: 'nowrap',
-                boxShadow: isActive ? '0 10px 26px rgba(216,243,74,0.12)' : 'none',
+                boxShadow: isActive ? '0 10px 26px rgba(216,243,74,0.06)' : 'none',
               }}
             >
               {filter.label}

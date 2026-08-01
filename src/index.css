@@ -367,6 +367,102 @@ textarea {
 .match-card.result-win::before  { background: var(--win); }
 .match-card.result-loss::before { background: var(--loss); }
 
+/* Home event categories: muted semantic accents from the existing club palette. */
+.home-event-card {
+  border-left-color: rgba(var(--event-accent-rgb), 0.5) !important;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.04));
+}
+
+.home-event-kind-badge {
+  color: rgba(var(--event-accent-rgb), 0.82);
+  border-color: rgba(var(--event-accent-rgb), 0.18);
+  background: rgba(var(--event-accent-rgb), 0.06);
+}
+
+.home-event-date-badge,
+.match-feed-date-chip {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  min-height: 28px;
+  padding: 5px 9px;
+  border: 1px solid rgba(251, 220, 138, 0.18);
+  border-radius: 999px;
+  background: rgba(251, 220, 138, 0.07);
+  color: rgba(251, 220, 138, 0.84);
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1;
+}
+
+.home-event-tab {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid rgba(245, 241, 232, 0.12);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.035);
+  color: rgba(245, 241, 232, 0.62);
+  font-size: 12px;
+  font-weight: 750;
+  white-space: nowrap;
+  transition: color 150ms ease, border-color 150ms ease, background 150ms ease, transform 150ms ease;
+}
+
+.home-event-tab > svg {
+  color: rgba(var(--event-accent-rgb), 0.58);
+}
+
+.home-event-tab.is-active {
+  border-color: rgba(var(--event-accent-rgb), 0.24);
+  background: rgba(var(--event-accent-rgb), 0.085);
+  color: rgba(var(--event-accent-rgb), 0.84);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.16);
+}
+
+.home-event-tab.is-active > svg {
+  color: rgba(var(--event-accent-rgb), 0.8);
+}
+
+.home-event-tab-count {
+  color: rgba(245, 241, 232, 0.52);
+  font-variant-numeric: tabular-nums;
+}
+
+.home-event-tab.is-active .home-event-tab-count {
+  color: rgba(var(--event-accent-rgb), 0.68);
+}
+
+.home-event-tab:active,
+.match-feed-card:active {
+  transform: scale(0.99);
+}
+
+.home-event-card:focus-visible,
+.home-event-tab:focus-visible,
+.match-feed-card:focus-visible {
+  outline: 2px solid rgba(216, 243, 74, 0.72);
+  outline-offset: 2px;
+}
+
+/* Active match feed card: stronger depth without a brighter solid fill. */
+.match-feed-card {
+  touch-action: manipulation;
+}
+
+.match-feed-date-chip {
+  flex: 0 0 auto;
+  font-size: 13px;
+}
+
+.match-feed-schedule {
+  align-items: center;
+}
+
 .match-left {
   display: flex;
   flex-direction: column;
@@ -914,6 +1010,19 @@ body.booking-sheet-open .bottom-nav {
 
   .nav-item {
     font-size: 9px;
+  }
+
+  .match-feed-card-footer {
+    flex-wrap: wrap;
+  }
+
+  .match-feed-card-action {
+    flex: 1 0 100%;
+    width: 100%;
+  }
+
+  .match-feed-schedule-divider {
+    display: none;
   }
 }
 html,

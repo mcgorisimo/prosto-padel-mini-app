@@ -1020,14 +1020,75 @@ test.describe('BOOKING Moscow calendar after midnight', () => {
 });
 
 test('opens authorized home on iPhone viewport', async ({ page }) => {
-  await openAuthenticatedApp(page);
+  const booking = createOpenJoinableMatch({
+    id: 'home-private-booking',
+    owner_id: testUser.id,
+    ownerId: testUser.id,
+    type: 'private',
+    title: 'Частная бронь корта',
+    status: 'upcoming',
+    isPrivate: true,
+    filledSlots: [{
+      id: testUser.id,
+      firstName: 'QA',
+      lastName: 'Player',
+      numericRating: 3.4,
+      isVerified: true,
+      isOrganizer: true,
+    }],
+    participants: [testUser.id],
+  });
+  await mockSupabase(page, { matches: [booking] });
+  await mockTelegram(page);
+  await setAuthenticatedSession(page);
+  await page.goto('/');
+  await expect(page.locator('.bottom-nav')).toBeVisible();
 
   await expect(page.locator('main')).toBeVisible();
   await expect(page.locator('.bottom-nav')).toBeVisible();
 
+  const eventCard = page.locator('.home-event-card').first();
+  await expect(eventCard).toBeVisible();
+  await expect(eventCard).toHaveAttribute('type', 'button');
+  await expect(eventCard.locator('.home-event-date-badge')).toBeVisible();
+
+  const eventTabs = page.locator('.home-event-tab');
+  await expect(eventTabs).toHaveCount(4);
+  const categorySemantics = await eventTabs.evaluateAll((tabs) => tabs.map((tab) => ({
+    label: tab.textContent.replace(/\d+\s*$/, '').trim(),
+    iconCount: tab.querySelectorAll('svg').length,
+    height: tab.getBoundingClientRect().height,
+  })));
+  expect(categorySemantics.map((item) => item.label)).toEqual(['Все', 'Брони', 'Матчи', 'Тренировки']);
+  expect(categorySemantics.every((item) => item.iconCount === 1)).toBe(true);
+  expect(categorySemantics.every((item) => item.height >= 44)).toBe(true);
+  const bookingsTab = page.getByRole('button', { name: /^Брони\s+\d+$/ });
+  await expect(bookingsTab).toHaveAttribute('aria-pressed', 'false');
+  await bookingsTab.click();
+  await expect(bookingsTab).toHaveAttribute('aria-pressed', 'true');
+
+  await page.keyboard.press('Tab');
+  await eventCard.focus();
+  await expect(eventCard).toBeFocused();
+  await expect(eventCard).toHaveCSS('outline-style', 'solid');
+
   const viewport = page.viewportSize();
   expect(viewport?.width).toBe(390);
   expect(viewport?.height).toBeGreaterThanOrEqual(600);
+
+  for (const width of [320, 375, 390, 430]) {
+    await page.setViewportSize({ width, height: viewport?.height ?? 844 });
+    const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    const eventCardBox = await eventCard.boundingBox();
+    const importantTextFits = await eventCard.evaluate((element) => [...element.querySelectorAll('.home-event-date-badge')]
+      .every((item) => item.scrollWidth <= item.clientWidth + 1));
+    expect(horizontalOverflow).toBeLessThanOrEqual(0);
+    expect(eventCardBox).not.toBeNull();
+    expect(eventCardBox.height).toBeGreaterThanOrEqual(44);
+    expect(eventCardBox.x).toBeGreaterThanOrEqual(0);
+    expect(eventCardBox.x + eventCardBox.width).toBeLessThanOrEqual(width + 0.5);
+    expect(importantTextFits).toBe(true);
+  }
 });
 
 test('checks bottom navigation and opens match creation smoke', async ({ page }) => {
@@ -1352,7 +1413,40 @@ test('OPEN-MATCH renders facts, full state and mobile layout', async ({ page }) 
   await expect(page.locator('.bottom-nav')).toBeVisible();
   await openMatchesTab(page);
 
-  await expect(page.getByText('17 июля', { exact: true })).toBeVisible();
+  const feedCard = page.getByTestId('match-free-spots-full-open-match').locator('xpath=ancestor::button[1]');
+  await expect(feedCard).toHaveClass(/match-feed-card/);
+  await expect(feedCard.locator('button, [role="button"]')).toHaveCount(0);
+  const dateChip = feedCard.locator('.match-feed-date-chip');
+  await expect(dateChip).toHaveText('17 июля');
+  const feedCardStyle = await feedCard.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { backgroundImage: style.backgroundImage, borderColor: style.borderColor };
+  });
+  expect(feedCardStyle.backgroundImage).not.toBe('none');
+  expect(feedCardStyle.borderColor).not.toBe('rgba(0, 0, 0, 0)');
+
+  await page.keyboard.press('Tab');
+  await feedCard.focus();
+  await expect(feedCard).toBeFocused();
+  await expect(feedCard).toHaveCSS('outline-style', 'solid');
+
+  for (const width of [320, 375, 390, 430]) {
+    await page.setViewportSize({ width, height: 844 });
+    const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    const footerWidth = await feedCard.locator('.match-feed-card-footer').evaluate((element) => element.getBoundingClientRect().width);
+    const actionWidth = await feedCard.locator('.match-feed-card-action').evaluate((element) => element.getBoundingClientRect().width);
+    const importantTextFits = await feedCard.evaluate((element) => [...element.querySelectorAll('.match-feed-date-chip, .match-feed-card-action')]
+      .every((item) => item.scrollWidth <= item.clientWidth + 1));
+    expect(horizontalOverflow).toBeLessThanOrEqual(0);
+    expect(actionWidth).toBeGreaterThanOrEqual(44);
+    expect(importantTextFits).toBe(true);
+    if (width <= 380) {
+      expect(actionWidth).toBeGreaterThanOrEqual(footerWidth - 1);
+    } else {
+      expect(actionWidth).toBeLessThan(footerWidth);
+    }
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.getByText('19:00 — 20:30', { exact: true })).toBeVisible();
   await expect(page.getByText('C — B', { exact: true })).toBeVisible();
   await expect(page.getByText('777 ₽', { exact: true })).toBeVisible();
