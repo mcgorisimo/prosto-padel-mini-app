@@ -10,6 +10,7 @@ const PARTICIPANT_ID = '66666666-6666-4666-8666-666666666666';
 const MESSAGE_ID = '77777777-7777-4777-8777-777777777777';
 const OLDER_MESSAGE_ID = '88888888-8888-4888-8888-888888888888';
 const WAITLIST_ENTRY_ID = '99999999-9999-4999-8999-999999999999';
+const RESULT_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 
 test.describe('backend match credential lifecycle', () => {
   test('uses exact no-store contracts for public/account feeds, detail, create, join and leave', async ({
@@ -1200,6 +1201,199 @@ test.describe('backend match credential lifecycle', () => {
     expect(summary.publicResultsHideCredential).toBe(true);
   });
 
+  test('uses exact private contracts for backend match results', async ({
+    page,
+  }) => {
+    await page.goto('/');
+
+    const summary = await page.evaluate(async (parameters) => {
+      const { createBackendSessionClient } = await import(
+        '/src/lib/backendSessionClient.js'
+      );
+      const contracts = [];
+      const mutation = (status, appliedAt, resultVersion) => ({
+        result: {
+          resultId: parameters.resultId,
+          matchId: parameters.matchId,
+          status,
+          appliedAt,
+          resultVersion,
+        },
+      });
+      const client = createBackendSessionClient({
+        cryptoImpl: { randomUUID: () => parameters.requestKey },
+        fetchImpl: async (url, options) => {
+          contracts.push({
+            url,
+            method: options.method,
+            bearerMatches:
+              options.headers.Authorization ===
+              `Bearer ${parameters.credential}`,
+            contentType: options.headers['Content-Type'] ?? null,
+            body: options.body === undefined ? null : JSON.parse(options.body),
+            cache: options.cache,
+            credentials: options.credentials,
+            redirect: options.redirect,
+          });
+          if (url.endsWith('/result/submit')) {
+            return new Response(JSON.stringify(
+              mutation('submitted', 1_900_000_010, 1),
+            ), { status: 201 });
+          }
+          if (url.endsWith('/result/confirm')) {
+            return new Response(JSON.stringify(
+              mutation('confirmed', 1_900_000_020, 2),
+            ), { status: 201 });
+          }
+          if (url.endsWith('/result/dispute')) {
+            return new Response(JSON.stringify(
+              mutation('disputed', 1_900_000_030, 2),
+            ), { status: 201 });
+          }
+          return new Response(JSON.stringify({
+            result: {
+              resultId: parameters.resultId,
+              matchId: parameters.matchId,
+              lineupVersion: 4,
+              teams: [
+                [parameters.accountId, parameters.otherAccountId],
+                [parameters.thirdAccountId, parameters.fourthAccountId],
+              ],
+              sets: [
+                { team1Games: 6, team2Games: 4 },
+                { team1Games: 6, team2Games: 3 },
+              ],
+              winningTeam: 1,
+              status: 'submitted',
+              submittedByAccountId: parameters.accountId,
+              submittedAt: 1_900_000_000,
+              version: 1,
+            },
+          }), { status: 200 });
+        },
+      });
+      const sets = [
+        { team1Games: 6, team2Games: 4 },
+        { team1Games: 6, team2Games: 3 },
+      ];
+      const loaded = await client.readMatchResult(
+        parameters.credential,
+        parameters.matchId,
+      );
+      const submitted = await client.submitMatchResult(
+        parameters.credential,
+        parameters.matchId,
+        sets,
+      );
+      const confirmed = await client.confirmMatchResult(
+        parameters.credential,
+        parameters.matchId,
+      );
+      const disputed = await client.disputeMatchResult(
+        parameters.credential,
+        parameters.matchId,
+      );
+      const missing = await createBackendSessionClient({
+        fetchImpl: async () => new Response(JSON.stringify({
+          code: 'match_result_not_found',
+        }), { status: 404 }),
+      }).readMatchResult(parameters.credential, parameters.matchId);
+      const malformed = await createBackendSessionClient({
+        fetchImpl: async () => new Response(JSON.stringify({
+          result: {
+            ...loaded.result,
+            winningTeam: 2,
+          },
+        }), { status: 200 }),
+      }).readMatchResult(parameters.credential, parameters.matchId);
+      const invalidSequence = await createBackendSessionClient({
+        fetchImpl: async () => {
+          throw new Error('invalid result sequence must not reach fetch');
+        },
+      }).submitMatchResult(parameters.credential, parameters.matchId, [
+        { team1Games: 6, team2Games: 0 },
+        { team1Games: 6, team2Games: 0 },
+        { team1Games: 0, team2Games: 6 },
+      ]);
+
+      return {
+        contracts,
+        outcomes: [
+          loaded.outcome,
+          submitted.outcome,
+          confirmed.outcome,
+          disputed.outcome,
+        ],
+        missing,
+        malformed,
+        invalidSequence,
+        publicResultsHideCredential:
+          !JSON.stringify([loaded, submitted, confirmed, disputed]).includes(
+            parameters.credential,
+          ),
+      };
+    }, {
+      credential: SYNTHETIC_CREDENTIAL,
+      accountId: ACCOUNT_ID,
+      otherAccountId: OTHER_ACCOUNT_ID,
+      thirdAccountId: PARTICIPANT_ID,
+      fourthAccountId: MESSAGE_ID,
+      matchId: MATCH_ID,
+      resultId: RESULT_ID,
+      requestKey: REQUEST_KEY,
+    });
+
+    expect(summary.contracts).toEqual([
+      {
+        url: `/api/v1/matches/${MATCH_ID}/result`,
+        method: 'GET',
+        bearerMatches: true,
+        contentType: null,
+        body: null,
+        cache: 'no-store',
+        credentials: 'omit',
+        redirect: 'error',
+      },
+      ...['submit', 'confirm', 'dispute'].map((operation) => ({
+        url: `/api/v1/matches/${MATCH_ID}/result/${operation}`,
+        method: 'POST',
+        bearerMatches: true,
+        contentType: 'application/json',
+        body: operation === 'submit'
+          ? {
+              requestKey: REQUEST_KEY,
+              sets: [
+                { team1Games: 6, team2Games: 4 },
+                { team1Games: 6, team2Games: 3 },
+              ],
+            }
+          : { requestKey: REQUEST_KEY },
+        cache: 'no-store',
+        credentials: 'omit',
+        redirect: 'error',
+      })),
+    ]);
+    expect(summary.outcomes).toEqual([
+      'result_loaded',
+      'result_submitted',
+      'result_confirmed',
+      'result_disputed',
+    ]);
+    expect(summary.missing).toEqual({
+      outcome: 'rejected',
+      reason: 'result_not_found',
+    });
+    expect(summary.malformed).toEqual({
+      outcome: 'rejected',
+      reason: 'internal_error',
+    });
+    expect(summary.invalidSequence).toEqual({
+      outcome: 'rejected',
+      reason: 'invalid_request',
+    });
+    expect(summary.publicResultsHideCredential).toBe(true);
+  });
+
   test('keeps the credential private and clears the boundary on invalid match session', async ({
     page,
   }) => {
@@ -1528,6 +1722,47 @@ test.describe('backend match credential lifecycle', () => {
               },
             };
           },
+          async readMatchResult(credential) {
+            credentialMatched =
+              credentialMatched && credential === parameters.credential;
+            return {
+              outcome: 'result_loaded',
+              result: { matchId: parameters.matchId },
+            };
+          },
+          async submitMatchResult(credential) {
+            credentialMatched =
+              credentialMatched && credential === parameters.credential;
+            return {
+              outcome: 'result_submitted',
+              result: {
+                matchId: parameters.matchId,
+                status: 'submitted',
+              },
+            };
+          },
+          async confirmMatchResult(credential) {
+            credentialMatched =
+              credentialMatched && credential === parameters.credential;
+            return {
+              outcome: 'result_confirmed',
+              result: {
+                matchId: parameters.matchId,
+                status: 'confirmed',
+              },
+            };
+          },
+          async disputeMatchResult(credential) {
+            credentialMatched =
+              credentialMatched && credential === parameters.credential;
+            return {
+              outcome: 'result_disputed',
+              result: {
+                matchId: parameters.matchId,
+                status: 'disputed',
+              },
+            };
+          },
         },
         credentialStorage: {
           async read() {
@@ -1592,6 +1827,13 @@ test.describe('backend match credential lifecycle', () => {
           'right',
         ),
         await lifecycle.releaseMatchLineupSlot(parameters.matchId),
+        await lifecycle.readMatchResult(parameters.matchId),
+        await lifecycle.submitMatchResult(parameters.matchId, [
+          { team1Games: 6, team2Games: 4 },
+          { team1Games: 6, team2Games: 3 },
+        ]),
+        await lifecycle.confirmMatchResult(parameters.matchId),
+        await lifecycle.disputeMatchResult(parameters.matchId),
       ];
       const invalid = await lifecycle.listMatches();
       for (let attempt = 0; attempt < 50; attempt += 1) {
@@ -1650,6 +1892,10 @@ test.describe('backend match credential lifecycle', () => {
         'lineup_loaded',
         'lineup_assigned',
         'lineup_released',
+        'result_loaded',
+        'result_submitted',
+        'result_confirmed',
+        'result_disputed',
       ],
       invalidOutcome: 'rejected',
       invalidReason: 'session_invalid',
@@ -3861,5 +4107,325 @@ test.describe('backend match credential lifecycle', () => {
       backendChatFailsClosedWithoutBoundary: true,
     });
     expect(summary.sensitiveAbsent).toBe(true);
+  });
+
+  test('submits, resolves and polls a backend result with the locked lineup', async ({
+    page,
+  }) => {
+    let legacyRpcCalls = 0;
+    await page.route(/\/rest\/v1\/rpc\//iu, async (route) => {
+      legacyRpcCalls += 1;
+      await route.fulfill({ status: 500, body: '{}' });
+    });
+    await page.goto('/');
+
+    await page.evaluate(async (parameters) => {
+      const reactModule = await import('/@id/react');
+      const React = reactModule.default ?? reactModule;
+      const reactDomClientModule = await import('/@id/react-dom/client');
+      const { createRoot } =
+        reactDomClientModule.default ?? reactDomClientModule;
+      const {
+        default: MatchDetailsScreen,
+        supportsBackendMatchResult,
+      } = await import('/src/components/MatchDetailsScreen.jsx');
+
+      const players = [
+        [parameters.accountId, 'Owner', 'Player'],
+        [parameters.otherAccountId, 'Partner', 'One'],
+        [parameters.thirdAccountId, 'Opponent', 'One'],
+        [parameters.fourthAccountId, 'Opponent', 'Two'],
+      ].map(([id, firstName, lastName], slotIndex) => ({
+        id,
+        firstName,
+        lastName,
+        numericRating: 3,
+        ratingIdx: 2,
+        isVerified: true,
+        isOrganizer: slotIndex === 0,
+        slotIndex,
+      }));
+      const match = {
+        id: parameters.matchId,
+        backendOwned: true,
+        ownerId: parameters.accountId,
+        owner_id: parameters.accountId,
+        description: '',
+        date: '1 января',
+        dateISO: '2023-11-14',
+        time: '10:00',
+        startsAt: 1_700_000_000,
+        duration: 1,
+        durationMinutes: 60,
+        courtName: 'Корт 1',
+        courtType: 'panoramic',
+        type: 'match',
+        scenario: 'social',
+        status: 'upcoming',
+        isPrivate: false,
+        isRatingMatch: true,
+        ratingMin: 0,
+        ratingMax: 6,
+        participants: players.map(({ id }) => id),
+        filledSlots: players,
+      };
+      let resultRecord = null;
+      let lineupStatus = 'draft';
+      const resultCalls = {
+        load: 0,
+        submit: 0,
+        confirm: 0,
+        dispute: 0,
+        submittedSets: null,
+      };
+      const lineup = () => ({
+        outcome: 'lineup_loaded',
+        lineup: {
+          matchId: parameters.matchId,
+          status: lineupStatus,
+          version: lineupStatus === 'locked' ? 2 : 1,
+          slots: players.map((player, index) => ({
+            teamNumber: index < 2 ? 1 : 2,
+            courtSide: index % 2 === 0 ? 'left' : 'right',
+            assignment: {
+              assignmentId: [
+                parameters.assignment1,
+                parameters.assignment2,
+                parameters.assignment3,
+                parameters.assignment4,
+              ][index],
+              player: {
+                playerId: player.id,
+                firstName: player.firstName,
+                lastName: player.lastName,
+                rating: 3,
+                isVerified: true,
+              },
+              assignedAt: 1_700_000_010 + index,
+              isCurrentPlayer: false,
+            },
+          })),
+          unassignedPlayers: [],
+        },
+      });
+
+      function Harness() {
+        const [accountId, setAccountId] = React.useState(parameters.accountId);
+        const [instance, setInstance] = React.useState(0);
+        React.useEffect(() => {
+          window.__switchBackendResultAccount = setAccountId;
+          window.__resetBackendResultToSubmitted = () => {
+            const {
+              confirmedAt,
+              confirmedByAccountId,
+              disputedAt,
+              disputedByAccountId,
+              ...pendingResult
+            } = resultRecord;
+            resultRecord = {
+              ...pendingResult,
+              status: 'submitted',
+              version: resultRecord.version + 1,
+            };
+            setInstance((value) => value + 1);
+          };
+          window.__externallyDisputeBackendResult = () => {
+            resultRecord = {
+              ...resultRecord,
+              status: 'disputed',
+              disputedByAccountId: parameters.fourthAccountId,
+              disputedAt: 1_700_000_300,
+              version: resultRecord.version + 1,
+            };
+          };
+        }, []);
+        const current = players.find((player) => player.id === accountId);
+        const currentUser = {
+          ...current,
+          role: 'user',
+          rating: 3,
+        };
+        return React.createElement(MatchDetailsScreen, {
+          key: instance,
+          match,
+          currentUser,
+          onLoadLineup: async () => {
+            const value = lineup();
+            value.lineup.slots.forEach((slot) => {
+              slot.assignment.isCurrentPlayer =
+                slot.assignment.player.playerId === accountId;
+            });
+            return value;
+          },
+          onAssignLineupSlot() {},
+          onReleaseLineupSlot() {},
+          onLoadResult: async () => {
+            resultCalls.load += 1;
+            return resultRecord === null
+              ? { outcome: 'rejected', reason: 'result_not_found' }
+              : { outcome: 'result_loaded', result: resultRecord };
+          },
+          onSubmitResult: async (matchId, sets) => {
+            resultCalls.submit += 1;
+            resultCalls.submittedSets = sets;
+            lineupStatus = 'locked';
+            resultRecord = {
+              resultId: parameters.resultId,
+              matchId,
+              lineupVersion: 1,
+              teams: [
+                [parameters.accountId, parameters.otherAccountId],
+                [parameters.thirdAccountId, parameters.fourthAccountId],
+              ],
+              sets,
+              winningTeam: 1,
+              status: 'submitted',
+              submittedByAccountId: parameters.accountId,
+              submittedAt: 1_700_000_100,
+              version: 1,
+            };
+            return {
+              outcome: 'result_submitted',
+              result: { matchId, status: 'submitted' },
+            };
+          },
+          onConfirmResult: async (matchId) => {
+            resultCalls.confirm += 1;
+            resultRecord = {
+              ...resultRecord,
+              status: 'confirmed',
+              confirmedByAccountId: accountId,
+              confirmedAt: 1_700_000_200,
+              version: 2,
+            };
+            return {
+              outcome: 'result_confirmed',
+              result: { matchId, status: 'confirmed' },
+            };
+          },
+          onDisputeResult: async (matchId) => {
+            resultCalls.dispute += 1;
+            resultRecord = {
+              ...resultRecord,
+              status: 'disputed',
+              disputedByAccountId: accountId,
+              disputedAt: 1_700_000_250,
+              version: resultRecord.version + 1,
+            };
+            return {
+              outcome: 'result_disputed',
+              result: { matchId, status: 'disputed' },
+            };
+          },
+          onRefreshMatch: async () => ({ ...match, status: 'completed' }),
+          onBack() {},
+          onJoinSuccess() {},
+          onDelete() {},
+          onComplete() {},
+          onConfirmScore() {},
+          onDisputeScore() {},
+          onSlotsChange() {},
+          onJoinMatch() {},
+          onLeaveMatch() {},
+          pendingInvitations: [],
+          invitationActions: new Set(),
+          allMessages: [],
+          messagesLoading: false,
+          messagesLoadError: '',
+          showToast() {},
+        });
+      }
+
+      const container = document.createElement('div');
+      container.dataset.testid = 'backend-result-test-root';
+      document.body.append(container);
+      const root = createRoot(container);
+      root.render(React.createElement(Harness));
+      window.__backendResultUiCalls = resultCalls;
+      window.__backendResultLegacyBoundary =
+        supportsBackendMatchResult(
+          { backendOwned: false },
+          () => {},
+          () => {},
+          () => {},
+          () => {},
+        ) === false;
+      window.__backendResultUiUnmount = () => {
+        root.unmount();
+        container.remove();
+      };
+    }, {
+      accountId: ACCOUNT_ID,
+      otherAccountId: OTHER_ACCOUNT_ID,
+      thirdAccountId: PARTICIPANT_ID,
+      fourthAccountId: MESSAGE_ID,
+      matchId: MATCH_ID,
+      resultId: RESULT_ID,
+      assignment1: INVITATION_ID,
+      assignment2: WAITLIST_ENTRY_ID,
+      assignment3: OLDER_MESSAGE_ID,
+      assignment4: REQUEST_KEY,
+    });
+
+    const harness = page.getByTestId('backend-result-test-root');
+    const submit = harness.getByTestId('match-result-submit-open');
+    await expect(submit).toBeEnabled();
+    await submit.click();
+    await expect(harness.getByTestId('finish-player-0')).toBeDisabled();
+    await expect(harness.getByTestId('finish-player-2')).toBeDisabled();
+    for (let index = 0; index < 6; index += 1) {
+      await harness.getByTestId('finish-set-1-team-1-plus').click();
+      await harness.getByTestId('finish-set-2-team-1-plus').click();
+    }
+    for (let index = 0; index < 4; index += 1) {
+      await harness.getByTestId('finish-set-1-team-2-plus').click();
+    }
+    for (let index = 0; index < 3; index += 1) {
+      await harness.getByTestId('finish-set-2-team-2-plus').click();
+    }
+    await harness.getByTestId('finish-match-save').click();
+    await expect(harness).toContainText('Ожидает подтверждения счёта');
+    await expect(harness.getByTestId('match-result-confirm')).toHaveCount(0);
+
+    await page.evaluate((accountId) => {
+      window.__switchBackendResultAccount(accountId);
+    }, PARTICIPANT_ID);
+    await expect(harness.getByTestId('match-result-confirm')).toBeVisible();
+    await expect(harness.getByTestId('match-result-dispute')).toBeVisible();
+    await harness.getByTestId('match-result-dispute').click();
+    await expect(harness).toContainText('Счёт оспорен');
+
+    await page.evaluate(() => window.__resetBackendResultToSubmitted());
+    await expect(harness.getByTestId('match-result-confirm')).toBeVisible();
+    await harness.getByTestId('match-result-confirm').click();
+    await expect(harness).toContainText('Матч завершён');
+    await expect(harness).toContainText('6:4, 6:3');
+
+    await page.evaluate(() => window.__resetBackendResultToSubmitted());
+    await expect(harness.getByTestId('match-result-confirm')).toBeVisible();
+    await page.evaluate(() => window.__externallyDisputeBackendResult());
+    await expect(harness).toContainText('Счёт оспорен', { timeout: 7_000 });
+    const loadCallsAfterTerminalStatus = await page.evaluate(
+      () => window.__backendResultUiCalls.load,
+    );
+    await page.waitForTimeout(5_500);
+    expect(await page.evaluate(
+      () => window.__backendResultUiCalls.load,
+    )).toBe(loadCallsAfterTerminalStatus);
+
+    const summary = await page.evaluate(() => ({
+      calls: window.__backendResultUiCalls,
+      legacyBoundary: window.__backendResultLegacyBoundary,
+    }));
+    expect(summary.calls.submit).toBe(1);
+    expect(summary.calls.confirm).toBe(1);
+    expect(summary.calls.dispute).toBe(1);
+    expect(summary.calls.submittedSets).toEqual([
+      { team1Games: 6, team2Games: 4 },
+      { team1Games: 6, team2Games: 3 },
+    ]);
+    expect(summary.legacyBoundary).toBe(true);
+    expect(legacyRpcCalls).toBe(0);
+    await page.evaluate(() => window.__backendResultUiUnmount());
   });
 });

@@ -33,9 +33,23 @@ const countSetsWon = (score) => {
   return { t1, t2 };
 };
 
+export function isCanonicalPadelSetScore(set) {
+  if (
+    !Number.isInteger(set?.t1) ||
+    !Number.isInteger(set?.t2) ||
+    set.t1 === set.t2
+  ) {
+    return false;
+  }
+  const high = Math.max(set.t1, set.t2);
+  const low = Math.min(set.t1, set.t2);
+  return (high === 6 && low >= 0 && low <= 4) ||
+    (high === 7 && low >= 5 && low <= 6);
+}
+
 // ─── Stepper (Apple-style +/-) ───────────────────────────────────────────────
 
-function Stepper({ value, onChange, color, disabled = false }) {
+function Stepper({ value, onChange, color, disabled = false, testId }) {
   const minus = () => onChange(Math.max(0, value - 1));
   const plus  = () => onChange(Math.min(7, value + 1));
   const btn = (disabled) => ({
@@ -49,13 +63,13 @@ function Stepper({ value, onChange, color, disabled = false }) {
   });
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-      <button onClick={minus} disabled={disabled || value === 0} style={btn(disabled || value === 0)}>−</button>
+      <button data-testid={`${testId}-minus`} onClick={minus} disabled={disabled || value === 0} style={btn(disabled || value === 0)}>−</button>
       <div style={{
         minWidth: 36, textAlign: 'center',
         color: color || C.text, fontSize: 28, fontWeight: 800, letterSpacing: '-0.02em',
         fontVariantNumeric: 'tabular-nums', lineHeight: 1,
       }}>{value}</div>
-      <button onClick={plus} disabled={disabled || value === 7} style={btn(disabled || value === 7)}>+</button>
+      <button data-testid={`${testId}-plus`} onClick={plus} disabled={disabled || value === 7} style={btn(disabled || value === 7)}>+</button>
     </div>
   );
 }
@@ -67,13 +81,15 @@ function PlayerChip({ player, slotIndex, selected, onTap }) {
   const color    = PLAYER_COLORS[slotIndex % 4];
   return (
     <button
+      data-testid={`finish-player-${slotIndex}`}
       onClick={onTap}
+      disabled={typeof onTap !== 'function'}
       style={{
         display: 'flex', alignItems: 'center', gap: 10,
         background: selected ? `${color}33` : C.surface,
         border: selected ? `2px solid ${color}` : `1px solid ${C.border}`,
         borderRadius: 10, padding: selected ? '7px 11px' : '8px 12px',
-        color: C.text, cursor: 'pointer', width: '100%',
+        color: C.text, cursor: typeof onTap === 'function' ? 'pointer' : 'default', width: '100%',
         textAlign: 'left', transition: 'all 0.15s',
       }}
     >
@@ -99,7 +115,7 @@ function PlayerChip({ player, slotIndex, selected, onTap }) {
 
 // ─── Team card ───────────────────────────────────────────────────────────────
 
-function TeamCard({ title, players, slotIndices, selectedKey, onTapPlayer, color }) {
+function TeamCard({ title, players, slotIndices, selectedKey, onTapPlayer, color, locked }) {
   return (
     <div style={{
       background: C.card, borderRadius: 14, padding: 14,
@@ -120,7 +136,7 @@ function TeamCard({ title, players, slotIndices, selectedKey, onTapPlayer, color
               player={p}
               slotIndex={key}
               selected={selectedKey === key}
-              onTap={() => onTapPlayer(key)}
+              onTap={locked ? undefined : () => onTapPlayer(key)}
             />
           );
         })}
@@ -131,7 +147,7 @@ function TeamCard({ title, players, slotIndices, selectedKey, onTapPlayer, color
 
 // ─── Main modal ──────────────────────────────────────────────────────────────
 
-export default function FinishMatchModal({ players, onSave, onClose }) {
+export default function FinishMatchModal({ players, onSave, onClose, lockTeams = false }) {
   // We track which "original index" sits in each team slot, so swaps are reversible.
   const [team1Idx, setTeam1Idx] = useState([0, 1]);
   const [team2Idx, setTeam2Idx] = useState([2, 3]);
@@ -148,6 +164,7 @@ export default function FinishMatchModal({ players, onSave, onClose }) {
 
   // Tap-swap: tap player → highlight; tap an opposite-team player → swap; tap same team → switch selection
   const handleTapPlayer = (origIdx) => {
+    if (lockTeams) return;
     if (selected === null) { setSelected(origIdx); return; }
     if (selected === origIdx) { setSelected(null); return; }
     const inT1 = (i) => team1Idx.includes(i);
@@ -178,14 +195,23 @@ export default function FinishMatchModal({ players, onSave, onClose }) {
     });
   }, [thirdSetLocked, firstTwoPlayed, firstTwoWinners[0], firstTwoWinners[1]]);
 
-  const setsWon    = countSetsWon(effectiveScore);
+  const submittedScore = thirdSetLocked
+    ? effectiveScore.slice(0, 2)
+    : effectiveScore;
+  const setsWon    = countSetsWon(submittedScore);
   const isTeam1Win = setsWon.t1 > setsWon.t2;
   const thirdSetWinner = winnerOfSet(score[2]);
-  const canSave    = thirdSetLocked || (thirdSetNeeded && thirdSetWinner !== 0);
+  const canSave = submittedScore.every(isCanonicalPadelSetScore) &&
+    (thirdSetLocked || (thirdSetNeeded && thirdSetWinner !== 0));
 
   const handleSave = () => {
     if (!canSave) return;
-    onSave({ team1: team1Players, team2: team2Players, score: effectiveScore, isTeam1Win });
+    onSave({
+      team1: team1Players,
+      team2: team2Players,
+      score: lockTeams ? submittedScore : effectiveScore,
+      isTeam1Win,
+    });
   };
 
   return (
@@ -226,7 +252,11 @@ export default function FinishMatchModal({ players, onSave, onClose }) {
           textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 8,
         }}>
           Состав команд
-          {selected !== null && (
+          {lockTeams ? (
+            <span style={{ color: C.muted, fontWeight: 600, textTransform: 'none', letterSpacing: 0, marginLeft: 6 }}>
+              · по сохранённой расстановке
+            </span>
+          ) : selected !== null && (
             <span style={{ color: C.accent, fontWeight: 600, textTransform: 'none', letterSpacing: 0, marginLeft: 6 }}>
               · выберите соперника для обмена
             </span>
@@ -240,6 +270,7 @@ export default function FinishMatchModal({ players, onSave, onClose }) {
             selectedKey={selected}
             onTapPlayer={handleTapPlayer}
             color={TEAM1_COLOR}
+            locked={lockTeams}
           />
           <TeamCard
             title="Команда 2"
@@ -248,6 +279,7 @@ export default function FinishMatchModal({ players, onSave, onClose }) {
             selectedKey={selected}
             onTapPlayer={handleTapPlayer}
             color={TEAM2_COLOR}
+            locked={lockTeams}
           />
         </div>
 
@@ -287,6 +319,7 @@ export default function FinishMatchModal({ players, onSave, onClose }) {
                     onChange={v => setSetScore(i, 't1', v)}
                     color={w === 1 ? C.win : (w === 2 ? '#475569' : C.text)}
                     disabled={disabled}
+                    testId={`finish-set-${i + 1}-team-1`}
                   />
                 </div>
                 <div style={{ width: 16, color: C.muted, fontSize: 18, fontWeight: 600, textAlign: 'center' }}>:</div>
@@ -296,6 +329,7 @@ export default function FinishMatchModal({ players, onSave, onClose }) {
                     onChange={v => setSetScore(i, 't2', v)}
                     color={w === 2 ? C.win : (w === 1 ? '#475569' : C.text)}
                     disabled={disabled}
+                    testId={`finish-set-${i + 1}-team-2`}
                   />
                 </div>
               </div>
@@ -328,6 +362,7 @@ export default function FinishMatchModal({ players, onSave, onClose }) {
             Отмена
           </button>
           <button
+            data-testid="finish-match-save"
             onClick={handleSave}
             disabled={!canSave}
             style={{

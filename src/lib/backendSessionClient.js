@@ -19,6 +19,7 @@ const MAX_MATCH_INVITATION_RESPONSE_BODY_BYTES = 524_288;
 const MAX_MATCH_CHAT_RESPONSE_BODY_BYTES = 524_288;
 const MAX_MATCH_WAITLIST_RESPONSE_BODY_BYTES = 524_288;
 const MAX_MATCH_LINEUP_RESPONSE_BODY_BYTES = 262_144;
+const MAX_MATCH_RESULT_RESPONSE_BODY_BYTES = 65_536;
 
 const BODY_ABORTED = Symbol('backend-session-body-aborted');
 const BODY_INVALID = Symbol('backend-session-body-invalid');
@@ -1418,6 +1419,150 @@ function matchLineupMutationSuccess(body, expectedMatchId, outcome) {
   });
 }
 
+function isCanonicalMatchResultSet(value) {
+  if (
+    !isPlainObject(value) ||
+    !hasExactKeys(Object.keys(value).sort(), ['team1Games', 'team2Games']) ||
+    !Number.isInteger(value.team1Games) ||
+    !Number.isInteger(value.team2Games) ||
+    value.team1Games === value.team2Games
+  ) {
+    return false;
+  }
+  const high = Math.max(value.team1Games, value.team2Games);
+  const low = Math.min(value.team1Games, value.team2Games);
+  return (high === 6 && low >= 0 && low <= 4) ||
+    (high === 7 && low >= 5 && low <= 6);
+}
+
+function isCanonicalMatchResultSets(value) {
+  if (
+    !Array.isArray(value) ||
+    ![2, 3].includes(value.length) ||
+    !value.every(isCanonicalMatchResultSet)
+  ) {
+    return false;
+  }
+  const team1Wins = value.filter(
+    ({ team1Games, team2Games }) => team1Games > team2Games,
+  ).length;
+  const team2Wins = value.length - team1Wins;
+  const firstTwoSplit =
+    value[0].team1Games > value[0].team2Games !==
+    (value[1].team1Games > value[1].team2Games);
+  return value.length === 2
+    ? Math.max(team1Wins, team2Wins) === 2
+    : firstTwoSplit && Math.max(team1Wins, team2Wins) === 2;
+}
+
+function matchResultReadSuccess(body, expectedMatchId) {
+  if (
+    !isPlainObject(body) ||
+    !hasExactKeys(Object.keys(body).sort(), ['result']) ||
+    !isPlainObject(body.result)
+  ) {
+    return null;
+  }
+  const result = body.result;
+  const expectedKeys = [
+    'lineupVersion',
+    'matchId',
+    'resultId',
+    'sets',
+    'status',
+    'submittedAt',
+    'submittedByAccountId',
+    'teams',
+    'version',
+    'winningTeam',
+    ...(result.status === 'confirmed'
+      ? ['confirmedAt', 'confirmedByAccountId']
+      : result.status === 'disputed'
+        ? ['disputedAt', 'disputedByAccountId']
+        : []),
+  ].sort();
+  if (
+    !['submitted', 'confirmed', 'disputed'].includes(result.status) ||
+    !hasExactKeys(Object.keys(result).sort(), expectedKeys) ||
+    !isMatchId(result.resultId) ||
+    result.matchId !== expectedMatchId ||
+    !Number.isSafeInteger(result.lineupVersion) ||
+    result.lineupVersion < 1 ||
+    !Array.isArray(result.teams) ||
+    result.teams.length !== 2 ||
+    !result.teams.every(
+      (team) => Array.isArray(team) && team.length === 2 && team.every(isMatchId),
+    ) ||
+    new Set(result.teams.flat()).size !== 4 ||
+    !isCanonicalMatchResultSets(result.sets) ||
+    ![1, 2].includes(result.winningTeam) ||
+    result.winningTeam !== (
+      result.sets.filter(({ team1Games, team2Games }) => team1Games > team2Games).length === 2
+        ? 1
+        : 2
+    ) ||
+    !result.teams.flat().includes(result.submittedByAccountId) ||
+    !isUnixEpochSeconds(result.submittedAt) ||
+    !Number.isSafeInteger(result.version) ||
+    result.version < 1 ||
+    (
+      result.status === 'confirmed' &&
+      (
+        !result.teams.flat().includes(result.confirmedByAccountId) ||
+        !isUnixEpochSeconds(result.confirmedAt)
+      )
+    ) ||
+    (
+      result.status === 'disputed' &&
+      (
+        !result.teams.flat().includes(result.disputedByAccountId) ||
+        !isUnixEpochSeconds(result.disputedAt)
+      )
+    )
+  ) {
+    return null;
+  }
+  return frozen('result_loaded', {
+    result: Object.freeze({
+      ...result,
+      teams: Object.freeze(
+        result.teams.map((team) => Object.freeze([...team])),
+      ),
+      sets: Object.freeze(
+        result.sets.map((set) => Object.freeze({ ...set })),
+      ),
+    }),
+  });
+}
+
+function matchResultMutationSuccess(
+  body,
+  expectedMatchId,
+  expectedStatus,
+  outcome,
+) {
+  if (
+    !isPlainObject(body) ||
+    !hasExactKeys(Object.keys(body).sort(), ['result']) ||
+    !isPlainObject(body.result) ||
+    !hasExactKeys(
+      Object.keys(body.result).sort(),
+      ['appliedAt', 'matchId', 'resultId', 'resultVersion', 'status'],
+    ) ||
+    !isMatchId(body.result.resultId) ||
+    body.result.matchId !== expectedMatchId ||
+    body.result.status !== expectedStatus ||
+    !isUnixEpochSeconds(body.result.appliedAt) ||
+    !Number.isSafeInteger(body.result.resultVersion) ||
+    body.result.resultVersion < 1
+  ) {
+    return null;
+  }
+  return frozen(outcome, {
+    result: Object.freeze({ ...body.result }),
+  });
+}
+
 function matchDescriptionUpdateSuccess(body, expectedMatchId) {
   if (
     !isPlainObject(body) ||
@@ -1625,6 +1770,31 @@ function classifyMatchLineup(status, body) {
   });
 }
 
+function classifyMatchResult(status, body) {
+  const code = exactPublicCode(body);
+  if (status === 401 && code === 'session_invalid') {
+    return frozen('rejected', { reason: 'invalid' });
+  }
+  const reasons = Object.freeze({
+    match_result_invalid_request: 'invalid_request',
+    match_result_forbidden: 'forbidden',
+    match_result_match_not_found: 'match_not_found',
+    match_result_not_found: 'result_not_found',
+    match_result_exists: 'result_exists',
+    match_result_too_early: 'match_not_finished',
+    match_result_match_closed: 'match_closed',
+    match_result_participant_required: 'participant_required',
+    match_result_lineup_incomplete: 'lineup_incomplete',
+    match_result_not_pending: 'result_not_pending',
+    match_result_opponent_confirmation_required: 'opponent_confirmation_required',
+    match_result_submitter_cannot_dispute: 'submitter_cannot_dispute',
+    match_result_request_conflict: 'request_conflict',
+  });
+  return frozen('rejected', {
+    reason: reasons[code] ?? 'internal_error',
+  });
+}
+
 export function createBackendSessionClient(dependencies = {}) {
   const fetchImpl = dependencies.fetchImpl ?? globalThis.fetch?.bind(globalThis);
   const cryptoImpl = dependencies.cryptoImpl ?? globalThis.crypto;
@@ -1671,6 +1841,8 @@ export function createBackendSessionClient(dependencies = {}) {
         operation.startsWith('match_waitlist_');
       const isMatchLineupOperation =
         operation.startsWith('match_lineup_');
+      const isMatchResultOperation =
+        operation.startsWith('match_result_');
       const isMatchListOperation =
         operation === 'match_list' || operation === 'match_list_mine';
       const isPlayerSearchOperation = operation === 'player_search';
@@ -1684,7 +1856,8 @@ export function createBackendSessionClient(dependencies = {}) {
         operation === 'match_invitation_outgoing' ||
         operation === 'match_chat_list' ||
         operation === 'match_waitlist_list' ||
-        operation === 'match_lineup_read';
+        operation === 'match_lineup_read' ||
+        operation === 'match_result_read';
       const isProfileOperation =
         operation === 'profile' || operation === 'profile_update';
       const matchId = operationPayload?.matchId;
@@ -1694,6 +1867,8 @@ export function createBackendSessionClient(dependencies = {}) {
         `${MATCHES_PATH}/${encodeURIComponent(matchId)}/waitlist`;
       const matchLineupPath =
         `${MATCHES_PATH}/${encodeURIComponent(matchId)}/lineup`;
+      const matchResultPath =
+        `${MATCHES_PATH}/${encodeURIComponent(matchId)}/result`;
       const url =
         operation === 'refresh'
           ? REFRESH_PATH
@@ -1747,6 +1922,14 @@ export function createBackendSessionClient(dependencies = {}) {
                           ? `${matchLineupPath}/assign`
                         : operation === 'match_lineup_release'
                           ? `${matchLineupPath}/release`
+                        : operation === 'match_result_read'
+                          ? matchResultPath
+                        : operation === 'match_result_submit'
+                          ? `${matchResultPath}/submit`
+                        : operation === 'match_result_confirm'
+                          ? `${matchResultPath}/confirm`
+                        : operation === 'match_result_dispute'
+                          ? `${matchResultPath}/dispute`
                     : operation === 'match_join'
                       ? `${MATCHES_PATH}/${encodeURIComponent(matchId)}/join`
                       : operation === 'match_leave'
@@ -1805,6 +1988,11 @@ export function createBackendSessionClient(dependencies = {}) {
                               teamNumber: operationPayload.teamNumber,
                               courtSide: operationPayload.courtSide,
                             }
+                        : operation === 'match_result_submit'
+                          ? {
+                              requestKey,
+                              sets: operationPayload.sets,
+                            }
                         : { requestKey },
                 ),
               }),
@@ -1837,6 +2025,8 @@ export function createBackendSessionClient(dependencies = {}) {
                 ? MAX_MATCH_WAITLIST_RESPONSE_BODY_BYTES
               : isMatchLineupOperation
                 ? MAX_MATCH_LINEUP_RESPONSE_BODY_BYTES
+              : isMatchResultOperation
+                ? MAX_MATCH_RESULT_RESPONSE_BODY_BYTES
               : MAX_RESPONSE_BODY_BYTES,
       );
       if (operation === 'authenticate' && response.status === 200) {
@@ -2001,6 +2191,40 @@ export function createBackendSessionClient(dependencies = {}) {
           : frozen('malformed_response');
       }
       if (
+        operation === 'match_result_read' &&
+        response.status === 200
+      ) {
+        const result = matchResultReadSuccess(body, matchId);
+        return result
+          ? frozen('success', { result })
+          : frozen('malformed_response');
+      }
+      if (
+        ['match_result_submit', 'match_result_confirm', 'match_result_dispute']
+          .includes(operation) &&
+        response.status === 201
+      ) {
+        const status = operation === 'match_result_submit'
+          ? 'submitted'
+          : operation === 'match_result_confirm'
+            ? 'confirmed'
+            : 'disputed';
+        const outcome = operation === 'match_result_submit'
+          ? 'result_submitted'
+          : operation === 'match_result_confirm'
+            ? 'result_confirmed'
+            : 'result_disputed';
+        const result = matchResultMutationSuccess(
+          body,
+          matchId,
+          status,
+          outcome,
+        );
+        return result
+          ? frozen('success', { result })
+          : frozen('malformed_response');
+      }
+      if (
         (operation === 'match_detail' || operation === 'match_create') &&
         response.status === (
           operation === 'match_create' ? 201 : 200
@@ -2064,6 +2288,8 @@ export function createBackendSessionClient(dependencies = {}) {
                   ? 'match_waitlist_service_unavailable'
                 : isMatchLineupOperation
                   ? 'match_lineup_service_unavailable'
+                : isMatchResultOperation
+                  ? 'match_result_service_unavailable'
             : isMatchOperation
               ? 'match_service_unavailable'
               : 'session_service_unavailable'
@@ -2089,6 +2315,8 @@ export function createBackendSessionClient(dependencies = {}) {
                       ? classifyMatchWaitlist(response.status, body)
                     : isMatchLineupOperation
                       ? classifyMatchLineup(response.status, body)
+                    : isMatchResultOperation
+                      ? classifyMatchResult(response.status, body)
                   : operation === 'content_moderation'
                     ? frozen('rejected', {
                         reason:
@@ -2227,6 +2455,16 @@ export function createBackendSessionClient(dependencies = {}) {
           !['left', 'right'].includes(operationPayload?.courtSide)
         )) ||
       (operation === 'match_lineup_release' &&
+        !isMatchId(operationPayload?.matchId)) ||
+      (operation === 'match_result_read' &&
+        !isMatchId(operationPayload?.matchId)) ||
+      (operation === 'match_result_submit' &&
+        (
+          !isMatchId(operationPayload?.matchId) ||
+          !isCanonicalMatchResultSets(operationPayload?.sets)
+        )) ||
+      ((operation === 'match_result_confirm' ||
+        operation === 'match_result_dispute') &&
         !isMatchId(operationPayload?.matchId))
     ) {
       return frozen('rejected', { reason: 'invalid_request' });
@@ -2247,7 +2485,10 @@ export function createBackendSessionClient(dependencies = {}) {
       operation === 'match_waitlist_join' ||
       operation === 'match_waitlist_leave' ||
       operation === 'match_lineup_assign' ||
-      operation === 'match_lineup_release';
+      operation === 'match_lineup_release' ||
+      operation === 'match_result_submit' ||
+      operation === 'match_result_confirm' ||
+      operation === 'match_result_dispute';
     const requestKey =
       requiresRequestKey ? createRequestKey(cryptoImpl) : null;
     if (requiresRequestKey && !requestKey) {
@@ -2436,6 +2677,34 @@ export function createBackendSessionClient(dependencies = {}) {
     releaseMatchLineupSlot: (credential, matchId, options) =>
       execute(
         'match_lineup_release',
+        credential,
+        options,
+        { matchId },
+      ),
+    readMatchResult: (credential, matchId, options) =>
+      execute(
+        'match_result_read',
+        credential,
+        options,
+        { matchId },
+      ),
+    submitMatchResult: (credential, matchId, sets, options) =>
+      execute(
+        'match_result_submit',
+        credential,
+        options,
+        { matchId, sets },
+      ),
+    confirmMatchResult: (credential, matchId, options) =>
+      execute(
+        'match_result_confirm',
+        credential,
+        options,
+        { matchId },
+      ),
+    disputeMatchResult: (credential, matchId, options) =>
+      execute(
+        'match_result_dispute',
         credential,
         options,
         { matchId },
