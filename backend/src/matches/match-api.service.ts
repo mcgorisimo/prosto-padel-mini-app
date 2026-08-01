@@ -20,6 +20,7 @@ import {
   MatchRepository,
 } from '../database/match.repository';
 import { MatchWaitlistPersistenceError } from '../database/match-waitlist.repository';
+import { MatchLineupPersistenceError } from '../database/match-lineup.repository';
 import { PostgresTransaction } from '../database/postgres-transaction';
 import {
   PublicPlayerProfileSearchPersistenceError,
@@ -58,6 +59,7 @@ import {
   readUpdateMatchDescriptionRequest,
 } from './match-api.http';
 import { MatchWaitlistService } from './match-waitlist.service';
+import { MatchLineupService } from './match-lineup.service';
 
 const UUID_URL_NAMESPACE = '6ba7b811-9dad-11d1-80b4-00c04fd430c8';
 const BINDING_DOMAINS = Object.freeze({
@@ -97,6 +99,7 @@ export interface MatchApiServiceDependencies {
     MatchWaitlistService,
     'promoteAvailable' | 'closeForParticipant'
   >;
+  readonly lineups: Pick<MatchLineupService, 'releaseForParticipantLeave'>;
   readonly clock: {
     nowEpochSeconds(): import('../auth/auth.types').UnixEpochSeconds;
   };
@@ -182,6 +185,12 @@ function mapRepositoryRejection(
 }
 
 function mapPersistenceFailure(error: unknown): MatchApiRejection {
+  if (error instanceof MatchLineupPersistenceError) {
+    return error.reason === 'database_unavailable' ||
+      error.reason === 'transaction_conflict'
+      ? 'temporary_unavailable'
+      : 'internal_failure';
+  }
   if (error instanceof MatchWaitlistPersistenceError) {
     return error.reason === 'database_unavailable' ||
       error.reason === 'transaction_conflict'
@@ -1159,6 +1168,13 @@ export class MatchApiService {
                 left.outcome === 'participant_left' &&
                 left.persistence === 'applied'
               ) {
+                await this.dependencies.lineups.releaseForParticipantLeave(
+                  transaction,
+                  input.matchId,
+                  input.accountId,
+                  now,
+                  commandId,
+                );
                 await this.dependencies.waitlist.promoteAvailable(
                   transaction,
                   input.matchId,

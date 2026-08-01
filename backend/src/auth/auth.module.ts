@@ -15,6 +15,7 @@ import { PostgresAuthenticationOperationTerminalRepository } from '../database/p
 import { PostgresExternalIdentityResolutionRepository } from '../database/postgres-external-identity.repository';
 import { PostgresInitialSessionRepository } from '../database/postgres-initial-session.repository';
 import { PostgresMatchChatRepository } from '../database/postgres-match-chat.repository';
+import { PostgresMatchLineupRepository } from '../database/postgres-match-lineup.repository';
 import { PostgresMatchRepository } from '../database/postgres-match.repository';
 import { PostgresMatchInvitationRepository } from '../database/postgres-match-invitation.repository';
 import { PostgresMatchWaitlistRepository } from '../database/postgres-match-waitlist.repository';
@@ -33,6 +34,8 @@ import { MatchChatService } from '../matches/match-chat.service';
 import { MatchController } from '../matches/match.controller';
 import { MatchInvitationController } from '../matches/match-invitation.controller';
 import { MatchInvitationService } from '../matches/match-invitation.service';
+import { MatchLineupController } from '../matches/match-lineup.controller';
+import { MatchLineupService } from '../matches/match-lineup.service';
 import { MatchWaitlistController } from '../matches/match-waitlist.controller';
 import { MatchWaitlistService } from '../matches/match-waitlist.service';
 import { NodeSessionCredentialIssuer } from './session-credential-issuer.adapter';
@@ -265,6 +268,7 @@ function createMatchApiService(
   matches: PostgresMatchRepository,
   publicProfiles: PostgresPublicPlayerProfileSearchRepository,
   waitlist: MatchWaitlistService,
+  lineups: MatchLineupService,
   clock: SessionAuthenticationClock,
 ): MatchApiService {
   return new MatchApiService({
@@ -272,6 +276,7 @@ function createMatchApiService(
     matches,
     publicProfiles,
     waitlist,
+    lineups,
     clock,
   });
 }
@@ -320,6 +325,20 @@ function createMatchChatService(
   });
 }
 
+function createMatchLineupService(
+  transactions: PostgresTransactionExecutorAdapter,
+  lineups: PostgresMatchLineupRepository,
+  publicProfiles: PostgresPublicPlayerProfileSearchRepository,
+  clock: SessionAuthenticationClock,
+): MatchLineupService {
+  return new MatchLineupService({
+    transactions,
+    lineups,
+    publicProfiles,
+    clock,
+  });
+}
+
 @Module({
   imports: [DatabaseModule],
   controllers: [
@@ -332,6 +351,7 @@ function createMatchChatService(
     MatchInvitationController,
     MatchChatController,
     MatchWaitlistController,
+    MatchLineupController,
     ContentModerationController,
   ],
   providers: [
@@ -339,6 +359,16 @@ function createMatchChatService(
     SESSION_LIFECYCLE_HTTP_CLOCK_PROVIDER,
     SESSION_AUTHENTICATION_CLOCK_PROVIDER,
     SessionBearerGuard,
+    {
+      provide: MatchLineupService,
+      inject: [
+        PostgresTransactionExecutorAdapter,
+        PostgresMatchLineupRepository,
+        PostgresPublicPlayerProfileSearchRepository,
+        SESSION_AUTHENTICATION_CLOCK,
+      ],
+      useFactory: createMatchLineupService,
+    },
     {
       provide: MatchWaitlistService,
       inject: [
@@ -377,6 +407,7 @@ function createMatchChatService(
         PostgresMatchRepository,
         PostgresPublicPlayerProfileSearchRepository,
         MatchWaitlistService,
+        MatchLineupService,
         SESSION_AUTHENTICATION_CLOCK,
       ],
       useFactory: createMatchApiService,
@@ -441,6 +472,7 @@ function createMatchChatService(
     MatchInvitationService,
     MatchChatService,
     MatchWaitlistService,
+    MatchLineupService,
   ],
 })
 export class AuthModule {}

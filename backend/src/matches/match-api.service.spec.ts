@@ -57,6 +57,7 @@ interface Harness {
   readonly clockNow: jest.Mock;
   readonly promoteAvailable: jest.Mock;
   readonly closeForParticipant: jest.Mock;
+  readonly releaseLineupForParticipant: jest.Mock;
 }
 
 function request(
@@ -161,6 +162,7 @@ function createHarness(): Harness {
   const clockNow = jest.fn(() => NOW);
   const promoteAvailable = jest.fn().mockResolvedValue(0);
   const closeForParticipant = jest.fn().mockResolvedValue(false);
+  const releaseLineupForParticipant = jest.fn().mockResolvedValue(false);
   const service = new MatchApiService({
     transactions: {
       run: <T>(
@@ -180,6 +182,7 @@ function createHarness(): Harness {
     },
     publicProfiles: { findByPlayerIds },
     waitlist: { promoteAvailable, closeForParticipant },
+    lineups: { releaseForParticipantLeave: releaseLineupForParticipant },
     clock: { nowEpochSeconds: clockNow },
   });
   return {
@@ -196,6 +199,7 @@ function createHarness(): Harness {
     clockNow,
     promoteAvailable,
     closeForParticipant,
+    releaseLineupForParticipant,
   };
 }
 
@@ -837,6 +841,13 @@ describe('MatchApiService', () => {
       MATCH_ID,
       NOW,
     );
+    expect(harness.releaseLineupForParticipant).toHaveBeenCalledWith(
+      TRANSACTION,
+      MATCH_ID,
+      ACCOUNT_ID,
+      NOW,
+      leaveCommand.commandId,
+    );
   });
 
   it('does not rerun FIFO promotion for an idempotent leave retry', async () => {
@@ -864,6 +875,7 @@ describe('MatchApiService', () => {
     });
     expect(harness.promoteAvailable).not.toHaveBeenCalled();
     expect(harness.closeForParticipant).not.toHaveBeenCalled();
+    expect(harness.releaseLineupForParticipant).not.toHaveBeenCalled();
   });
 
   it('returns idempotent repository results as the same public success shape', async () => {
