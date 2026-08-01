@@ -1290,6 +1290,55 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
     );
   }
 
+  function readMatchLineup(matchId) {
+    return runMatchOperation(
+      (credential, signal) =>
+        matches.readMatchLineup(credential, matchId, { signal }),
+      (result, principal) =>
+        result?.outcome === 'lineup_loaded' &&
+        result.lineup?.matchId === matchId &&
+        Array.isArray(result.lineup.slots) &&
+        result.lineup.slots.every((slot) => {
+          const assignment = slot.assignment;
+          const playerId = assignment?.player?.playerId;
+          if (assignment?.isCurrentPlayer === true) {
+            return playerId === undefined || playerId === principal.accountId;
+          }
+          return playerId !== principal.accountId;
+        }),
+    );
+  }
+
+  function assignMatchLineupSlot(matchId, teamNumber, courtSide) {
+    return runMatchOperation(
+      (credential, signal) =>
+        matches.assignMatchLineupSlot(
+          credential,
+          matchId,
+          teamNumber,
+          courtSide,
+          { signal },
+        ),
+      (result, principal) =>
+        result?.outcome === 'lineup_assigned' &&
+        result.assignment?.matchId === matchId &&
+        result.assignment?.accountId === principal.accountId &&
+        result.assignment?.teamNumber === teamNumber &&
+        result.assignment?.courtSide === courtSide,
+    );
+  }
+
+  function releaseMatchLineupSlot(matchId) {
+    return runMatchOperation(
+      (credential, signal) =>
+        matches.releaseMatchLineupSlot(credential, matchId, { signal }),
+      (result, principal) =>
+        result?.outcome === 'lineup_released' &&
+        result.assignment?.matchId === matchId &&
+        result.assignment?.accountId === principal.accountId,
+    );
+  }
+
   function attach(rawInitData, listener) {
     if (teardownTimer !== null) {
       clearTimer(teardownTimer);
@@ -1373,6 +1422,9 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
     listMatchWaitlist,
     joinMatchWaitlist,
     leaveMatchWaitlist,
+    readMatchLineup,
+    assignMatchLineupSlot,
+    releaseMatchLineupSlot,
     logout,
   });
 }
@@ -1645,6 +1697,44 @@ export function useTelegramBackendLogin() {
     return telegramBackendLoginLifecycle.leaveMatchWaitlist(matchId);
   }, []);
 
+  const readMatchLineup = useCallback((matchId) => {
+    if (!FEATURE_ENABLED) {
+      return Promise.resolve(Object.freeze({
+        outcome: 'rejected',
+        reason: 'not_authenticated',
+      }));
+    }
+    return telegramBackendLoginLifecycle.readMatchLineup(matchId);
+  }, []);
+
+  const assignMatchLineupSlot = useCallback((
+    matchId,
+    teamNumber,
+    courtSide,
+  ) => {
+    if (!FEATURE_ENABLED) {
+      return Promise.resolve(Object.freeze({
+        outcome: 'rejected',
+        reason: 'not_authenticated',
+      }));
+    }
+    return telegramBackendLoginLifecycle.assignMatchLineupSlot(
+      matchId,
+      teamNumber,
+      courtSide,
+    );
+  }, []);
+
+  const releaseMatchLineupSlot = useCallback((matchId) => {
+    if (!FEATURE_ENABLED) {
+      return Promise.resolve(Object.freeze({
+        outcome: 'rejected',
+        reason: 'not_authenticated',
+      }));
+    }
+    return telegramBackendLoginLifecycle.releaseMatchLineupSlot(matchId);
+  }, []);
+
   useEffect(() => {
     if (!FEATURE_ENABLED) return undefined;
 
@@ -1688,6 +1778,9 @@ export function useTelegramBackendLogin() {
     listMatchWaitlist,
     joinMatchWaitlist,
     leaveMatchWaitlist,
+    readMatchLineup,
+    assignMatchLineupSlot,
+    releaseMatchLineupSlot,
     logout,
   });
 }

@@ -18,6 +18,7 @@ const MAX_MATCH_FEED_RESPONSE_BODY_BYTES = 1_048_576;
 const MAX_MATCH_INVITATION_RESPONSE_BODY_BYTES = 524_288;
 const MAX_MATCH_CHAT_RESPONSE_BODY_BYTES = 524_288;
 const MAX_MATCH_WAITLIST_RESPONSE_BODY_BYTES = 524_288;
+const MAX_MATCH_LINEUP_RESPONSE_BODY_BYTES = 262_144;
 
 const BODY_ABORTED = Symbol('backend-session-body-aborted');
 const BODY_INVALID = Symbol('backend-session-body-invalid');
@@ -1274,6 +1275,149 @@ function matchWaitlistMutationSuccess(
   });
 }
 
+function isBackendMatchLineupPlayer(value) {
+  return (
+    isBackendMatchPublicPlayer(value) ||
+    (
+      isPlainObject(value) &&
+      hasExactKeys(Object.keys(value).sort(), ['unavailable']) &&
+      value.unavailable === true
+    )
+  );
+}
+
+function freezeBackendMatchLineupPlayer(player) {
+  return Object.freeze({ ...player });
+}
+
+function isBackendMatchLineupSlot(value) {
+  return (
+    isPlainObject(value) &&
+    hasOnlyAllowedKeys(value, ['courtSide', 'teamNumber'], ['assignment']) &&
+    (value.teamNumber === 1 || value.teamNumber === 2) &&
+    (value.courtSide === 'left' || value.courtSide === 'right') &&
+    (
+      value.assignment === undefined ||
+      (
+        isPlainObject(value.assignment) &&
+        hasExactKeys(
+          Object.keys(value.assignment).sort(),
+          ['assignedAt', 'assignmentId', 'isCurrentPlayer', 'player'],
+        ) &&
+        isMatchId(value.assignment.assignmentId) &&
+        isBackendMatchLineupPlayer(value.assignment.player) &&
+        isUnixEpochSeconds(value.assignment.assignedAt) &&
+        typeof value.assignment.isCurrentPlayer === 'boolean'
+      )
+    )
+  );
+}
+
+function matchLineupReadSuccess(body, expectedMatchId) {
+  const expectedSlots = ['1:left', '1:right', '2:left', '2:right'];
+  if (
+    !isPlainObject(body) ||
+    !hasExactKeys(Object.keys(body).sort(), ['lineup']) ||
+    !isPlainObject(body.lineup) ||
+    !hasExactKeys(
+      Object.keys(body.lineup).sort(),
+      ['matchId', 'slots', 'status', 'unassignedPlayers', 'version'],
+    ) ||
+    body.lineup.matchId !== expectedMatchId ||
+    !['draft', 'locked'].includes(body.lineup.status) ||
+    !Number.isSafeInteger(body.lineup.version) ||
+    body.lineup.version < 1 ||
+    !Array.isArray(body.lineup.slots) ||
+    body.lineup.slots.length !== 4 ||
+    !body.lineup.slots.every(isBackendMatchLineupSlot) ||
+    body.lineup.slots.some(
+      (slot, index) =>
+        `${slot.teamNumber}:${slot.courtSide}` !== expectedSlots[index],
+    ) ||
+    body.lineup.slots.filter(
+      (slot) => slot.assignment?.isCurrentPlayer === true,
+    ).length > 1 ||
+    new Set(
+      body.lineup.slots
+        .map((slot) => slot.assignment?.assignmentId)
+        .filter(Boolean),
+    ).size !== body.lineup.slots.filter(
+      (slot) => slot.assignment !== undefined,
+    ).length ||
+    !Array.isArray(body.lineup.unassignedPlayers) ||
+    body.lineup.unassignedPlayers.length > 4 ||
+    !body.lineup.unassignedPlayers.every(isBackendMatchLineupPlayer) ||
+    body.lineup.slots.filter(
+      (slot) => slot.assignment !== undefined,
+    ).length + body.lineup.unassignedPlayers.length > 4
+  ) {
+    return null;
+  }
+  const publicAssignedIds = body.lineup.slots
+    .map((slot) => slot.assignment?.player?.playerId)
+    .filter(Boolean);
+  const publicUnassignedIds = body.lineup.unassignedPlayers
+    .map((player) => player.playerId)
+    .filter(Boolean);
+  const allPublicIds = [...publicAssignedIds, ...publicUnassignedIds];
+  if (new Set(allPublicIds).size !== allPublicIds.length) return null;
+
+  return frozen('lineup_loaded', {
+    lineup: Object.freeze({
+      ...body.lineup,
+      slots: Object.freeze(body.lineup.slots.map((slot) => Object.freeze({
+        ...slot,
+        ...(slot.assignment === undefined
+          ? {}
+          : {
+              assignment: Object.freeze({
+                ...slot.assignment,
+                player: freezeBackendMatchLineupPlayer(
+                  slot.assignment.player,
+                ),
+              }),
+            }),
+      }))),
+      unassignedPlayers: Object.freeze(
+        body.lineup.unassignedPlayers.map(freezeBackendMatchLineupPlayer),
+      ),
+    }),
+  });
+}
+
+function matchLineupMutationSuccess(body, expectedMatchId, outcome) {
+  if (
+    !isPlainObject(body) ||
+    !hasExactKeys(Object.keys(body).sort(), ['assignment']) ||
+    !isPlainObject(body.assignment) ||
+    !hasExactKeys(
+      Object.keys(body.assignment).sort(),
+      [
+        'accountId',
+        'appliedAt',
+        'assignmentId',
+        'courtSide',
+        'lineupVersion',
+        'matchId',
+        'teamNumber',
+      ],
+    ) ||
+    !isMatchId(body.assignment.assignmentId) ||
+    body.assignment.matchId !== expectedMatchId ||
+    !isMatchId(body.assignment.accountId) ||
+    (body.assignment.teamNumber !== 1 && body.assignment.teamNumber !== 2) ||
+    !['left', 'right'].includes(body.assignment.courtSide) ||
+    !isUnixEpochSeconds(body.assignment.appliedAt) ||
+    !Number.isSafeInteger(body.assignment.lineupVersion) ||
+    body.assignment.lineupVersion < 1
+  ) {
+    return null;
+  }
+  return frozen(outcome, {
+    assignment: Object.freeze({ ...body.assignment }),
+  });
+}
+
 function matchDescriptionUpdateSuccess(body, expectedMatchId) {
   if (
     !isPlainObject(body) ||
@@ -1458,6 +1602,29 @@ function classifyMatchWaitlist(status, body) {
   });
 }
 
+function classifyMatchLineup(status, body) {
+  const code = exactPublicCode(body);
+  if (status === 401 && code === 'session_invalid') {
+    return frozen('rejected', { reason: 'invalid' });
+  }
+  const reasons = Object.freeze({
+    match_lineup_invalid_request: 'invalid_request',
+    match_lineup_forbidden: 'forbidden',
+    match_lineup_not_found: 'match_not_found',
+    match_lineup_closed: 'match_closed',
+    match_lineup_started: 'match_started',
+    match_lineup_participant_required: 'participant_required',
+    match_lineup_locked: 'lineup_locked',
+    match_lineup_slot_occupied: 'slot_occupied',
+    match_lineup_already_assigned: 'already_assigned',
+    match_lineup_not_assigned: 'not_assigned',
+    match_lineup_request_conflict: 'request_conflict',
+  });
+  return frozen('rejected', {
+    reason: reasons[code] ?? 'internal_error',
+  });
+}
+
 export function createBackendSessionClient(dependencies = {}) {
   const fetchImpl = dependencies.fetchImpl ?? globalThis.fetch?.bind(globalThis);
   const cryptoImpl = dependencies.cryptoImpl ?? globalThis.crypto;
@@ -1502,6 +1669,8 @@ export function createBackendSessionClient(dependencies = {}) {
         operation.startsWith('match_chat_');
       const isMatchWaitlistOperation =
         operation.startsWith('match_waitlist_');
+      const isMatchLineupOperation =
+        operation.startsWith('match_lineup_');
       const isMatchListOperation =
         operation === 'match_list' || operation === 'match_list_mine';
       const isPlayerSearchOperation = operation === 'player_search';
@@ -1514,7 +1683,8 @@ export function createBackendSessionClient(dependencies = {}) {
         operation === 'match_invitation_incoming' ||
         operation === 'match_invitation_outgoing' ||
         operation === 'match_chat_list' ||
-        operation === 'match_waitlist_list';
+        operation === 'match_waitlist_list' ||
+        operation === 'match_lineup_read';
       const isProfileOperation =
         operation === 'profile' || operation === 'profile_update';
       const matchId = operationPayload?.matchId;
@@ -1522,6 +1692,8 @@ export function createBackendSessionClient(dependencies = {}) {
         `${MATCHES_PATH}/${encodeURIComponent(matchId)}/messages`;
       const matchWaitlistPath =
         `${MATCHES_PATH}/${encodeURIComponent(matchId)}/waitlist`;
+      const matchLineupPath =
+        `${MATCHES_PATH}/${encodeURIComponent(matchId)}/lineup`;
       const url =
         operation === 'refresh'
           ? REFRESH_PATH
@@ -1569,6 +1741,12 @@ export function createBackendSessionClient(dependencies = {}) {
                           ? `${matchWaitlistPath}/join`
                         : operation === 'match_waitlist_leave'
                           ? `${matchWaitlistPath}/leave`
+                        : operation === 'match_lineup_read'
+                          ? matchLineupPath
+                        : operation === 'match_lineup_assign'
+                          ? `${matchLineupPath}/assign`
+                        : operation === 'match_lineup_release'
+                          ? `${matchLineupPath}/release`
                     : operation === 'match_join'
                       ? `${MATCHES_PATH}/${encodeURIComponent(matchId)}/join`
                       : operation === 'match_leave'
@@ -1621,6 +1799,12 @@ export function createBackendSessionClient(dependencies = {}) {
                               requestKey,
                               body: operationPayload.body,
                             }
+                        : operation === 'match_lineup_assign'
+                          ? {
+                              requestKey,
+                              teamNumber: operationPayload.teamNumber,
+                              courtSide: operationPayload.courtSide,
+                            }
                         : { requestKey },
                 ),
               }),
@@ -1651,6 +1835,8 @@ export function createBackendSessionClient(dependencies = {}) {
                 ? MAX_MATCH_CHAT_RESPONSE_BODY_BYTES
               : isMatchWaitlistOperation
                 ? MAX_MATCH_WAITLIST_RESPONSE_BODY_BYTES
+              : isMatchLineupOperation
+                ? MAX_MATCH_LINEUP_RESPONSE_BODY_BYTES
               : MAX_RESPONSE_BODY_BYTES,
       );
       if (operation === 'authenticate' && response.status === 200) {
@@ -1790,6 +1976,31 @@ export function createBackendSessionClient(dependencies = {}) {
           : frozen('malformed_response');
       }
       if (
+        operation === 'match_lineup_read' &&
+        response.status === 200
+      ) {
+        const result = matchLineupReadSuccess(body, matchId);
+        return result
+          ? frozen('success', { result })
+          : frozen('malformed_response');
+      }
+      if (
+        (operation === 'match_lineup_assign' ||
+          operation === 'match_lineup_release') &&
+        response.status === 201
+      ) {
+        const result = matchLineupMutationSuccess(
+          body,
+          matchId,
+          operation === 'match_lineup_assign'
+            ? 'lineup_assigned'
+            : 'lineup_released',
+        );
+        return result
+          ? frozen('success', { result })
+          : frozen('malformed_response');
+      }
+      if (
         (operation === 'match_detail' || operation === 'match_create') &&
         response.status === (
           operation === 'match_create' ? 201 : 200
@@ -1851,6 +2062,8 @@ export function createBackendSessionClient(dependencies = {}) {
                   ? 'match_chat_service_unavailable'
                 : isMatchWaitlistOperation
                   ? 'match_waitlist_service_unavailable'
+                : isMatchLineupOperation
+                  ? 'match_lineup_service_unavailable'
             : isMatchOperation
               ? 'match_service_unavailable'
               : 'session_service_unavailable'
@@ -1874,6 +2087,8 @@ export function createBackendSessionClient(dependencies = {}) {
                       ? classifyMatchChat(response.status, body)
                     : isMatchWaitlistOperation
                       ? classifyMatchWaitlist(response.status, body)
+                    : isMatchLineupOperation
+                      ? classifyMatchLineup(response.status, body)
                   : operation === 'content_moderation'
                     ? frozen('rejected', {
                         reason:
@@ -2002,6 +2217,16 @@ export function createBackendSessionClient(dependencies = {}) {
         )) ||
       ((operation === 'match_waitlist_join' ||
         operation === 'match_waitlist_leave') &&
+        !isMatchId(operationPayload?.matchId)) ||
+      (operation === 'match_lineup_read' &&
+        !isMatchId(operationPayload?.matchId)) ||
+      (operation === 'match_lineup_assign' &&
+        (
+          !isMatchId(operationPayload?.matchId) ||
+          ![1, 2].includes(operationPayload?.teamNumber) ||
+          !['left', 'right'].includes(operationPayload?.courtSide)
+        )) ||
+      (operation === 'match_lineup_release' &&
         !isMatchId(operationPayload?.matchId))
     ) {
       return frozen('rejected', { reason: 'invalid_request' });
@@ -2020,7 +2245,9 @@ export function createBackendSessionClient(dependencies = {}) {
       operation === 'match_invitation_cancel' ||
       operation === 'match_chat_send' ||
       operation === 'match_waitlist_join' ||
-      operation === 'match_waitlist_leave';
+      operation === 'match_waitlist_leave' ||
+      operation === 'match_lineup_assign' ||
+      operation === 'match_lineup_release';
     const requestKey =
       requiresRequestKey ? createRequestKey(cryptoImpl) : null;
     if (requiresRequestKey && !requestKey) {
@@ -2183,6 +2410,32 @@ export function createBackendSessionClient(dependencies = {}) {
     leaveMatchWaitlist: (credential, matchId, options) =>
       execute(
         'match_waitlist_leave',
+        credential,
+        options,
+        { matchId },
+      ),
+    readMatchLineup: (credential, matchId, options) =>
+      execute(
+        'match_lineup_read',
+        credential,
+        options,
+        { matchId },
+      ),
+    assignMatchLineupSlot: (
+      credential,
+      matchId,
+      teamNumber,
+      courtSide,
+      options,
+    ) => execute(
+      'match_lineup_assign',
+      credential,
+      options,
+      { matchId, teamNumber, courtSide },
+    ),
+    releaseMatchLineupSlot: (credential, matchId, options) =>
+      execute(
+        'match_lineup_release',
         credential,
         options,
         { matchId },

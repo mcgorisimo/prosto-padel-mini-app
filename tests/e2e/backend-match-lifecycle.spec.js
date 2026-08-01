@@ -1017,6 +1017,189 @@ test.describe('backend match credential lifecycle', () => {
     expect(summary.publicResultsHideCredential).toBe(true);
   });
 
+  test('uses exact private contracts for backend match lineup', async ({
+    page,
+  }) => {
+    await page.goto('/');
+
+    const summary = await page.evaluate(async (parameters) => {
+      const { createBackendSessionClient } = await import(
+        '/src/lib/backendSessionClient.js'
+      );
+      const contracts = [];
+      const player = {
+        playerId: parameters.accountId,
+        firstName: 'Current',
+        lastName: 'Player',
+        username: 'current_player',
+        rating: 3,
+        isVerified: true,
+      };
+      const slots = [
+        {
+          teamNumber: 1,
+          courtSide: 'left',
+          assignment: {
+            assignmentId: parameters.assignmentId,
+            player,
+            assignedAt: 1_900_000_000,
+            isCurrentPlayer: true,
+          },
+        },
+        { teamNumber: 1, courtSide: 'right' },
+        { teamNumber: 2, courtSide: 'left' },
+        { teamNumber: 2, courtSide: 'right' },
+      ];
+      const mutation = (teamNumber, courtSide, appliedAt) => ({
+        assignment: {
+          assignmentId: parameters.assignmentId,
+          matchId: parameters.matchId,
+          accountId: parameters.accountId,
+          teamNumber,
+          courtSide,
+          appliedAt,
+          lineupVersion: 2,
+        },
+      });
+      const client = createBackendSessionClient({
+        cryptoImpl: { randomUUID: () => parameters.requestKey },
+        fetchImpl: async (url, options) => {
+          contracts.push({
+            url,
+            method: options.method,
+            bearerMatches:
+              options.headers.Authorization ===
+              `Bearer ${parameters.credential}`,
+            contentType: options.headers['Content-Type'] ?? null,
+            body: options.body === undefined
+              ? null
+              : JSON.parse(options.body),
+            cache: options.cache,
+            credentials: options.credentials,
+            redirect: options.redirect,
+          });
+          if (url.endsWith('/lineup')) {
+            return new Response(JSON.stringify({
+              lineup: {
+                matchId: parameters.matchId,
+                status: 'draft',
+                version: 1,
+                slots,
+                unassignedPlayers: [],
+              },
+            }), { status: 200 });
+          }
+          if (url.endsWith('/lineup/assign')) {
+            return new Response(JSON.stringify(
+              mutation(2, 'right', 1_900_000_010),
+            ), { status: 201 });
+          }
+          return new Response(JSON.stringify(
+            mutation(2, 'right', 1_900_000_020),
+          ), { status: 201 });
+        },
+      });
+
+      const loaded = await client.readMatchLineup(
+        parameters.credential,
+        parameters.matchId,
+      );
+      const assigned = await client.assignMatchLineupSlot(
+        parameters.credential,
+        parameters.matchId,
+        2,
+        'right',
+      );
+      const released = await client.releaseMatchLineupSlot(
+        parameters.credential,
+        parameters.matchId,
+      );
+      const malformed = await createBackendSessionClient({
+        fetchImpl: async () => new Response(JSON.stringify({
+          lineup: {
+            matchId: parameters.matchId,
+            status: 'draft',
+            version: 1,
+            slots: [slots[1], slots[0], slots[2], slots[3]],
+            unassignedPlayers: [],
+          },
+        }), { status: 200 }),
+      }).readMatchLineup(parameters.credential, parameters.matchId);
+
+      return {
+        contracts,
+        outcomes: [loaded.outcome, assigned.outcome, released.outcome],
+        slotOrder: loaded.lineup?.slots.map(
+          ({ teamNumber, courtSide }) => `${teamNumber}:${courtSide}`,
+        ),
+        malformed,
+        publicResultsHideCredential:
+          !JSON.stringify([loaded, assigned, released]).includes(
+            parameters.credential,
+          ),
+      };
+    }, {
+      credential: SYNTHETIC_CREDENTIAL,
+      accountId: ACCOUNT_ID,
+      matchId: MATCH_ID,
+      requestKey: REQUEST_KEY,
+      assignmentId: PARTICIPANT_ID,
+    });
+
+    expect(summary.contracts).toEqual([
+      {
+        url: `/api/v1/matches/${MATCH_ID}/lineup`,
+        method: 'GET',
+        bearerMatches: true,
+        contentType: null,
+        body: null,
+        cache: 'no-store',
+        credentials: 'omit',
+        redirect: 'error',
+      },
+      {
+        url: `/api/v1/matches/${MATCH_ID}/lineup/assign`,
+        method: 'POST',
+        bearerMatches: true,
+        contentType: 'application/json',
+        body: {
+          requestKey: REQUEST_KEY,
+          teamNumber: 2,
+          courtSide: 'right',
+        },
+        cache: 'no-store',
+        credentials: 'omit',
+        redirect: 'error',
+      },
+      {
+        url: `/api/v1/matches/${MATCH_ID}/lineup/release`,
+        method: 'POST',
+        bearerMatches: true,
+        contentType: 'application/json',
+        body: { requestKey: REQUEST_KEY },
+        cache: 'no-store',
+        credentials: 'omit',
+        redirect: 'error',
+      },
+    ]);
+    expect(summary.outcomes).toEqual([
+      'lineup_loaded',
+      'lineup_assigned',
+      'lineup_released',
+    ]);
+    expect(summary.slotOrder).toEqual([
+      '1:left',
+      '1:right',
+      '2:left',
+      '2:right',
+    ]);
+    expect(summary.malformed).toEqual({
+      outcome: 'rejected',
+      reason: 'internal_error',
+    });
+    expect(summary.publicResultsHideCredential).toBe(true);
+  });
+
   test('keeps the credential private and clears the boundary on invalid match session', async ({
     page,
   }) => {
@@ -1302,6 +1485,49 @@ test.describe('backend match credential lifecycle', () => {
               },
             };
           },
+          async readMatchLineup(credential) {
+            credentialMatched =
+              credentialMatched &&
+              credential === parameters.credential;
+            return {
+              outcome: 'lineup_loaded',
+              lineup: {
+                matchId: parameters.matchId,
+                slots: [{
+                  assignment: {
+                    isCurrentPlayer: true,
+                    player: { playerId: parameters.accountId },
+                  },
+                }],
+              },
+            };
+          },
+          async assignMatchLineupSlot(credential) {
+            credentialMatched =
+              credentialMatched &&
+              credential === parameters.credential;
+            return {
+              outcome: 'lineup_assigned',
+              assignment: {
+                matchId: parameters.matchId,
+                accountId: parameters.accountId,
+                teamNumber: 2,
+                courtSide: 'right',
+              },
+            };
+          },
+          async releaseMatchLineupSlot(credential) {
+            credentialMatched =
+              credentialMatched &&
+              credential === parameters.credential;
+            return {
+              outcome: 'lineup_released',
+              assignment: {
+                matchId: parameters.matchId,
+                accountId: parameters.accountId,
+              },
+            };
+          },
         },
         credentialStorage: {
           async read() {
@@ -1359,6 +1585,13 @@ test.describe('backend match credential lifecycle', () => {
         await lifecycle.listMatchWaitlist(parameters.matchId, 50),
         await lifecycle.joinMatchWaitlist(parameters.matchId),
         await lifecycle.leaveMatchWaitlist(parameters.matchId),
+        await lifecycle.readMatchLineup(parameters.matchId),
+        await lifecycle.assignMatchLineupSlot(
+          parameters.matchId,
+          2,
+          'right',
+        ),
+        await lifecycle.releaseMatchLineupSlot(parameters.matchId),
       ];
       const invalid = await lifecycle.listMatches();
       for (let attempt = 0; attempt < 50; attempt += 1) {
@@ -1414,6 +1647,9 @@ test.describe('backend match credential lifecycle', () => {
         'waitlist_loaded',
         'waitlist_joined',
         'waitlist_left',
+        'lineup_loaded',
+        'lineup_assigned',
+        'lineup_released',
       ],
       invalidOutcome: 'rejected',
       invalidReason: 'session_invalid',
@@ -2179,6 +2415,316 @@ test.describe('backend match credential lifecycle', () => {
     expect(waitlistUiCalls.refresh).toBe(refreshCallsAfterPromotion);
     expect(legacyWaitlistCalls).toBe(0);
     await page.evaluate(() => window.__backendWaitlistUiUnmount());
+  });
+
+  test('renders fixed backend pairs and blocks direct changes after a pair is formed', async ({
+    page,
+  }) => {
+    let legacyRpcCalls = 0;
+    await page.route(/\/rest\/v1\/rpc\//iu, async (route) => {
+      legacyRpcCalls += 1;
+      await route.fulfill({
+        status: 500,
+        contentType: 'application/json',
+        body: JSON.stringify({ message: 'legacy RPC must not run' }),
+      });
+    });
+    await page.goto('/');
+
+    await page.evaluate(async (parameters) => {
+      const reactModule = await import('/@id/react');
+      const React = reactModule.default ?? reactModule;
+      const reactDomClientModule = await import('/@id/react-dom/client');
+      const { createRoot } =
+        reactDomClientModule.default ?? reactDomClientModule;
+      const {
+        default: MatchDetailsScreen,
+        supportsBackendMatchLineup,
+      } = await import('/src/components/MatchDetailsScreen.jsx');
+
+      const container = document.createElement('div');
+      container.dataset.testid = 'backend-lineup-test-root';
+      document.body.append(container);
+      const currentUser = {
+        id: parameters.accountId,
+        role: 'user',
+        firstName: 'Current',
+        lastName: 'Player',
+        rating: 3,
+        numericRating: 3,
+        ratingIdx: 2,
+        isVerified: true,
+      };
+      const match = {
+        id: parameters.matchId,
+        backendOwned: true,
+        ownerId: parameters.ownerAccountId,
+        owner_id: parameters.ownerAccountId,
+        title: 'Backend lineup match',
+        description: '',
+        date: '1 января',
+        dateISO: '2030-01-01',
+        time: '10:00',
+        duration: 1.5,
+        courtName: 'Корт 1',
+        courtType: 'panoramic',
+        type: 'match',
+        scenario: 'social',
+        status: 'upcoming',
+        isPrivate: false,
+        isRatingMatch: false,
+        ratingMin: 0,
+        ratingMax: 6,
+        participants: [parameters.ownerAccountId, parameters.accountId],
+        filledSlots: [
+          {
+            id: parameters.ownerAccountId,
+            firstName: 'Owner',
+            lastName: 'Player',
+            numericRating: 3,
+            ratingIdx: 2,
+            isVerified: true,
+            isOrganizer: true,
+            slotIndex: 0,
+          },
+          {
+            id: parameters.accountId,
+            firstName: 'Current',
+            lastName: 'Player',
+            numericRating: 3,
+            ratingIdx: 2,
+            isVerified: true,
+            isOrganizer: false,
+            slotIndex: 1,
+          },
+        ],
+      };
+      const ownerPlayer = {
+        playerId: parameters.ownerAccountId,
+        firstName: 'Owner',
+        lastName: 'Player',
+        rating: 3,
+        isVerified: true,
+      };
+      const currentPlayer = {
+        playerId: parameters.accountId,
+        firstName: 'Current',
+        lastName: 'Player',
+        rating: 3,
+        isVerified: true,
+      };
+      let currentCell = null;
+      let lineupStatus = 'draft';
+      const lineupResult = () => ({
+        outcome: 'lineup_loaded',
+        lineup: {
+          matchId: parameters.matchId,
+          status: lineupStatus,
+          version: window.__backendLineupUiCalls.assign +
+            window.__backendLineupUiCalls.release + 1,
+          slots: [
+            {
+              teamNumber: 1,
+              courtSide: 'left',
+              assignment: {
+                assignmentId: parameters.ownerAssignmentId,
+                player: ownerPlayer,
+                assignedAt: 1_900_000_000,
+                isCurrentPlayer: false,
+              },
+            },
+            ...[
+              [1, 'right'],
+              [2, 'left'],
+              [2, 'right'],
+            ].map(([teamNumber, courtSide]) => ({
+              teamNumber,
+              courtSide,
+              ...(currentCell === `${teamNumber}:${courtSide}`
+                ? {
+                    assignment: {
+                      assignmentId: parameters.currentAssignmentId,
+                      player: currentPlayer,
+                      assignedAt: 1_900_000_010,
+                      isCurrentPlayer: true,
+                    },
+                  }
+                : {}),
+            })),
+          ],
+          unassignedPlayers: currentCell === null ? [currentPlayer] : [],
+        },
+      });
+
+      window.__backendLineupUiCalls = {
+        load: 0,
+        assign: 0,
+        release: 0,
+        assignments: [],
+      };
+      const originalSetInterval = globalThis.setInterval;
+      const originalClearInterval = globalThis.clearInterval;
+      const lineupPollers = new Map();
+      let nextPollerId = -10_000;
+      globalThis.setInterval = (callback, delay, ...args) => {
+        if (delay !== 5_000) {
+          return originalSetInterval(callback, delay, ...args);
+        }
+        const id = nextPollerId;
+        nextPollerId -= 1;
+        lineupPollers.set(id, () => callback(...args));
+        return id;
+      };
+      globalThis.clearInterval = (id) => {
+        if (!lineupPollers.delete(id)) originalClearInterval(id);
+      };
+      window.__backendLineupPollerCount = () => lineupPollers.size;
+      window.__runBackendLineupPoll = () => {
+        [...lineupPollers.values()].forEach((poll) => poll());
+      };
+      window.__lockBackendLineup = () => {
+        lineupStatus = 'locked';
+        window.__runBackendLineupPoll();
+      };
+      window.__legacyLineupBoundary =
+        supportsBackendMatchLineup(
+          { backendOwned: false },
+          () => {},
+          () => {},
+          () => {},
+        ) === false;
+
+      const root = createRoot(container);
+      root.render(React.createElement(MatchDetailsScreen, {
+        match,
+        currentUser,
+        onLoadLineup() {
+          window.__backendLineupUiCalls.load += 1;
+          return Promise.resolve(lineupResult());
+        },
+        onAssignLineupSlot(matchId, teamNumber, courtSide) {
+          window.__backendLineupUiCalls.assign += 1;
+          window.__backendLineupUiCalls.assignments.push({
+            matchId,
+            teamNumber,
+            courtSide,
+          });
+          currentCell = `${teamNumber}:${courtSide}`;
+          return Promise.resolve({
+            outcome: 'lineup_assigned',
+            assignment: {
+              assignmentId: parameters.currentAssignmentId,
+              matchId: parameters.matchId,
+              accountId: parameters.accountId,
+              teamNumber,
+              courtSide,
+              appliedAt: 1_900_000_010,
+              lineupVersion: window.__backendLineupUiCalls.assign + 1,
+            },
+          });
+        },
+        onReleaseLineupSlot() {
+          window.__backendLineupUiCalls.release += 1;
+          const [teamNumber, courtSide] = currentCell.split(':');
+          currentCell = null;
+          return Promise.resolve({
+            outcome: 'lineup_released',
+            assignment: {
+              assignmentId: parameters.currentAssignmentId,
+              matchId: parameters.matchId,
+              accountId: parameters.accountId,
+              teamNumber: Number(teamNumber),
+              courtSide,
+              appliedAt: 1_900_000_020,
+              lineupVersion: window.__backendLineupUiCalls.release + 2,
+            },
+          });
+        },
+        onBack() {},
+        onJoinSuccess() {},
+        onDelete() {},
+        onComplete() {},
+        onConfirmScore() {},
+        onDisputeScore() {},
+        onSlotsChange() {},
+        onJoinMatch() {},
+        onLeaveMatch() {},
+        onRefreshMatch() { return Promise.resolve(match); },
+        pendingInvitations: [],
+        invitationActions: new Set(),
+        allMessages: [],
+        messagesLoading: false,
+        messagesLoadError: '',
+        showToast() {},
+      }));
+      window.__backendLineupUiUnmount = () => {
+        root.unmount();
+        globalThis.setInterval = originalSetInterval;
+        globalThis.clearInterval = originalClearInterval;
+        lineupPollers.clear();
+        container.remove();
+      };
+    }, {
+      accountId: ACCOUNT_ID,
+      ownerAccountId: OTHER_ACCOUNT_ID,
+      matchId: MATCH_ID,
+      ownerAssignmentId: PARTICIPANT_ID,
+      currentAssignmentId: WAITLIST_ENTRY_ID,
+    });
+
+    const harness = page.getByTestId('backend-lineup-test-root');
+    await expect(harness.getByTestId('match-lineup')).toBeVisible();
+    await expect(harness.getByTestId('match-lineup-team-1')).toContainText('Owner Player');
+    await expect(harness.getByTestId('match-lineup-team-2')).toContainText('Выбрать');
+    await expect(harness.getByTestId('match-lineup-slot-1-left')).toBeDisabled();
+
+    await harness.getByTestId('match-lineup-slot-2-right').click();
+    await expect(harness.getByTestId('match-lineup-slot-2-right')).toContainText('Current Player');
+    await expect(harness.getByTestId('match-lineup-release')).toBeVisible();
+
+    await harness.getByTestId('match-lineup-release').click();
+    await expect(harness.getByTestId('match-lineup-release')).toHaveCount(0);
+    await expect(harness.getByTestId('match-lineup-slot-2-right')).toContainText('Выбрать');
+
+    await harness.getByTestId('match-lineup-slot-2-right').click();
+    await expect(harness.getByTestId('match-lineup-slot-2-right')).toContainText('Current Player');
+
+    await harness.getByTestId('match-lineup-slot-1-right').click();
+    await expect(harness.getByTestId('match-lineup-slot-1-right')).toContainText('Current Player');
+    await expect(harness.getByTestId('match-lineup-slot-2-right')).toContainText('Свободно');
+    await expect(harness.getByTestId('match-lineup-release')).toHaveCount(0);
+    await expect(harness.getByTestId('match-lineup-slot-2-right')).toBeDisabled();
+
+    await expect.poll(() => page.evaluate(
+      () => window.__backendLineupPollerCount(),
+    )).toBe(1);
+    await page.evaluate(() => window.__lockBackendLineup());
+    await expect.poll(() => page.evaluate(
+      () => window.__backendLineupPollerCount(),
+    )).toBe(0);
+    const loadsAfterLock = await page.evaluate(
+      () => window.__backendLineupUiCalls.load,
+    );
+    await page.evaluate(() => window.__runBackendLineupPoll());
+    expect(await page.evaluate(
+      () => window.__backendLineupUiCalls.load,
+    )).toBe(loadsAfterLock);
+
+    const summary = await page.evaluate(() => ({
+      calls: window.__backendLineupUiCalls,
+      legacyBoundary: window.__legacyLineupBoundary,
+    }));
+    expect(summary.calls.load).toBeGreaterThanOrEqual(4);
+    expect(summary.calls.assign).toBe(3);
+    expect(summary.calls.release).toBe(1);
+    expect(summary.calls.assignments).toEqual([
+      { matchId: MATCH_ID, teamNumber: 2, courtSide: 'right' },
+      { matchId: MATCH_ID, teamNumber: 2, courtSide: 'right' },
+      { matchId: MATCH_ID, teamNumber: 1, courtSide: 'right' },
+    ]);
+    expect(summary.legacyBoundary).toBe(true);
+    expect(legacyRpcCalls).toBe(0);
+    await page.evaluate(() => window.__backendLineupUiUnmount());
   });
 
   test('renders account-scoped Home matches and preserves legacy private bookings', async ({

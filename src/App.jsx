@@ -2580,6 +2580,21 @@ const handleBookSlot = async (booking) => {
             ? backendMatchActions?.leaveMatchWaitlist
             : null
         }
+        onLoadLineup={
+          isBackendOwnedMatch(selectedMatch)
+            ? backendMatchActions?.readMatchLineup
+            : null
+        }
+        onAssignLineupSlot={
+          isBackendOwnedMatch(selectedMatch)
+            ? backendMatchActions?.assignMatchLineupSlot
+            : null
+        }
+        onReleaseLineupSlot={
+          isBackendOwnedMatch(selectedMatch)
+            ? backendMatchActions?.releaseMatchLineupSlot
+            : null
+        }
         incomingInvitation={incomingInvitations.find((invitation) => invitation.match_id === selectedMatch.id) ?? null}
         pendingInvitations={outgoingInvitations.filter((invitation) => invitation.match_id === selectedMatch.id)}
         invitationActions={invitationActions}

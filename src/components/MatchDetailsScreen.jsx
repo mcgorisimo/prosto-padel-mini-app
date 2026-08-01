@@ -80,6 +80,20 @@ export function supportsBackendMatchWaitlist(
   );
 }
 
+export function supportsBackendMatchLineup(
+  match,
+  onLoadLineup,
+  onAssignLineupSlot,
+  onReleaseLineupSlot,
+) {
+  return (
+    match?.backendOwned === true &&
+    typeof onLoadLineup === 'function' &&
+    typeof onAssignLineupSlot === 'function' &&
+    typeof onReleaseLineupSlot === 'function'
+  );
+}
+
 function backendWaitlistPlayer(entry) {
   const unavailable = entry.player?.unavailable === true;
   return Object.freeze({
@@ -934,6 +948,97 @@ function MatchWaitlistList({ players, count, loading, loadError, showEmptyMessag
   );
 }
 
+function MatchLineupPanel({
+  lineup,
+  loading,
+  loadError,
+  canManage,
+  action,
+  onAssign,
+  onRelease,
+  onRetry,
+}) {
+  const currentSlot = lineup?.slots?.find(
+    (slot) => slot.assignment?.isCurrentPlayer === true,
+  );
+  const sideLabel = (courtSide) =>
+    courtSide === 'left' ? 'Левая сторона' : 'Правая сторона';
+  const playerLabel = (player) => {
+    if (player?.unavailable === true) return 'Игрок';
+    return [player?.firstName, player?.lastName]
+      .filter(Boolean)
+      .join(' ') || 'Игрок';
+  };
+
+  return (
+    <section data-testid="match-lineup" style={{ marginBottom: '20px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '10px', marginBottom: '10px' }}>
+        <div style={{ color: C.text, fontSize: '14px', fontWeight: 900 }}>Пары</div>
+        <div style={{ color: C.muted, fontSize: '10px' }}>{canManage ? 'Выберите свободную сторону' : 'Состав команд'}</div>
+      </div>
+
+      {loadError && (
+        <div data-testid="match-lineup-error" style={{ padding: '12px', borderRadius: '12px', border: '1px solid rgba(255,111,97,0.2)', background: 'rgba(255,111,97,0.06)' }}>
+          <div style={{ color: C.text, fontSize: '12px', fontWeight: 800 }}>Не удалось загрузить расстановку</div>
+          <button type="button" data-testid="match-lineup-retry" onClick={onRetry} disabled={loading} style={{ minHeight: '44px', marginTop: '6px', padding: '0 12px', borderRadius: '10px', border: '1px solid rgba(216,243,74,0.28)', background: 'transparent', color: C.gold, fontSize: '12px', fontWeight: 850 }}>
+            Повторить
+          </button>
+        </div>
+      )}
+
+      {!loadError && loading && !lineup && (
+        <div data-testid="match-lineup-loading" style={{ color: C.muted, fontSize: '12px', padding: '8px 0' }}>Загружаем пары…</div>
+      )}
+
+      {!loadError && lineup && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+          {[1, 2].map((teamNumber) => (
+            <div key={teamNumber} data-testid={`match-lineup-team-${teamNumber}`} style={{ minWidth: 0, padding: '10px', borderRadius: '14px', border: `1px solid ${C.border}`, background: C.card }}>
+              <div style={{ color: C.gold, fontSize: '11px', fontWeight: 900, marginBottom: '8px' }}>Пара {teamNumber}</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '7px' }}>
+                {lineup.slots
+                  .filter((slot) => slot.teamNumber === teamNumber)
+                  .map((slot) => {
+                    const assignment = slot.assignment;
+                    const isCurrent = assignment?.isCurrentPlayer === true;
+                    const slotAction = `${teamNumber}:${slot.courtSide}`;
+                    const isBusy = action !== null;
+                    return (
+                      <button
+                        type="button"
+                        key={slotAction}
+                        data-testid={`match-lineup-slot-${teamNumber}-${slot.courtSide}`}
+                        disabled={
+                          assignment !== undefined ||
+                          !canManage ||
+                          isBusy
+                        }
+                        onClick={() => onAssign(teamNumber, slot.courtSide)}
+                        style={{ minWidth: 0, minHeight: '58px', padding: '8px', textAlign: 'left', borderRadius: '11px', border: isCurrent ? '1px solid rgba(216,243,74,0.55)' : `1px solid ${C.border}`, background: isCurrent ? 'rgba(216,243,74,0.10)' : 'rgba(5,15,11,0.5)', color: C.text, opacity: assignment !== undefined && !isCurrent ? 0.82 : 1, cursor: assignment === undefined && canManage && !isBusy ? 'pointer' : 'default' }}
+                      >
+                        <div style={{ color: C.muted, fontSize: '9px', fontWeight: 800 }}>{sideLabel(slot.courtSide)}</div>
+                        <div style={{ marginTop: '4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: assignment ? C.text : C.gold, fontSize: '12px', fontWeight: 850 }}>
+                          {assignment ? playerLabel(assignment.player) : canManage ? 'Выбрать' : 'Свободно'}
+                        </div>
+                        {isCurrent && <div style={{ color: C.gold, fontSize: '9px', fontWeight: 900, marginTop: '2px' }}>Это вы</div>}
+                      </button>
+                    );
+                  })}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {currentSlot && canManage && (
+        <button type="button" data-testid="match-lineup-release" disabled={action !== null} onClick={onRelease} style={{ width: '100%', minHeight: '44px', marginTop: '8px', borderRadius: '11px', border: '1px solid rgba(255,111,97,0.25)', background: 'rgba(255,111,97,0.06)', color: C.loss, fontSize: '11px', fontWeight: 850 }}>
+          {action === 'release' ? 'Освобождаем…' : 'Освободить позицию'}
+        </button>
+      )}
+    </section>
+  );
+}
+
 function WaitlistPanel({ position, count, loading, action, onJoin, onLeave }) {
   const queuePosition = Number(position?.queue_position);
   const isWaiting = Number.isFinite(queuePosition) && queuePosition > 0;
@@ -1016,7 +1121,7 @@ function MatchInvitationPanel({ accepting, declining, onAccept, onDecline }) {
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
-export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinSuccess, onDelete, onComplete, onConfirmScore, onDisputeScore, onUpdateDescription, onSlotsChange, onJoinMatch, onLeaveMatch, onRefreshMatch, onLoadWaitlist, onJoinWaitlist, onLeaveWaitlist, incomingInvitation = null, pendingInvitations = [], invitationActions = new Set(), onAcceptInvitation, onDeclineInvitation, onCreateInvitation, onCancelInvitation, onSearchPlayers, onRemoveParticipant, allMessages, messagesLoading, messagesLoadError, hasOlderMessages = false, olderMessagesLoading = false, onLoadOlderMessages, onRefreshMessages, onRetryMessages, onSendMessage, onRevertToPrivate, showToast }) {
+export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinSuccess, onDelete, onComplete, onConfirmScore, onDisputeScore, onUpdateDescription, onSlotsChange, onJoinMatch, onLeaveMatch, onRefreshMatch, onLoadWaitlist, onJoinWaitlist, onLeaveWaitlist, onLoadLineup, onAssignLineupSlot, onReleaseLineupSlot, incomingInvitation = null, pendingInvitations = [], invitationActions = new Set(), onAcceptInvitation, onDeclineInvitation, onCreateInvitation, onCancelInvitation, onSearchPlayers, onRemoveParticipant, allMessages, messagesLoading, messagesLoadError, hasOlderMessages = false, olderMessagesLoading = false, onLoadOlderMessages, onRefreshMessages, onRetryMessages, onSendMessage, onRevertToPrivate, showToast }) {
   const isOwner = canManageMatch(currentUser, match);
 
   const allBots = useMemo(() => getTestBots(), []);
@@ -1057,6 +1162,13 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
   const [waitlistListError, setWaitlistListError] = useState('');
   const [waitlistAction, setWaitlistAction] = useState(null);
   const [capacityUnavailable, setCapacityUnavailable] = useState(false);
+  const lineupLoadRef = useRef(0);
+  const lineupActionRef = useRef(false);
+  const lineupPollInFlightRef = useRef(false);
+  const [lineup, setLineup] = useState(null);
+  const [lineupLoading, setLineupLoading] = useState(false);
+  const [lineupLoadError, setLineupLoadError] = useState('');
+  const [lineupAction, setLineupAction] = useState(null);
 
   const handleOpenChat = () => {
     setChatOpen(true);
@@ -1294,6 +1406,12 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
     onJoinWaitlist,
     onLeaveWaitlist,
   );
+  const usesBackendMatchLineup = supportsBackendMatchLineup(
+    match,
+    onLoadLineup,
+    onAssignLineupSlot,
+    onReleaseLineupSlot,
+  );
   const canEditMatch = usesLegacyMatchExtensions && isOwner && !isCompletedMatch && !isScorePending && !isScoreDisputed;
   const canEditDescription = match.backendOwned === true &&
     isOwner &&
@@ -1413,6 +1531,130 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
   const canJoin = joinBlockReason === null;
   const guardReason = joinBlockReason === 'unverified' || joinBlockReason === 'level' ? joinBlockReason : null;
   const showRatingGuard = !isOwner && !isParticipant && !isCapacityReserved && guardReason;
+  const canViewLineup = usesBackendMatchLineup &&
+    match.type === 'match' &&
+    match.isPrivate !== true;
+  const currentLineupSlot = lineup?.slots?.find(
+    (slot) => slot.assignment?.isCurrentPlayer === true,
+  );
+  const currentLineupHasPartner = currentLineupSlot !== undefined &&
+    lineup?.slots?.some(
+      (slot) =>
+        slot.teamNumber === currentLineupSlot.teamNumber &&
+        slot.courtSide !== currentLineupSlot.courtSide &&
+        slot.assignment !== undefined,
+    ) === true;
+  const canManageLineup = canViewLineup &&
+    isParticipant &&
+    isActiveWaitlistStatus &&
+    matchHasNotStarted &&
+    !isCompletedMatch &&
+    lineup?.status === 'draft' &&
+    !currentLineupHasPartner;
+  const lineupPollingLocked = lineup?.matchId === match.id &&
+    lineup?.status === 'locked';
+
+  const refreshLineup = useCallback(async () => {
+    if (!usesBackendMatchLineup) return null;
+    const requestId = ++lineupLoadRef.current;
+    setLineupLoading(true);
+    setLineupLoadError('');
+    try {
+      const result = await onLoadLineup(match.id);
+      if (requestId !== lineupLoadRef.current) return null;
+      if (
+        result?.outcome !== 'lineup_loaded' ||
+        result.lineup?.matchId !== match.id
+      ) {
+        throw new Error(result?.reason ?? 'lineup_load_failed');
+      }
+      setLineup(result.lineup);
+      return result.lineup;
+    } catch {
+      if (requestId !== lineupLoadRef.current) return null;
+      setLineupLoadError('Не удалось загрузить расстановку.');
+      return null;
+    } finally {
+      if (requestId === lineupLoadRef.current) setLineupLoading(false);
+    }
+  }, [match.id, onLoadLineup, usesBackendMatchLineup]);
+
+  useEffect(() => {
+    if (!canViewLineup) {
+      lineupLoadRef.current += 1;
+      setLineup(null);
+      setLineupLoading(false);
+      setLineupLoadError('');
+      return undefined;
+    }
+    if (lineupPollingLocked) return undefined;
+    void refreshLineup();
+    const interval = globalThis.setInterval(() => {
+      if (lineupPollInFlightRef.current || lineupActionRef.current) return;
+      lineupPollInFlightRef.current = true;
+      void refreshLineup().finally(() => {
+        lineupPollInFlightRef.current = false;
+      });
+    }, 5_000);
+    return () => {
+      globalThis.clearInterval(interval);
+      lineupLoadRef.current += 1;
+      lineupPollInFlightRef.current = false;
+    };
+  }, [canViewLineup, lineupPollingLocked, refreshLineup]);
+
+  const handleAssignLineupSlot = async (teamNumber, courtSide) => {
+    if (!canManageLineup || lineupActionRef.current) return;
+    const target = lineup?.slots?.find(
+      (slot) =>
+        slot.teamNumber === teamNumber &&
+        slot.courtSide === courtSide,
+    );
+    if (!target || target.assignment !== undefined) return;
+    lineupActionRef.current = true;
+    setLineupAction(`${teamNumber}:${courtSide}`);
+    try {
+      const result = await onAssignLineupSlot(
+        match.id,
+        teamNumber,
+        courtSide,
+      );
+      if (result?.outcome !== 'lineup_assigned') {
+        throw new Error(result?.reason ?? 'lineup_assign_failed');
+      }
+      await refreshLineup();
+    } catch (error) {
+      showToast?.(
+        error?.message === 'slot_occupied'
+          ? 'Эту позицию уже занял другой игрок. Расстановка обновлена.'
+          : 'Не удалось выбрать позицию. Попробуйте ещё раз.',
+        error?.message === 'slot_occupied' ? 'info' : 'error',
+      );
+      await refreshLineup();
+    } finally {
+      lineupActionRef.current = false;
+      setLineupAction(null);
+    }
+  };
+
+  const handleReleaseLineupSlot = async () => {
+    if (!canManageLineup || lineupActionRef.current) return;
+    lineupActionRef.current = true;
+    setLineupAction('release');
+    try {
+      const result = await onReleaseLineupSlot(match.id);
+      if (result?.outcome !== 'lineup_released') {
+        throw new Error(result?.reason ?? 'lineup_release_failed');
+      }
+      await refreshLineup();
+    } catch {
+      showToast?.('Не удалось освободить позицию. Попробуйте ещё раз.', 'error');
+      await refreshLineup();
+    } finally {
+      lineupActionRef.current = false;
+      setLineupAction(null);
+    }
+  };
   const getJoinBlockedText = (reason = joinBlockReason) => {
     if (reason === 'completed') return 'Матч уже завершён.';
     if (reason === 'participant') return 'Вы уже участвуете в этом матче.';
@@ -1689,6 +1931,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
       setJoined(false);
       setLeaveTarget(null);
       if (canViewWaitlist) await refreshWaitlist();
+      if (usesBackendMatchLineup) await refreshLineup();
     } catch {
       // The parent handler shows the concrete RPC error without duplicating the message.
     } finally {
@@ -2131,6 +2374,19 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
             </div>
           )}
         </div>
+
+        {canViewLineup && (
+          <MatchLineupPanel
+            lineup={lineup}
+            loading={lineupLoading}
+            loadError={lineupLoadError}
+            canManage={canManageLineup}
+            action={lineupAction}
+            onAssign={handleAssignLineupSlot}
+            onRelease={handleReleaseLineupSlot}
+            onRetry={refreshLineup}
+          />
+        )}
 
         {canViewWaitlist && (
           <MatchWaitlistList
