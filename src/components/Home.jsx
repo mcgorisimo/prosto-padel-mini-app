@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Dumbbell } from 'lucide-react';
+import { CalendarDays, Dumbbell, LayoutGrid, Swords } from 'lucide-react';
 import PadelButton from './ui/PadelButton';
 import PadelCard from './ui/PadelCard';
 import TrainingModal from './TrainingModal';
@@ -24,6 +24,13 @@ const getDisplayDate = (dateISO) => {
   }
 };
 
+const EVENT_CATEGORY_VISUALS = {
+  all: { accentRgb: '245, 241, 232', Icon: LayoutGrid },
+  bookings: { accentRgb: '251, 220, 138', Icon: CalendarDays },
+  matches: { accentRgb: '216, 243, 74', Icon: Swords },
+  trainings: { accentRgb: '245, 241, 232', Icon: Dumbbell },
+};
+
 function CountdownBadge({ matchDateISO, matchTime }) {
   const [timeRemaining, setTimeRemaining] = useState(null);
 
@@ -46,7 +53,7 @@ function CountdownBadge({ matchDateISO, matchTime }) {
   const minutes = timeRemaining % 60;
 
   return (
-    <span className="inline-flex items-center rounded-full border border-accent-light/20 bg-accent-light/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-accent-light">
+    <span className="inline-flex items-center rounded-full border border-accent-light/[0.16] bg-accent-light/[0.07] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-accent-light/80">
       {hours > 0 ? `${hours}ч ` : ''}{minutes}мин
     </span>
   );
@@ -124,24 +131,31 @@ function UpcomingRow({ match, onClick }) {
   const coachName = match.trainingDetails?.coachName;
   const courtLabel = match.courtName || (match.courtType === 'panoramic' ? 'Ультрапанорама' : 'Корт');
   const label = isMatch ? 'Матч' : isTraining ? 'Тренировка' : 'Бронь';
+  const categoryId = isMatch ? 'matches' : isTraining ? 'trainings' : 'bookings';
+  const { accentRgb, Icon: EventIcon } = EVENT_CATEGORY_VISUALS[categoryId];
 
   return (
     <PadelCard
+      as="button"
+      type="button"
       onClick={onClick}
       padding="md"
-      className="mb-2 cursor-pointer border-l-4 border-l-accent-light/70 transition-transform active:scale-[0.99]"
+      className="home-event-card mb-2 w-full cursor-pointer border-l-4 text-left transition-transform active:scale-[0.99]"
+      style={{ '--event-accent-rgb': accentRgb }}
     >
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
           <div className="mb-2 flex flex-wrap items-center gap-2">
-            <span className="rounded-full border border-warm-white/10 bg-white/[0.04] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-warm-white/64">
+            <span className="home-event-kind-badge inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide">
+              <EventIcon size={11} strokeWidth={2} aria-hidden="true" />
               {label}
             </span>
             <CountdownBadge matchDateISO={match.dateISO} matchTime={match.time} />
           </div>
           <div className="mb-1 text-xl font-bold text-warm-white">{match.time}</div>
-          <div className="text-sm text-warm-white/62">
-            {getDisplayDate(match.dateISO)}, {courtLabel}
+          <div className="flex flex-wrap items-center gap-2 text-sm text-warm-white/62">
+            <span className="home-event-date-badge">{getDisplayDate(match.dateISO)}</span>
+            <span>{courtLabel}</span>
           </div>
           {match.description && (
             <div className="mt-2 line-clamp-2 text-sm leading-relaxed text-warm-white/56">
@@ -156,8 +170,8 @@ function UpcomingRow({ match, onClick }) {
         </div>
         <span className={`shrink-0 rounded-full border px-2 py-1 text-[10px] font-bold uppercase tracking-wide ${
           isTrainingPending
-            ? 'border-coral/24 bg-coral/10 text-coral'
-            : 'border-accent-light/22 bg-accent-light/10 text-accent-light'
+            ? 'border-[#FBDC8A]/20 bg-[#FBDC8A]/[0.07] text-[#FBDC8A]/80'
+            : 'border-accent-light/[0.18] bg-accent-light/[0.07] text-accent-light/80'
         }`}>
           {isTrainingPending ? 'Ожидает' : 'Подтверждено'}
         </span>
@@ -191,10 +205,10 @@ export default function Home({
   const myEvents = [...personalBookings, ...gamesWithPartners, ...myTrainings]
     .sort((a, b) => new Date(`${a.dateISO}T${a.time || '00:00'}:00`) - new Date(`${b.dateISO}T${b.time || '00:00'}:00`));
   const eventTabs = [
-    { id: 'all', label: 'Все', count: myEvents.length },
-    { id: 'bookings', label: 'Брони', count: personalBookings.length },
-    { id: 'matches', label: 'Матчи', count: gamesWithPartners.length },
-    { id: 'trainings', label: 'Тренировки', count: myTrainings.length },
+    { id: 'all', label: 'Все', count: myEvents.length, ...EVENT_CATEGORY_VISUALS.all },
+    { id: 'bookings', label: 'Брони', count: personalBookings.length, ...EVENT_CATEGORY_VISUALS.bookings },
+    { id: 'matches', label: 'Матчи', count: gamesWithPartners.length, ...EVENT_CATEGORY_VISUALS.matches },
+    { id: 'trainings', label: 'Тренировки', count: myTrainings.length, ...EVENT_CATEGORY_VISUALS.trainings },
   ];
   const visibleEvents = myEvents.filter((event) => {
     if (eventsFilter === 'bookings') return event.type === 'private' && !event.isTraining;
@@ -300,20 +314,19 @@ export default function Home({
         <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
           {eventTabs.map((tab) => {
             const active = eventsFilter === tab.id;
+            const TabIcon = tab.Icon;
             return (
               <button
                 key={tab.id}
                 type="button"
                 onClick={() => setEventsFilter(tab.id)}
-                className={[
-                  'shrink-0 rounded-full border px-3 py-2 text-xs font-bold transition-colors',
-                  active
-                    ? 'border-accent-light/35 bg-accent-light/12 text-accent-light'
-                    : 'border-warm-white/10 bg-white/[0.035] text-warm-white/58',
-                ].join(' ')}
+                aria-pressed={active}
+                className={`home-event-tab ${active ? 'is-active' : ''}`}
+                style={{ '--event-accent-rgb': tab.accentRgb }}
               >
-                {tab.label}
-                <span className="ml-1 text-warm-white/38">{tab.count}</span>
+                <TabIcon size={14} strokeWidth={2} aria-hidden="true" />
+                <span>{tab.label}</span>
+                <span className="home-event-tab-count">{tab.count}</span>
               </button>
             );
           })}
