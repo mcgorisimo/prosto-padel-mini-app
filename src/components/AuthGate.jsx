@@ -24,6 +24,21 @@ const normalizeTelegramUsername = (value) =>
 const isTelegramBackendSuccess = (status) =>
   status === 'authenticated' || status === 'session_restored';
 
+export function resolveOwnProfileGate({
+  backendRequired,
+  sessionReady,
+  profileStatus,
+  hasProfile,
+}) {
+  if (!backendRequired) return 'legacy';
+  if (!sessionReady) return 'loading';
+  if (profileStatus === 'loading' || profileStatus === 'inactive') {
+    return 'loading';
+  }
+  if (profileStatus === 'ready' && hasProfile) return 'ready';
+  return 'error';
+}
+
 export function createBackendMatchActions(telegramBackendLogin) {
   if (telegramBackendLogin?.sessionReady !== true) return null;
 
@@ -294,14 +309,31 @@ const handleSignUp = async ({ email, password, options }) => {
   };
 
   // 1. Показываем лоадер (если ты сделал BallLoader, используй его тут!)
+  const backendProfileRequired =
+    telegramBackendLogin.status !== 'disabled' &&
+    telegramBackendLogin.status !== 'outside_telegram';
+  const effectiveBackendProfileStatus =
+    telegramBackendLogin.sessionReady &&
+    backendProfileStatus === 'inactive'
+      ? 'loading'
+      : backendProfileStatus;
+  const ownProfileGate = resolveOwnProfileGate({
+    backendRequired: backendProfileRequired,
+    sessionReady: telegramBackendLogin.sessionReady,
+    profileStatus: effectiveBackendProfileStatus,
+    hasProfile: backendProfile !== null,
+  });
+  const visibleTelegramBackendStatus =
+    session && ownProfileGate === 'error'
+      ? 'profile_unavailable'
+      : (session || authView !== 'welcome') &&
+          isTelegramBackendSuccess(telegramBackendLogin.status)
+        ? 'idle'
+        : telegramBackendLogin.status;
+
   const telegramBackendStatus = (
     <TelegramBackendLoginStatus
-      status={
-        (session || authView !== 'welcome') &&
-        isTelegramBackendSuccess(telegramBackendLogin.status)
-          ? 'idle'
-          : telegramBackendLogin.status
-      }
+      status={visibleTelegramBackendStatus}
       accountKind={telegramBackendLogin.accountKind}
     />
   );
@@ -328,6 +360,22 @@ const handleSignUp = async ({ email, password, options }) => {
     />
   );
 
+  if (
+    session &&
+    backendProfileRequired &&
+    ownProfileGate !== 'ready'
+  ) {
+    return (
+      <div
+        data-testid="backend-own-profile-gate"
+        data-state={ownProfileGate}
+      >
+        <BallLoader />
+        {telegramBackendStatus}
+      </div>
+    );
+  }
+
   // 2. Если залогинены — пускаем в само приложение
   if (session) {
     return (
@@ -335,17 +383,9 @@ const handleSignUp = async ({ email, password, options }) => {
         <App
           session={session}
           backendProfile={backendProfile}
-          backendMatchRequired={
-            telegramBackendLogin.status !== 'disabled' &&
-            telegramBackendLogin.status !== 'outside_telegram'
-          }
+          backendMatchRequired={backendProfileRequired}
           backendMatchLifecycleStatus={telegramBackendLogin.status}
-          backendProfileStatus={
-            telegramBackendLogin.sessionReady &&
-            backendProfileStatus === 'inactive'
-              ? 'loading'
-              : backendProfileStatus
-          }
+          backendProfileStatus={effectiveBackendProfileStatus}
           backendMatchActions={backendMatchActions}
           onBackendProfileSave={
             telegramBackendLogin.sessionReady

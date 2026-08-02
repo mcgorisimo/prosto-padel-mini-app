@@ -20,13 +20,18 @@ const STATUS_MESSAGES = Object.freeze({
     'Сессия Telegram истекла. Переоткройте Mini App.',
 });
 
+const PROFILE_UNAVAILABLE_MESSAGE =
+  'Не удалось загрузить ваш профиль. Полностью переоткройте Mini App.';
+
 export default function TelegramBackendLoginStatus({
   status,
   accountKind,
 }) {
   if (status === 'disabled' || status === 'idle') return null;
 
-  let message = STATUS_MESSAGES[status];
+  let message = status === 'profile_unavailable'
+    ? PROFILE_UNAVAILABLE_MESSAGE
+    : STATUS_MESSAGES[status];
   let tone = 'rgba(245,241,232,0.96)';
   let background = 'rgba(7,31,22,0.96)';
   let border = 'rgba(216,243,74,0.28)';

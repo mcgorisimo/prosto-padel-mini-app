@@ -413,6 +413,43 @@ test.describe('Telegram backend login feature enabled', () => {
     await expect(status).toHaveCount(0);
   });
 
+  test('does not expose the legacy profile when the Telegram backend profile is unavailable', async ({
+    page,
+  }) => {
+    await page.unroute(PROFILE_ROUTE);
+    await page.route(PROFILE_ROUTE, async (route) => {
+      await fulfillJson(route, 503, {
+        statusCode: 503,
+        code: 'profile_temporarily_unavailable',
+        message: 'Synthetic public error',
+      });
+    });
+    await prepareBrowser(page);
+    await page.route(LOGIN_ROUTE, async (route) => {
+      await fulfillJson(route, 200, successBody('existing'));
+    });
+
+    await page.goto('/');
+    const sessionResult = await establishSyntheticSupabaseSession(page);
+
+    expect(sessionResult).toEqual({
+      hasSession: true,
+      hasError: false,
+    });
+    await expect(
+      page.getByTestId('backend-own-profile-gate'),
+    ).toHaveAttribute('data-state', 'error');
+    const status = page.getByTestId('telegram-backend-login-status');
+    await expect(status).toHaveAttribute(
+      'data-status',
+      'profile_unavailable',
+    );
+    await expect(status).toContainText(
+      'Не удалось загрузить ваш профиль',
+    );
+    await expect(page.locator('.bottom-nav')).toHaveCount(0);
+  });
+
   test('saves personal information through the backend credential boundary', async ({
     page,
   }) => {

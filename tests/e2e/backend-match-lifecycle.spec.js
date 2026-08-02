@@ -3507,6 +3507,88 @@ test.describe('backend match credential lifecycle', () => {
     )).toBe(callsBeforeUnmount);
   });
 
+  test('requires the backend own profile before rendering a Telegram session', async ({
+    page,
+  }) => {
+    await page.goto('/');
+
+    const states = await page.evaluate(async () => {
+      const { resolveOwnProfileGate } = await import(
+        '/src/components/AuthGate.jsx'
+      );
+      const { mergeProfileSources } = await import('/src/App.jsx');
+      const backendWithoutRating = mergeProfileSources(
+        {
+          first_name: 'Legacy',
+          rating: 1.5,
+          is_verified: true,
+        },
+        {
+          firstName: 'Backend',
+          lastName: 'Player',
+          username: 'backend_player',
+        },
+      );
+      return {
+        legacy: resolveOwnProfileGate({
+          backendRequired: false,
+          sessionReady: false,
+          profileStatus: 'inactive',
+          hasProfile: false,
+        }),
+        loginPending: resolveOwnProfileGate({
+          backendRequired: true,
+          sessionReady: false,
+          profileStatus: 'inactive',
+          hasProfile: false,
+        }),
+        profilePending: resolveOwnProfileGate({
+          backendRequired: true,
+          sessionReady: true,
+          profileStatus: 'loading',
+          hasProfile: false,
+        }),
+        profileRejected: resolveOwnProfileGate({
+          backendRequired: true,
+          sessionReady: true,
+          profileStatus: 'error',
+          hasProfile: false,
+        }),
+        profileMissing: resolveOwnProfileGate({
+          backendRequired: true,
+          sessionReady: true,
+          profileStatus: 'ready',
+          hasProfile: false,
+        }),
+        ready: resolveOwnProfileGate({
+          backendRequired: true,
+          sessionReady: true,
+          profileStatus: 'ready',
+          hasProfile: true,
+        }),
+        backendIdentity: {
+          firstName: backendWithoutRating.first_name,
+          rating: backendWithoutRating.rating,
+          isVerified: backendWithoutRating.is_verified,
+        },
+      };
+    });
+
+    expect(states).toEqual({
+      legacy: 'legacy',
+      loginPending: 'loading',
+      profilePending: 'loading',
+      profileRejected: 'error',
+      profileMissing: 'error',
+      ready: 'ready',
+      backendIdentity: {
+        firstName: 'Backend',
+        rating: 3,
+        isVerified: false,
+      },
+    });
+  });
+
   test('maps backend match data into the existing UI without sensitive fields', async ({
     page,
   }) => {

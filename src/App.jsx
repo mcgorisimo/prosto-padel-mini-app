@@ -303,11 +303,13 @@ export function mergeProfileSources(profile, backendProfile, metadata = {}) {
     side_preference: backendProfile?.sidePreference ??
       profile?.side_preference ??
       'Both',
-    rating: typeof backendProfile?.rating === 'number'
-      ? backendProfile.rating
+    rating: backendProfile
+      ? (typeof backendProfile.rating === 'number'
+          ? backendProfile.rating
+          : 3.0)
       : baseProfile.rating,
-    is_verified: typeof backendProfile?.isVerified === 'boolean'
-      ? backendProfile.isVerified
+    is_verified: backendProfile
+      ? backendProfile.isVerified === true
       : baseProfile.is_verified,
   };
 }
