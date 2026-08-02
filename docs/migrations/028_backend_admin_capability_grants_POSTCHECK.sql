@@ -223,7 +223,7 @@ begin
           'admin_capability_events_reason_shape_check', 'c',
           array['event_type', 'reason_code']::text[],
           null::text, null::text[], false, false, true,
-          'check (event_type = ''granted''::text and reason_code = any (array[''bootstrap_admin''::text, ''admin_access_granted''::text]) or event_type = ''revoked''::text and reason_code = ''admin_access_revoked''::text)'
+          'check (event_type = ''granted''::text and (reason_code = any (array[''bootstrap_admin''::text, ''admin_access_granted''::text])) or event_type = ''revoked''::text and reason_code = ''admin_access_revoked''::text)'
         ),
         (
           'admin_capability_events_time_check', 'c', array['occurred_at']::text[],
