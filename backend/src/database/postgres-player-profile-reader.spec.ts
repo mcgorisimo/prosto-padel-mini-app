@@ -74,6 +74,7 @@ function profileRow(
     side_preference: 'Right',
     rating: '3.00',
     is_verified: false,
+    has_club_admin_capability: false,
     ...overrides,
   };
 }
@@ -143,6 +144,7 @@ describe('PostgresPlayerProfileReader', () => {
         sidePreference: 'Right',
         rating: 3,
         isVerified: false,
+        capabilities: [],
       },
     });
     expect(Object.isFrozen(result)).toBe(true);
@@ -160,6 +162,7 @@ describe('PostgresPlayerProfileReader', () => {
           'sidePreference',
           'username',
           'isVerified',
+          'capabilities',
         ].sort(),
       );
     }
@@ -177,7 +180,7 @@ describe('PostgresPlayerProfileReader', () => {
     expect(transaction.calls).toHaveLength(1);
     const call = transaction.calls[0];
     expect(normalizeSql(call.text)).toBe(
-      'SELECT details.account_id, details.first_name, details.last_name, details.username, details.photo_url, details.language_code, details.phone, details.side_preference, rating_states.rating, rating_states.is_verified FROM backend_auth.player_profile_details AS details LEFT JOIN backend_auth.player_rating_states AS rating_states ON rating_states.account_id = details.account_id WHERE details.account_id = $1',
+      "SELECT details.account_id, details.first_name, details.last_name, details.username, details.photo_url, details.language_code, details.phone, details.side_preference, rating_states.rating, rating_states.is_verified, COALESCE(( SELECT capability_events.event_type = 'granted' FROM backend_auth.admin_capability_events AS capability_events WHERE capability_events.account_id = details.account_id AND capability_events.capability = 'club_admin' ORDER BY capability_events.event_order DESC LIMIT 1 ), false) AS has_club_admin_capability FROM backend_auth.player_profile_details AS details LEFT JOIN backend_auth.player_rating_states AS rating_states ON rating_states.account_id = details.account_id WHERE details.account_id = $1",
     );
     expect(call.values).toEqual([ACCOUNT_ID]);
     const upperSql = normalizeSql(call.text).toUpperCase();
@@ -226,6 +229,7 @@ describe('PostgresPlayerProfileReader', () => {
         firstName: 'Synthetic',
         rating: 3,
         isVerified: false,
+        capabilities: [],
       },
     });
   });
@@ -250,6 +254,25 @@ describe('PostgresPlayerProfileReader', () => {
     });
   });
 
+  it('projects the latest granted club-admin capability', async () => {
+    const result = await new PostgresPlayerProfileReader().findByAccountId(
+      new FakeTransaction([
+        queryResult([
+          profileRow({ has_club_admin_capability: true }),
+        ]),
+      ]),
+      { accountId: ACCOUNT_ID },
+    );
+
+    expect(result).toMatchObject({
+      outcome: 'found',
+      profile: { capabilities: ['club_admin'] },
+    });
+    if (result.outcome === 'found') {
+      expect(Object.isFrozen(result.profile.capabilities)).toBe(true);
+    }
+  });
+
   it.each([
     ['unexpected account', { account_id: OTHER_ACCOUNT_ID }],
     ['missing account', { account_id: null }],
@@ -265,6 +288,7 @@ describe('PostgresPlayerProfileReader', () => {
     ['invalid rating scale', { rating: '3.001' }],
     ['out-of-range rating', { rating: '10.01' }],
     ['invalid verification', { is_verified: 'false' }],
+    ['invalid capability state', { has_club_admin_capability: null }],
   ])('rejects invalid persisted state: %s', async (_label, overrides) => {
     await expect(
       new PostgresPlayerProfileReader().findByAccountId(

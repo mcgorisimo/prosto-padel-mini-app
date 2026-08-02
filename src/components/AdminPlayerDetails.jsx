@@ -1,6 +1,5 @@
 import React, { useMemo, useState } from 'react';
 import { getLevelForRating } from '../lib/ratingEngine';
-import { adminUpdateProfileSecurity } from '../lib/profileApi';
 
 const C = {
   bg: '#050F0B',
@@ -31,8 +30,14 @@ function InfoRow({ label, value }) {
   );
 }
 
-export default function AdminPlayerDetails({ user, player, onBack, onSaved }) {
-  const isAdmin = user?.role === 'admin';
+export default function AdminPlayerDetails({
+  user,
+  player,
+  adminActions,
+  onBack,
+  onSaved,
+}) {
+  const isAdmin = user?.isAdmin === true;
   const [rating, setRating] = useState(formatRating(player?.rating));
   const [isVerified, setIsVerified] = useState(isPlayerRatingVerified(player));
   const [saving, setSaving] = useState(false);
@@ -63,10 +68,18 @@ export default function AdminPlayerDetails({ user, player, onBack, onSaved }) {
         is_verified: isVerified,
       };
 
-      const data = await adminUpdateProfileSecurity({
-        profileId: player.id,
-        rating: payload.rating,
-        isVerified: payload.is_verified,
+      const result = await adminActions?.setAdminPlayerRatingState?.(
+        player.id,
+        payload.rating,
+        payload.is_verified,
+      );
+      if (result?.outcome !== 'admin_rating_state_updated') {
+        throw new Error('ADMIN_PLAYER_UPDATE_REJECTED');
+      }
+      const data = Object.freeze({
+        ...player,
+        rating: result.state.rating,
+        is_verified: result.state.isVerified,
       });
 
       if (Number(data.rating) !== payload.rating || isPlayerRatingVerified(data) !== payload.is_verified) {

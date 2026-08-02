@@ -21,6 +21,7 @@ export interface OwnPlayerProfile {
   readonly sidePreference: 'Left' | 'Both' | 'Right' | null;
   readonly rating: number;
   readonly isVerified: boolean;
+  readonly capabilities: readonly 'club_admin'[];
 }
 
 export interface OwnPlayerProfilePatch {
@@ -189,6 +190,7 @@ export function isOwnPlayerProfile(
     'sidePreference',
     'rating',
     'isVerified',
+    'capabilities',
   ] as const;
   if (
     !isRecord(value) ||
@@ -214,6 +216,9 @@ export function isOwnPlayerProfile(
         )))
     || !isRating(value.rating)
     || typeof value.isVerified !== 'boolean'
+    || !Array.isArray(value.capabilities)
+    || value.capabilities.length > 1
+    || value.capabilities.some((capability) => capability !== 'club_admin')
   ) {
     return false;
   }

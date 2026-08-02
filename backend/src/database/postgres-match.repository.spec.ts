@@ -288,6 +288,7 @@ function repositoryHarness(options: {
       firstName: 'Synthetic',
       rating: 3,
       isVerified: options.isVerified ?? true,
+      capabilities: [],
     },
   });
   const resolveCourt = jest.fn<

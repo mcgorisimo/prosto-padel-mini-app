@@ -96,6 +96,7 @@ async function createHarness(): Promise<Harness> {
       sidePreference: 'Right',
       rating: 3,
       isVerified: false,
+      capabilities: [],
     },
   });
   const nowEpochSeconds = jest.fn<
@@ -123,6 +124,7 @@ async function createHarness(): Promise<Harness> {
       sidePreference: 'Left',
       rating: 3,
       isVerified: false,
+      capabilities: [],
     },
   });
   const moduleRef = await Test.createTestingModule({
@@ -227,10 +229,12 @@ describe('PlayerProfileController HTTP boundary', () => {
       sidePreference: 'Right',
       rating: 3,
       isVerified: false,
+      capabilities: [],
     });
     expect(Object.keys(response.json()).sort()).toEqual(
       [
         'accountId',
+        'capabilities',
         'firstName',
         'languageCode',
         'lastName',
@@ -351,6 +355,7 @@ describe('PlayerProfileController HTTP boundary', () => {
         sidePreference: null,
         rating: 3,
         isVerified: false,
+        capabilities: [],
         extra: PRIVATE_MARKER,
       },
     },
@@ -415,6 +420,7 @@ describe('PlayerProfileController HTTP boundary', () => {
       sidePreference: 'Left',
       rating: 3,
       isVerified: false,
+      capabilities: [],
     });
     expect(harness.updateOwnProfile).toHaveBeenCalledWith({
       accountId: ACCOUNT_ID,

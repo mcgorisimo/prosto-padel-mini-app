@@ -16,6 +16,7 @@ export interface PlayerProfileRecord {
   readonly sidePreference?: 'Left' | 'Both' | 'Right';
   readonly rating: number;
   readonly isVerified: boolean;
+  readonly capabilities: readonly 'club_admin'[];
 }
 
 export type ReadPlayerProfileResult =

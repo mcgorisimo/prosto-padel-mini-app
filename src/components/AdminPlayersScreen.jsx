@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Search } from 'lucide-react';
 import AdminPlayerDetails from './AdminPlayerDetails';
 import { getLevelForRating } from '../lib/ratingEngine';
-import { adminListProfiles } from '../lib/profileApi';
 import { useTelegram } from '../hooks/useTelegram';
 
 const C = {
@@ -111,9 +110,23 @@ function PlayerCard({ player, onOpen }) {
   );
 }
 
-export default function AdminPlayersScreen({ user, onBack }) {
+function backendPlayerToView(player) {
+  return Object.freeze({
+    id: player.accountId,
+    first_name: player.firstName,
+    last_name: player.lastName,
+    username: player.username,
+    phone: player.phone,
+    side_preference: player.sidePreference,
+    role: 'player',
+    rating: player.rating,
+    is_verified: player.isVerified,
+  });
+}
+
+export default function AdminPlayersScreen({ user, adminActions, onBack }) {
   const { tg } = useTelegram();
-  const isAdmin = user?.role === 'admin';
+  const isAdmin = user?.isAdmin === true;
   const [players, setPlayers] = useState([]);
   const [selectedPlayer, setSelectedPlayer] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -134,6 +147,7 @@ export default function AdminPlayersScreen({ user, onBack }) {
 
   useEffect(() => {
     if (!isAdmin) return;
+    let cancelled = false;
 
     const loadPlayers = async () => {
       setLoading(true);
@@ -142,11 +156,20 @@ export default function AdminPlayersScreen({ user, onBack }) {
       let data = [];
       let loadError = null;
       try {
-        data = await adminListProfiles({ search: query, filter });
+        const result = await adminActions?.listAdminPlayers?.({
+          ...(query.trim() ? { search: query.trim().normalize('NFKC') } : {}),
+          verification: filter,
+          limit: 50,
+        });
+        if (result?.outcome !== 'admin_players_loaded') {
+          throw new Error('ADMIN_PLAYER_LIST_REJECTED');
+        }
+        data = result.players.map(backendPlayerToView);
       } catch (error) {
         loadError = error;
       }
 
+      if (cancelled) return;
       if (loadError) {
         setPlayers([]);
         setError('Не удалось загрузить игроков. Проверьте доступ и попробуйте еще раз.');
@@ -158,7 +181,10 @@ export default function AdminPlayersScreen({ user, onBack }) {
     };
 
     loadPlayers();
-  }, [isAdmin, query, filter]);
+    return () => {
+      cancelled = true;
+    };
+  }, [adminActions, isAdmin, query, filter]);
 
   const filteredPlayers = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -192,6 +218,7 @@ export default function AdminPlayersScreen({ user, onBack }) {
     return (
       <AdminPlayerDetails
         user={user}
+        adminActions={adminActions}
         player={selectedPlayer}
         onBack={() => setSelectedPlayer(null)}
         onSaved={handleSaved}

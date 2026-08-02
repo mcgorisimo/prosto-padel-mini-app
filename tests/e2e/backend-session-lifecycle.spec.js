@@ -778,6 +778,7 @@ test.describe('backend session credential lifecycle', () => {
             sidePreference: 'Left',
             rating: 4.25,
             isVerified: true,
+            capabilities: ['club_admin'],
           };
           if (calls === 2) {
             body.internalDigest = 'must-be-rejected';
@@ -797,11 +798,12 @@ test.describe('backend session credential lifecycle', () => {
         acceptedOutcome: accepted.outcome,
         acceptedExactKeys:
           Object.keys(accepted.profile ?? {}).sort().join(',') ===
-          'accountId,firstName,isVerified,languageCode,lastName,phone,photoUrl,rating,role,sidePreference,username',
+          'accountId,capabilities,firstName,isVerified,languageCode,lastName,phone,photoUrl,rating,role,sidePreference,username',
         acceptedAccountMatches:
           accepted.profile?.accountId === parameters.accountId,
         acceptedRating: accepted.profile?.rating,
         acceptedIsVerified: accepted.profile?.isVerified,
+        acceptedCapabilities: accepted.profile?.capabilities,
         acceptedExposesCredential:
           Object.prototype.hasOwnProperty.call(accepted, 'credential'),
         malformedOutcome: malformed.outcome,
@@ -841,6 +843,7 @@ test.describe('backend session credential lifecycle', () => {
       acceptedAccountMatches: true,
       acceptedRating: 4.25,
       acceptedIsVerified: true,
+      acceptedCapabilities: ['club_admin'],
       acceptedExposesCredential: false,
       malformedOutcome: 'rejected',
       malformedReason: 'internal_error',
@@ -954,6 +957,238 @@ test.describe('backend session credential lifecycle', () => {
     });
   });
 
+  test('lists players and updates rating only through the backend admin capability boundary', async ({
+    page,
+  }) => {
+    await prepareTelegramWithSecureStorage(page, null, '');
+    await page.goto('/');
+
+    const summary = await page.evaluate(async (parameters) => {
+      const { createBackendSessionClient } = await import(
+        '/src/lib/backendSessionClient.js'
+      );
+      const contracts = [];
+      const client = createBackendSessionClient({
+        cryptoImpl: { randomUUID: () => parameters.requestKey },
+        fetchImpl: async (url, options) => {
+          contracts.push({
+            url,
+            method: options.method,
+            bearerMatches:
+              options.headers.Authorization ===
+              `Bearer ${parameters.credential}`,
+            cache: options.cache,
+            credentials: options.credentials,
+            redirect: options.redirect,
+            body: options.body === undefined
+              ? null
+              : JSON.parse(options.body),
+          });
+          if (options.method === 'GET') {
+            return new Response(JSON.stringify({
+              players: [{
+                accountId: parameters.playerId,
+                firstName: 'Synthetic',
+                lastName: 'Player',
+                username: 'synthetic_player',
+                phone: '+79991112233',
+                sidePreference: 'Left',
+                rating: 3,
+                isVerified: false,
+              }],
+              nextCursor: null,
+            }), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            });
+          }
+          return new Response(JSON.stringify({
+            state: {
+              commandId: parameters.requestKey,
+              targetAccountId: parameters.playerId,
+              resultType: 'rating_and_verification_updated',
+              ratingBefore: 3,
+              rating: 4.25,
+              isVerifiedBefore: false,
+              isVerified: true,
+              appliedAt: 1_800_000_000,
+            },
+          }), {
+            status: 201,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        },
+      });
+
+      const listed = await client.listAdminPlayers(
+        parameters.credential,
+        { search: 'Synthetic', verification: 'unverified', limit: 2 },
+      );
+      const updated = await client.setAdminPlayerRatingState(
+        parameters.credential,
+        parameters.playerId,
+        4.25,
+        true,
+      );
+      const callsBeforeInvalid = contracts.length;
+      const invalid = await client.listAdminPlayers(
+        parameters.credential,
+        { verification: 'unknown', limit: 2 },
+      );
+
+      return {
+        contracts,
+        callsBeforeInvalid,
+        listedOutcome: listed.outcome,
+        listedPlayerId: listed.players?.[0]?.accountId,
+        listedFrozen:
+          Object.isFrozen(listed) &&
+          Object.isFrozen(listed.players) &&
+          Object.isFrozen(listed.players?.[0]),
+        updatedOutcome: updated.outcome,
+        updatedState: updated.state,
+        invalidOutcome: invalid.outcome,
+        invalidReason: invalid.reason,
+      };
+    }, {
+      credential: NEXT_CREDENTIAL,
+      playerId: '22222222-2222-4222-8222-222222222222',
+      requestKey: FIXED_REQUEST_KEY,
+    });
+
+    expect(summary).toEqual({
+      contracts: [
+        {
+          url: '/api/v1/admin/players?verification=unverified&limit=2&search=Synthetic',
+          method: 'GET',
+          bearerMatches: true,
+          cache: 'no-store',
+          credentials: 'omit',
+          redirect: 'error',
+          body: null,
+        },
+        {
+          url: '/api/v1/admin/players/22222222-2222-4222-8222-222222222222/rating-state',
+          method: 'POST',
+          bearerMatches: true,
+          cache: 'no-store',
+          credentials: 'omit',
+          redirect: 'error',
+          body: {
+            requestKey: FIXED_REQUEST_KEY,
+            rating: 4.25,
+            isVerified: true,
+          },
+        },
+      ],
+      callsBeforeInvalid: 2,
+      listedOutcome: 'admin_players_loaded',
+      listedPlayerId: '22222222-2222-4222-8222-222222222222',
+      listedFrozen: true,
+      updatedOutcome: 'admin_rating_state_updated',
+      updatedState: {
+        commandId: FIXED_REQUEST_KEY,
+        targetAccountId: '22222222-2222-4222-8222-222222222222',
+        resultType: 'rating_and_verification_updated',
+        ratingBefore: 3,
+        rating: 4.25,
+        isVerifiedBefore: false,
+        isVerified: true,
+        appliedAt: 1_800_000_000,
+      },
+      invalidOutcome: 'rejected',
+      invalidReason: 'invalid_request',
+    });
+  });
+
+  test('admin player UI loads and saves through backend actions without Supabase profile calls', async ({
+    page,
+  }) => {
+    let legacyProfileCalls = 0;
+    await page.route(/\/rest\/v1\/profiles/iu, async (route) => {
+      legacyProfileCalls += 1;
+      await route.fulfill({ status: 500, body: '{}' });
+    });
+    await prepareTelegramWithSecureStorage(page, null, '');
+    await page.goto('/');
+
+    await page.evaluate(async (parameters) => {
+      const reactModule = await import('/@id/react');
+      const React = reactModule.default ?? reactModule;
+      const reactDomClientModule = await import('/@id/react-dom/client');
+      const { createRoot } =
+        reactDomClientModule.default ?? reactDomClientModule;
+      const { default: AdminPlayersScreen } = await import(
+        '/src/components/AdminPlayersScreen.jsx'
+      );
+      const calls = { list: 0, set: 0, setInput: null };
+      window.__adminPlayerUiCalls = calls;
+      document.body.innerHTML = '<div id="admin-root"></div>';
+      createRoot(document.getElementById('admin-root')).render(
+        React.createElement(AdminPlayersScreen, {
+          user: { id: parameters.adminId, isAdmin: true },
+          adminActions: {
+            async listAdminPlayers(request) {
+              calls.list += 1;
+              calls.listRequest = request;
+              return {
+                outcome: 'admin_players_loaded',
+                players: [{
+                  accountId: parameters.playerId,
+                  firstName: 'Synthetic',
+                  lastName: 'Player',
+                  username: 'synthetic_player',
+                  phone: '+79991112233',
+                  sidePreference: 'Left',
+                  rating: 3,
+                  isVerified: false,
+                }],
+                nextCursor: null,
+              };
+            },
+            async setAdminPlayerRatingState(playerId, rating, isVerified) {
+              calls.set += 1;
+              calls.setInput = { playerId, rating, isVerified };
+              return {
+                outcome: 'admin_rating_state_updated',
+                state: {
+                  targetAccountId: playerId,
+                  rating,
+                  isVerified,
+                },
+              };
+            },
+          },
+          onBack() {},
+        }),
+      );
+    }, {
+      adminId: SYNTHETIC_ACCOUNT_ID,
+      playerId: '22222222-2222-4222-8222-222222222222',
+    });
+
+    await expect(page.getByText('Synthetic Player')).toBeVisible();
+    await page.locator('#admin-root button').last().click();
+    await page.locator('#admin-root input[type="number"]').fill('4.25');
+    await page.locator('#admin-root input[type="checkbox"]').check();
+    await page.locator('#admin-root button').last().click();
+    await expect(page.locator('#admin-root input[type="number"]'))
+      .toHaveValue('4.25');
+
+    const calls = await page.evaluate(() => window.__adminPlayerUiCalls);
+    expect(calls).toEqual({
+      list: 1,
+      listRequest: { verification: 'all', limit: 50 },
+      set: 1,
+      setInput: {
+        playerId: '22222222-2222-4222-8222-222222222222',
+        rating: 4.25,
+        isVerified: true,
+      },
+    });
+    expect(legacyProfileCalls).toBe(0);
+  });
+
   test('backend-owned profile fields override Supabase while legacy fields retain fallback behavior', async ({
     page,
   }) => {
@@ -985,6 +1220,7 @@ test.describe('backend session credential lifecycle', () => {
           sidePreference: 'Left',
           rating: 4.25,
           isVerified: true,
+          capabilities: ['club_admin'],
         },
         {
           first_name: 'Metadata',
@@ -1007,6 +1243,7 @@ test.describe('backend session credential lifecycle', () => {
           languageCode: 'ru',
           phone: null,
           sidePreference: null,
+          capabilities: [],
         },
       );
 
@@ -1019,12 +1256,28 @@ test.describe('backend session credential lifecycle', () => {
         backendPhoneOwned: merged.phone === '+79991112233',
         sidePreference: merged.side_preference,
         supabaseRolePreserved: merged.role === 'user',
+        backendCapabilityWins: merged.is_admin === true,
         exposesAccountId:
           Object.prototype.hasOwnProperty.call(merged, 'accountId'),
         uninitializedPhoneFallback:
           uninitialized.phone === '+79990000000',
         uninitializedSideFallback:
           uninitialized.side_preference === 'Right',
+        legacyAdminDoesNotLeak:
+          mergeProfileSources({ role: 'admin' }, {
+            accountId: '11111111-1111-4111-8111-111111111111',
+            role: 'player',
+            firstName: 'Backend',
+            lastName: null,
+            username: null,
+            photoUrl: null,
+            languageCode: 'ru',
+            phone: null,
+            sidePreference: null,
+            rating: 3,
+            isVerified: false,
+            capabilities: [],
+          }).is_admin === false,
       };
     });
 
@@ -1037,9 +1290,11 @@ test.describe('backend session credential lifecycle', () => {
       backendPhoneOwned: true,
       sidePreference: 'Left',
       supabaseRolePreserved: true,
+      backendCapabilityWins: true,
       exposesAccountId: false,
       uninitializedPhoneFallback: true,
       uninitializedSideFallback: true,
+      legacyAdminDoesNotLeak: true,
     });
   });
 
@@ -1172,7 +1427,7 @@ test.describe('backend session credential lifecycle', () => {
         sharedOutcome: sharedResult.outcome,
         firstExactProfile:
           Object.keys(firstResult.profile ?? {}).sort().join(',') ===
-          'accountId,firstName,languageCode,lastName,phone,photoUrl,role,sidePreference,username',
+          'accountId,capabilities,firstName,languageCode,lastName,phone,photoUrl,role,sidePreference,username',
         firstExposesCredential:
           Object.prototype.hasOwnProperty.call(firstResult, 'credential') ||
           Object.prototype.hasOwnProperty.call(

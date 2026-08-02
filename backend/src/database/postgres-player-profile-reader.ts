@@ -33,7 +33,15 @@ const FIND_PLAYER_PROFILE_SQL = `
     details.phone,
     details.side_preference,
     rating_states.rating,
-    rating_states.is_verified
+    rating_states.is_verified,
+    COALESCE((
+      SELECT capability_events.event_type = 'granted'
+      FROM backend_auth.admin_capability_events AS capability_events
+      WHERE capability_events.account_id = details.account_id
+        AND capability_events.capability = 'club_admin'
+      ORDER BY capability_events.event_order DESC
+      LIMIT 1
+    ), false) AS has_club_admin_capability
   FROM backend_auth.player_profile_details AS details
   LEFT JOIN backend_auth.player_rating_states AS rating_states
     ON rating_states.account_id = details.account_id
@@ -51,6 +59,7 @@ interface PlayerProfileRow extends QueryResultRow {
   readonly side_preference: unknown;
   readonly rating: unknown;
   readonly is_verified: unknown;
+  readonly has_club_admin_capability: unknown;
 }
 
 function failure(
@@ -199,6 +208,13 @@ function hydrateProfile(
   const sidePreference = readSidePreference(row.side_preference);
   const rating = readRating(row.rating);
   const isVerified = readVerification(row.is_verified);
+  const hasClubAdminCapability = readVerification(
+    row.has_club_admin_capability,
+  );
+  const capabilities: PlayerProfileRecord['capabilities'] =
+    hasClubAdminCapability
+      ? Object.freeze(['club_admin'] as const)
+      : Object.freeze([]);
 
   return Object.freeze({
     accountId: row.account_id,
@@ -211,6 +227,7 @@ function hydrateProfile(
     ...(sidePreference === undefined ? {} : { sidePreference }),
     rating,
     isVerified,
+    capabilities,
   });
 }
 

@@ -311,6 +311,9 @@ export function mergeProfileSources(profile, backendProfile, metadata = {}) {
     is_verified: backendProfile
       ? backendProfile.isVerified === true
       : baseProfile.is_verified,
+    is_admin: backendProfile
+      ? backendProfile.capabilities?.includes('club_admin') === true
+      : false,
   };
 }
 
@@ -894,13 +897,15 @@ export default function App({
       side_preference: p.side_preference || 'Both',
       username: p.username || user?.username || meta.username || '',
       role: p.role,
+      isAdmin: p.is_admin === true,
     };
   }, [backendProfile, profile, session, user?.username]); // <-- добавили session в зависимости
 
   const backendMatchCurrentUser = useMemo(() => ({
     ...currentUser,
     id: backendProfile?.accountId ?? null,
-  }), [backendProfile?.accountId, currentUser]);
+    role: backendProfile?.role ?? 'player',
+  }), [backendProfile?.accountId, backendProfile?.role, currentUser]);
   const matchCurrentUser = isBackendOwnedMatch(selectedMatch)
     ? backendMatchCurrentUser
     : currentUser;
@@ -1077,7 +1082,7 @@ export default function App({
     backendMatchesReady,
   ]);
 
-  const isAdmin = currentUser?.role === 'admin';
+  const isAdmin = currentUser?.isAdmin === true;
 
   // ── Delete match: remove from allMatches (persisted via useLocalStorage) ──
   const handleDeleteMatch = async (matchId) => {
@@ -2692,7 +2697,13 @@ const handleBookSlot = async (booking) => {
   }
 
   if (screen === 'admin') {
-    return <AdminScreen user={currentUser} onBack={() => setScreen(null)} />;
+    return (
+      <AdminScreen
+        user={currentUser}
+        adminActions={backendMatchActions}
+        onBack={() => setScreen(null)}
+      />
+    );
   }
     
   
@@ -2701,7 +2712,7 @@ const handleBookSlot = async (booking) => {
     <div className="app-container">
       {/* isDevMode check needs to be updated if role is in profile table */}
       {/* Dev mode badge — visible only for admin accounts */}
-      {currentUser.role === 'admin' && (
+      {isAdmin && (
         <div style={{
           position: 'fixed', top: '10px', right: '10px', zIndex: 9999,
           background: 'rgba(234,67,53,0.12)', border: '1px solid rgba(234,67,53,0.35)',
@@ -2752,7 +2763,7 @@ const handleBookSlot = async (booking) => {
             onLogout={handleLogout}
             onOpenSettings={() => setScreen('edit-profile')} // This needs showToast
             onOpenAdmin={() => {
-              if (currentUser.role === 'admin') setScreen('admin');
+              if (isAdmin) setScreen('admin');
             }}
             // showToast is already passed to App, no need to pass it here again
             showToast={showToast}
@@ -2796,7 +2807,13 @@ const handleBookSlot = async (booking) => {
             onRetry={
               usesBackendMatches ? loadBackendMatchFeed : loadMatches
             }
-            onReset={currentUser?.role === 'admin' ? handleReset : null}
+            onReset={
+              backendMatchRequired
+                ? null
+                : currentUser?.role === 'admin'
+                  ? handleReset
+                  : null
+            }
           />
         )}
 

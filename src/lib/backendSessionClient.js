@@ -8,6 +8,7 @@ const MATCHES_PATH = '/api/v1/matches';
 const PLAYER_SEARCH_PATH = '/api/v1/players/search';
 const MATCH_INVITATIONS_PATH = '/api/v1/match-invitations';
 const CONTENT_MODERATION_PATH = '/api/v1/content/moderation';
+const ADMIN_PLAYERS_PATH = '/api/v1/admin/players';
 const REQUEST_TIMEOUT_MS = 8_000;
 const MAX_REQUESTS = 3;
 const BACKOFF_BASE_MS = 250;
@@ -20,6 +21,7 @@ const MAX_MATCH_CHAT_RESPONSE_BODY_BYTES = 524_288;
 const MAX_MATCH_WAITLIST_RESPONSE_BODY_BYTES = 524_288;
 const MAX_MATCH_LINEUP_RESPONSE_BODY_BYTES = 262_144;
 const MAX_MATCH_RESULT_RESPONSE_BODY_BYTES = 65_536;
+const MAX_ADMIN_PLAYER_RESPONSE_BODY_BYTES = 262_144;
 
 const BODY_ABORTED = Symbol('backend-session-body-aborted');
 const BODY_INVALID = Symbol('backend-session-body-invalid');
@@ -98,6 +100,26 @@ const RATING_PROFILE_KEYS = Object.freeze([
   'sidePreference',
   'username',
 ]);
+const CAPABILITY_PROFILE_KEYS = Object.freeze([
+  'accountId',
+  'capabilities',
+  'firstName',
+  'isVerified',
+  'languageCode',
+  'lastName',
+  'phone',
+  'photoUrl',
+  'rating',
+  'role',
+  'sidePreference',
+  'username',
+]);
+const ADMIN_VERIFICATION_FILTERS = Object.freeze([
+  'all',
+  'verified',
+  'unverified',
+]);
+const ADMIN_CURSOR_PATTERN = /^[A-Za-z0-9_-]{1,1024}$/u;
 
 function frozen(outcome, extra = {}) {
   return Object.freeze({ outcome, ...extra });
@@ -835,7 +857,9 @@ function authenticationSuccess(body) {
 export function isBackendOwnProfile(value) {
   if (!isPlainObject(value)) return false;
   const keys = Object.keys(value).sort();
-  const hasRatingState = hasExactKeys(keys, RATING_PROFILE_KEYS);
+  const hasCapabilities = hasExactKeys(keys, CAPABILITY_PROFILE_KEYS);
+  const hasRatingState =
+    hasCapabilities || hasExactKeys(keys, RATING_PROFILE_KEYS);
   if (
     (!hasRatingState && !hasExactKeys(keys, LEGACY_PROFILE_KEYS)) ||
     !INTERNAL_UUID_PATTERN.test(value.accountId) ||
@@ -852,7 +876,13 @@ export function isBackendOwnProfile(value) {
       !SIDE_PREFERENCES.includes(value.sidePreference)) ||
     (hasRatingState &&
       (!isRating(value.rating) ||
-        typeof value.isVerified !== 'boolean'))
+        typeof value.isVerified !== 'boolean')) ||
+    (hasCapabilities &&
+      (!Array.isArray(value.capabilities) ||
+        value.capabilities.length > 1 ||
+        value.capabilities.some(
+          (capability) => capability !== 'club_admin',
+        )))
   ) {
     return false;
   }
@@ -907,7 +937,103 @@ function profileSuccess(body, outcome = 'profile_loaded') {
             isVerified: body.isVerified,
           }
         : {}),
+      ...(Object.prototype.hasOwnProperty.call(body, 'capabilities')
+        ? {
+            capabilities: Object.freeze([...body.capabilities]),
+          }
+        : {}),
     }),
+  });
+}
+
+function isBackendAdminPlayer(value) {
+  return (
+    isPlainObject(value) &&
+    hasExactKeys(
+      Object.keys(value).sort(),
+      [
+        'accountId',
+        'firstName',
+        'isVerified',
+        'lastName',
+        'phone',
+        'rating',
+        'sidePreference',
+        'username',
+      ],
+    ) &&
+    isMatchId(value.accountId) &&
+    isBoundedString(value.firstName, 256) &&
+    isNullableBoundedString(value.lastName, 256) &&
+    isNullableBoundedString(value.username, 64) &&
+    (value.phone === null ||
+      (typeof value.phone === 'string' && PHONE_PATTERN.test(value.phone))) &&
+    (value.sidePreference === null ||
+      SIDE_PREFERENCES.includes(value.sidePreference)) &&
+    isRating(value.rating) &&
+    typeof value.isVerified === 'boolean'
+  );
+}
+
+function adminPlayerListSuccess(body, limit) {
+  if (
+    !isPlainObject(body) ||
+    !hasExactKeys(Object.keys(body).sort(), ['nextCursor', 'players']) ||
+    !Array.isArray(body.players) ||
+    body.players.length > limit ||
+    !body.players.every(isBackendAdminPlayer) ||
+    new Set(body.players.map((player) => player.accountId)).size !==
+      body.players.length ||
+    (body.nextCursor !== null &&
+      (typeof body.nextCursor !== 'string' ||
+        !ADMIN_CURSOR_PATTERN.test(body.nextCursor)))
+  ) {
+    return null;
+  }
+  return frozen('admin_players_loaded', {
+    players: Object.freeze(
+      body.players.map((player) => Object.freeze({ ...player })),
+    ),
+    nextCursor: body.nextCursor,
+  });
+}
+
+function adminRatingStateSuccess(body, expectedPlayerId) {
+  if (
+    !isPlainObject(body) ||
+    !hasExactKeys(Object.keys(body).sort(), ['state']) ||
+    !isPlainObject(body.state) ||
+    !hasExactKeys(
+      Object.keys(body.state).sort(),
+      [
+        'appliedAt',
+        'commandId',
+        'isVerified',
+        'isVerifiedBefore',
+        'rating',
+        'ratingBefore',
+        'resultType',
+        'targetAccountId',
+      ],
+    ) ||
+    !isMatchId(body.state.commandId) ||
+    body.state.targetAccountId !== expectedPlayerId ||
+    ![
+      'rating_updated',
+      'verification_updated',
+      'rating_and_verification_updated',
+      'rating_state_unchanged',
+    ].includes(body.state.resultType) ||
+    !isRating(body.state.ratingBefore) ||
+    !isRating(body.state.rating) ||
+    typeof body.state.isVerifiedBefore !== 'boolean' ||
+    typeof body.state.isVerified !== 'boolean' ||
+    !isUnixEpochSeconds(body.state.appliedAt)
+  ) {
+    return null;
+  }
+  return frozen('admin_rating_state_updated', {
+    state: Object.freeze({ ...body.state }),
   });
 }
 
@@ -1795,6 +1921,22 @@ function classifyMatchResult(status, body) {
   });
 }
 
+function classifyAdminPlayerRating(status, body) {
+  const code = exactPublicCode(body);
+  if (status === 401 && code === 'session_invalid') {
+    return frozen('rejected', { reason: 'invalid' });
+  }
+  const reasons = Object.freeze({
+    admin_player_rating_invalid_request: 'invalid_request',
+    admin_player_rating_forbidden: 'forbidden',
+    admin_player_rating_player_not_found: 'player_not_found',
+    admin_player_rating_request_conflict: 'request_conflict',
+  });
+  return frozen('rejected', {
+    reason: reasons[code] ?? 'internal_error',
+  });
+}
+
 export function createBackendSessionClient(dependencies = {}) {
   const fetchImpl = dependencies.fetchImpl ?? globalThis.fetch?.bind(globalThis);
   const cryptoImpl = dependencies.cryptoImpl ?? globalThis.crypto;
@@ -1843,12 +1985,14 @@ export function createBackendSessionClient(dependencies = {}) {
         operation.startsWith('match_lineup_');
       const isMatchResultOperation =
         operation.startsWith('match_result_');
+      const isAdminOperation = operation.startsWith('admin_');
       const isMatchListOperation =
         operation === 'match_list' || operation === 'match_list_mine';
       const isPlayerSearchOperation = operation === 'player_search';
       const isReadOnly =
         operation === 'authenticate' ||
         operation === 'profile' ||
+        operation === 'admin_players_list' ||
         isMatchListOperation ||
         operation === 'match_detail' ||
         operation === 'player_search' ||
@@ -1869,6 +2013,7 @@ export function createBackendSessionClient(dependencies = {}) {
         `${MATCHES_PATH}/${encodeURIComponent(matchId)}/lineup`;
       const matchResultPath =
         `${MATCHES_PATH}/${encodeURIComponent(matchId)}/result`;
+      const adminPlayerId = operationPayload?.playerId;
       const url =
         operation === 'refresh'
           ? REFRESH_PATH
@@ -1876,6 +2021,18 @@ export function createBackendSessionClient(dependencies = {}) {
             ? LOGOUT_PATH
             : isProfileOperation
               ? PROFILE_PATH
+              : operation === 'admin_players_list'
+                ? `${ADMIN_PLAYERS_PATH}?verification=${operationPayload.verification}&limit=${operationPayload.limit}${
+                    operationPayload.search === undefined
+                      ? ''
+                      : `&search=${encodeURIComponent(operationPayload.search)}`
+                  }${
+                    operationPayload.cursor === undefined
+                      ? ''
+                      : `&cursor=${encodeURIComponent(operationPayload.cursor)}`
+                  }`
+              : operation === 'admin_player_rating_set'
+                ? `${ADMIN_PLAYERS_PATH}/${encodeURIComponent(adminPlayerId)}/rating-state`
               : operation === 'content_moderation'
                 ? CONTENT_MODERATION_PATH
               : operation === 'match_list'
@@ -1924,7 +2081,7 @@ export function createBackendSessionClient(dependencies = {}) {
                           ? `${matchLineupPath}/release`
                         : operation === 'match_result_read'
                           ? matchResultPath
-                        : operation === 'match_result_submit'
+                    : operation === 'match_result_submit'
                           ? `${matchResultPath}/submit`
                         : operation === 'match_result_confirm'
                           ? `${matchResultPath}/confirm`
@@ -1993,6 +2150,12 @@ export function createBackendSessionClient(dependencies = {}) {
                               requestKey,
                               sets: operationPayload.sets,
                             }
+                        : operation === 'admin_player_rating_set'
+                          ? {
+                              requestKey,
+                              rating: operationPayload.rating,
+                              isVerified: operationPayload.isVerified,
+                            }
                         : { requestKey },
                 ),
               }),
@@ -2027,6 +2190,8 @@ export function createBackendSessionClient(dependencies = {}) {
                 ? MAX_MATCH_LINEUP_RESPONSE_BODY_BYTES
               : isMatchResultOperation
                 ? MAX_MATCH_RESULT_RESPONSE_BODY_BYTES
+              : isAdminOperation
+                ? MAX_ADMIN_PLAYER_RESPONSE_BODY_BYTES
               : MAX_RESPONSE_BODY_BYTES,
       );
       if (operation === 'authenticate' && response.status === 200) {
@@ -2043,6 +2208,24 @@ export function createBackendSessionClient(dependencies = {}) {
       }
       if (operation === 'profile_update' && response.status === 200) {
         const result = profileSuccess(body, 'profile_updated');
+        return result
+          ? frozen('success', { result })
+          : frozen('malformed_response');
+      }
+      if (operation === 'admin_players_list' && response.status === 200) {
+        const result = adminPlayerListSuccess(
+          body,
+          operationPayload.limit,
+        );
+        return result
+          ? frozen('success', { result })
+          : frozen('malformed_response');
+      }
+      if (
+        operation === 'admin_player_rating_set' &&
+        response.status === 201
+      ) {
+        const result = adminRatingStateSuccess(body, adminPlayerId);
         return result
           ? frozen('success', { result })
           : frozen('malformed_response');
@@ -2290,6 +2473,8 @@ export function createBackendSessionClient(dependencies = {}) {
                   ? 'match_lineup_service_unavailable'
                 : isMatchResultOperation
                   ? 'match_result_service_unavailable'
+                : isAdminOperation
+                  ? 'admin_player_rating_unavailable'
             : isMatchOperation
               ? 'match_service_unavailable'
               : 'session_service_unavailable'
@@ -2315,8 +2500,10 @@ export function createBackendSessionClient(dependencies = {}) {
                       ? classifyMatchWaitlist(response.status, body)
                     : isMatchLineupOperation
                       ? classifyMatchLineup(response.status, body)
-                    : isMatchResultOperation
-                      ? classifyMatchResult(response.status, body)
+                : isMatchResultOperation
+                  ? classifyMatchResult(response.status, body)
+                : isAdminOperation
+                  ? classifyAdminPlayerRating(response.status, body)
                   : operation === 'content_moderation'
                     ? frozen('rejected', {
                         reason:
@@ -2465,7 +2652,31 @@ export function createBackendSessionClient(dependencies = {}) {
         )) ||
       ((operation === 'match_result_confirm' ||
         operation === 'match_result_dispute') &&
-        !isMatchId(operationPayload?.matchId))
+        !isMatchId(operationPayload?.matchId)) ||
+      (operation === 'admin_players_list' &&
+        (
+          !ADMIN_VERIFICATION_FILTERS.includes(
+            operationPayload?.verification,
+          ) ||
+          !Number.isInteger(operationPayload?.limit) ||
+          operationPayload.limit < 1 ||
+          operationPayload.limit > 50 ||
+          (operationPayload.search !== undefined &&
+            (!isBoundedString(operationPayload.search, 64) ||
+              operationPayload.search.trim() !== operationPayload.search ||
+              operationPayload.search.normalize('NFKC') !==
+                operationPayload.search ||
+              CONTROL_CHARACTER_PATTERN.test(operationPayload.search))) ||
+          (operationPayload.cursor !== undefined &&
+            (typeof operationPayload.cursor !== 'string' ||
+              !ADMIN_CURSOR_PATTERN.test(operationPayload.cursor)))
+        )) ||
+      (operation === 'admin_player_rating_set' &&
+        (
+          !isMatchId(operationPayload?.playerId) ||
+          !isRating(operationPayload?.rating) ||
+          typeof operationPayload?.isVerified !== 'boolean'
+        ))
     ) {
       return frozen('rejected', { reason: 'invalid_request' });
     }
@@ -2488,7 +2699,8 @@ export function createBackendSessionClient(dependencies = {}) {
       operation === 'match_lineup_release' ||
       operation === 'match_result_submit' ||
       operation === 'match_result_confirm' ||
-      operation === 'match_result_dispute';
+      operation === 'match_result_dispute' ||
+      operation === 'admin_player_rating_set';
     const requestKey =
       requiresRequestKey ? createRequestKey(cryptoImpl) : null;
     if (requiresRequestKey && !requestKey) {
@@ -2546,6 +2758,28 @@ export function createBackendSessionClient(dependencies = {}) {
       execute('profile', credential, options),
     updateOwnProfile: (credential, profilePatch, options) =>
       execute('profile_update', credential, options, profilePatch),
+    listAdminPlayers: (credential, request = {}, options) =>
+      execute('admin_players_list', credential, options, {
+        verification: request.verification ?? 'all',
+        limit: request.limit ?? 20,
+        ...(request.search === undefined
+          ? {}
+          : { search: request.search }),
+        ...(request.cursor === undefined
+          ? {}
+          : { cursor: request.cursor }),
+      }),
+    setAdminPlayerRatingState: (
+      credential,
+      playerId,
+      rating,
+      isVerified,
+      options,
+    ) => execute('admin_player_rating_set', credential, options, {
+      playerId,
+      rating,
+      isVerified,
+    }),
     moderateText: (credential, text, options) =>
       execute('content_moderation', credential, options, { text }),
     listMatches: (credential, limit = 20, options) =>

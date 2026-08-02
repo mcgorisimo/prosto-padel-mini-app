@@ -73,6 +73,7 @@ function createHarness(): Harness {
       sidePreference: 'Right',
       rating: 3,
       isVerified: false,
+      capabilities: [],
     },
   });
   const updateByAccountId = jest.fn<
@@ -122,6 +123,7 @@ describe('PlayerProfileService', () => {
         sidePreference: 'Right',
         rating: 3,
         isVerified: false,
+        capabilities: [],
       },
     });
     expect(harness.transactions.calls).toBe(1);
@@ -132,6 +134,7 @@ describe('PlayerProfileService', () => {
     expect(Object.isFrozen(result)).toBe(true);
     if (result.outcome === 'found') {
       expect(Object.isFrozen(result.profile)).toBe(true);
+      expect(Object.isFrozen(result.profile.capabilities)).toBe(true);
     }
   });
 
@@ -144,6 +147,7 @@ describe('PlayerProfileService', () => {
         firstName: 'Synthetic',
         rating: 3,
         isVerified: false,
+        capabilities: [],
       },
     });
 
@@ -161,6 +165,7 @@ describe('PlayerProfileService', () => {
         sidePreference: null,
         rating: 3,
         isVerified: false,
+        capabilities: [],
       },
     });
   });
@@ -174,6 +179,7 @@ describe('PlayerProfileService', () => {
         firstName: 'Synthetic',
         rating: 0.29,
         isVerified: true,
+        capabilities: ['club_admin'],
       },
     });
 
@@ -191,6 +197,7 @@ describe('PlayerProfileService', () => {
         sidePreference: null,
         rating: 0.29,
         isVerified: true,
+        capabilities: ['club_admin'],
       },
     });
   });
@@ -253,6 +260,7 @@ describe('PlayerProfileService', () => {
         firstName: 'Synthetic',
         rating: 3,
         isVerified: false,
+        capabilities: [],
         ...patch,
       },
     } as never);
@@ -339,6 +347,7 @@ describe('PlayerProfileService', () => {
         sidePreference: 'Right',
         rating: 3,
         isVerified: false,
+        capabilities: [],
       },
     });
 

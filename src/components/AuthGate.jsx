@@ -89,6 +89,10 @@ export function createBackendMatchActions(telegramBackendLogin) {
       telegramBackendLogin.confirmMatchResult,
     disputeMatchResult:
       telegramBackendLogin.disputeMatchResult,
+    listAdminPlayers:
+      telegramBackendLogin.listAdminPlayers,
+    setAdminPlayerRatingState:
+      telegramBackendLogin.setAdminPlayerRatingState,
   });
 }
 
@@ -234,6 +238,8 @@ export default function AuthGate() {
       telegramBackendLogin.submitMatchResult,
       telegramBackendLogin.confirmMatchResult,
       telegramBackendLogin.disputeMatchResult,
+      telegramBackendLogin.listAdminPlayers,
+      telegramBackendLogin.setAdminPlayerRatingState,
       telegramBackendLogin.searchPlayers,
       telegramBackendLogin.sendMatchMessage,
       telegramBackendLogin.sessionReady,

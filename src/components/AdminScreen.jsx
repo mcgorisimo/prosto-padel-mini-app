@@ -68,9 +68,9 @@ function Header({ onBack }) {
   );
 }
 
-export default function AdminScreen({ user, onBack }) {
+export default function AdminScreen({ user, adminActions, onBack }) {
   const { tg } = useTelegram();
-  const isAdmin = user?.role === 'admin';
+  const isAdmin = user?.isAdmin === true;
   const [section, setSection] = useState(null);
 
   useEffect(() => {
@@ -89,7 +89,11 @@ export default function AdminScreen({ user, onBack }) {
     return (
       <div style={{ background: C.bg, minHeight: '100vh', paddingBottom: '40px' }}>
         <Header onBack={() => setSection(null)} />
-        <AdminPlayersScreen user={user} onBack={() => setSection(null)} />
+        <AdminPlayersScreen
+          user={user}
+          adminActions={adminActions}
+          onBack={() => setSection(null)}
+        />
       </div>
     );
   }

@@ -809,7 +809,7 @@ export default function PlayerProfile({ user, stats, upcomingMatches = [], compl
           {onBookCourt ? 'Забронировать / Создать матч' : 'Бронирование скоро будет обновлено'}
         </PadelButton>
 
-        {user?.role === 'admin' && (
+        {user?.isAdmin === true && (
           <PadelButton
             variant="info"
             size="md"

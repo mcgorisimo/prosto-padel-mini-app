@@ -746,6 +746,11 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
               languageCode: result.profile.languageCode,
               phone: result.profile.phone,
               sidePreference: result.profile.sidePreference,
+              capabilities: Object.freeze([
+                ...(Array.isArray(result.profile.capabilities)
+                  ? result.profile.capabilities
+                  : []),
+              ]),
               ...(Object.prototype.hasOwnProperty.call(
                 result.profile,
                 'rating',
@@ -1382,6 +1387,34 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
     );
   }
 
+  function listAdminPlayers(request = {}) {
+    return runMatchOperation(
+      (credential, signal) =>
+        matches.listAdminPlayers(credential, request, { signal }),
+      (result) =>
+        result?.outcome === 'admin_players_loaded' &&
+        Array.isArray(result.players),
+    );
+  }
+
+  function setAdminPlayerRatingState(playerId, rating, isVerified) {
+    return runMatchOperation(
+      (credential, signal) =>
+        matches.setAdminPlayerRatingState(
+          credential,
+          playerId,
+          rating,
+          isVerified,
+          { signal },
+        ),
+      (result) =>
+        result?.outcome === 'admin_rating_state_updated' &&
+        result.state?.targetAccountId === playerId &&
+        result.state?.rating === rating &&
+        result.state?.isVerified === isVerified,
+    );
+  }
+
   function attach(rawInitData, listener) {
     if (teardownTimer !== null) {
       clearTimer(teardownTimer);
@@ -1472,6 +1505,8 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
     submitMatchResult,
     confirmMatchResult,
     disputeMatchResult,
+    listAdminPlayers,
+    setAdminPlayerRatingState,
     logout,
   });
 }
@@ -1822,6 +1857,34 @@ export function useTelegramBackendLogin() {
     return telegramBackendLoginLifecycle.disputeMatchResult(matchId);
   }, []);
 
+  const listAdminPlayers = useCallback((request = {}) => {
+    if (!FEATURE_ENABLED) {
+      return Promise.resolve(Object.freeze({
+        outcome: 'rejected',
+        reason: 'not_authenticated',
+      }));
+    }
+    return telegramBackendLoginLifecycle.listAdminPlayers(request);
+  }, []);
+
+  const setAdminPlayerRatingState = useCallback((
+    playerId,
+    rating,
+    isVerified,
+  ) => {
+    if (!FEATURE_ENABLED) {
+      return Promise.resolve(Object.freeze({
+        outcome: 'rejected',
+        reason: 'not_authenticated',
+      }));
+    }
+    return telegramBackendLoginLifecycle.setAdminPlayerRatingState(
+      playerId,
+      rating,
+      isVerified,
+    );
+  }, []);
+
   useEffect(() => {
     if (!FEATURE_ENABLED) return undefined;
 
@@ -1872,6 +1935,8 @@ export function useTelegramBackendLogin() {
     submitMatchResult,
     confirmMatchResult,
     disputeMatchResult,
+    listAdminPlayers,
+    setAdminPlayerRatingState,
     logout,
   });
 }

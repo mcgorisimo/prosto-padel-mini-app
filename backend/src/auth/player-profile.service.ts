@@ -121,6 +121,7 @@ function readProfileRecord(
           'sidePreference',
           'rating',
           'isVerified',
+          'capabilities',
         ].includes(key),
     ) ||
     !isAccountId(value.accountId) ||
@@ -138,6 +139,9 @@ function readProfileRecord(
         !['Left', 'Both', 'Right'].includes(value.sidePreference)))
     || !isRating(value.rating)
     || typeof value.isVerified !== 'boolean'
+    || !Array.isArray(value.capabilities)
+    || value.capabilities.length > 1
+    || value.capabilities.some((capability) => capability !== 'club_admin')
   ) {
     return undefined;
   }
@@ -168,6 +172,7 @@ function publicProfile(
     sidePreference: profile.sidePreference ?? null,
     rating: profile.rating,
     isVerified: profile.isVerified,
+    capabilities: Object.freeze([...profile.capabilities]),
   });
 }
 
