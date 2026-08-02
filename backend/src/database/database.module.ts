@@ -5,6 +5,7 @@ import {
   SystemMatchCourtCatalog,
 } from '../matches/match-court-catalog';
 import { PostgresAccountStatusReader } from './postgres-account-status.reader';
+import { PostgresAdminPlayerRatingRepository } from './postgres-admin-player-rating.repository';
 import { PostgresAuthenticationOperationTerminalRepository } from './postgres-authentication-operation-terminal.repository';
 import { PostgresExternalIdentityResolutionRepository } from './postgres-external-identity.repository';
 import { PostgresInitialSessionRepository } from './postgres-initial-session.repository';
@@ -28,6 +29,7 @@ import { PostgresTransactionRunner } from './postgres-transaction';
 import { PostgresTransactionExecutorAdapter } from './postgres-transaction-executor.adapter';
 
 const DATABASE_WORKFLOW_PROVIDERS: Provider[] = [
+  PostgresAdminPlayerRatingRepository,
   PostgresSecurityAuditRepository,
   PostgresExternalIdentityResolutionRepository,
   PostgresAccountStatusReader,
@@ -122,6 +124,7 @@ const DATABASE_WORKFLOW_PROVIDERS: Provider[] = [
 const DATABASE_WORKFLOW_EXPORTS = [
   PostgresTransactionRunner,
   PostgresTransactionExecutorAdapter,
+  PostgresAdminPlayerRatingRepository,
   PostgresSecurityAuditRepository,
   PostgresTelegramAuthenticationOperationRepository,
   PostgresExternalIdentityResolutionRepository,

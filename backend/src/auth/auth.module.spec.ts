@@ -13,6 +13,7 @@ import {
   TELEGRAM_SESSION_TTL_SECONDS,
 } from '../config/telegram-login.config';
 import { PostgresAccountStatusReader } from '../database/postgres-account-status.reader';
+import { PostgresAdminPlayerRatingRepository } from '../database/postgres-admin-player-rating.repository';
 import { PostgresAuthenticationOperationTerminalRepository } from '../database/postgres-authentication-operation-terminal.repository';
 import { PostgresExternalIdentityResolutionRepository } from '../database/postgres-external-identity.repository';
 import { PostgresInitialSessionRepository } from '../database/postgres-initial-session.repository';
@@ -54,6 +55,8 @@ import {
   unixEpochSeconds,
 } from './auth.types';
 import { AuthModule } from './auth.module';
+import { AdminPlayerRatingController } from './admin-player-rating.controller';
+import { AdminPlayerRatingService } from './admin-player-rating.service';
 import { NodeSessionCredentialIssuer } from './session-credential-issuer.adapter';
 import { PlayerProfileController } from './player-profile.controller';
 import { PlayerProfileService } from './player-profile.service';
@@ -251,6 +254,16 @@ function getPublicPlayerProfileControllerService(
   ).service;
 }
 
+function getAdminPlayerRatingControllerService(
+  controller: AdminPlayerRatingController,
+): AdminPlayerRatingService {
+  return (
+    controller as unknown as {
+      readonly service: AdminPlayerRatingService;
+    }
+  ).service;
+}
+
 function getMatchControllerService(
   controller: MatchController,
 ): MatchApiService {
@@ -401,6 +414,21 @@ describe('AuthModule Telegram login wiring', () => {
         moduleRef.get(PublicPlayerProfileController),
       ),
     ).toBe(publicPlayerProfile);
+    const adminPlayerRating = moduleRef.get(AdminPlayerRatingService);
+    expect(adminPlayerRating.dependencies.transactions).toBe(
+      moduleRef.get(PostgresTransactionExecutorAdapter),
+    );
+    expect(adminPlayerRating.dependencies.ratings).toBe(
+      moduleRef.get(PostgresAdminPlayerRatingRepository),
+    );
+    expect(adminPlayerRating.dependencies.clock).toBe(
+      moduleRef.get(SESSION_AUTHENTICATION_CLOCK),
+    );
+    expect(
+      getAdminPlayerRatingControllerService(
+        moduleRef.get(AdminPlayerRatingController),
+      ),
+    ).toBe(adminPlayerRating);
     const matchApi = moduleRef.get(MatchApiService);
     const matchRepository = moduleRef.get(PostgresMatchRepository);
     const matchWaitlist = moduleRef.get(MatchWaitlistService);

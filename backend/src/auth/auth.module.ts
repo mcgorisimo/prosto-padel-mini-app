@@ -11,6 +11,7 @@ import {
 import { DatabaseModule } from '../database/database.module';
 import { ContentModerationController } from '../common/content-moderation.controller';
 import { PostgresAccountStatusReader } from '../database/postgres-account-status.reader';
+import { PostgresAdminPlayerRatingRepository } from '../database/postgres-admin-player-rating.repository';
 import { PostgresAuthenticationOperationTerminalRepository } from '../database/postgres-authentication-operation-terminal.repository';
 import { PostgresExternalIdentityResolutionRepository } from '../database/postgres-external-identity.repository';
 import { PostgresInitialSessionRepository } from '../database/postgres-initial-session.repository';
@@ -42,6 +43,8 @@ import { MatchResultService } from '../matches/match-result.service';
 import { MatchWaitlistController } from '../matches/match-waitlist.controller';
 import { MatchWaitlistService } from '../matches/match-waitlist.service';
 import { NodeSessionCredentialIssuer } from './session-credential-issuer.adapter';
+import { AdminPlayerRatingController } from './admin-player-rating.controller';
+import { AdminPlayerRatingService } from './admin-player-rating.service';
 import { PlayerProfileController } from './player-profile.controller';
 import { PlayerProfileService } from './player-profile.service';
 import { PublicPlayerProfileController } from './public-player-profile.controller';
@@ -256,6 +259,14 @@ function createPlayerProfileService(
   });
 }
 
+function createAdminPlayerRatingService(
+  transactions: PostgresTransactionExecutorAdapter,
+  ratings: PostgresAdminPlayerRatingRepository,
+  clock: SessionAuthenticationClock,
+): AdminPlayerRatingService {
+  return new AdminPlayerRatingService({ transactions, ratings, clock });
+}
+
 function createPublicPlayerProfileService(
   transactions: PostgresTransactionExecutorAdapter,
   profiles: PostgresPublicPlayerProfileSearchRepository,
@@ -357,6 +368,7 @@ function createMatchResultService(
 @Module({
   imports: [DatabaseModule],
   controllers: [
+    AdminPlayerRatingController,
     TelegramLoginController,
     SessionLifecycleController,
     SessionAuthenticationController,
@@ -375,6 +387,15 @@ function createMatchResultService(
     SESSION_LIFECYCLE_HTTP_CLOCK_PROVIDER,
     SESSION_AUTHENTICATION_CLOCK_PROVIDER,
     SessionBearerGuard,
+    {
+      provide: AdminPlayerRatingService,
+      inject: [
+        PostgresTransactionExecutorAdapter,
+        PostgresAdminPlayerRatingRepository,
+        SESSION_AUTHENTICATION_CLOCK,
+      ],
+      useFactory: createAdminPlayerRatingService,
+    },
     {
       provide: MatchResultService,
       inject: [
@@ -491,6 +512,7 @@ function createMatchResultService(
     TELEGRAM_LOGIN_FEATURE,
     SessionAuthenticationService,
     SessionBearerGuard,
+    AdminPlayerRatingService,
     PlayerProfileService,
     PublicPlayerProfileService,
     MatchApiService,
