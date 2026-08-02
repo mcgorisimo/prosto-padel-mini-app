@@ -59,6 +59,7 @@ function contextRow(overrides: Record<string, unknown> = {}): QueryResultRow {
     visibility: 'public',
     scenario: 'social',
     status: 'upcoming',
+    is_rating_match: false,
     updated_at: String(Number(NOW) - 7_200),
     version: '4',
     ...overrides,
@@ -123,6 +124,44 @@ function commandRow(
     result_status: suffix[1],
     result_version: suffix[2],
     ...overrides,
+  };
+}
+
+const RATING_BY_ACCOUNT = new Map<AccountId, string>([
+  [TEAM1_LEFT, '3.00'],
+  [TEAM1_RIGHT, '3.00'],
+  [TEAM2_LEFT, '3.00'],
+  [TEAM2_RIGHT, '3.00'],
+]);
+
+function orderedAccountIds(): AccountId[] {
+  return [TEAM1_LEFT, TEAM1_RIGHT, TEAM2_LEFT, TEAM2_RIGHT].sort();
+}
+
+function ratingStateRows(
+  overrides: Partial<Record<AccountId, Record<string, unknown>>> = {},
+): QueryResultRow[] {
+  return orderedAccountIds().map((accountId) => ({
+    account_id: accountId,
+    rating: RATING_BY_ACCOUNT.get(accountId),
+    is_verified: true,
+    ...(overrides[accountId] ?? {}),
+  }));
+}
+
+function ratedMatchCountRows(): QueryResultRow[] {
+  return orderedAccountIds().map((accountId) => ({
+    account_id: accountId,
+    rated_matches_before: '0',
+  }));
+}
+
+function updatedRatingRow(accountId: AccountId): QueryResultRow {
+  const isTeam1 = accountId === TEAM1_LEFT || accountId === TEAM1_RIGHT;
+  return {
+    account_id: accountId,
+    rating: isTeam1 ? '3.20' : '2.80',
+    updated_at: String(NOW),
   };
 }
 
@@ -299,6 +338,159 @@ describe('PostgresMatchResultRepository', () => {
       'confirm_result',
       'result_confirmed',
     ]);
+    expect(
+      transaction.calls.some((call) =>
+        call.text.includes('match_rating_applications'),
+      ),
+    ).toBe(false);
+  });
+
+  it('locks four verified states, writes immutable audit and updates ratings before confirmation', async () => {
+    const updatedByAccount = new Map(
+      orderedAccountIds().map((accountId) => [
+        accountId,
+        updatedRatingRow(accountId),
+      ]),
+    );
+    const transaction = new FakeTransaction([
+      result([contextRow({ is_rating_match: true })]),
+      result([]),
+      result([resultRow()]),
+      result(ratingStateRows()),
+      result(ratedMatchCountRows()),
+      result([{ result_id: RESULT_ID, match_id: MATCH_ID }], 'INSERT'),
+      result([{ result_id: RESULT_ID, account_id: TEAM1_LEFT }], 'INSERT'),
+      result([{ result_id: RESULT_ID, account_id: TEAM1_RIGHT }], 'INSERT'),
+      result([{ result_id: RESULT_ID, account_id: TEAM2_LEFT }], 'INSERT'),
+      result([{ result_id: RESULT_ID, account_id: TEAM2_RIGHT }], 'INSERT'),
+      ...orderedAccountIds().map((accountId) =>
+        result([updatedByAccount.get(accountId) as QueryResultRow], 'UPDATE'),
+      ),
+      result([resultRow({
+        status: 'confirmed',
+        confirmed_by_account_id: TEAM2_LEFT,
+        confirmed_at: String(NOW),
+        version: '2',
+      })], 'UPDATE'),
+      result([{ version: '5' }], 'UPDATE'),
+      result([{ command_id: COMMAND_ID }], 'INSERT'),
+    ]);
+
+    await expect(
+      new PostgresMatchResultRepository().confirm(transaction, resolveInput()),
+    ).resolves.toEqual({
+      outcome: 'result_confirmed',
+      persistence: 'applied',
+      result: {
+        resultId: RESULT_ID,
+        matchId: MATCH_ID,
+        status: 'confirmed',
+        appliedAt: NOW,
+        resultVersion: 2,
+      },
+    });
+
+    expect(transaction.calls[3].text).toContain(
+      'FROM backend_auth.player_rating_states',
+    );
+    expect(transaction.calls[3].text).toContain('ORDER BY account_id');
+    expect(transaction.calls[3].text).toContain('FOR UPDATE');
+    expect(transaction.calls[4].text).toContain(
+      'backend_match.match_rating_changes',
+    );
+    expect(transaction.calls[5].values).toEqual([
+      RESULT_ID,
+      MATCH_ID,
+      2,
+      1,
+      '3.000',
+      '3.000',
+      '0.500000',
+      'doubles_elo_v1',
+      TEAM2_LEFT,
+      NOW,
+    ]);
+    expect(transaction.calls.slice(6, 10).map((call) => call.values.slice(2, 9))).toEqual([
+      [TEAM1_LEFT, 1, 'left', '3.00', '0.20', '3.20', 0],
+      [TEAM1_RIGHT, 1, 'right', '3.00', '0.20', '3.20', 0],
+      [TEAM2_LEFT, 2, 'left', '3.00', '-0.20', '2.80', 0],
+      [TEAM2_RIGHT, 2, 'right', '3.00', '-0.20', '2.80', 0],
+    ]);
+    expect(transaction.calls.slice(10, 14).map((call) => call.values[0])).toEqual(
+      orderedAccountIds(),
+    );
+    expect(transaction.calls[14].text).toContain(
+      'UPDATE backend_match.match_results',
+    );
+    expect(transaction.calls[15].text).toContain("status = 'completed'");
+    expect(transaction.calls[16].values.slice(5, 7)).toEqual([
+      'confirm_result',
+      'result_confirmed',
+    ]);
+  });
+
+  it('fails closed on an unverified rating state before writing audit or result state', async () => {
+    const transaction = new FakeTransaction([
+      result([contextRow({ is_rating_match: true })]),
+      result([]),
+      result([resultRow()]),
+      result(ratingStateRows({
+        [TEAM2_RIGHT]: { is_verified: false },
+      })),
+    ]);
+
+    await expect(
+      new PostgresMatchResultRepository().confirm(transaction, resolveInput()),
+    ).rejects.toMatchObject({ reason: 'invalid_persisted_state' });
+    expect(transaction.calls).toHaveLength(4);
+  });
+
+  it.each([
+    ['missing', ratingStateRows().slice(0, 3)],
+    [
+      'malformed',
+      ratingStateRows({ [TEAM2_RIGHT]: { rating: '3.000' } }),
+    ],
+  ])(
+    'fails closed on a %s rating state before writing audit or result state',
+    async (_case, states) => {
+      const transaction = new FakeTransaction([
+        result([contextRow({ is_rating_match: true })]),
+        result([]),
+        result([resultRow()]),
+        result(states),
+      ]);
+
+      await expect(
+        new PostgresMatchResultRepository().confirm(
+          transaction,
+          resolveInput(),
+        ),
+      ).rejects.toMatchObject({ reason: 'invalid_persisted_state' });
+      expect(transaction.calls).toHaveLength(4);
+    },
+  );
+
+  it('returns an immutable rating confirmation retry without applying ratings again', async () => {
+    const transaction = new FakeTransaction([
+      result([contextRow({ status: 'completed', is_rating_match: true })]),
+      result([commandRow('confirm_result')]),
+    ]);
+
+    await expect(
+      new PostgresMatchResultRepository().confirm(transaction, resolveInput()),
+    ).resolves.toEqual({
+      outcome: 'result_confirmed',
+      persistence: 'idempotent_retry',
+      result: {
+        resultId: RESULT_ID,
+        matchId: MATCH_ID,
+        status: 'confirmed',
+        appliedAt: NOW,
+        resultVersion: 2,
+      },
+    });
+    expect(transaction.calls).toHaveLength(2);
   });
 
   it('lets a non-submitting participant dispute without completing the match', async () => {

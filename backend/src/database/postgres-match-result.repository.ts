@@ -2,6 +2,15 @@ import { QueryResultRow } from 'pg';
 import { AccountId, isAccountId } from '../accounts/account.types';
 import { isUnixEpochSeconds } from '../auth/auth.types';
 import {
+  MatchRatingCourtSide,
+  MatchRatingTeamNumber,
+  calculateDoublesEloV1,
+  formatExpectedScore,
+  formatRatingAverageMillis,
+  formatRatingCents,
+  formatRatingDeltaCents,
+} from '../matches/match-rating-calculator';
+import {
   MatchResultMutationRecord,
   MatchResultRecord,
   MatchResultSetRecord,
@@ -49,6 +58,7 @@ const SELECT_MATCH_CONTEXT_SQL = `
     matches.visibility,
     matches.scenario,
     matches.status,
+    matches.is_rating_match,
     matches.updated_at,
     matches.version
   FROM backend_match.matches AS matches
@@ -218,6 +228,70 @@ const INSERT_COMMAND_SQL = `
   RETURNING command_id
 `;
 
+const SELECT_RATING_STATES_FOR_UPDATE_SQL = `
+  SELECT account_id, rating, is_verified
+  FROM backend_auth.player_rating_states
+  WHERE account_id = ANY($1::uuid[])
+  ORDER BY account_id
+  FOR UPDATE
+`;
+
+const SELECT_RATED_MATCH_COUNTS_SQL = `
+  SELECT
+    requested.account_id,
+    COUNT(changes.result_id) AS rated_matches_before
+  FROM pg_catalog.unnest($1::uuid[]) AS requested(account_id)
+  LEFT JOIN backend_match.match_rating_changes AS changes
+    ON changes.account_id = requested.account_id
+  GROUP BY requested.account_id
+  ORDER BY requested.account_id
+`;
+
+const INSERT_RATING_APPLICATION_SQL = `
+  INSERT INTO backend_match.match_rating_applications (
+    result_id,
+    match_id,
+    result_version,
+    winning_team,
+    team1_average_before,
+    team2_average_before,
+    expected_team1,
+    formula_version,
+    applied_by_account_id,
+    applied_at
+  )
+  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+  RETURNING result_id, match_id
+`;
+
+const INSERT_RATING_CHANGE_SQL = `
+  INSERT INTO backend_match.match_rating_changes (
+    result_id,
+    match_id,
+    account_id,
+    team_number,
+    court_side,
+    rating_before,
+    rating_delta,
+    rating_after,
+    rated_matches_before,
+    k_factor,
+    expected_score,
+    applied_at
+  )
+  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+  RETURNING result_id, account_id
+`;
+
+const UPDATE_RATING_STATE_SQL = `
+  UPDATE backend_auth.player_rating_states
+  SET rating = $2, updated_at = $3
+  WHERE account_id = $1
+    AND rating = $4
+    AND is_verified = true
+  RETURNING account_id, rating, updated_at
+`;
+
 interface MatchContextRow extends QueryResultRow {
   readonly id: unknown;
   readonly owner_account_id: unknown;
@@ -227,6 +301,7 @@ interface MatchContextRow extends QueryResultRow {
   readonly visibility: unknown;
   readonly scenario: unknown;
   readonly status: unknown;
+  readonly is_rating_match: unknown;
   readonly updated_at: unknown;
   readonly version: unknown;
 }
@@ -284,6 +359,29 @@ interface CommandRow extends QueryResultRow {
   readonly applied_at: unknown;
   readonly result_status: unknown;
   readonly result_version: unknown;
+}
+
+interface RatingStateRow extends QueryResultRow {
+  readonly account_id: unknown;
+  readonly rating: unknown;
+  readonly is_verified: unknown;
+}
+
+interface RatedMatchCountRow extends QueryResultRow {
+  readonly account_id: unknown;
+  readonly rated_matches_before: unknown;
+}
+
+interface RatingIdentityRow extends QueryResultRow {
+  readonly result_id: unknown;
+  readonly match_id?: unknown;
+  readonly account_id?: unknown;
+}
+
+interface UpdatedRatingStateRow extends QueryResultRow {
+  readonly account_id: unknown;
+  readonly rating: unknown;
+  readonly updated_at: unknown;
 }
 
 function invalidState(): MatchResultPersistenceError {
@@ -512,6 +610,7 @@ function hydrateContext(row: MatchContextRow) {
     !['match', 'private'].includes(String(row.kind)) ||
     !['public', 'private'].includes(String(row.visibility)) ||
     !['community', 'social', 'private'].includes(String(row.scenario)) ||
+    typeof row.is_rating_match !== 'boolean' ||
     ![
       'open',
       'searching',
@@ -537,6 +636,7 @@ function hydrateContext(row: MatchContextRow) {
     kind: row.kind as 'match' | 'private',
     scenario: row.scenario as 'community' | 'social' | 'private',
     status: row.status as string,
+    isRatingMatch: row.is_rating_match,
   });
 }
 
@@ -682,6 +782,210 @@ function participantTeam(result: MatchResultRecord, accountId: AccountId): 1 | 2
   if (result.team1LeftAccountId === accountId || result.team1RightAccountId === accountId) return 1;
   if (result.team2LeftAccountId === accountId || result.team2RightAccountId === accountId) return 2;
   return undefined;
+}
+
+const POSTGRES_RATING_PATTERN = /^(?:[0-9]\.[0-9]{2}|10\.00)$/u;
+
+function ratingCents(value: unknown): number {
+  if (typeof value !== 'string' || !POSTGRES_RATING_PATTERN.test(value)) {
+    throw invalidState();
+  }
+  const [whole, fraction] = value.split('.');
+  const cents = Number(whole) * 100 + Number(fraction);
+  if (!Number.isInteger(cents) || cents < 0 || cents > 1_000) {
+    throw invalidState();
+  }
+  return cents;
+}
+
+interface RatingParticipant {
+  readonly accountId: AccountId;
+  readonly teamNumber: MatchRatingTeamNumber;
+  readonly courtSide: MatchRatingCourtSide;
+  readonly ratingBeforeCents: number;
+  readonly ratedMatchesBefore: number;
+}
+
+function ratingSlots(result: MatchResultRecord): readonly Omit<
+  RatingParticipant,
+  'ratingBeforeCents' | 'ratedMatchesBefore'
+>[] {
+  return Object.freeze([
+    Object.freeze({
+      accountId: result.team1LeftAccountId,
+      teamNumber: 1 as const,
+      courtSide: 'left' as const,
+    }),
+    Object.freeze({
+      accountId: result.team1RightAccountId,
+      teamNumber: 1 as const,
+      courtSide: 'right' as const,
+    }),
+    Object.freeze({
+      accountId: result.team2LeftAccountId,
+      teamNumber: 2 as const,
+      courtSide: 'left' as const,
+    }),
+    Object.freeze({
+      accountId: result.team2RightAccountId,
+      teamNumber: 2 as const,
+      courtSide: 'right' as const,
+    }),
+  ]);
+}
+
+async function applyRatingForConfirmedResult(
+  transaction: PostgresTransaction,
+  input: Readonly<Pick<ConfirmMatchResultInput, 'actorAccountId' | 'now'>>,
+  result: MatchResultRecord,
+): Promise<void> {
+  const slots = ratingSlots(result);
+  const accountIds = slots.map(({ accountId }) => accountId).sort();
+  if (new Set(accountIds).size !== 4) throw invalidState();
+
+  const selectedStates = await transaction.query<RatingStateRow>(
+    SELECT_RATING_STATES_FOR_UPDATE_SQL,
+    [accountIds],
+  );
+  if (selectedStates.rowCount !== 4 || selectedStates.rows.length !== 4) {
+    throw invalidState();
+  }
+
+  const ratingByAccount = new Map<AccountId, number>();
+  for (let index = 0; index < accountIds.length; index += 1) {
+    const row = selectedStates.rows[index];
+    if (
+      !isAccountId(row.account_id) ||
+      row.account_id !== accountIds[index] ||
+      row.is_verified !== true
+    ) {
+      throw invalidState();
+    }
+    ratingByAccount.set(row.account_id, ratingCents(row.rating));
+  }
+
+  // This is a separate statement after the ordered row locks. Under READ
+  // COMMITTED it sees rating applications committed while the lock waited.
+  const selectedCounts = await transaction.query<RatedMatchCountRow>(
+    SELECT_RATED_MATCH_COUNTS_SQL,
+    [accountIds],
+  );
+  if (selectedCounts.rowCount !== 4 || selectedCounts.rows.length !== 4) {
+    throw invalidState();
+  }
+  const countByAccount = new Map<AccountId, number>();
+  for (let index = 0; index < accountIds.length; index += 1) {
+    const row = selectedCounts.rows[index];
+    if (!isAccountId(row.account_id) || row.account_id !== accountIds[index]) {
+      throw invalidState();
+    }
+    countByAccount.set(
+      row.account_id,
+      decodePostgresNonNegativeBigint(row.rated_matches_before),
+    );
+  }
+
+  const participants: RatingParticipant[] = slots.map((slot) => {
+    const before = ratingByAccount.get(slot.accountId);
+    const count = countByAccount.get(slot.accountId);
+    if (before === undefined || count === undefined) throw invalidState();
+    return Object.freeze({
+      ...slot,
+      ratingBeforeCents: before,
+      ratedMatchesBefore: count,
+    });
+  });
+
+  let calculation: ReturnType<typeof calculateDoublesEloV1>;
+  try {
+    calculation = calculateDoublesEloV1({
+      winningTeam: result.winningTeam,
+      participants,
+    });
+  } catch {
+    throw invalidState();
+  }
+
+  const confirmedVersion = result.version + 1;
+  if (!Number.isSafeInteger(confirmedVersion) || confirmedVersion < 2) {
+    throw invalidState();
+  }
+
+  const insertedApplication = await transaction.query<RatingIdentityRow>(
+    INSERT_RATING_APPLICATION_SQL,
+    [
+      result.resultId,
+      result.matchId,
+      confirmedVersion,
+      result.winningTeam,
+      formatRatingAverageMillis(calculation.team1AverageBeforeMillis),
+      formatRatingAverageMillis(calculation.team2AverageBeforeMillis),
+      formatExpectedScore(calculation.expectedTeam1),
+      calculation.formulaVersion,
+      input.actorAccountId,
+      input.now,
+    ],
+  );
+  exactOne(insertedApplication.rowCount, insertedApplication.rows);
+  if (
+    insertedApplication.rows[0].result_id !== result.resultId ||
+    insertedApplication.rows[0].match_id !== result.matchId
+  ) {
+    throw invalidState();
+  }
+
+  const changes = participants.map((participant, index) =>
+    Object.freeze({ ...participant, ...calculation.changes[index] }),
+  );
+  for (const change of changes) {
+    const insertedChange = await transaction.query<RatingIdentityRow>(
+      INSERT_RATING_CHANGE_SQL,
+      [
+        result.resultId,
+        result.matchId,
+        change.accountId,
+        change.teamNumber,
+        change.courtSide,
+        formatRatingCents(change.ratingBeforeCents),
+        formatRatingDeltaCents(change.ratingDeltaCents),
+        formatRatingCents(change.ratingAfterCents),
+        change.ratedMatchesBefore,
+        change.kFactor.toFixed(1),
+        formatExpectedScore(change.expectedScore),
+        input.now,
+      ],
+    );
+    exactOne(insertedChange.rowCount, insertedChange.rows);
+    if (
+      insertedChange.rows[0].result_id !== result.resultId ||
+      insertedChange.rows[0].account_id !== change.accountId
+    ) {
+      throw invalidState();
+    }
+  }
+
+  for (const change of [...changes].sort((left, right) =>
+    left.accountId.localeCompare(right.accountId),
+  )) {
+    const updatedState = await transaction.query<UpdatedRatingStateRow>(
+      UPDATE_RATING_STATE_SQL,
+      [
+        change.accountId,
+        formatRatingCents(change.ratingAfterCents),
+        input.now,
+        formatRatingCents(change.ratingBeforeCents),
+      ],
+    );
+    exactOne(updatedState.rowCount, updatedState.rows);
+    const row = updatedState.rows[0];
+    if (
+      row.account_id !== change.accountId ||
+      row.rating !== formatRatingCents(change.ratingAfterCents) ||
+      decodePostgresNonNegativeBigint(row.updated_at) !== input.now
+    ) {
+      throw invalidState();
+    }
+  }
 }
 
 function mapPersistenceError(error: unknown): MatchResultPersistenceError {
@@ -907,6 +1211,13 @@ export class PostgresMatchResultRepository implements MatchResultRepository {
       }
       if (!ACTIVE_MATCH_STATUSES.has(context.status)) {
         return Object.freeze({ outcome: 'rejected', reason: 'match_closed' });
+      }
+      if (operation === 'confirm_result' && context.isRatingMatch) {
+        await applyRatingForConfirmedResult(
+          transaction,
+          validated,
+          current,
+        );
       }
       const updated = await transaction.query<ResultRow>(
         operation === 'confirm_result' ? CONFIRM_RESULT_SQL : DISPUTE_RESULT_SQL,

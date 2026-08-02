@@ -261,18 +261,18 @@ describe('auth integration migration inventory', () => {
       columnAclEntries: evidence.columnAcl.length,
     }).toEqual({
       tables: 15,
-      columns: 162,
+      columns: 164,
       functions: 20,
       triggers: 33,
       indexes: 11,
-      constraints: 139,
+      constraints: 141,
       keys: 30,
       foreignKeys: 28,
-      columnAclEntries: 165,
+      columnAclEntries: 170,
     });
   });
 
-  it('requires the migration 017 table, foreign key, and insert-only ACL', () => {
+  it('requires the migration 017 table, foreign key, and migration 018 editable ACL', () => {
     const evidence = validAuthIntegrationCatalogEvidenceFixture();
 
     expect(
@@ -300,24 +300,41 @@ describe('auth integration migration inventory', () => {
       isDeferred: false,
       isValidated: true,
     });
+    const profileDetailsAcl = evidence.columnAcl.filter(
+      (entry) => entry.tableName === 'player_profile_details',
+    );
+    expect(profileDetailsAcl).toHaveLength(13);
     expect(
-      evidence.columnAcl.filter(
+      profileDetailsAcl
+        .filter((entry) => entry.privilegeType === 'INSERT')
+        .map((entry) => entry.columnName),
+    ).toEqual([
+      'account_id',
+      'first_name',
+      'last_name',
+      'username',
+      'photo_url',
+      'language_code',
+      'created_at',
+      'updated_at',
+    ]);
+    expect(
+      profileDetailsAcl
+        .filter((entry) => entry.privilegeType === 'UPDATE')
+        .map((entry) => entry.columnName),
+    ).toEqual([
+      'first_name',
+      'last_name',
+      'phone',
+      'side_preference',
+      'updated_at',
+    ]);
+    expect(
+      profileDetailsAcl.every(
         (entry) =>
-          entry.tableName === 'player_profile_details',
+          entry.grantee === 'backend_auth_app' &&
+          entry.isGrantable === false,
       ),
-    ).toHaveLength(8);
-    expect(
-      evidence.columnAcl
-        .filter(
-          (entry) =>
-            entry.tableName === 'player_profile_details',
-        )
-        .every(
-          (entry) =>
-            entry.grantee === 'backend_auth_app' &&
-            entry.privilegeType === 'INSERT' &&
-            entry.isGrantable === false,
-        ),
     ).toBe(true);
   });
 
