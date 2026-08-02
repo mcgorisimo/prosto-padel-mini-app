@@ -4221,8 +4221,8 @@ test.describe('backend match credential lifecycle', () => {
         id,
         firstName,
         lastName,
-        numericRating: 3,
-        ratingIdx: 2,
+        numericRating: slotIndex === 1 ? 4.2 : 3,
+        ratingIdx: slotIndex === 1 ? 3 : 2,
         isVerified: true,
         isOrganizer: slotIndex === 0,
         slotIndex,
@@ -4280,7 +4280,7 @@ test.describe('backend match credential lifecycle', () => {
                 playerId: player.id,
                 firstName: player.firstName,
                 lastName: player.lastName,
-                rating: 3,
+                rating: player.numericRating,
                 isVerified: true,
               },
               assignedAt: 1_700_000_010 + index,
@@ -4450,6 +4450,12 @@ test.describe('backend match credential lifecycle', () => {
     });
 
     const harness = page.getByTestId('backend-result-test-root');
+    await harness.getByTestId('match-filled-slot-1').click();
+    await expect(harness.getByTestId('player-mini-profile-level')).toHaveText('B');
+    await expect(harness.getByTestId('player-mini-profile-rating')).toHaveText('4.2');
+    await expect(harness).not.toContainText('3.0–3.4');
+    await harness.getByTestId('player-mini-profile-close').click();
+
     const submit = harness.getByTestId('match-result-submit-open');
     await expect(submit).toBeEnabled();
     await submit.click();

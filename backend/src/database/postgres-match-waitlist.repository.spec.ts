@@ -252,6 +252,11 @@ describe('PostgresMatchWaitlistRepository', () => {
     expect(transaction.calls[2].text).toContain('match_invitations');
     expect(transaction.calls[3].text).toContain('UPDATE backend_match.match_waitlist_entries');
     expect(transaction.calls[3].text).toContain('backend_auth.player_rating_states');
+    expect(transaction.calls[3].text).toContain('WHEN ratings.rating < 4.0 THEN 3');
+    expect(transaction.calls[3].text).toContain('WHEN ratings.rating < 4.7 THEN 4');
+    expect(transaction.calls[3].text).toContain('WHEN ratings.rating < 5.5 THEN 5');
+    expect(transaction.calls[3].text).not.toContain('ratings.rating >= matches.rating_min');
+    expect(transaction.calls[3].text).not.toContain('ratings.rating <= matches.rating_max');
     expect(transaction.calls[3].text).toContain("participants.status = 'active'");
     expect(transaction.calls[3].text).toContain("invitations.status = 'pending'");
     expect(transaction.calls[3].values).toEqual([MATCH_ID, NOW]);

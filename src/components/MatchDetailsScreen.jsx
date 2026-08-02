@@ -21,7 +21,6 @@ import {
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const RATINGS   = ['D', 'D+', 'C', 'C+', 'B', 'B+', 'A'];
-const NUMERIC_RATING_LABELS = ['1.0–1.9', '1.5–2.4', '2.5–2.9', '3.0–3.4', '3.5–3.9', '4.0–4.4', '4.5+'];
 
 const C = {
   bg:      '#050F0B',
@@ -212,6 +211,26 @@ const formatPlayerRating = (player) => {
   return Number.isFinite(numericRating) ? numericRating.toFixed(1) : '—';
 };
 
+const getPlayerRatingPresentation = (player) => {
+  const rawRating = player?.numericRating ?? player?.rating;
+  const numericRating = rawRating == null ? null : Number(rawRating);
+  if (Number.isFinite(numericRating)) {
+    const levelLabel = getLevelForRating(numericRating)?.label ?? null;
+    return {
+      levelLabel,
+      levelIndex: RATINGS.indexOf(levelLabel),
+      ratingLabel: numericRating.toFixed(1),
+    };
+  }
+
+  const levelIndex = getRatingIndexForPlayer(player);
+  return {
+    levelLabel: levelIndex == null ? null : RATINGS[levelIndex],
+    levelIndex,
+    ratingLabel: null,
+  };
+};
+
 // ─── BottomSheet ──────────────────────────────────────────────────────────────
 
 function BottomSheet({ children, onClose, variant = 'default' }) {
@@ -258,7 +277,8 @@ function BottomSheet({ children, onClose, variant = 'default' }) {
 
 function PlayerMiniProfile({ player, onClose, onRemove, removeLabel = 'Убрать из матча' }) {
   const initials = [player.firstName?.[0], player.lastName?.[0]].filter(Boolean).join('') || '?';
-  const isGold   = (player.ratingIdx ?? 0) >= 2;
+  const ratingPresentation = getPlayerRatingPresentation(player);
+  const isGold = (ratingPresentation.levelIndex ?? 0) >= 2;
 
   return (
     <BottomSheet onClose={onClose}>
@@ -284,12 +304,16 @@ function PlayerMiniProfile({ player, onClose, onRemove, removeLabel = 'Убра�
             {player.firstName} {player.lastName}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-            {player.ratingIdx != null && (
+            {ratingPresentation.levelLabel && (
               <>
-                <div style={{ background: 'rgba(216,243,74,0.10)', borderRadius: '6px', padding: '2px 8px', border: '1px solid rgba(216,243,74,0.24)', color: C.gold, fontSize: '12px', fontWeight: 700 }}>
-                  {RATINGS[player.ratingIdx]}
+                <div data-testid="player-mini-profile-level" style={{ background: 'rgba(216,243,74,0.10)', borderRadius: '6px', padding: '2px 8px', border: '1px solid rgba(216,243,74,0.24)', color: C.gold, fontSize: '12px', fontWeight: 700 }}>
+                  {ratingPresentation.levelLabel}
                 </div>
-                <div style={{ color: C.muted, fontSize: '11px' }}>{NUMERIC_RATING_LABELS[player.ratingIdx]}</div>
+                {ratingPresentation.ratingLabel && (
+                  <div data-testid="player-mini-profile-rating" style={{ color: C.muted, fontSize: '11px' }}>
+                    {ratingPresentation.ratingLabel}
+                  </div>
+                )}
               </>
             )}
             {player.isVerified && (
@@ -324,7 +348,7 @@ function PlayerMiniProfile({ player, onClose, onRemove, removeLabel = 'Убра�
           {removeLabel}
         </button>
       )}
-      <button onClick={onClose} style={{ width: '100%', padding: '14px', background: 'transparent', color: C.muted, border: `1px solid ${C.border}`, borderRadius: '12px', fontSize: '15px', cursor: 'pointer' }}>
+      <button data-testid="player-mini-profile-close" onClick={onClose} style={{ width: '100%', padding: '14px', background: 'transparent', color: C.muted, border: `1px solid ${C.border}`, borderRadius: '12px', fontSize: '15px', cursor: 'pointer' }}>
         Закрыть
       </button>
     </BottomSheet>

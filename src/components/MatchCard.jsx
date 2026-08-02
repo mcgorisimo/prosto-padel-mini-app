@@ -15,7 +15,7 @@ const C = {
   gold:    '#D4AF37',
 };
 
-const NUMERIC_RATING_START = [1.0, 1.5, 2.5, 3.0, 3.5, 4.0, 4.5];
+const NUMERIC_RATING_START = [1.0, 2.0, 3.0, 3.5, 4.0, 4.7, 5.5];
 const ratingFromIdx = (idx) =>
   (typeof idx === 'number' && idx >= 0 && idx < NUMERIC_RATING_START.length) ? NUMERIC_RATING_START[idx] : null;
 

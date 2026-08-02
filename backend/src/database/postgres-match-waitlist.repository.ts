@@ -304,8 +304,24 @@ const SKIP_INELIGIBLE_PROMOTION_ENTRIES_SQL = `
             matches.is_rating_match = false
             OR ratings.is_verified = true
           )
-          AND ratings.rating >= matches.rating_min
-          AND ratings.rating <= matches.rating_max
+          AND CASE
+            WHEN ratings.rating < 2.0 THEN 0
+            WHEN ratings.rating < 3.0 THEN 1
+            WHEN ratings.rating < 3.5 THEN 2
+            WHEN ratings.rating < 4.0 THEN 3
+            WHEN ratings.rating < 4.7 THEN 4
+            WHEN ratings.rating < 5.5 THEN 5
+            ELSE 6
+          END >= matches.rating_min
+          AND CASE
+            WHEN ratings.rating < 2.0 THEN 0
+            WHEN ratings.rating < 3.0 THEN 1
+            WHEN ratings.rating < 3.5 THEN 2
+            WHEN ratings.rating < 4.0 THEN 3
+            WHEN ratings.rating < 4.7 THEN 4
+            WHEN ratings.rating < 5.5 THEN 5
+            ELSE 6
+          END <= matches.rating_max
       )
     )
 `;

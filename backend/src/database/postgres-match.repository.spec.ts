@@ -22,7 +22,10 @@ import {
   MatchPersistenceFailure,
 } from './match.repository';
 import { PlayerProfileReader } from './player-profile-reader';
-import { PostgresMatchRepository } from './postgres-match.repository';
+import {
+  PostgresMatchRepository,
+  readPlayerRatingLevel,
+} from './postgres-match.repository';
 import { PostgresTransaction } from './postgres-transaction';
 
 const MATCH_ID = deterministicUuid('repository-match') as MatchId;
@@ -404,6 +407,26 @@ function expectSafeError(
 }
 
 describe('PostgresMatchRepository', () => {
+  it.each([
+    ['0.00', 0],
+    ['1.99', 0],
+    ['2.00', 1],
+    ['2.99', 1],
+    ['3.00', 2],
+    ['3.49', 2],
+    ['3.50', 3],
+    ['3.99', 3],
+    ['4.00', 4],
+    ['4.20', 4],
+    ['4.69', 4],
+    ['4.70', 5],
+    ['5.49', 5],
+    ['5.50', 6],
+    ['10.00', 6],
+  ])('maps trusted rating %s to canonical level index %i', (rating, level) => {
+    expect(readPlayerRatingLevel(rating)).toBe(level);
+  });
+
   it('creates the match and append-only command in one passed transaction', async () => {
     const harness = repositoryHarness();
     const transaction = new FakeTransaction([

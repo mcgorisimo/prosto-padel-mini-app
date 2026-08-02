@@ -1,5 +1,5 @@
 const LEVEL_LABELS = ['D', 'D+', 'C', 'C+', 'B', 'B+', 'A'];
-const NUMERIC_RANGE_LABELS = ['1.0–1.9', '1.5–2.4', '2.5–2.9', '3.0–3.4', '3.5–3.9', '4.0–4.4', '4.5+'];
+const NUMERIC_RANGE_LABELS = ['1.0–2.0', '2.0–3.0', '3.0–3.5', '3.5–4.0', '4.0–4.7', '4.7–5.5', '5.5+'];
 
 const clampLevelIndex = (value, fallback) => {
   const number = Number(value);

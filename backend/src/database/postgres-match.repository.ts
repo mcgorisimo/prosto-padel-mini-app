@@ -649,12 +649,12 @@ export function readPlayerRatingLevel(value: unknown): number {
   if (!Number.isFinite(rating) || rating < 0 || rating > 10) {
     throw invalidPersistedState();
   }
-  if (rating <= 1.5) return 0;
-  if (rating <= 2.2) return 1;
-  if (rating <= 3.2) return 2;
-  if (rating <= 5) return 3;
-  if (rating <= 6.5) return 4;
-  if (rating <= 7.5) return 5;
+  if (rating < 2) return 0;
+  if (rating < 3) return 1;
+  if (rating < 3.5) return 2;
+  if (rating < 4) return 3;
+  if (rating < 4.7) return 4;
+  if (rating < 5.5) return 5;
   return 6;
 }
 

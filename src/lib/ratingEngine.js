@@ -3,13 +3,13 @@
 
 export const RATING_CONFIG = {
   levels: [
-    { min: 0,    max: 1.50,  label: 'D',  color: 'rgba(245,241,232,0.62)' },
-    { min: 1.51, max: 2.20,  label: 'D+', color: 'rgba(245,241,232,0.72)' },
-    { min: 2.21, max: 3.20,  label: 'C',  color: '#D8F34A' },
-    { min: 3.21, max: 5.00,  label: 'C+', color: '#D8F34A' },
-    { min: 5.01, max: 6.50,  label: 'B',  color: '#FF6F61' },
-    { min: 6.51, max: 7.50,  label: 'B+', color: '#FF6F61' },
-    { min: 7.51, max: 10.00, label: 'A',  color: '#D8F34A' },
+    { min: 1.0, max: 2.0,  label: 'D',  color: 'rgba(245,241,232,0.62)' },
+    { min: 2.0, max: 3.0,  label: 'D+', color: 'rgba(245,241,232,0.72)' },
+    { min: 3.0, max: 3.5,  label: 'C',  color: '#D8F34A' },
+    { min: 3.5, max: 4.0,  label: 'C+', color: '#D8F34A' },
+    { min: 4.0, max: 4.7,  label: 'B',  color: '#FF6F61' },
+    { min: 4.7, max: 5.5,  label: 'B+', color: '#FF6F61' },
+    { min: 5.5, max: 10.0, label: 'A',  color: '#D8F34A' },
   ],
   decayPerDay:         0.01,
   inactivityThreshold: 14, // days
@@ -28,10 +28,14 @@ const clamp  = (n, min, max) => Math.max(min, Math.min(max, n));
 // ─── Level lookup ─────────────────────────────────────────────────────────────
 
 export function getLevelForRating(rating) {
-  for (const lvl of RATING_CONFIG.levels) {
-    if (rating <= lvl.max) return lvl;
+  const numericRating = Number(rating);
+  if (!Number.isFinite(numericRating)) return RATING_CONFIG.levels[0];
+
+  for (let index = RATING_CONFIG.levels.length - 1; index >= 0; index -= 1) {
+    const level = RATING_CONFIG.levels[index];
+    if (numericRating >= level.min) return level;
   }
-  return RATING_CONFIG.levels[RATING_CONFIG.levels.length - 1];
+  return RATING_CONFIG.levels[0];
 }
 
 export function getNextLevelInfo(rating) {
