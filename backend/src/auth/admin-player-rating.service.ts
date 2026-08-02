@@ -173,7 +173,6 @@ export class AdminPlayerRatingService {
 
   async list(input: ListAdminPlayersApiInput): Promise<ListAdminPlayersApiResult> {
     if (!validListInput(input)) return rejected('invalid_request');
-    if (input.role !== 'club_admin') return rejected('forbidden');
     const afterAccountId = input.request.cursor === undefined
       ? undefined
       : decodeCursor(input.request.cursor, input.request.search, input.request.verification);
@@ -210,7 +209,6 @@ export class AdminPlayerRatingService {
 
   async setRatingState(input: SetAdminPlayerRatingStateApiInput): Promise<SetAdminPlayerRatingStateApiResult> {
     if (!validSetInput(input)) return rejected('invalid_request');
-    if (input.role !== 'club_admin') return rejected('forbidden');
     let appliedAt;
     try {
       appliedAt = this.dependencies.clock.nowEpochSeconds();

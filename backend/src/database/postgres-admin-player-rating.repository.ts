@@ -35,6 +35,15 @@ const SELECT_ACTOR_FOR_SHARE_SQL = `
   FOR SHARE
 `;
 
+const SELECT_LATEST_ADMIN_CAPABILITY_SQL = `
+  SELECT event_type
+  FROM backend_auth.admin_capability_events
+  WHERE account_id = $1
+    AND capability = 'club_admin'
+  ORDER BY event_order DESC
+  LIMIT 1
+`;
+
 const LIST_PLAYERS_SQL = `
   SELECT
     accounts.id AS account_id,
@@ -145,6 +154,10 @@ interface AccountRow extends QueryResultRow {
   readonly id: unknown;
   readonly role: unknown;
   readonly status: unknown;
+}
+
+interface AdminCapabilityRow extends QueryResultRow {
+  readonly event_type: unknown;
 }
 
 interface PlayerRow extends QueryResultRow {
@@ -332,9 +345,29 @@ function mapped(error: unknown): AdminPlayerRatingPersistenceError {
   }
 }
 
-function activeAdmin(rows: readonly AccountRow[], actorAccountId: string): boolean {
-  return rows.length === 1 && rows[0].id === actorAccountId &&
-    rows[0].role === 'club_admin' && rows[0].status === 'active';
+async function activeAdmin(
+  transaction: PostgresTransaction,
+  rows: readonly AccountRow[],
+  actorAccountId: string,
+): Promise<boolean> {
+  if (rows.length !== 1 || rows[0].id !== actorAccountId || rows[0].status !== 'active') {
+    return false;
+  }
+  if (rows[0].role === 'club_admin') return true;
+  if (rows[0].role !== 'player') return false;
+
+  const capability = await transaction.query<AdminCapabilityRow>(
+    SELECT_LATEST_ADMIN_CAPABILITY_SQL,
+    [actorAccountId],
+  );
+  if (capability.rowCount !== capability.rows.length || capability.rows.length > 1) {
+    throw failure('invalid_persisted_state');
+  }
+  if (capability.rows.length === 0) return false;
+  if (!['granted', 'revoked'].includes(String(capability.rows[0].event_type))) {
+    throw failure('invalid_persisted_state');
+  }
+  return capability.rows[0].event_type === 'granted';
 }
 
 export class PostgresAdminPlayerRatingRepository implements AdminPlayerRatingRepository {
@@ -343,7 +376,9 @@ export class PostgresAdminPlayerRatingRepository implements AdminPlayerRatingRep
       const value = validateListInput(input);
       const actor = await transaction.query<AccountRow>(SELECT_ACTOR_FOR_SHARE_SQL, [value.actorAccountId]);
       if (actor.rowCount !== actor.rows.length) throw failure('invalid_persisted_state');
-      if (!activeAdmin(actor.rows, value.actorAccountId)) return Object.freeze({ outcome: 'forbidden' });
+      if (!await activeAdmin(transaction, actor.rows, value.actorAccountId)) {
+        return Object.freeze({ outcome: 'forbidden' });
+      }
 
       const verification = value.verification === 'all' ? null : value.verification === 'verified';
       const selected = await transaction.query<PlayerRow>(LIST_PLAYERS_SQL, [
@@ -380,7 +415,7 @@ export class PostgresAdminPlayerRatingRepository implements AdminPlayerRatingRep
         throw failure('invalid_persisted_state');
       }
       const actor = lockedAccounts.rows.find((row) => row.id === value.actorAccountId);
-      if (!actor || actor.role !== 'club_admin' || actor.status !== 'active') {
+      if (!actor || !await activeAdmin(transaction, [actor], value.actorAccountId)) {
         return Object.freeze({ outcome: 'forbidden' });
       }
       const target = lockedAccounts.rows.find((row) => row.id === value.targetAccountId);

@@ -30,6 +30,10 @@ function commandRow(digest = DIGEST) {
   };
 }
 
+function capabilityRow(eventType: 'granted' | 'revoked') {
+  return { event_type: eventType };
+}
+
 describe('PostgresAdminPlayerRatingRepository', () => {
   it('uses account-id keyset pagination and returns only a bounded active-player page', async () => {
     const query = jest.fn()
@@ -55,8 +59,50 @@ describe('PostgresAdminPlayerRatingRepository', () => {
     expect(query.mock.calls[1][1]).toEqual([null, '%One%', null, 2]);
   });
 
-  it('fails closed when the persisted actor is not an active club admin', async () => {
-    const query = jest.fn().mockResolvedValue(result([{ id: ADMIN_ID, role: 'player', status: 'active' }]));
+  it('fails closed when an active player has no admin capability event', async () => {
+    const query = jest.fn()
+      .mockResolvedValueOnce(result([{ id: ADMIN_ID, role: 'player', status: 'active' }]))
+      .mockResolvedValueOnce(result([]));
+    const repository = new PostgresAdminPlayerRatingRepository();
+    await expect(repository.listPlayers({ query }, {
+      actorAccountId: ADMIN_ID,
+      verification: 'all',
+      limit: 20,
+    })).resolves.toEqual({ outcome: 'forbidden' });
+    expect(query).toHaveBeenCalledTimes(2);
+    expect(query.mock.calls[1][0]).toContain('FROM backend_auth.admin_capability_events');
+    expect(query.mock.calls[1][0]).toContain('ORDER BY event_order DESC');
+  });
+
+  it('allows an active player whose latest club-admin capability event is granted', async () => {
+    const query = jest.fn()
+      .mockResolvedValueOnce(result([{ id: ADMIN_ID, role: 'player', status: 'active' }]))
+      .mockResolvedValueOnce(result([capabilityRow('granted')]))
+      .mockResolvedValueOnce(result([]));
+    const repository = new PostgresAdminPlayerRatingRepository();
+    await expect(repository.listPlayers({ query }, {
+      actorAccountId: ADMIN_ID,
+      verification: 'all',
+      limit: 20,
+    })).resolves.toEqual({ outcome: 'listed', players: [] });
+  });
+
+  it('fails closed after the latest club-admin capability event is revoked', async () => {
+    const query = jest.fn()
+      .mockResolvedValueOnce(result([{ id: ADMIN_ID, role: 'player', status: 'active' }]))
+      .mockResolvedValueOnce(result([capabilityRow('revoked')]));
+    const repository = new PostgresAdminPlayerRatingRepository();
+    await expect(repository.listPlayers({ query }, {
+      actorAccountId: ADMIN_ID,
+      verification: 'all',
+      limit: 20,
+    })).resolves.toEqual({ outcome: 'forbidden' });
+    expect(query).toHaveBeenCalledTimes(2);
+  });
+
+  it('fails closed for a blocked player without reading a capability event', async () => {
+    const query = jest.fn()
+      .mockResolvedValueOnce(result([{ id: ADMIN_ID, role: 'player', status: 'blocked' }]));
     const repository = new PostgresAdminPlayerRatingRepository();
     await expect(repository.listPlayers({ query }, {
       actorAccountId: ADMIN_ID,
@@ -69,9 +115,10 @@ describe('PostgresAdminPlayerRatingRepository', () => {
   it('locks accounts in id order, locks rating state, updates it, then appends the immutable command', async () => {
     const query = jest.fn()
       .mockResolvedValueOnce(result([
-        { id: ADMIN_ID, role: 'club_admin', status: 'active' },
+        { id: ADMIN_ID, role: 'player', status: 'active' },
         { id: PLAYER_ID, role: 'player', status: 'active' },
       ]))
+      .mockResolvedValueOnce(result([capabilityRow('granted')]))
       .mockResolvedValueOnce(result([{ account_id: PLAYER_ID, rating: '3.00', is_verified: false, updated_at: String(NOW + 10) }]))
       .mockResolvedValueOnce(result([]))
       .mockResolvedValueOnce(result([{ account_id: PLAYER_ID, rating: '4.25', is_verified: true, updated_at: String(NOW + 10) }]))
@@ -99,12 +146,13 @@ describe('PostgresAdminPlayerRatingRepository', () => {
     } });
     expect(query.mock.calls[0][0]).toContain('ORDER BY id');
     expect(query.mock.calls[0][0]).toContain('FOR UPDATE');
-    expect(query.mock.calls[1][0]).toContain('FOR UPDATE OF rating_states');
-    expect(query.mock.calls[3][0]).toContain('UPDATE backend_auth.player_rating_states');
-    expect(query.mock.calls[3][0]).toContain('GREATEST(updated_at, $4)');
-    expect(query.mock.calls[3][0]).toContain('AND rating = $5');
-    expect(query.mock.calls[3][0]).toContain('AND is_verified = $6');
-    expect(query.mock.calls[4][0]).toContain('INSERT INTO backend_auth.player_rating_admin_commands');
+    expect(query.mock.calls[1][0]).toContain('FROM backend_auth.admin_capability_events');
+    expect(query.mock.calls[2][0]).toContain('FOR UPDATE OF rating_states');
+    expect(query.mock.calls[4][0]).toContain('UPDATE backend_auth.player_rating_states');
+    expect(query.mock.calls[4][0]).toContain('GREATEST(updated_at, $4)');
+    expect(query.mock.calls[4][0]).toContain('AND rating = $5');
+    expect(query.mock.calls[4][0]).toContain('AND is_verified = $6');
+    expect(query.mock.calls[5][0]).toContain('INSERT INTO backend_auth.player_rating_admin_commands');
   });
 
   it('reconstructs an idempotent retry from immutable command data without updating current state', async () => {

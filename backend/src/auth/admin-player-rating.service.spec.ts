@@ -44,14 +44,20 @@ function harness() {
 }
 
 describe('AdminPlayerRatingService', () => {
-  it('enforces club_admin before opening a transaction', async () => {
+  it('delegates player-principal authorization to the transactional repository', async () => {
     const subject = harness();
+    subject.listPlayers.mockResolvedValueOnce({ outcome: 'forbidden' });
     await expect(subject.service.list({
       accountId: ADMIN_ID,
       role: 'player',
       request: { verification: 'all', limit: 20 },
     })).resolves.toEqual({ outcome: 'rejected', reason: 'forbidden' });
-    expect(subject.run).not.toHaveBeenCalled();
+    expect(subject.run).toHaveBeenCalledTimes(1);
+    expect(subject.listPlayers).toHaveBeenCalledWith(expect.anything(), {
+      actorAccountId: ADMIN_ID,
+      verification: 'all',
+      limit: 20,
+    });
   });
 
   it('binds a keyset cursor to the search and verification context', async () => {
@@ -82,7 +88,7 @@ describe('AdminPlayerRatingService', () => {
     const subject = harness();
     const input = {
       accountId: ADMIN_ID,
-      role: 'club_admin' as const,
+      role: 'player' as const,
       targetAccountId: PLAYER_ID,
       request: { requestKey: COMMAND_ID, rating: 4.25, isVerified: true },
     };
