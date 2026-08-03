@@ -2592,13 +2592,6 @@ const handleBookSlot = async (booking) => {
       )
     : legacyUpcomingMatches;
   const completedMatches = getUserMatchHistory(allMatches, ME_ID);
-  const profileResultMatches = allMatches.filter((match) => {
-    if (!Array.isArray(match.participants) || !match.participants.includes(ME_ID)) return false;
-    if (isMatchCompleted(match) || ['cancelled', 'canceled'].includes(match.status)) return true;
-    const start = new Date(`${match.dateISO}T${match.time || '00:00'}:00`);
-    const end = new Date(start.getTime() + (match.duration || 1.5) * 3600 * 1000);
-    return Number.isFinite(end.getTime()) && end <= new Date();
-  });
   // Public feed shows only non-private open matches.
   const legacyOpenMatches = allMatches.filter(m => {
     // Восстанавливаем строгий фильтр: только публичные, не завершенные матчи
@@ -2863,7 +2856,7 @@ const handleBookSlot = async (booking) => {
             stats={profileStats}
             upcomingMatches={upcomingMatches} // This needs to be passed `currentUser`
             completedMatches={completedMatches}
-            resultMatches={profileResultMatches}
+            resultMatches={completedMatches}
             onViewDetails={openMatchDetails}
             notifications={notificationCenter.items}
             notificationsLoading={notificationsLoading || invitationsLoading}

@@ -2552,8 +2552,24 @@ test('PROFILE-RESULTS use a horizontal rail, real outcomes and real statistics',
     completedAt: '2026-07-15T18:30:00.000Z', delta: -0.05,
     score: [{ t1: 4, t2: 6 }, { t1: 3, t2: 6 }],
   });
+  const cancelled = createOpenJoinableMatch({
+    id: 'profile-result-cancelled',
+    title: 'Отменённый матч',
+    status: 'cancelled',
+    participants: [testUser.id],
+  });
+  const expiredWithoutResult = createOpenJoinableMatch({
+    id: 'profile-result-expired',
+    title: 'Истёкший матч без результата',
+    status: 'open',
+    dateISO: '2020-01-01',
+    time: '10:00',
+    participants: [testUser.id],
+  });
 
-  await mockSupabase(page, { matches: [win, loss] });
+  await mockSupabase(page, {
+    matches: [win, loss, cancelled, expiredWithoutResult],
+  });
   await mockTelegram(page);
   await setAuthenticatedSession(page);
   await page.goto('/');
@@ -2563,6 +2579,7 @@ test('PROFILE-RESULTS use a horizontal rail, real outcomes and real statistics',
   await expect(rail).toBeVisible();
   await expect(page.getByTestId('result-card-win')).toBeVisible();
   await expect(page.getByTestId('result-card-loss')).toBeVisible();
+  await expect(page.getByTestId('result-card-neutral')).toHaveCount(0);
   const winBox = await page.getByTestId('result-card-win').boundingBox();
   const lossBox = await page.getByTestId('result-card-loss').boundingBox();
   expect(Math.abs(winBox.y - lossBox.y)).toBeLessThan(2);
