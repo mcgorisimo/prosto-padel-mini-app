@@ -305,9 +305,12 @@ begin
           order by position
         ),
         index_row.indoption::text,
-        pg_catalog.pg_get_expr(
-          index_row.indpred, index_row.indrelid, true
-        )::text
+        pg_catalog.lower(pg_catalog.btrim(pg_catalog.regexp_replace(
+          pg_catalog.pg_get_expr(
+            index_row.indpred, index_row.indrelid, true
+          ),
+          '[[:space:]]+', ' ', 'g'
+        )))::text
       from pg_catalog.pg_index index_row
       join pg_catalog.pg_class index_relation
         on index_relation.oid = index_row.indexrelid
