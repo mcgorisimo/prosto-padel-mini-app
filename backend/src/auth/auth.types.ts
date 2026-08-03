@@ -237,6 +237,15 @@ export interface VerifiedTelegramProfileDetails {
   readonly photoUrl?: string;
 }
 
+export type VerifiedTelegramNotificationPermission =
+  | Readonly<{
+      readonly status: 'granted';
+      readonly telegramChatId: string;
+    }>
+  | Readonly<{
+      readonly status: 'not_granted';
+    }>;
+
 export type TelegramProofVerificationOutcome =
   | {
       readonly status: 'verified';
@@ -258,6 +267,7 @@ export type TelegramLoginProofVerificationOutcome =
       readonly status: 'verified';
       readonly proof: VerifiedTelegramProof;
       readonly profile: VerifiedTelegramProfileDetails;
+      readonly notificationPermission: VerifiedTelegramNotificationPermission;
     }
   | Exclude<TelegramProofVerificationOutcome, { readonly status: 'verified' }>;
 

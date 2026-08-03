@@ -16,15 +16,21 @@ that must be retained.
 4. Apply
    `docs/migrations/018_backend_auth_player_profile_editable_fields.sql`
    manually after its PRECHECK, then require its POSTCHECK to pass.
-5. Connect as the non-superuser `backend_auth_app` role.
-6. Set all four environment variables:
+5. Apply migration 019, then the migration 030 backend-match prerequisites
+   020 through 024 and 029, and finally migration 030. Run each migration's
+   PRECHECK, guarded apply, and POSTCHECK procedure. This deliberately minimal
+   disposable schema is required because the login graph uses the real
+   Telegram notification destination repository and verifies its
+   column-level ACL boundary.
+6. Connect as the non-superuser `backend_auth_app` role.
+7. Set all four environment variables:
 
    - `AUTH_INTEGRATION_TESTS_ENABLED=true`
    - `AUTH_INTEGRATION_DISPOSABLE_DATABASE=true`
    - `AUTH_INTEGRATION_DATABASE_URL=<URL of the disposable database>`
    - `AUTH_INTEGRATION_EXPECTED_DATABASE_NAME=<exact database name>`
 
-7. Use the one-shot Docker runner documented in
+8. Use the one-shot Docker runner documented in
    `infra/test/auth-integration/README.md`. It builds from the backend
    package lock, runs as the unprivileged `node` user, and connects only
    to the internal Compose network.
@@ -45,7 +51,7 @@ that must be retained.
    the four guarded integration environment values have been supplied.
    Do not run it as part of image discovery.
 
-The harness never creates a database or schema, applies migrations 015/017,
+The harness never creates a database or schema, applies any migration,
 grants roles, repairs schema state, or rolls a migration back. Before the
 first data change it verifies the exact database name, disposable suffix,
 application role, non-superuser status, supported PostgreSQL version,

@@ -17,6 +17,7 @@ import {
 import {
   TelegramProofVerificationOutcome,
   TelegramLoginProofVerificationOutcome,
+  VerifiedTelegramNotificationPermission,
   VerifiedTelegramProof,
   VerifiedTelegramProfileDetails,
   isAuthenticationCommandId,
@@ -77,6 +78,10 @@ import {
   TelegramAuthenticationOperationPersistenceError,
   TelegramAuthenticationOperationRepository,
 } from '../database/telegram-authentication-operation.repository';
+import {
+  TelegramNotificationDestinationPersistenceError,
+  TelegramNotificationDestinationRepository,
+} from '../database/telegram-notification-destination.repository';
 import { classifyPostgresError } from '../database/postgres-error-classifier';
 import {
   PostgresTransaction,
@@ -110,6 +115,7 @@ export type TelegramLoginDiagnosticStage =
   | 'account_provisioning'
   | 'terminal_operation'
   | 'profile_details_persistence'
+  | 'notification_destination_persistence'
   | 'credential_issue'
   | 'session_creation'
   | 'initial_session_persistence'
@@ -148,6 +154,7 @@ export interface TelegramLoginServiceDependencies {
   readonly accounts: AccountStatusReader;
   readonly playerAccounts: PlayerAccountProvisioningRepository;
   readonly profileDetails: PlayerProfileDetailsRepository;
+  readonly notificationDestinations: TelegramNotificationDestinationRepository;
   readonly terminalOperations: AuthenticationOperationTerminalRepository;
   readonly credentialIssuer: SessionCredentialIssuer;
   readonly initialSessions: InitialSessionRepository;
@@ -157,6 +164,7 @@ export interface TelegramLoginServiceDependencies {
 interface PreparedWorkflow {
   readonly proof: VerifiedTelegramProof;
   readonly profile: VerifiedTelegramProfileDetails;
+  readonly notificationPermission: VerifiedTelegramNotificationPermission;
   readonly digests: TelegramLookupDigestCandidates;
   readonly bindings: TelegramLoginWorkflowBindings;
   readonly operation: PendingAuthenticationOperation & {
@@ -392,6 +400,34 @@ function computedDigestsAreValid(
   );
 }
 
+const MAX_TELEGRAM_CHAT_ID_TEXT = String(2 ** 52 - 1);
+
+function validNotificationPermission(
+  value: unknown,
+  expectedTelegramChatId: string,
+): value is VerifiedTelegramNotificationPermission {
+  if (!isRecord(value) || typeof value.status !== 'string') {
+    return false;
+  }
+  if (value.status === 'not_granted') {
+    return hasExactlyKeys(value, ['status']);
+  }
+  if (
+    value.status !== 'granted' ||
+    !hasExactlyKeys(value, ['status', 'telegramChatId']) ||
+    typeof value.telegramChatId !== 'string' ||
+    !/^[1-9][0-9]*$/u.test(value.telegramChatId)
+  ) {
+    return false;
+  }
+  return (
+    value.telegramChatId === expectedTelegramChatId &&
+    (value.telegramChatId.length < MAX_TELEGRAM_CHAT_ID_TEXT.length ||
+      (value.telegramChatId.length === MAX_TELEGRAM_CHAT_ID_TEXT.length &&
+        value.telegramChatId <= MAX_TELEGRAM_CHAT_ID_TEXT))
+  );
+}
+
 function mapPersistenceReason(reason: string): TelegramLoginRejectionReason {
   switch (reason) {
     case 'transaction_conflict':
@@ -405,6 +441,7 @@ function mapPersistenceReason(reason: string): TelegramLoginRejectionReason {
     case 'identity_binding_conflict':
     case 'session_binding_conflict':
     case 'credential_conflict':
+    case 'binding_conflict':
       return 'request_conflict';
     default:
       return 'internal_failure';
@@ -420,6 +457,7 @@ function mapFailure(error: unknown): TelegramLoginRejectionReason {
     error instanceof ExternalIdentityPersistenceError ||
     error instanceof PlayerAccountProvisioningPersistenceError ||
     error instanceof PlayerProfileDetailsPersistenceError ||
+    error instanceof TelegramNotificationDestinationPersistenceError ||
     error instanceof AuthenticationOperationTerminalPersistenceError ||
     error instanceof InitialSessionPersistenceError
   ) {
@@ -673,7 +711,11 @@ export class TelegramLoginService {
     }
     if (
       !computedDigestsAreValid(digests, proof) ||
-      !validWorkflowBindings(bindings, proof)
+      !validWorkflowBindings(bindings, proof) ||
+      !validNotificationPermission(
+        proofOutcome.notificationPermission,
+        proof.identityKey.lookup.subject,
+      )
     ) {
       return this.internalFailure('proof_preparation');
     }
@@ -728,6 +770,7 @@ export class TelegramLoginService {
     return {
       proof,
       profile: proofOutcome.profile,
+      notificationPermission: proofOutcome.notificationPermission,
       digests,
       bindings,
       operation: created.state as PreparedWorkflow['operation'],
@@ -822,6 +865,13 @@ export class TelegramLoginService {
       );
     }
 
+    await this.persistNotificationDestination(
+      transaction,
+      prepared,
+      account.accountId,
+      diagnostic,
+    );
+
     return {
       accountKind: 'existing',
       accountId: account.accountId,
@@ -904,6 +954,13 @@ export class TelegramLoginService {
       diagnostic,
     );
 
+    await this.persistNotificationDestination(
+      transaction,
+      prepared,
+      prepared.bindings.accountId,
+      diagnostic,
+    );
+
     return {
       accountKind: 'new',
       accountId: prepared.bindings.accountId,
@@ -929,6 +986,35 @@ export class TelegramLoginService {
     if (
       result.accountId !== accountId ||
       (result.outcome !== 'created' && result.outcome !== 'existing')
+    ) {
+      throw new TelegramLoginTransactionAbort('internal_failure');
+    }
+    diagnostic.stage = 'terminal_operation';
+  }
+
+  private async persistNotificationDestination(
+    transaction: PostgresTransaction,
+    prepared: PreparedWorkflow,
+    accountId: AccountId,
+    diagnostic: TelegramLoginDiagnosticStageTracker,
+  ): Promise<void> {
+    diagnostic.stage = 'notification_destination_persistence';
+    diagnostic.checkpoint = undefined;
+    const result = await this.dependencies.notificationDestinations.synchronize(
+      transaction,
+      {
+        accountId,
+        permission: prepared.notificationPermission,
+        observedAt: prepared.proof.authDate,
+      },
+    );
+    if (
+      result.outcome !== 'synchronized' ||
+      result.accountId !== accountId ||
+      (result.state !== 'enabled' &&
+        result.state !== 'disabled' &&
+        result.state !== 'absent') ||
+      typeof result.changed !== 'boolean'
     ) {
       throw new TelegramLoginTransactionAbort('internal_failure');
     }

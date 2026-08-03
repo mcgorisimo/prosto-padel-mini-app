@@ -34,6 +34,7 @@ import { PostgresSessionAuthenticationRepository } from '../database/postgres-se
 import { PostgresSessionCredentialLifecycleRepository } from '../database/postgres-session-credential-lifecycle.repository';
 import { PostgresService } from '../database/postgres.service';
 import { PostgresTelegramAuthenticationOperationRepository } from '../database/postgres-telegram-authentication-operation.repository';
+import { PostgresTelegramNotificationDestinationRepository } from '../database/postgres-telegram-notification-destination.repository';
 import { PostgresTransactionRunner } from '../database/postgres-transaction';
 import { PostgresTransactionExecutorAdapter } from '../database/postgres-transaction-executor.adapter';
 import { ContentModerationController } from '../common/content-moderation.controller';
@@ -632,6 +633,9 @@ describe('AuthModule Telegram login wiring', () => {
     expect(dependencies.profileDetails).toBe(
       moduleRef.get(PostgresPlayerProfileDetailsRepository),
     );
+    expect(dependencies.notificationDestinations).toBe(
+      moduleRef.get(PostgresTelegramNotificationDestinationRepository),
+    );
     expect(moduleRef.get(PostgresPlayerProfileReader)).toBeInstanceOf(
       PostgresPlayerProfileReader,
     );
@@ -928,6 +932,9 @@ describe('AuthModule Telegram login wiring', () => {
         status: 'verified',
         proof: verifiedProof(),
         profile: Object.freeze({ firstName: 'Synthetic' }),
+        notificationPermission: Object.freeze({
+          status: 'not_granted' as const,
+        }),
       });
     jest
       .spyOn(dependencies.lookupDigests, 'computeCandidates')

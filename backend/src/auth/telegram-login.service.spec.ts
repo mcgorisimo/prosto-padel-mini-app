@@ -68,6 +68,12 @@ import {
   TelegramAuthenticationOperationResult,
 } from '../database/telegram-authentication-operation.repository';
 import {
+  SynchronizeTelegramNotificationDestinationInput,
+  SynchronizeTelegramNotificationDestinationResult,
+  TelegramNotificationDestinationPersistenceError,
+  TelegramNotificationDestinationRepository,
+} from '../database/telegram-notification-destination.repository';
+import {
   PostgresTransaction,
   PostgresTransactionCommitCheckpoint,
   PostgresTransactionCommitObserver,
@@ -192,6 +198,10 @@ function verifiedProof(): Extract<
       proofFingerprint: PROOF_FINGERPRINT,
     },
     profile: VERIFIED_PROFILE,
+    notificationPermission: Object.freeze({
+      status: 'granted' as const,
+      telegramChatId: '123456789',
+    }),
   };
 }
 
@@ -450,6 +460,36 @@ class FakePlayerProfileDetails implements PlayerProfileDetailsRepository {
   }
 }
 
+class FakeNotificationDestinations
+  implements TelegramNotificationDestinationRepository
+{
+  readonly calls: Array<{
+    transaction: PostgresTransaction;
+    input: SynchronizeTelegramNotificationDestinationInput;
+  }> = [];
+  result: SynchronizeTelegramNotificationDestinationResult = {
+    outcome: 'synchronized',
+    accountId: ACCOUNT_ID,
+    state: 'enabled',
+    changed: true,
+  };
+  error: unknown;
+
+  constructor(private readonly timeline: string[]) {}
+
+  async synchronize(
+    transaction: PostgresTransaction,
+    inputValue: SynchronizeTelegramNotificationDestinationInput,
+  ): Promise<SynchronizeTelegramNotificationDestinationResult> {
+    this.timeline.push('notification-destination');
+    this.calls.push({ transaction, input: inputValue });
+    if (this.error !== undefined) {
+      throw this.error;
+    }
+    return this.result;
+  }
+}
+
 class FakeTerminalOperations
   implements AuthenticationOperationTerminalRepository
 {
@@ -543,6 +583,7 @@ interface Harness {
   readonly accounts: FakeAccounts;
   readonly playerAccounts: FakePlayerAccounts;
   readonly profileDetails: FakePlayerProfileDetails;
+  readonly notificationDestinations: FakeNotificationDestinations;
   readonly terminal: FakeTerminalOperations;
   readonly issuer: FakeCredentialIssuer;
   readonly sessions: FakeInitialSessions;
@@ -563,6 +604,7 @@ function harness(
     accounts: new FakeAccounts(timeline),
     playerAccounts: new FakePlayerAccounts(timeline),
     profileDetails: new FakePlayerProfileDetails(timeline),
+    notificationDestinations: new FakeNotificationDestinations(timeline),
     terminal: new FakeTerminalOperations(timeline),
     issuer: new FakeCredentialIssuer(timeline),
     sessions: new FakeInitialSessions(timeline),
@@ -576,6 +618,7 @@ function harness(
     accounts: subject.accounts,
     playerAccounts: subject.playerAccounts,
     profileDetails: subject.profileDetails,
+    notificationDestinations: subject.notificationDestinations,
     terminalOperations: subject.terminal,
     credentialIssuer: subject.issuer,
     initialSessions: subject.sessions,
@@ -603,6 +646,7 @@ function persistedPayloads(subject: Harness): string {
     accounts: subject.accounts.calls,
     provisioning: subject.playerAccounts.calls,
     profileDetails: subject.profileDetails.calls,
+    notificationDestinations: subject.notificationDestinations.calls,
     terminal: subject.terminal.calls,
     sessions: subject.sessions.calls,
   });
@@ -911,6 +955,129 @@ describe('TelegramLoginService', () => {
     });
   });
 
+  it('synchronizes a granted private-message destination in the account transaction', async () => {
+    const subject = harness();
+
+    await subject.service.authenticateWithTelegram(input());
+
+    expect(subject.notificationDestinations.calls).toHaveLength(1);
+    expect(subject.notificationDestinations.calls[0]).toEqual({
+      transaction: subject.transactions.transactions[1],
+      input: {
+        accountId: ACCOUNT_ID,
+        permission: {
+          status: 'granted',
+          telegramChatId: '123456789',
+        },
+        observedAt: OPERATION_CREATED_AT,
+      },
+    });
+    expect(subject.timeline.indexOf('terminal')).toBeLessThan(
+      subject.timeline.indexOf('notification-destination'),
+    );
+  });
+
+  it('keeps a newer permission ahead of an older proof processed later', async () => {
+    const subject = harness();
+    const verified = verifiedProof();
+    const newerAuthDate = NOW;
+    const olderAuthDate = OPERATION_CREATED_AT;
+    subject.verifier.outcome = {
+      ...verified,
+      proof: {
+        ...verified.proof,
+        authDate: newerAuthDate,
+        verifiedAt: NOW,
+      },
+    };
+
+    await expect(
+      subject.service.authenticateWithTelegram(input()),
+    ).resolves.toMatchObject({ outcome: 'authenticated' });
+
+    subject.verifier.outcome = {
+      ...verified,
+      proof: {
+        ...verified.proof,
+        authDate: olderAuthDate,
+        verifiedAt: NOW,
+      },
+      notificationPermission: Object.freeze({
+        status: 'not_granted' as const,
+      }),
+    };
+
+    await expect(
+      subject.service.authenticateWithTelegram(input()),
+    ).resolves.toMatchObject({ outcome: 'authenticated' });
+    expect(
+      subject.notificationDestinations.calls.map(({ input: callInput }) => ({
+        permission: callInput.permission,
+        observedAt: callInput.observedAt,
+      })),
+    ).toEqual([
+      {
+        permission: {
+          status: 'granted',
+          telegramChatId: '123456789',
+        },
+        observedAt: newerAuthDate,
+      },
+      {
+        permission: { status: 'not_granted' },
+        observedAt: olderAuthDate,
+      },
+    ]);
+  });
+
+  it('rejects a private-message destination that differs from the proof subject', async () => {
+    const subject = harness();
+    const verified = verifiedProof();
+    subject.verifier.outcome = {
+      ...verified,
+      notificationPermission: Object.freeze({
+        status: 'granted' as const,
+        telegramChatId: '987654321',
+      }),
+    };
+
+    await expect(
+      subject.service.authenticateWithTelegram(input()),
+    ).resolves.toEqual({
+      outcome: 'rejected',
+      reason: 'internal_failure',
+    });
+    expect(subject.transactions.transactions).toHaveLength(0);
+    expect(subject.notificationDestinations.calls).toHaveLength(0);
+  });
+
+  it('synchronizes a missing private-message permission without a Telegram ID', async () => {
+    const subject = harness();
+    const verified = verifiedProof();
+    subject.verifier.outcome = {
+      ...verified,
+      notificationPermission: Object.freeze({
+        status: 'not_granted' as const,
+      }),
+    };
+    subject.notificationDestinations.result = {
+      outcome: 'synchronized',
+      accountId: ACCOUNT_ID,
+      state: 'absent',
+      changed: false,
+    };
+
+    await expect(
+      subject.service.authenticateWithTelegram(input()),
+    ).resolves.toMatchObject({ outcome: 'authenticated' });
+    expect(subject.notificationDestinations.calls[0].input.permission).toEqual(
+      { status: 'not_granted' },
+    );
+    expect(
+      JSON.stringify(subject.notificationDestinations.calls[0].input),
+    ).not.toContain('telegramChatId');
+  });
+
   it('does not persist player profile details for an active club admin', async () => {
     const subject = harness();
     subject.accounts.result = {
@@ -929,6 +1096,7 @@ describe('TelegramLoginService', () => {
       accountKind: 'existing',
     });
     expect(subject.profileDetails.calls).toHaveLength(0);
+    expect(subject.notificationDestinations.calls).toHaveLength(1);
   });
 
   it.each([
@@ -979,6 +1147,23 @@ describe('TelegramLoginService', () => {
     const subject = harness();
     subject.profileDetails.error =
       new PlayerProfileDetailsPersistenceError('permission_denied');
+
+    await expect(
+      subject.service.authenticateWithTelegram(input()),
+    ).resolves.toEqual({
+      outcome: 'rejected',
+      reason: 'dependency_unavailable',
+    });
+    expect(subject.timeline).toContain('tx2:rollback');
+    expect(subject.issuer.issued).toHaveLength(0);
+  });
+
+  it('rolls back the account transaction when destination persistence fails', async () => {
+    const subject = harness();
+    subject.notificationDestinations.error =
+      new TelegramNotificationDestinationPersistenceError(
+        'permission_denied',
+      );
 
     await expect(
       subject.service.authenticateWithTelegram(input()),
@@ -1323,6 +1508,7 @@ describe('TelegramLoginService', () => {
       'account',
       'terminal',
       'profile-details',
+      'notification-destination',
       'tx2:commit',
       'credential',
       'tx3:begin',
@@ -1366,6 +1552,7 @@ describe('TelegramLoginService', () => {
       LOOKUP_DIGEST,
       CREDENTIAL_DIGEST,
       PROOF_FINGERPRINT,
+      '123456789',
     ]) {
       expect(serialized).not.toContain(forbidden);
     }

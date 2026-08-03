@@ -62,6 +62,17 @@ interface PlayerProfileDetailsRow extends QueryResultRow {
   readonly updated_at: string;
 }
 
+interface TelegramNotificationDestinationRow extends QueryResultRow {
+  readonly account_id: string;
+  readonly telegram_chat_id: string;
+  readonly status: string;
+  readonly permission_granted_at: string;
+  readonly updated_at: string;
+  readonly disabled_at: string | null;
+  readonly disable_reason: string | null;
+  readonly version: string;
+}
+
 function safeLoginResult(
   result: TelegramLoginResult,
 ): Readonly<Record<string, unknown>> {
@@ -396,6 +407,74 @@ describe('Telegram login PostgreSQL integration', () => {
         ],
       ),
     ).toBe(2);
+  });
+
+  it('persists notification permission through the real repository and ignores an older proof', async () => {
+    const newer = await harness.prepareLogin({
+      subjectLabel: 'notification-destination-user',
+      proofLabel: 'notification-destination-newer-proof',
+      firstName: 'Notification Destination',
+      authDate: harness.now,
+      allowsWriteToPm: true,
+    });
+    const older = await harness.prepareLogin({
+      subjectLabel: 'notification-destination-user',
+      proofLabel: 'notification-destination-older-proof',
+      firstName: 'Notification Destination',
+      authDate: harness.now - 1,
+      allowsWriteToPm: false,
+    });
+
+    await expect(
+      harness.graph.service.authenticateWithTelegram({
+        rawInitData: newer.rawInitData,
+        requestKey: newer.requestKey,
+        now: newer.now,
+      }),
+    ).resolves.toMatchObject({
+      outcome: 'authenticated',
+      accountKind: 'new',
+    });
+    await expect(
+      harness.graph.service.authenticateWithTelegram({
+        rawInitData: older.rawInitData,
+        requestKey: older.requestKey,
+        now: older.now,
+      }),
+    ).resolves.toMatchObject({
+      outcome: 'authenticated',
+      accountKind: 'existing',
+    });
+
+    const destination =
+      await harness.query<TelegramNotificationDestinationRow>(
+        `
+          SELECT
+            account_id,
+            telegram_chat_id::text,
+            status,
+            permission_granted_at::text,
+            updated_at::text,
+            disabled_at::text,
+            disable_reason,
+            version::text
+          FROM backend_auth.telegram_notification_destinations
+          WHERE account_id = $1
+        `,
+        [newer.bindings.accountId],
+      );
+    expect(destination.rows).toEqual([
+      {
+        account_id: newer.bindings.accountId,
+        telegram_chat_id: newer.subject,
+        status: 'enabled',
+        permission_granted_at: String(harness.now),
+        updated_at: String(harness.now),
+        disabled_at: null,
+        disable_reason: null,
+        version: '1',
+      },
+    ]);
   });
 
   it('rolls provisioning and its audit rows back with the transaction', async () => {

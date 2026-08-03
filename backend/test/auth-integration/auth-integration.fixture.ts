@@ -46,6 +46,8 @@ import { PostgresPlayerAccountProvisioningRepository } from '../../src/database/
 import { PostgresPlayerProfileDetailsRepository } from '../../src/database/postgres-player-profile-details.repository';
 import { PostgresSecurityAuditRepository } from '../../src/database/postgres-security-audit.repository';
 import { PostgresTelegramAuthenticationOperationRepository } from '../../src/database/postgres-telegram-authentication-operation.repository';
+import { PostgresTelegramNotificationDestinationRepository } from '../../src/database/postgres-telegram-notification-destination.repository';
+import { TelegramNotificationDestinationRepository } from '../../src/database/telegram-notification-destination.repository';
 import { PostgresTransactionExecutorAdapter } from '../../src/database/postgres-transaction-executor.adapter';
 import {
   PostgresTransaction,
@@ -109,6 +111,7 @@ export interface AuthIntegrationGraph {
   readonly playerAccounts:
     PostgresPlayerAccountProvisioningRepository;
   readonly profileDetails: PostgresPlayerProfileDetailsRepository;
+  readonly notificationDestinations: TelegramNotificationDestinationRepository;
   readonly terminalOperations:
     PostgresAuthenticationOperationTerminalRepository;
   readonly initialSessions: PostgresInitialSessionRepository;
@@ -126,6 +129,8 @@ export interface AuthIntegrationHarness {
     readonly requestKey?: string;
     readonly rawInitData?: string;
     readonly firstName?: string;
+    readonly authDate?: number;
+    readonly allowsWriteToPm?: boolean;
   }): Promise<PreparedTelegramLogin>;
   persistPending(
     prepared: PreparedTelegramLogin,
@@ -168,6 +173,8 @@ function createGraph(
       audit,
     );
   const profileDetails = new PostgresPlayerProfileDetailsRepository();
+  const notificationDestinations =
+    new PostgresTelegramNotificationDestinationRepository();
   const terminalOperations =
     new PostgresAuthenticationOperationTerminalRepository(audit);
   const initialSessions =
@@ -212,6 +219,7 @@ function createGraph(
     accounts: accountStatus,
     playerAccounts,
     profileDetails,
+    notificationDestinations,
     terminalOperations,
     credentialIssuer,
     initialSessions,
@@ -231,6 +239,7 @@ function createGraph(
     accountStatus,
     playerAccounts,
     profileDetails,
+    notificationDestinations,
     terminalOperations,
     initialSessions,
     service,
@@ -253,16 +262,21 @@ function signedInitData(
   now: number,
   proofLabel: string,
   firstName: string,
+  allowsWriteToPm: boolean | undefined,
 ): string {
+  const user = {
+    id: Number(subject),
+    first_name: firstName,
+    ...(allowsWriteToPm === undefined
+      ? {}
+      : { allows_write_to_pm: allowsWriteToPm }),
+  };
   const parameters = new Map<string, string>([
     ['auth_date', now.toString(10)],
     ['query_id', `${proofLabel}:${randomUUID()}`],
     [
       'user',
-      JSON.stringify({
-        id: Number(subject),
-        first_name: firstName,
-      }),
+      JSON.stringify(user),
     ],
   ]);
   const dataCheckString = [...parameters.entries()]
@@ -423,9 +437,10 @@ export async function openAuthIntegrationHarness(): Promise<AuthIntegrationHarne
         options.rawInitData ??
         signedInitData(
           subject,
-          now,
+          options.authDate ?? now,
           options.proofLabel ?? randomUUID(),
           options.firstName ?? 'Auth Integration',
+          options.allowsWriteToPm,
         );
       const proofOutcome = verifierResult(graph.verifier, rawInitData);
       const proof = proofOutcome.proof;

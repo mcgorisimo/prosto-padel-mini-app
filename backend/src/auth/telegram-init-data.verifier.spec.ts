@@ -131,6 +131,7 @@ describe('TelegramInitDataVerifier', () => {
           username: 'fixture_user',
           language_code: 'ru-RU',
           photo_url: 'https://example.test/avatar.svg',
+          allows_write_to_pm: true,
           is_premium: true,
           unknown_future_field: { ignored: true },
         }),
@@ -432,6 +433,7 @@ describe('TelegramInitDataVerifier', () => {
           username: 'fixture_user',
           language_code: 'ru-RU',
           photo_url: 'https://example.test/avatar.svg',
+          allows_write_to_pm: true,
           is_premium: true,
           unknown_future_field: { ignored: true },
         }),
@@ -442,8 +444,18 @@ describe('TelegramInitDataVerifier', () => {
       expect(outcome.status).toBe('verified');
       if (outcome.status === 'verified') {
         expect(Object.keys(outcome).sort()).toEqual(
-          ['profile', 'proof', 'status'].sort(),
+          [
+            'notificationPermission',
+            'profile',
+            'proof',
+            'status',
+          ].sort(),
         );
+        expect(outcome.notificationPermission).toEqual({
+          status: 'granted',
+          telegramChatId: '4503599627370495',
+        });
+        expect(Object.isFrozen(outcome.notificationPermission)).toBe(true);
         expect(outcome.profile).toEqual({
           firstName: 'First',
           lastName: 'Last',
@@ -456,7 +468,63 @@ describe('TelegramInitDataVerifier', () => {
         expect(outcome.profile).not.toHaveProperty('id');
         expect(outcome.profile).not.toHaveProperty('isPremium');
         expect(outcome.profile).not.toHaveProperty('unknownFutureField');
+        expect(outcome.profile).not.toHaveProperty('allowsWriteToPm');
       }
+    });
+
+    it.each([
+      ['missing', {}],
+      ['false', { allows_write_to_pm: false }],
+    ] as const)(
+      'does not grant private-message delivery when allows_write_to_pm is %s',
+      (_description, permissionFields) => {
+        const outcome = makeVerifier().verifyLoginProof(
+          signParameters(
+            userParameters({
+              id: 42,
+              first_name: 'No permission',
+              ...permissionFields,
+            }),
+          ),
+        );
+
+        expect(outcome).toMatchObject({
+          status: 'verified',
+          notificationPermission: { status: 'not_granted' },
+        });
+        if (outcome.status === 'verified') {
+          expect(outcome.notificationPermission).not.toHaveProperty(
+            'telegramChatId',
+          );
+        }
+      },
+    );
+
+    it('rejects a non-boolean allows_write_to_pm with safe diagnostics', () => {
+      const observer = jest.fn();
+      const outcome = makeVerifier(
+        undefined,
+        () => FIXED_NOW,
+        observer,
+      ).verifyLoginProof(
+        signParameters(
+          userParameters({
+            id: 43,
+            first_name: 'Invalid permission',
+            allows_write_to_pm: 'true',
+          }),
+        ),
+      );
+
+      expect(outcome).toEqual({
+        status: 'invalid',
+        reason: 'invalid_proof',
+      });
+      expect(observer).toHaveBeenCalledWith({
+        reason: 'optional_field_invalid',
+        field: 'allows_write_to_pm',
+      });
+      expect(inspect(observer.mock.calls)).not.toContain('43');
     });
 
     it('preserves invalid and expired public proof outcomes', () => {

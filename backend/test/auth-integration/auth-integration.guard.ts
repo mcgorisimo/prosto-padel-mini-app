@@ -31,7 +31,7 @@ import {
 const MINIMUM_POSTGRES_VERSION = 140000;
 const EXPECTED_APPLICATION_ROLE = 'backend_auth_app';
 const NOT_PROVISIONED_MESSAGE =
-  'Auth integration database is not provisioned with migrations 015 and 017';
+  'Auth integration database is not provisioned through migration 030';
 
 export const AUTH_INTEGRATION_JEST_TIMEOUT_MILLIS = 60_000;
 export const AUTH_INTEGRATION_POOL_LIMITS = Object.freeze({
@@ -206,6 +206,10 @@ async function readCatalogEvidence(
       rel.relname AS name,
       pg_catalog.obj_description(rel.oid, 'pg_class') =
         CASE rel.relname
+          WHEN 'telegram_notification_destinations'
+            THEN '030_backend_telegram_outbound_notifications:'
+          WHEN 'player_rating_states'
+            THEN '019_backend_auth_player_rating_state:'
           WHEN 'player_profile_details'
             THEN '018_backend_auth_player_profile_editable_fields:'
           ELSE '015_backend_auth_foundation:'

@@ -260,15 +260,15 @@ describe('auth integration migration inventory', () => {
       foreignKeys: evidence.foreignKeys.length,
       columnAclEntries: evidence.columnAcl.length,
     }).toEqual({
-      tables: 15,
-      columns: 164,
+      tables: 17,
+      columns: 177,
       functions: 20,
       triggers: 33,
       indexes: 11,
-      constraints: 141,
-      keys: 30,
-      foreignKeys: 28,
-      columnAclEntries: 170,
+      constraints: 154,
+      keys: 33,
+      foreignKeys: 30,
+      columnAclEntries: 186,
     });
   });
 

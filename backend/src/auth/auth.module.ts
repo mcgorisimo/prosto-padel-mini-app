@@ -30,6 +30,7 @@ import { PostgresPublicPlayerProfileSearchRepository } from '../database/postgre
 import { PostgresSessionAuthenticationRepository } from '../database/postgres-session-authentication.repository';
 import { PostgresSessionCredentialLifecycleRepository } from '../database/postgres-session-credential-lifecycle.repository';
 import { PostgresTelegramAuthenticationOperationRepository } from '../database/postgres-telegram-authentication-operation.repository';
+import { PostgresTelegramNotificationDestinationRepository } from '../database/postgres-telegram-notification-destination.repository';
 import { PostgresTransactionExecutorAdapter } from '../database/postgres-transaction-executor.adapter';
 import { MatchApiService } from '../matches/match-api.service';
 import { MatchChatController } from '../matches/match-chat.controller';
@@ -133,6 +134,7 @@ function createTelegramLoginFeature(
   accounts: PostgresAccountStatusReader,
   playerAccounts: PostgresPlayerAccountProvisioningRepository,
   profileDetails: PostgresPlayerProfileDetailsRepository,
+  notificationDestinations: PostgresTelegramNotificationDestinationRepository,
   terminalOperations: PostgresAuthenticationOperationTerminalRepository,
   initialSessions: PostgresInitialSessionRepository,
 ): TelegramLoginFeature {
@@ -205,6 +207,7 @@ function createTelegramLoginFeature(
           accounts,
           playerAccounts,
           profileDetails,
+          notificationDestinations,
           terminalOperations,
           credentialIssuer: new NodeSessionCredentialIssuer(),
           initialSessions,
@@ -530,6 +533,7 @@ function createMatchResultService(
         PostgresAccountStatusReader,
         PostgresPlayerAccountProvisioningRepository,
         PostgresPlayerProfileDetailsRepository,
+        PostgresTelegramNotificationDestinationRepository,
         PostgresAuthenticationOperationTerminalRepository,
         PostgresInitialSessionRepository,
       ],

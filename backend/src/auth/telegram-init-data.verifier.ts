@@ -11,6 +11,7 @@ import {
   TelegramProofVerificationOutcome,
   UnixEpochSeconds,
   VerifiedTelegramIdentity,
+  VerifiedTelegramNotificationPermission,
   unixEpochSeconds,
 } from './auth.types';
 
@@ -66,7 +67,8 @@ export type TelegramInitDataInvalidOptionalField =
   | 'last_name'
   | 'username'
   | 'language_code'
-  | 'photo_url';
+  | 'photo_url'
+  | 'allows_write_to_pm';
 
 type TelegramInitDataNonExpiredDiagnosticEvent = Readonly<
   | {
@@ -117,6 +119,7 @@ type TelegramInitDataVerificationInternalOutcome =
         { readonly status: 'verified' }
       >['proof'];
       readonly identity: VerifiedTelegramIdentity;
+      readonly notificationPermission: VerifiedTelegramNotificationPermission;
     }
   | Exclude<TelegramProofVerificationOutcome, { readonly status: 'verified' }>;
 
@@ -426,6 +429,28 @@ function readTelegramId(user: TelegramUserData): number {
   return id;
 }
 
+function readNotificationPermission(
+  user: TelegramUserData,
+  telegramId: number,
+): VerifiedTelegramNotificationPermission {
+  if (!hasOwn(user, 'allows_write_to_pm')) {
+    return Object.freeze({ status: 'not_granted' as const });
+  }
+
+  const allowed = user.allows_write_to_pm;
+  if (typeof allowed !== 'boolean') {
+    return failOptionalFieldDiagnostic('allows_write_to_pm');
+  }
+  if (!allowed) {
+    return Object.freeze({ status: 'not_granted' as const });
+  }
+
+  return Object.freeze({
+    status: 'granted' as const,
+    telegramChatId: String(telegramId),
+  });
+}
+
 export function telegramCanonicalSubjectFromUserId(
   telegramUserId: string,
 ): CanonicalExternalIdentitySubject {
@@ -549,6 +574,7 @@ export class TelegramInitDataVerifier {
             ? {}
             : { photoUrl: identity.photoUrl }),
         }),
+        notificationPermission: outcome.notificationPermission,
       };
     }
 
@@ -578,6 +604,10 @@ export class TelegramInitDataVerifier {
       } = readAuthDate(parameters, now, this.settings.maxAgeSeconds);
       const user = parseTelegramUser(parameters.get('user'));
       const telegramId = readTelegramId(user);
+      const notificationPermission = readNotificationPermission(
+        user,
+        telegramId,
+      );
       const firstName = readRequiredString(
         user,
         'first_name',
@@ -651,6 +681,7 @@ export class TelegramInitDataVerifier {
           proofFingerprint,
         },
         identity,
+        notificationPermission,
       };
     } catch (error: unknown) {
       const event: TelegramInitDataNonExpiredDiagnosticEvent =

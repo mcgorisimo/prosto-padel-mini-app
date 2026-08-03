@@ -28,7 +28,12 @@ suite execution, manually:
 6. run migration 015 POSTCHECK;
 7. run migration 017 PRECHECK;
 8. apply migration 017 with the guarded apply wrapper;
-9. run migration 017 POSTCHECK.
+9. run migration 017 POSTCHECK;
+10. apply migration 018, then migration 019 and the migration 030
+    backend-match prerequisites 020 through 024 and 029, and finally
+    migration 030; run each PRECHECK, guarded apply, and POSTCHECK. This
+    deliberately minimal disposable schema lets the suite exercise the real
+    Telegram notification destination repository and its column ACLs.
 
 The runner does not create or delete databases, provision roles, apply
 SQL, repair schema state, or make backups. The integration harness keeps
