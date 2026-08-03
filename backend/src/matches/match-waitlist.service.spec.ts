@@ -66,6 +66,7 @@ function harness() {
   const queue = waitlist();
   const matchRepository = matches();
   const notificationRepository = notifications();
+  const enqueueMatchNotification = jest.fn().mockResolvedValue(undefined);
   const findByPlayerIds = jest.fn<
     ReturnType<PublicPlayerProfileSearchRepository['findByPlayerIds']>,
     Parameters<PublicPlayerProfileSearchRepository['findByPlayerIds']>
@@ -77,12 +78,14 @@ function harness() {
     queue,
     matches: matchRepository,
     notifications: notificationRepository,
+    enqueueMatchNotification,
     findByPlayerIds,
     service: new MatchWaitlistService({
       transactions: { run: (operation) => operation(transaction) },
       waitlist: queue,
       matches: matchRepository,
       notifications: notificationRepository,
+      notificationOutbox: { enqueueMatchNotification },
       publicProfiles: { findByPlayerIds },
       clock: { nowEpochSeconds: () => NOW },
     }),
@@ -218,6 +221,13 @@ describe('MatchWaitlistService', () => {
     expect(firstNotification.notificationId).toMatch(
       /^[0-9a-f-]{36}$/u,
     );
+    expect(test.enqueueMatchNotification).toHaveBeenCalledWith(
+      transaction,
+      expect.objectContaining({
+        matchNotificationId: firstNotification.notificationId,
+        now: NOW,
+      }),
+    );
   });
 
   it('stops FIFO promotion without consuming the first entry when no slot is free', async () => {
@@ -244,6 +254,7 @@ describe('MatchWaitlistService', () => {
     expect(test.queue.resolvePromotion).toHaveBeenCalledTimes(8);
     expect(test.matches.join).not.toHaveBeenCalled();
     expect(test.notifications.createWaitlistPromotion).not.toHaveBeenCalled();
+    expect(test.enqueueMatchNotification).not.toHaveBeenCalled();
   });
 
   it('fails the surrounding promotion transaction when notification persistence fails', async () => {

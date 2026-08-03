@@ -7,6 +7,7 @@ import {
   TELEGRAM_LOOKUP_PEPPER_VERSION,
   TELEGRAM_SESSION_TTL_SECONDS,
 } from './telegram-login.config';
+import { TELEGRAM_NOTIFICATION_CONFIG_KEYS } from './telegram-notification.config';
 
 const canonicalBase64Secret = Joi.string()
   .base64()
@@ -88,6 +89,25 @@ export const envValidationSchema = Joi.object({
       .allow('')
       .default(''),
   }),
+  [TELEGRAM_NOTIFICATION_CONFIG_KEYS.enabled]: Joi.boolean()
+    .truthy('true')
+    .falsy('false')
+    .default(false)
+    .when('TELEGRAM_AUTH_ENABLED', {
+      is: false,
+      then: Joi.valid(false).messages({
+        'any.only':
+          'TELEGRAM_OUTBOUND_NOTIFICATIONS_ENABLED requires TELEGRAM_AUTH_ENABLED to be enabled',
+      }),
+    }),
+  [TELEGRAM_NOTIFICATION_CONFIG_KEYS.miniAppUrl]: Joi.when(
+    TELEGRAM_NOTIFICATION_CONFIG_KEYS.enabled,
+    {
+      is: true,
+      then: Joi.string().uri({ scheme: ['https'] }).required(),
+      otherwise: Joi.string().allow('').default(''),
+    },
+  ),
   [TELEGRAM_LOGIN_CONFIG_KEYS.lookupPepperBase64]:
     requiredWhenTelegramEnabled(canonicalBase64Secret),
   [TELEGRAM_LOGIN_CONFIG_KEYS.workflowHmacSecretBase64]:

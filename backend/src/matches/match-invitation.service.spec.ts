@@ -106,11 +106,13 @@ function service(
 ) {
   const promoteAvailable = jest.fn().mockResolvedValue(0);
   const closeForParticipant = jest.fn().mockResolvedValue(false);
+  const enqueueInvitation = jest.fn().mockResolvedValue(undefined);
   return {
     invitations,
     publicProfiles,
     promoteAvailable,
     closeForParticipant,
+    enqueueInvitation,
     service: new MatchInvitationService({
       transactions: {
         run: (operation) => operation(transaction),
@@ -118,6 +120,7 @@ function service(
       invitations,
       publicProfiles,
       waitlist: { promoteAvailable, closeForParticipant },
+      notificationOutbox: { enqueueInvitation },
       clock: { nowEpochSeconds: () => NOW },
     }),
   };
@@ -152,6 +155,13 @@ describe('MatchInvitationService', () => {
         },
       },
     });
+    expect(harness.enqueueInvitation).toHaveBeenCalledWith(
+      transaction,
+      expect.objectContaining({
+        invitationId: INVITATION_ID,
+        now: NOW,
+      }),
+    );
 
     const persistenceInput =
       harness.invitations.create.mock.calls[0][1];

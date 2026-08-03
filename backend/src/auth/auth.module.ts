@@ -31,6 +31,7 @@ import { PostgresSessionAuthenticationRepository } from '../database/postgres-se
 import { PostgresSessionCredentialLifecycleRepository } from '../database/postgres-session-credential-lifecycle.repository';
 import { PostgresTelegramAuthenticationOperationRepository } from '../database/postgres-telegram-authentication-operation.repository';
 import { PostgresTelegramNotificationDestinationRepository } from '../database/postgres-telegram-notification-destination.repository';
+import { PostgresTelegramNotificationOutboxRepository } from '../database/postgres-telegram-notification-outbox.repository';
 import { PostgresTransactionExecutorAdapter } from '../database/postgres-transaction-executor.adapter';
 import { MatchApiService } from '../matches/match-api.service';
 import { MatchChatController } from '../matches/match-chat.controller';
@@ -306,6 +307,7 @@ function createMatchInvitationService(
   invitations: PostgresMatchInvitationRepository,
   publicProfiles: PostgresPublicPlayerProfileSearchRepository,
   waitlist: MatchWaitlistService,
+  notificationOutbox: PostgresTelegramNotificationOutboxRepository,
   clock: SessionAuthenticationClock,
 ): MatchInvitationService {
   return new MatchInvitationService({
@@ -313,6 +315,7 @@ function createMatchInvitationService(
     invitations,
     publicProfiles,
     waitlist,
+    notificationOutbox,
     clock,
   });
 }
@@ -322,6 +325,7 @@ function createMatchWaitlistService(
   waitlist: PostgresMatchWaitlistRepository,
   matches: PostgresMatchRepository,
   notifications: PostgresMatchNotificationRepository,
+  notificationOutbox: PostgresTelegramNotificationOutboxRepository,
   publicProfiles: PostgresPublicPlayerProfileSearchRepository,
   clock: SessionAuthenticationClock,
 ): MatchWaitlistService {
@@ -330,6 +334,7 @@ function createMatchWaitlistService(
     waitlist,
     matches,
     notifications,
+    notificationOutbox,
     publicProfiles,
     clock,
   });
@@ -452,6 +457,7 @@ function createMatchResultService(
         PostgresMatchWaitlistRepository,
         PostgresMatchRepository,
         PostgresMatchNotificationRepository,
+        PostgresTelegramNotificationOutboxRepository,
         PostgresPublicPlayerProfileSearchRepository,
         SESSION_AUTHENTICATION_CLOCK,
       ],
@@ -473,6 +479,7 @@ function createMatchResultService(
         PostgresMatchInvitationRepository,
         PostgresPublicPlayerProfileSearchRepository,
         MatchWaitlistService,
+        PostgresTelegramNotificationOutboxRepository,
         SESSION_AUTHENTICATION_CLOCK,
       ],
       useFactory: createMatchInvitationService,

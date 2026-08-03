@@ -27,6 +27,7 @@ import { PostgresSessionCredentialLifecycleRepository } from './postgres-session
 import { PostgresService } from './postgres.service';
 import { PostgresTelegramAuthenticationOperationRepository } from './postgres-telegram-authentication-operation.repository';
 import { PostgresTelegramNotificationDestinationRepository } from './postgres-telegram-notification-destination.repository';
+import { PostgresTelegramNotificationOutboxRepository } from './postgres-telegram-notification-outbox.repository';
 import { PostgresTransactionRunner } from './postgres-transaction';
 import { PostgresTransactionExecutorAdapter } from './postgres-transaction-executor.adapter';
 
@@ -45,6 +46,7 @@ const DATABASE_WORKFLOW_PROVIDERS: Provider[] = [
   PostgresMatchNotificationRepository,
   PostgresMatchResultRepository,
   PostgresTelegramNotificationDestinationRepository,
+  PostgresTelegramNotificationOutboxRepository,
   PostgresMatchWaitlistRepository,
   {
     provide: MATCH_COURT_CATALOG,
@@ -132,6 +134,7 @@ const DATABASE_WORKFLOW_EXPORTS = [
   PostgresSecurityAuditRepository,
   PostgresTelegramAuthenticationOperationRepository,
   PostgresTelegramNotificationDestinationRepository,
+  PostgresTelegramNotificationOutboxRepository,
   PostgresExternalIdentityResolutionRepository,
   PostgresAccountStatusReader,
   PostgresSessionAuthenticationRepository,

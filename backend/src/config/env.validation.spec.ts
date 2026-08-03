@@ -6,6 +6,7 @@ import {
   TELEGRAM_LOOKUP_PEPPER_VERSION,
   TELEGRAM_SESSION_TTL_SECONDS,
 } from './telegram-login.config';
+import { TELEGRAM_NOTIFICATION_CONFIG_KEYS } from './telegram-notification.config';
 
 const SAFE_TEST_TELEGRAM_CRYPTO_CONFIG = Object.freeze({
   [TELEGRAM_LOGIN_CONFIG_KEYS.lookupPepperBase64]: Buffer.alloc(
@@ -309,6 +310,57 @@ describe('envValidationSchema', () => {
       [TELEGRAM_LOGIN_CONFIG_KEYS.pepperVersion]: 1,
       [TELEGRAM_LOGIN_CONFIG_KEYS.operationTtlSeconds]: 300,
       [TELEGRAM_LOGIN_CONFIG_KEYS.sessionTtlSeconds]: 2_592_000,
+    });
+  });
+
+  it('keeps outbound Telegram notifications disabled by default', () => {
+    const { error, value } = validate();
+
+    expect(error).toBeUndefined();
+    expect(value[TELEGRAM_NOTIFICATION_CONFIG_KEYS.enabled]).toBe(false);
+    expect(value[TELEGRAM_NOTIFICATION_CONFIG_KEYS.miniAppUrl]).toBe('');
+  });
+
+  it('requires Telegram auth and an HTTPS Mini App URL for outbound notifications', () => {
+    const disabledAuth = validate({
+      [TELEGRAM_NOTIFICATION_CONFIG_KEYS.enabled]: 'true',
+      [TELEGRAM_NOTIFICATION_CONFIG_KEYS.miniAppUrl]:
+        'https://app.prostopdl.ru/',
+    });
+    expect(disabledAuth.error?.message).toContain(
+      'requires TELEGRAM_AUTH_ENABLED',
+    );
+
+    const insecureUrl = validate({
+      ...SAFE_TEST_DATABASE_CONFIG,
+      ...SAFE_TEST_TELEGRAM_CRYPTO_CONFIG,
+      TELEGRAM_AUTH_ENABLED: 'true',
+      TELEGRAM_BOT_TOKEN: SAFE_TEST_BOT_TOKEN,
+      TELEGRAM_INIT_DATA_MAX_AGE_SECONDS: '300',
+      [TELEGRAM_NOTIFICATION_CONFIG_KEYS.enabled]: 'true',
+      [TELEGRAM_NOTIFICATION_CONFIG_KEYS.miniAppUrl]:
+        'http://app.prostopdl.ru/',
+    });
+    expect(insecureUrl.error).toBeDefined();
+  });
+
+  it('accepts explicitly enabled outbound Telegram notifications', () => {
+    const { error, value } = validate({
+      ...SAFE_TEST_DATABASE_CONFIG,
+      ...SAFE_TEST_TELEGRAM_CRYPTO_CONFIG,
+      TELEGRAM_AUTH_ENABLED: 'true',
+      TELEGRAM_BOT_TOKEN: SAFE_TEST_BOT_TOKEN,
+      TELEGRAM_INIT_DATA_MAX_AGE_SECONDS: '300',
+      [TELEGRAM_NOTIFICATION_CONFIG_KEYS.enabled]: 'true',
+      [TELEGRAM_NOTIFICATION_CONFIG_KEYS.miniAppUrl]:
+        'https://app.prostopdl.ru/',
+    });
+
+    expect(error).toBeUndefined();
+    expect(value).toMatchObject({
+      [TELEGRAM_NOTIFICATION_CONFIG_KEYS.enabled]: true,
+      [TELEGRAM_NOTIFICATION_CONFIG_KEYS.miniAppUrl]:
+        'https://app.prostopdl.ru/',
     });
   });
 
