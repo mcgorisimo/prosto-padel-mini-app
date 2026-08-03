@@ -4,8 +4,10 @@ This is an isolated, synthetic-only contour for PostgreSQL, the NestJS backend,
 nginx, and an opt-in one-shot `db-tools` container. PostgreSQL and backend have
 no host port mapping. Only nginx is reachable, at `127.0.0.1:8080`.
 Nginx joins the ordinary `test_edge` bridge for loopback publication and the
-internal `test_internal` network for backend access. PostgreSQL, backend, and
-`db-tools` remain attached only to `test_internal`.
+internal `test_internal` network for backend access. PostgreSQL and `db-tools`
+remain attached only to `test_internal`. Backend also joins the dedicated
+`test_egress` bridge so outbound integrations can use HTTPS without exposing a
+host port or attaching PostgreSQL to an internet-capable network.
 
 The project-approved versions are Node.js `>=20.11.0` and PostgreSQL `>=14`.
 This contour pins Node.js `20.11.0` and PostgreSQL `14`.

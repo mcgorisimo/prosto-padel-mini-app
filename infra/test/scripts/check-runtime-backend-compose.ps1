@@ -162,6 +162,8 @@ function Assert-RuntimeBackendContract {
         TELEGRAM_LOGIN_WORKFLOW_HMAC_SECRET_BASE64 = '!reset null'
         TELEGRAM_INIT_DATA_MAX_AGE_SECONDS = '${TELEGRAM_INIT_DATA_MAX_AGE_SECONDS:?TELEGRAM_INIT_DATA_MAX_AGE_SECONDS is required}'
         TELEGRAM_LOGIN_UUID_NAMESPACE = '${TELEGRAM_LOGIN_UUID_NAMESPACE:?TELEGRAM_LOGIN_UUID_NAMESPACE is required}'
+        TELEGRAM_OUTBOUND_NOTIFICATIONS_ENABLED = '${TELEGRAM_OUTBOUND_NOTIFICATIONS_ENABLED:-false}'
+        TELEGRAM_MINI_APP_URL = '${TELEGRAM_MINI_APP_URL:-https://app.prostopdl.ru/}'
         TELEGRAM_BOT_TOKEN_FILE = '/run/secrets/telegram-bot-token'
         TELEGRAM_IDENTITY_LOOKUP_PEPPER_BASE64_FILE = '/run/secrets/telegram-identity-lookup-pepper-base64'
         TELEGRAM_LOGIN_WORKFLOW_HMAC_SECRET_BASE64_FILE = '/run/secrets/telegram-login-workflow-hmac-secret-base64'
@@ -264,11 +266,20 @@ $basePostgres = Get-NormalizedLines (
 $baseBackend = Get-NormalizedLines (
     Get-ServiceBlock -Yaml $baseCompose -ServiceName 'backend'
 )
+$baseFrontend = Get-NormalizedLines (
+    Get-ServiceBlock -Yaml $baseCompose -ServiceName 'frontend'
+)
+$baseNginx = Get-NormalizedLines (
+    Get-ServiceBlock -Yaml $baseCompose -ServiceName 'nginx'
+)
 $baseRunner = Get-NormalizedLines (
     Get-ServiceBlock -Yaml $baseCompose -ServiceName 'auth-integration-runner'
 )
 $baseDbTools = Get-NormalizedLines (
     Get-ServiceBlock -Yaml $baseCompose -ServiceName 'db-tools'
+)
+$baseEgressNetwork = Get-NormalizedLines (
+    Get-ServiceBlock -Yaml $baseCompose -ServiceName 'test_egress'
 )
 $runtimeBackendBlock = Get-ServiceBlock `
     -Yaml $runtimeCompose `
@@ -280,6 +291,20 @@ Assert-Line $basePostgres 'POSTGRES_PASSWORD: ${TEST_POSTGRES_PASSWORD:-local_te
 Assert-Line $baseDbTools 'DATABASE_USER: ${DATABASE_USER:-prosto_padel_test}'
 Assert-Line $baseDbTools 'PGPASSWORD: ${TEST_POSTGRES_PASSWORD:-local_test_password_only}'
 Assert-Line $baseBackend 'DATABASE_URL: postgresql://${TEST_POSTGRES_USER:-prosto_padel_test}:${TEST_POSTGRES_PASSWORD:-local_test_password_only}@postgres:5432/${TEST_POSTGRES_DB:-prosto_padel_test_migration_cycle}'
+Assert-Line $baseBackend '- test_internal'
+Assert-Line $baseBackend '- test_egress'
+Assert-Line $baseEgressNetwork 'driver: bridge'
+
+if (
+    ($basePostgres -join "`n") -match '(^|\n)- test_egress($|\n)' -or
+    ($baseFrontend -join "`n") -match '(^|\n)- test_egress($|\n)' -or
+    ($baseNginx -join "`n") -match '(^|\n)- test_egress($|\n)' -or
+    ($baseRunner -join "`n") -match '(^|\n)- test_egress($|\n)' -or
+    ($baseDbTools -join "`n") -match '(^|\n)- test_egress($|\n)' -or
+    $baseEgressNetwork.Count -ne 2
+) {
+    throw "RUNTIME_BACKEND_COMPOSE_EGRESS_BOUNDARY_INVALID"
+}
 
 Assert-RuntimeBackendContract -ServiceBlock $runtimeBackendBlock
 
