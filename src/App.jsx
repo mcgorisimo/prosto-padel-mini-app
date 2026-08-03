@@ -21,6 +21,7 @@ import {
   isBackendOwnedMatch,
   mapBackendInvitationToApp,
   mapBackendMatchMessageToApp,
+  mapBackendMatchNotificationToApp,
   mapBackendMatchToApp,
   mapBackendPublicPlayerToApp,
   mergeAccountUpcomingMatches,
@@ -372,6 +373,7 @@ export default function App({
   const backendAccountRequestRef = useRef(0);
   const backendInvitationRequestRef = useRef(0);
   const backendChatRequestRef = useRef(0);
+  const backendNotificationRequestRef = useRef(0);
   const backendChatMatchRef = useRef(null);
   const [incomingInvitations, setIncomingInvitations] = useState([]);
   const [outgoingInvitations, setOutgoingInvitations] = useState([]);
@@ -656,22 +658,62 @@ export default function App({
     }
   }, [backendMatchActions, backendMatchesReady]);
 
-  const loadNotifications = useCallback(async () => {
-    if (!ME_ID) return null;
-    setNotificationsLoading(true);
+  const loadNotifications = useCallback(async ({ background = false } = {}) => {
+    const requestId = backendNotificationRequestRef.current + 1;
+    backendNotificationRequestRef.current = requestId;
+    if (
+      (usesBackendMatches &&
+        (!backendMatchesReady ||
+          typeof backendMatchActions?.listMatchNotifications !== 'function')) ||
+      (!usesBackendMatches && !ME_ID)
+    ) {
+      setNotificationCenter({ items: [], unreadCount: 0 });
+      setNotificationsLoading(false);
+      setNotificationsLoadError('');
+      return null;
+    }
+    if (!background) setNotificationsLoading(true);
     setNotificationsLoadError('');
     try {
-      const center = await getNotificationCenter();
+      const center = usesBackendMatches
+        ? await backendMatchActions.listMatchNotifications(50).then((result) => {
+            if (result.outcome !== 'notifications_loaded') {
+              throw new Error('BACKEND_NOTIFICATION_LIST_REJECTED');
+            }
+            const items = result.notifications
+              .map(mapBackendMatchNotificationToApp)
+              .filter(Boolean);
+            if (items.length !== result.notifications.length) {
+              throw new Error('BACKEND_NOTIFICATION_LIST_INVALID');
+            }
+            return Object.freeze({
+              items,
+              unreadCount: result.unreadCount,
+            });
+          })
+        : await getNotificationCenter();
+      if (backendNotificationRequestRef.current !== requestId) return null;
       setNotificationCenter(center);
       return center;
     } catch (error) {
+      if (backendNotificationRequestRef.current !== requestId) return null;
       console.error(`Ошибка при получении уведомлений: ${error.message}`);
       setNotificationsLoadError('Не удалось загрузить уведомления. Проверьте подключение и попробуйте ещё раз.');
       return null;
     } finally {
-      setNotificationsLoading(false);
+      if (
+        !background &&
+        backendNotificationRequestRef.current === requestId
+      ) {
+        setNotificationsLoading(false);
+      }
     }
-  }, [ME_ID]);
+  }, [
+    ME_ID,
+    backendMatchActions,
+    backendMatchesReady,
+    usesBackendMatches,
+  ]);
 
   const fetchData = useCallback(async () => {
     if (!ME_ID) {
@@ -738,18 +780,35 @@ export default function App({
           })
           .subscribe();
 
-    const notificationsSubscription = supabase.channel('public:notifications')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications' }, loadNotifications)
-      .subscribe();
+    const notificationsSubscription = usesBackendMatches
+      ? null
+      : supabase.channel('public:notifications')
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications' }, () => {
+            loadNotifications();
+          })
+          .subscribe();
 
     return () => {
       supabase.removeChannel(matchesSubscription);
       if (invitationsSubscription) {
         supabase.removeChannel(invitationsSubscription);
       }
-      supabase.removeChannel(notificationsSubscription);
+      if (notificationsSubscription) {
+        supabase.removeChannel(notificationsSubscription);
+      }
     };
   }, [fetchData]);
+
+  useEffect(() => {
+    if (!backendMatchesReady) return undefined;
+    const intervalId = globalThis.setInterval(() => {
+      void loadNotifications({ background: true });
+    }, 5_000);
+    return () => {
+      globalThis.clearInterval(intervalId);
+      backendNotificationRequestRef.current += 1;
+    };
+  }, [backendMatchesReady, loadNotifications]);
 
   useEffect(() => {
     if (
@@ -1992,20 +2051,57 @@ const handleBookSlot = async (booking) => {
     return updatedMatch;
   };
 
+  const markAppNotificationRead = async (notification) => {
+    const notificationId = notification?.notification_id;
+    if (!notificationId) return null;
+    const isBackendNotification =
+      notification.notification_provider === 'backend';
+    let readAt;
+    if (isBackendNotification) {
+      if (
+        !backendMatchesReady ||
+        typeof backendMatchActions?.markMatchNotificationRead !== 'function'
+      ) {
+        throw new Error('BACKEND_NOTIFICATION_MARK_READ_UNAVAILABLE');
+      }
+      const result = await backendMatchActions.markMatchNotificationRead(
+        notificationId,
+      );
+      if (result.outcome !== 'notification_read') {
+        throw new Error('BACKEND_NOTIFICATION_MARK_READ_REJECTED');
+      }
+      readAt = new Date(result.notification.readAt * 1_000).toISOString();
+    } else {
+      await markNotificationRead(notificationId);
+      readAt = new Date().toISOString();
+    }
+    backendNotificationRequestRef.current += 1;
+    setNotificationCenter((prev) => {
+      const current = prev.items.find(
+        (item) => item.notification_id === notificationId,
+      );
+      return {
+        items: prev.items.map((item) => item.notification_id === notificationId
+          ? { ...item, read_at: readAt }
+          : item),
+        unreadCount: current && !current.read_at
+          ? Math.max(0, prev.unreadCount - 1)
+          : prev.unreadCount,
+      };
+    });
+    return readAt;
+  };
+
   const markInvitationHandled = async (invitationId) => {
     const notification = notificationCenter.items.find((item) =>
-      item.invitation_id === invitationId && !item.read_at
+      item.notification_provider !== 'backend' &&
+      item.invitation_id === invitationId &&
+      !item.read_at
     );
 
     if (notification?.notification_id) {
       try {
-        await markNotificationRead(notification.notification_id);
-        setNotificationCenter((prev) => ({
-          items: prev.items.map((item) => item.notification_id === notification.notification_id
-            ? { ...item, read_at: new Date().toISOString() }
-            : item),
-          unreadCount: Math.max(0, prev.unreadCount - 1),
-        }));
+        await markAppNotificationRead(notification);
       } catch (error) {
         console.error(`Не удалось отметить уведомление прочитанным: ${error.message}`);
       }
@@ -2017,13 +2113,7 @@ const handleBookSlot = async (booking) => {
 
     if (!notification.read_at && notification.notification_id) {
       try {
-        await markNotificationRead(notification.notification_id);
-        setNotificationCenter((prev) => ({
-          items: prev.items.map((item) => item.notification_id === notification.notification_id
-            ? { ...item, read_at: new Date().toISOString() }
-            : item),
-          unreadCount: Math.max(0, prev.unreadCount - 1),
-        }));
+        await markAppNotificationRead(notification);
       } catch (error) {
         console.error(`Не удалось отметить уведомление прочитанным: ${error.message}`);
         showToast?.('Не удалось обновить уведомление. Попробуйте ещё раз.', 'error');
@@ -2033,8 +2123,24 @@ const handleBookSlot = async (booking) => {
 
     if (notification.match_id) {
       try {
-        const match = allMatches.find((item) => item.id === notification.match_id)
-          ?? await fetchMatchById(notification.match_id);
+        const isBackendNotification =
+          notification.notification_provider === 'backend';
+        let match = getMatchSource(notification.match_id);
+        if (isBackendNotification) {
+          const result = await backendMatchActions.loadMatch(
+            notification.match_id,
+          );
+          if (result.outcome !== 'match_loaded') {
+            throw new Error('BACKEND_NOTIFICATION_MATCH_UNAVAILABLE');
+          }
+          match = mapBackendMatchToApp(result.match, backendProfile);
+          if (!match) {
+            throw new Error('BACKEND_NOTIFICATION_MATCH_INVALID');
+          }
+          storeBackendMatch(match);
+        } else if (!match || isBackendOwnedMatch(match)) {
+          match = await fetchMatchById(notification.match_id);
+        }
         if (match) openMatchDetails(match);
       } catch (error) {
         console.error(`Не удалось открыть матч из уведомления: ${error.message}`);

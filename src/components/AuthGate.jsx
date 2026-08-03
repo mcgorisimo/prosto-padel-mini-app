@@ -71,6 +71,10 @@ export function createBackendMatchActions(telegramBackendLogin) {
       telegramBackendLogin.sendMatchMessage,
     listMatchWaitlist:
       telegramBackendLogin.listMatchWaitlist,
+    listMatchNotifications:
+      telegramBackendLogin.listMatchNotifications,
+    markMatchNotificationRead:
+      telegramBackendLogin.markMatchNotificationRead,
     joinMatchWaitlist:
       telegramBackendLogin.joinMatchWaitlist,
     leaveMatchWaitlist:
@@ -228,6 +232,8 @@ export default function AuthGate() {
       telegramBackendLogin.listOutgoingMatchInvitations,
       telegramBackendLogin.listMatchMessages,
       telegramBackendLogin.listMatchWaitlist,
+      telegramBackendLogin.listMatchNotifications,
+      telegramBackendLogin.markMatchNotificationRead,
       telegramBackendLogin.loadMatch,
       telegramBackendLogin.joinMatchWaitlist,
       telegramBackendLogin.leaveMatchWaitlist,

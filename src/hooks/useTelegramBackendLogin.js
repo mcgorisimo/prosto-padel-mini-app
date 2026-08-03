@@ -1273,6 +1273,38 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
     );
   }
 
+  function listMatchNotifications(limit = 50, before) {
+    return runMatchOperation(
+      (credential, signal) =>
+        matches.listMatchNotifications(
+          credential,
+          limit,
+          before,
+          { signal },
+        ),
+      (result) =>
+        result?.outcome === 'notifications_loaded' &&
+        Array.isArray(result.notifications) &&
+        Number.isSafeInteger(result.unreadCount) &&
+        result.unreadCount >= 0,
+    );
+  }
+
+  function markMatchNotificationRead(notificationId) {
+    return runMatchOperation(
+      (credential, signal) =>
+        matches.markMatchNotificationRead(
+          credential,
+          notificationId,
+          { signal },
+        ),
+      (result) =>
+        result?.outcome === 'notification_read' &&
+        result.notification?.notificationId === notificationId &&
+        Number.isSafeInteger(result.notification?.readAt),
+    );
+  }
+
   function joinMatchWaitlist(matchId) {
     return runMatchOperation(
       (credential, signal) =>
@@ -1496,6 +1528,8 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
     listMatchMessages,
     sendMatchMessage,
     listMatchWaitlist,
+    listMatchNotifications,
+    markMatchNotificationRead,
     joinMatchWaitlist,
     leaveMatchWaitlist,
     readMatchLineup,
@@ -1759,6 +1793,28 @@ export function useTelegramBackendLogin() {
     return telegramBackendLoginLifecycle.listMatchWaitlist(matchId, limit);
   }, []);
 
+  const listMatchNotifications = useCallback((limit = 50, before) => {
+    if (!FEATURE_ENABLED) {
+      return Promise.resolve(Object.freeze({
+        outcome: 'rejected',
+        reason: 'not_authenticated',
+      }));
+    }
+    return telegramBackendLoginLifecycle.listMatchNotifications(limit, before);
+  }, []);
+
+  const markMatchNotificationRead = useCallback((notificationId) => {
+    if (!FEATURE_ENABLED) {
+      return Promise.resolve(Object.freeze({
+        outcome: 'rejected',
+        reason: 'not_authenticated',
+      }));
+    }
+    return telegramBackendLoginLifecycle.markMatchNotificationRead(
+      notificationId,
+    );
+  }, []);
+
   const joinMatchWaitlist = useCallback((matchId) => {
     if (!FEATURE_ENABLED) {
       return Promise.resolve(Object.freeze({
@@ -1926,6 +1982,8 @@ export function useTelegramBackendLogin() {
     listMatchMessages,
     sendMatchMessage,
     listMatchWaitlist,
+    listMatchNotifications,
+    markMatchNotificationRead,
     joinMatchWaitlist,
     leaveMatchWaitlist,
     readMatchLineup,

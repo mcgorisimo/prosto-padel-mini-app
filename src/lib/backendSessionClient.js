@@ -7,6 +7,7 @@ const PROFILE_PATH = '/api/v1/profile/me';
 const MATCHES_PATH = '/api/v1/matches';
 const PLAYER_SEARCH_PATH = '/api/v1/players/search';
 const MATCH_INVITATIONS_PATH = '/api/v1/match-invitations';
+const MATCH_NOTIFICATIONS_PATH = '/api/v1/match-notifications';
 const CONTENT_MODERATION_PATH = '/api/v1/content/moderation';
 const ADMIN_PLAYERS_PATH = '/api/v1/admin/players';
 const REQUEST_TIMEOUT_MS = 8_000;
@@ -21,6 +22,7 @@ const MAX_MATCH_CHAT_RESPONSE_BODY_BYTES = 524_288;
 const MAX_MATCH_WAITLIST_RESPONSE_BODY_BYTES = 524_288;
 const MAX_MATCH_LINEUP_RESPONSE_BODY_BYTES = 262_144;
 const MAX_MATCH_RESULT_RESPONSE_BODY_BYTES = 65_536;
+const MAX_MATCH_NOTIFICATION_RESPONSE_BODY_BYTES = 262_144;
 const MAX_ADMIN_PLAYER_RESPONSE_BODY_BYTES = 262_144;
 
 const BODY_ABORTED = Symbol('backend-session-body-aborted');
@@ -74,6 +76,7 @@ const MATCH_INVITATION_STATUSES = Object.freeze([
   'declined',
   'cancelled',
 ]);
+const MATCH_NOTIFICATION_TYPES = Object.freeze(['waitlist_promoted']);
 const MATCH_CHAT_MAX_BODY_CODE_POINTS = 2_000;
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f-\u009f]/u;
 const LEGACY_PROFILE_KEYS = Object.freeze([
@@ -1402,6 +1405,95 @@ function matchWaitlistMutationSuccess(
   });
 }
 
+function isBackendMatchNotification(value) {
+  return (
+    isPlainObject(value) &&
+    hasOnlyAllowedKeys(
+      value,
+      ['notificationId', 'matchId', 'notificationType', 'createdAt'],
+      ['readAt'],
+    ) &&
+    isMatchId(value.notificationId) &&
+    isMatchId(value.matchId) &&
+    MATCH_NOTIFICATION_TYPES.includes(value.notificationType) &&
+    isUnixEpochSeconds(value.createdAt) &&
+    (value.readAt === undefined ||
+      (isUnixEpochSeconds(value.readAt) && value.readAt >= value.createdAt))
+  );
+}
+
+function isBackendMatchNotificationCursor(value) {
+  return (
+    isPlainObject(value) &&
+    hasExactKeys(
+      Object.keys(value).sort(),
+      ['createdAt', 'notificationId'],
+    ) &&
+    isUnixEpochSeconds(value.createdAt) &&
+    isMatchId(value.notificationId)
+  );
+}
+
+function freezeBackendMatchNotification(notification) {
+  return Object.freeze({ ...notification });
+}
+
+function matchNotificationListSuccess(body, maximumLength = 50) {
+  if (
+    !isPlainObject(body) ||
+    !hasOnlyAllowedKeys(
+      body,
+      ['notifications', 'unreadCount'],
+      ['nextCursor'],
+    ) ||
+    !Array.isArray(body.notifications) ||
+    body.notifications.length > maximumLength ||
+    !body.notifications.every(isBackendMatchNotification) ||
+    new Set(body.notifications.map(({ notificationId }) => notificationId))
+      .size !== body.notifications.length ||
+    body.notifications.some((notification, index) => {
+      const previous = body.notifications[index - 1];
+      return previous !== undefined &&
+        notification.createdAt > previous.createdAt;
+    }) ||
+    !Number.isSafeInteger(body.unreadCount) ||
+    body.unreadCount < 0 ||
+    (body.nextCursor !== undefined &&
+      (!isBackendMatchNotificationCursor(body.nextCursor) ||
+        body.notifications.length !== maximumLength ||
+        body.nextCursor.createdAt !==
+          body.notifications.at(-1)?.createdAt ||
+        body.nextCursor.notificationId !==
+          body.notifications.at(-1)?.notificationId))
+  ) {
+    return null;
+  }
+  return frozen('notifications_loaded', {
+    notifications: Object.freeze(
+      body.notifications.map(freezeBackendMatchNotification),
+    ),
+    unreadCount: body.unreadCount,
+    ...(body.nextCursor === undefined
+      ? {}
+      : { nextCursor: Object.freeze({ ...body.nextCursor }) }),
+  });
+}
+
+function matchNotificationReadSuccess(body, expectedNotificationId) {
+  if (
+    !isPlainObject(body) ||
+    !hasExactKeys(Object.keys(body).sort(), ['notification']) ||
+    !isBackendMatchNotification(body.notification) ||
+    body.notification.notificationId !== expectedNotificationId ||
+    body.notification.readAt === undefined
+  ) {
+    return null;
+  }
+  return frozen('notification_read', {
+    notification: freezeBackendMatchNotification(body.notification),
+  });
+}
+
 function isBackendMatchLineupPlayer(value) {
   return (
     isBackendMatchPublicPlayer(value) ||
@@ -1873,6 +1965,20 @@ function classifyMatchWaitlist(status, body) {
   });
 }
 
+function classifyMatchNotification(status, body) {
+  const code = exactPublicCode(body);
+  if (status === 401 && code === 'session_invalid') {
+    return frozen('rejected', { reason: 'invalid' });
+  }
+  const reasons = Object.freeze({
+    match_notification_invalid_request: 'invalid_request',
+    match_notification_not_found: 'notification_not_found',
+  });
+  return frozen('rejected', {
+    reason: reasons[code] ?? 'internal_error',
+  });
+}
+
 function classifyMatchLineup(status, body) {
   const code = exactPublicCode(body);
   if (status === 401 && code === 'session_invalid') {
@@ -1981,6 +2087,8 @@ export function createBackendSessionClient(dependencies = {}) {
         operation.startsWith('match_chat_');
       const isMatchWaitlistOperation =
         operation.startsWith('match_waitlist_');
+      const isMatchNotificationOperation =
+        operation.startsWith('match_notification_');
       const isMatchLineupOperation =
         operation.startsWith('match_lineup_');
       const isMatchResultOperation =
@@ -2000,6 +2108,7 @@ export function createBackendSessionClient(dependencies = {}) {
         operation === 'match_invitation_outgoing' ||
         operation === 'match_chat_list' ||
         operation === 'match_waitlist_list' ||
+        operation === 'match_notification_list' ||
         operation === 'match_lineup_read' ||
         operation === 'match_result_read';
       const isProfileOperation =
@@ -2035,6 +2144,14 @@ export function createBackendSessionClient(dependencies = {}) {
                 ? `${ADMIN_PLAYERS_PATH}/${encodeURIComponent(adminPlayerId)}/rating-state`
               : operation === 'content_moderation'
                 ? CONTENT_MODERATION_PATH
+              : operation === 'match_notification_list'
+                ? `${MATCH_NOTIFICATIONS_PATH}?limit=${operationPayload.limit}${
+                    operationPayload.before === undefined
+                      ? ''
+                      : `&beforeCreatedAt=${operationPayload.before.createdAt}&beforeNotificationId=${encodeURIComponent(operationPayload.before.notificationId)}`
+                  }`
+              : operation === 'match_notification_read'
+                ? `${MATCH_NOTIFICATIONS_PATH}/${encodeURIComponent(operationPayload.notificationId)}/read`
               : operation === 'match_list'
                 ? `${MATCHES_PATH}?limit=${operationPayload.limit}`
                 : operation === 'match_list_mine'
@@ -2150,12 +2267,14 @@ export function createBackendSessionClient(dependencies = {}) {
                               requestKey,
                               sets: operationPayload.sets,
                             }
-                        : operation === 'admin_player_rating_set'
+                    : operation === 'admin_player_rating_set'
                           ? {
                               requestKey,
                               rating: operationPayload.rating,
                               isVerified: operationPayload.isVerified,
                             }
+                        : operation === 'match_notification_read'
+                          ? {}
                         : { requestKey },
                 ),
               }),
@@ -2186,6 +2305,8 @@ export function createBackendSessionClient(dependencies = {}) {
                 ? MAX_MATCH_CHAT_RESPONSE_BODY_BYTES
               : isMatchWaitlistOperation
                 ? MAX_MATCH_WAITLIST_RESPONSE_BODY_BYTES
+              : isMatchNotificationOperation
+                ? MAX_MATCH_NOTIFICATION_RESPONSE_BODY_BYTES
               : isMatchLineupOperation
                 ? MAX_MATCH_LINEUP_RESPONSE_BODY_BYTES
               : isMatchResultOperation
@@ -2333,6 +2454,30 @@ export function createBackendSessionClient(dependencies = {}) {
           : frozen('malformed_response');
       }
       if (
+        operation === 'match_notification_list' &&
+        response.status === 200
+      ) {
+        const result = matchNotificationListSuccess(
+          body,
+          operationPayload.limit,
+        );
+        return result
+          ? frozen('success', { result })
+          : frozen('malformed_response');
+      }
+      if (
+        operation === 'match_notification_read' &&
+        response.status === 200
+      ) {
+        const result = matchNotificationReadSuccess(
+          body,
+          operationPayload.notificationId,
+        );
+        return result
+          ? frozen('success', { result })
+          : frozen('malformed_response');
+      }
+      if (
         (operation === 'match_waitlist_join' ||
           operation === 'match_waitlist_leave') &&
         response.status === 201
@@ -2469,6 +2614,8 @@ export function createBackendSessionClient(dependencies = {}) {
                   ? 'match_chat_service_unavailable'
                 : isMatchWaitlistOperation
                   ? 'match_waitlist_service_unavailable'
+                : isMatchNotificationOperation
+                  ? 'match_notification_service_unavailable'
                 : isMatchLineupOperation
                   ? 'match_lineup_service_unavailable'
                 : isMatchResultOperation
@@ -2498,6 +2645,8 @@ export function createBackendSessionClient(dependencies = {}) {
                       ? classifyMatchChat(response.status, body)
                     : isMatchWaitlistOperation
                       ? classifyMatchWaitlist(response.status, body)
+                    : isMatchNotificationOperation
+                      ? classifyMatchNotification(response.status, body)
                     : isMatchLineupOperation
                       ? classifyMatchLineup(response.status, body)
                 : isMatchResultOperation
@@ -2630,6 +2779,16 @@ export function createBackendSessionClient(dependencies = {}) {
           operationPayload.limit < 1 ||
           operationPayload.limit > 50
         )) ||
+      (operation === 'match_notification_list' &&
+        (
+          !Number.isInteger(operationPayload?.limit) ||
+          operationPayload.limit < 1 ||
+          operationPayload.limit > 50 ||
+          (operationPayload.before !== undefined &&
+            !isBackendMatchNotificationCursor(operationPayload.before))
+        )) ||
+      (operation === 'match_notification_read' &&
+        !isMatchId(operationPayload?.notificationId)) ||
       ((operation === 'match_waitlist_join' ||
         operation === 'match_waitlist_leave') &&
         !isMatchId(operationPayload?.matchId)) ||
@@ -2874,6 +3033,24 @@ export function createBackendSessionClient(dependencies = {}) {
         credential,
         options,
         { matchId, limit },
+      ),
+    listMatchNotifications: (
+      credential,
+      limit = 50,
+      before,
+      options,
+    ) => execute(
+      'match_notification_list',
+      credential,
+      options,
+      { limit, before },
+    ),
+    markMatchNotificationRead: (credential, notificationId, options) =>
+      execute(
+        'match_notification_read',
+        credential,
+        options,
+        { notificationId },
       ),
     joinMatchWaitlist: (credential, matchId, options) =>
       execute(

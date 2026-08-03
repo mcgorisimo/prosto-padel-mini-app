@@ -11,6 +11,7 @@ const MESSAGE_ID = '77777777-7777-4777-8777-777777777777';
 const OLDER_MESSAGE_ID = '88888888-8888-4888-8888-888888888888';
 const WAITLIST_ENTRY_ID = '99999999-9999-4999-8999-999999999999';
 const RESULT_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const NOTIFICATION_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 
 test.describe('backend match credential lifecycle', () => {
   test('uses exact no-store contracts for public/account feeds, detail, create, join and leave', async ({
@@ -1018,6 +1019,143 @@ test.describe('backend match credential lifecycle', () => {
     expect(summary.publicResultsHideCredential).toBe(true);
   });
 
+  test('uses exact private contracts for backend match notifications', async ({
+    page,
+  }) => {
+    await page.goto('/');
+
+    const summary = await page.evaluate(async (parameters) => {
+      const { createBackendSessionClient } = await import(
+        '/src/lib/backendSessionClient.js'
+      );
+      const { mapBackendMatchNotificationToApp } = await import(
+        '/src/lib/backendMatchAdapter.js'
+      );
+      const contracts = [];
+      const notification = {
+        notificationId: parameters.notificationId,
+        matchId: parameters.matchId,
+        notificationType: 'waitlist_promoted',
+        createdAt: 1_900_000_000,
+      };
+      const client = createBackendSessionClient({
+        fetchImpl: async (url, options) => {
+          contracts.push({
+            url,
+            method: options.method,
+            bearerMatches:
+              options.headers.Authorization ===
+              `Bearer ${parameters.credential}`,
+            contentType: options.headers['Content-Type'] ?? null,
+            body: options.body === undefined
+              ? null
+              : JSON.parse(options.body),
+            cache: options.cache,
+            credentials: options.credentials,
+            redirect: options.redirect,
+          });
+          if (options.method === 'POST') {
+            return new Response(JSON.stringify({
+              notification: { ...notification, readAt: 1_900_000_010 },
+            }), { status: 200 });
+          }
+          return new Response(JSON.stringify({
+            notifications: [notification],
+            unreadCount: 1,
+          }), { status: 200 });
+        },
+      });
+      const listed = await client.listMatchNotifications(
+        parameters.credential,
+        50,
+      );
+      const marked = await client.markMatchNotificationRead(
+        parameters.credential,
+        parameters.notificationId,
+      );
+      const contractsBeforeInvalid = contracts.length;
+      const invalid = await client.markMatchNotificationRead(
+        parameters.credential,
+        'invalid-notification-id',
+      );
+      const malformed = await createBackendSessionClient({
+        fetchImpl: async () => new Response(JSON.stringify({
+          notifications: [{ ...notification, readAt: 1_899_999_999 }],
+          unreadCount: 0,
+        }), { status: 200 }),
+      }).listMatchNotifications(parameters.credential, 50);
+      const mapped = mapBackendMatchNotificationToApp(
+        listed.notifications[0],
+      );
+      const mappedInvalidDate = mapBackendMatchNotificationToApp({
+        ...notification,
+        createdAt: Number.MAX_SAFE_INTEGER,
+      });
+
+      return {
+        contracts,
+        contractsBeforeInvalid,
+        outcomes: [listed.outcome, marked.outcome],
+        invalid,
+        malformed,
+        mapped,
+        mappedInvalidDate,
+        publicResultsHideCredential:
+          !JSON.stringify([listed, marked]).includes(parameters.credential),
+      };
+    }, {
+      credential: SYNTHETIC_CREDENTIAL,
+      matchId: MATCH_ID,
+      notificationId: NOTIFICATION_ID,
+    });
+
+    expect(summary.contracts).toEqual([
+      {
+        url: '/api/v1/match-notifications?limit=50',
+        method: 'GET',
+        bearerMatches: true,
+        contentType: null,
+        body: null,
+        cache: 'no-store',
+        credentials: 'omit',
+        redirect: 'error',
+      },
+      {
+        url: `/api/v1/match-notifications/${NOTIFICATION_ID}/read`,
+        method: 'POST',
+        bearerMatches: true,
+        contentType: 'application/json',
+        body: {},
+        cache: 'no-store',
+        credentials: 'omit',
+        redirect: 'error',
+      },
+    ]);
+    expect(summary.contractsBeforeInvalid).toBe(2);
+    expect(summary.outcomes).toEqual([
+      'notifications_loaded',
+      'notification_read',
+    ]);
+    expect(summary.invalid).toEqual({
+      outcome: 'rejected',
+      reason: 'invalid_request',
+    });
+    expect(summary.malformed).toEqual({
+      outcome: 'rejected',
+      reason: 'internal_error',
+    });
+    expect(summary.mapped).toMatchObject({
+      notification_id: NOTIFICATION_ID,
+      notification_type: 'waitlist_promoted',
+      match_id: MATCH_ID,
+      read_at: null,
+      notification_provider: 'backend',
+      backendOwned: true,
+    });
+    expect(summary.mappedInvalidDate).toBeNull();
+    expect(summary.publicResultsHideCredential).toBe(true);
+  });
+
   test('uses exact private contracts for backend match lineup', async ({
     page,
   }) => {
@@ -1655,6 +1793,36 @@ test.describe('backend match credential lifecycle', () => {
               count: 1,
             };
           },
+          async listMatchNotifications(credential) {
+            credentialMatched =
+              credentialMatched && credential === parameters.credential;
+            return {
+              outcome: 'notifications_loaded',
+              notifications: [{
+                notificationId: parameters.notificationId,
+                matchId: parameters.matchId,
+                notificationType: 'waitlist_promoted',
+                createdAt: 1_900_000_000,
+              }],
+              unreadCount: 1,
+            };
+          },
+          async markMatchNotificationRead(credential, notificationId) {
+            credentialMatched =
+              credentialMatched &&
+              credential === parameters.credential &&
+              notificationId === parameters.notificationId;
+            return {
+              outcome: 'notification_read',
+              notification: {
+                notificationId,
+                matchId: parameters.matchId,
+                notificationType: 'waitlist_promoted',
+                createdAt: 1_900_000_000,
+                readAt: 1_900_000_010,
+              },
+            };
+          },
           async joinMatchWaitlist(credential) {
             credentialMatched =
               credentialMatched &&
@@ -1818,6 +1986,8 @@ test.describe('backend match credential lifecycle', () => {
           'Synthetic message',
         ),
         await lifecycle.listMatchWaitlist(parameters.matchId, 50),
+        await lifecycle.listMatchNotifications(50),
+        await lifecycle.markMatchNotificationRead(parameters.notificationId),
         await lifecycle.joinMatchWaitlist(parameters.matchId),
         await lifecycle.leaveMatchWaitlist(parameters.matchId),
         await lifecycle.readMatchLineup(parameters.matchId),
@@ -1864,6 +2034,7 @@ test.describe('backend match credential lifecycle', () => {
       invitationId: INVITATION_ID,
       messageId: MESSAGE_ID,
       waitlistEntryId: WAITLIST_ENTRY_ID,
+      notificationId: NOTIFICATION_ID,
     });
 
     expect(summary).toEqual({
@@ -1887,6 +2058,8 @@ test.describe('backend match credential lifecycle', () => {
         'messages_loaded',
         'message_sent',
         'waitlist_loaded',
+        'notifications_loaded',
+        'notification_read',
         'waitlist_joined',
         'waitlist_left',
         'lineup_loaded',
@@ -4515,5 +4688,231 @@ test.describe('backend match credential lifecycle', () => {
     expect(summary.legacyBoundary).toBe(true);
     expect(legacyRpcCalls).toBe(0);
     await page.evaluate(() => window.__backendResultUiUnmount());
+  });
+
+  test('polls backend notifications, marks them read and never opens the Supabase notification provider', async ({
+    page,
+  }) => {
+    const pageErrors = [];
+    page.on('pageerror', (error) => pageErrors.push(error.message));
+    await page.goto('/');
+
+    await page.evaluate(async (parameters) => {
+      const reactModule = await import('/@id/react');
+      const React = reactModule.default ?? reactModule;
+      const reactDomClientModule = await import('/@id/react-dom/client');
+      const { createRoot } =
+        reactDomClientModule.default ?? reactDomClientModule;
+      const { supabase } = await import('/src/lib/supabaseClient.js');
+      const { default: App } = await import('/src/App.jsx');
+      const originalSupabase = {
+        rpc: supabase.rpc,
+        from: supabase.from,
+        channel: supabase.channel,
+        removeChannel: supabase.removeChannel,
+      };
+      const boundary = {
+        rpcNames: [],
+        channelNames: [],
+        listNotifications: 0,
+        markRead: 0,
+        loadMatch: 0,
+      };
+      supabase.rpc = async (name) => {
+        boundary.rpcNames.push(name);
+        if (name === 'get_my_profile') {
+          return {
+            data: [{
+              id: parameters.accountId,
+              first_name: 'Current',
+              last_name: 'Player',
+              username: 'current_player',
+              rating: 3,
+              is_verified: true,
+              role: 'user',
+            }],
+            error: null,
+          };
+        }
+        return { data: [], error: null };
+      };
+      supabase.from = () => ({
+        select() { return this; },
+        order() {
+          return Promise.resolve({ data: [], error: null });
+        },
+      });
+      supabase.channel = (name) => {
+        boundary.channelNames.push(name);
+        const channel = {
+          on() { return channel; },
+          subscribe() { return channel; },
+        };
+        return channel;
+      };
+      supabase.removeChannel = () => {};
+
+      const startsAt = Math.floor(Date.now() / 1_000) + 86_400;
+      const owner = {
+        playerId: parameters.otherAccountId,
+        firstName: 'Match',
+        lastName: 'Owner',
+        username: 'match_owner',
+        rating: 3,
+        isVerified: true,
+      };
+      const currentPlayer = {
+        playerId: parameters.accountId,
+        firstName: 'Current',
+        lastName: 'Player',
+        username: 'current_player',
+        rating: 3,
+        isVerified: true,
+      };
+      const detail = {
+        matchId: parameters.matchId,
+        ownerAccountId: parameters.otherAccountId,
+        createdAt: startsAt - 3_600,
+        updatedAt: startsAt - 30,
+        startsAt,
+        durationMinutes: 90,
+        courtId: 'court-1',
+        courtName: 'Court 1',
+        courtType: 'panoramic',
+        kind: 'match',
+        visibility: 'public',
+        scenario: 'social',
+        status: 'confirmed',
+        description: 'Waitlist promotion match',
+        ratingMin: 1,
+        ratingMax: 5,
+        isRatingMatch: false,
+        pricePerPersonSnapshot: 750,
+        version: 2,
+        owner,
+        participants: [{ ...currentPlayer, slotNumber: 2 }],
+      };
+      const notification = {
+        notificationId: parameters.notificationId,
+        matchId: parameters.matchId,
+        notificationType: 'waitlist_promoted',
+        createdAt: startsAt - 60,
+      };
+      const backendMatchActions = {
+        async listMatches() {
+          return { outcome: 'matches_loaded', matches: [] };
+        },
+        async listAccountMatches() {
+          return { outcome: 'matches_loaded', matches: [] };
+        },
+        async listIncomingMatchInvitations() {
+          return { outcome: 'invitations_loaded', invitations: [] };
+        },
+        async listMatchNotifications() {
+          boundary.listNotifications += 1;
+          return {
+            outcome: 'notifications_loaded',
+            notifications:
+              boundary.listNotifications === 1 ? [] : [notification],
+            unreadCount: boundary.listNotifications === 1 ? 0 : 1,
+          };
+        },
+        async markMatchNotificationRead(notificationId) {
+          boundary.markRead += 1;
+          return {
+            outcome: 'notification_read',
+            notification: {
+              ...notification,
+              notificationId,
+              readAt: notification.createdAt + 120,
+            },
+          };
+        },
+        async loadMatch() {
+          boundary.loadMatch += 1;
+          return { outcome: 'match_loaded', match: detail };
+        },
+      };
+      const backendProfile = {
+        accountId: parameters.accountId,
+        role: 'player',
+        firstName: currentPlayer.firstName,
+        lastName: currentPlayer.lastName,
+        username: currentPlayer.username,
+        photoUrl: null,
+        languageCode: 'ru',
+        phone: null,
+        sidePreference: null,
+        rating: currentPlayer.rating,
+        isVerified: currentPlayer.isVerified,
+        capabilities: [],
+      };
+      const session = {
+        user: {
+          id: parameters.accountId,
+          email: 'current-player@prostopadel.test',
+          user_metadata: {
+            first_name: currentPlayer.firstName,
+            last_name: currentPlayer.lastName,
+            username: currentPlayer.username,
+          },
+        },
+      };
+      const container = document.createElement('div');
+      container.dataset.testid = 'backend-notification-app-root';
+      document.body.append(container);
+      const root = createRoot(container);
+      root.render(React.createElement(App, {
+        session,
+        backendProfile,
+        backendMatchRequired: true,
+        backendMatchLifecycleStatus: 'authenticated',
+        backendProfileStatus: 'ready',
+        backendMatchActions,
+        showToast() {},
+        onLogout() {},
+      }));
+      window.__backendNotificationBoundary = boundary;
+      window.__backendNotificationUiUnmount = () => {
+        root.unmount();
+        container.remove();
+        supabase.rpc = originalSupabase.rpc;
+        supabase.from = originalSupabase.from;
+        supabase.channel = originalSupabase.channel;
+        supabase.removeChannel = originalSupabase.removeChannel;
+      };
+    }, {
+      accountId: ACCOUNT_ID,
+      otherAccountId: OTHER_ACCOUNT_ID,
+      matchId: MATCH_ID,
+      notificationId: NOTIFICATION_ID,
+    });
+
+    const harness = page.getByTestId('backend-notification-app-root');
+    await expect(harness.locator('.bottom-nav button')).toHaveCount(5);
+    await harness.locator('.bottom-nav button').last().click();
+    await expect(harness.getByTestId('notifications-empty')).toBeVisible();
+    const card = harness.getByTestId(
+      `notification-card-${NOTIFICATION_ID}`,
+    );
+    await expect(card).toBeVisible({ timeout: 7_000 });
+    await expect(card).toContainText('Вы в матче');
+    await expect(card.getByLabel('Непрочитанное')).toBeVisible();
+    await card.click();
+    await expect(harness).toContainText('Waitlist promotion match');
+    await expect(harness).toContainText('Court 1');
+
+    const boundary = await page.evaluate(
+      () => window.__backendNotificationBoundary,
+    );
+    expect(boundary.listNotifications).toBeGreaterThanOrEqual(2);
+    expect(boundary.markRead).toBe(1);
+    expect(boundary.loadMatch).toBeGreaterThanOrEqual(1);
+    expect(boundary.rpcNames).not.toContain('get_my_notifications');
+    expect(boundary.rpcNames).not.toContain('get_unread_notification_count');
+    expect(boundary.rpcNames).not.toContain('mark_notification_read');
+    expect(boundary.channelNames).not.toContain('public:notifications');
+    expect(pageErrors).toEqual([]);
+    await page.evaluate(() => window.__backendNotificationUiUnmount());
   });
 });

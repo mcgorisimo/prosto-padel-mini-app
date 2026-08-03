@@ -237,6 +237,45 @@ export function mapBackendMatchMessageToApp(message) {
   });
 }
 
+export function mapBackendMatchNotificationToApp(notification) {
+  if (!notification || typeof notification !== 'object') return null;
+  const createdAt = Number(notification.createdAt);
+  const readAt = notification.readAt === undefined
+    ? null
+    : Number(notification.readAt);
+  const createdAtDate = new Date(createdAt * 1_000);
+  const readAtDate = readAt === null
+    ? null
+    : new Date(readAt * 1_000);
+  if (
+    typeof notification.notificationId !== 'string' ||
+    typeof notification.matchId !== 'string' ||
+    notification.notificationType !== 'waitlist_promoted' ||
+    !Number.isSafeInteger(createdAt) ||
+    createdAt < 0 ||
+    !Number.isFinite(createdAtDate.getTime()) ||
+    (readAt !== null &&
+      (!Number.isSafeInteger(readAt) ||
+        readAt < createdAt ||
+        !Number.isFinite(readAtDate.getTime())))
+  ) {
+    return null;
+  }
+  return Object.freeze({
+    notification_id: notification.notificationId,
+    notification_type: notification.notificationType,
+    match_id: notification.matchId,
+    created_at: createdAtDate.toISOString(),
+    read_at: readAt === null
+      ? null
+      : readAtDate.toISOString(),
+    title: 'Вы в матче',
+    body: 'Освободилось место — вы автоматически добавлены в состав.',
+    notification_provider: 'backend',
+    backendOwned: true,
+  });
+}
+
 export function mapBackendInvitationToApp(invitation) {
   if (!invitation || typeof invitation !== 'object') return null;
   const dateTime = moscowDateTime(invitation.match?.startsAt);
