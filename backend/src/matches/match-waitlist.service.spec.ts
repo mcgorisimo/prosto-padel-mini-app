@@ -1,6 +1,7 @@
 import { deterministicUuid } from '../../test/deterministic-uuid';
 import { AccountId } from '../accounts/account.types';
 import { unixEpochSeconds } from '../auth/auth.types';
+import { MatchNotificationRepository } from '../database/match-notification.repository';
 import { MatchWaitlistRepository } from '../database/match-waitlist.repository';
 import { MatchRepository } from '../database/match.repository';
 import { PostgresTransaction } from '../database/postgres-transaction';
@@ -40,9 +41,31 @@ function matches(): jest.Mocked<MatchRepository> {
   };
 }
 
+function notifications(): jest.Mocked<MatchNotificationRepository> {
+  return {
+    list: jest.fn(),
+    markRead: jest.fn(),
+    createWaitlistPromotion: jest.fn().mockImplementation(
+      async (_transaction, input) => ({
+        outcome: 'notification_created' as const,
+        persistence: 'applied' as const,
+        notification: {
+          notificationId: input.notificationId,
+          waitlistEntryId: input.waitlistEntryId,
+          matchId: input.matchId,
+          recipientAccountId: input.recipientAccountId,
+          notificationType: 'waitlist_promoted' as const,
+          createdAt: input.now,
+        },
+      }),
+    ),
+  };
+}
+
 function harness() {
   const queue = waitlist();
   const matchRepository = matches();
+  const notificationRepository = notifications();
   const findByPlayerIds = jest.fn<
     ReturnType<PublicPlayerProfileSearchRepository['findByPlayerIds']>,
     Parameters<PublicPlayerProfileSearchRepository['findByPlayerIds']>
@@ -53,11 +76,13 @@ function harness() {
   return {
     queue,
     matches: matchRepository,
+    notifications: notificationRepository,
     findByPlayerIds,
     service: new MatchWaitlistService({
       transactions: { run: (operation) => operation(transaction) },
       waitlist: queue,
       matches: matchRepository,
+      notifications: notificationRepository,
       publicProfiles: { findByPlayerIds },
       clock: { nowEpochSeconds: () => NOW },
     }),
@@ -179,6 +204,20 @@ describe('MatchWaitlistService', () => {
       outcome: 'promoted',
       accountId: ACTOR_ID,
     }));
+    expect(test.notifications.createWaitlistPromotion).toHaveBeenCalledWith(
+      transaction,
+      expect.objectContaining({
+        waitlistEntryId: ENTRY_ID,
+        matchId: MATCH_ID,
+        recipientAccountId: ACTOR_ID,
+        now: NOW,
+      }),
+    );
+    const firstNotification =
+      test.notifications.createWaitlistPromotion.mock.calls[0][1];
+    expect(firstNotification.notificationId).toMatch(
+      /^[0-9a-f-]{36}$/u,
+    );
   });
 
   it('stops FIFO promotion without consuming the first entry when no slot is free', async () => {
@@ -204,6 +243,43 @@ describe('MatchWaitlistService', () => {
     expect(test.queue.readPromotionCandidate).toHaveBeenCalledTimes(8);
     expect(test.queue.resolvePromotion).toHaveBeenCalledTimes(8);
     expect(test.matches.join).not.toHaveBeenCalled();
+    expect(test.notifications.createWaitlistPromotion).not.toHaveBeenCalled();
+  });
+
+  it('fails the surrounding promotion transaction when notification persistence fails', async () => {
+    const test = harness();
+    test.queue.readPromotionCandidate.mockResolvedValueOnce({
+      outcome: 'candidate',
+      entry: waiting(),
+      playerIsActive: true,
+    });
+    test.matches.join.mockResolvedValue({
+      outcome: 'participant_joined',
+      persistence: 'applied',
+      participant: {
+        participantId: deterministicUuid(
+          'waitlist-notification-rollback-participant',
+        ) as MatchParticipantId,
+        accountId: ACTOR_ID,
+        slotNumber: 2,
+        status: 'active',
+        joinedAt: NOW,
+        updatedAt: NOW,
+        version: 1,
+      },
+      matchVersion: 2,
+    });
+    test.notifications.createWaitlistPromotion.mockRejectedValue(
+      new Error('synthetic notification failure'),
+    );
+
+    await expect(
+      test.service.promoteAvailable(transaction, MATCH_ID, NOW),
+    ).rejects.toThrow('synthetic notification failure');
+    expect(test.queue.resolvePromotion).toHaveBeenCalledWith(
+      transaction,
+      expect.objectContaining({ outcome: 'promoted' }),
+    );
   });
 
   it('rejects admin mutations and maps command reuse without persistence details', async () => {

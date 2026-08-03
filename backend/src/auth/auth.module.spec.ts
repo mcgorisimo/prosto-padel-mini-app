@@ -20,6 +20,7 @@ import { PostgresInitialSessionRepository } from '../database/postgres-initial-s
 import { PostgresMatchChatRepository } from '../database/postgres-match-chat.repository';
 import { PostgresMatchInvitationRepository } from '../database/postgres-match-invitation.repository';
 import { PostgresMatchLineupRepository } from '../database/postgres-match-lineup.repository';
+import { PostgresMatchNotificationRepository } from '../database/postgres-match-notification.repository';
 import { PostgresMatchResultRepository } from '../database/postgres-match-result.repository';
 import { PostgresMatchRepository } from '../database/postgres-match.repository';
 import { PostgresMatchWaitlistRepository } from '../database/postgres-match-waitlist.repository';
@@ -45,6 +46,8 @@ import { MatchInvitationController } from '../matches/match-invitation.controlle
 import { MatchInvitationService } from '../matches/match-invitation.service';
 import { MatchLineupController } from '../matches/match-lineup.controller';
 import { MatchLineupService } from '../matches/match-lineup.service';
+import { MatchNotificationController } from '../matches/match-notification.controller';
+import { MatchNotificationService } from '../matches/match-notification.service';
 import { MatchResultController } from '../matches/match-result.controller';
 import { MatchResultService } from '../matches/match-result.service';
 import { MatchWaitlistController } from '../matches/match-waitlist.controller';
@@ -304,6 +307,16 @@ function getMatchWaitlistControllerService(
   ).service;
 }
 
+function getMatchNotificationControllerService(
+  controller: MatchNotificationController,
+): MatchNotificationService {
+  return (
+    controller as unknown as {
+      readonly service: MatchNotificationService;
+    }
+  ).service;
+}
+
 function getMatchLineupControllerService(
   controller: MatchLineupController,
 ): MatchLineupService {
@@ -432,6 +445,7 @@ describe('AuthModule Telegram login wiring', () => {
     const matchApi = moduleRef.get(MatchApiService);
     const matchRepository = moduleRef.get(PostgresMatchRepository);
     const matchWaitlist = moduleRef.get(MatchWaitlistService);
+    const matchNotifications = moduleRef.get(MatchNotificationService);
     const matchLineup = moduleRef.get(MatchLineupService);
     const matchResult = moduleRef.get(MatchResultService);
     expect(matchResult.dependencies.transactions).toBe(
@@ -472,6 +486,9 @@ describe('AuthModule Telegram login wiring', () => {
       moduleRef.get(PostgresMatchWaitlistRepository),
     );
     expect(matchWaitlist.dependencies.matches).toBe(matchRepository);
+    expect(matchWaitlist.dependencies.notifications).toBe(
+      moduleRef.get(PostgresMatchNotificationRepository),
+    );
     expect(matchWaitlist.dependencies.publicProfiles).toBe(
       moduleRef.get(PostgresPublicPlayerProfileSearchRepository),
     );
@@ -483,6 +500,20 @@ describe('AuthModule Telegram login wiring', () => {
         moduleRef.get(MatchWaitlistController),
       ),
     ).toBe(matchWaitlist);
+    expect(matchNotifications.dependencies.transactions).toBe(
+      moduleRef.get(PostgresTransactionExecutorAdapter),
+    );
+    expect(matchNotifications.dependencies.notifications).toBe(
+      moduleRef.get(PostgresMatchNotificationRepository),
+    );
+    expect(matchNotifications.dependencies.clock).toBe(
+      moduleRef.get(SESSION_AUTHENTICATION_CLOCK),
+    );
+    expect(
+      getMatchNotificationControllerService(
+        moduleRef.get(MatchNotificationController),
+      ),
+    ).toBe(matchNotifications);
     expect(matchApi.dependencies.transactions).toBe(
       moduleRef.get(PostgresTransactionExecutorAdapter),
     );

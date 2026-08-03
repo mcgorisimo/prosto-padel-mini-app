@@ -17,6 +17,7 @@ import { PostgresExternalIdentityResolutionRepository } from '../database/postgr
 import { PostgresInitialSessionRepository } from '../database/postgres-initial-session.repository';
 import { PostgresMatchChatRepository } from '../database/postgres-match-chat.repository';
 import { PostgresMatchLineupRepository } from '../database/postgres-match-lineup.repository';
+import { PostgresMatchNotificationRepository } from '../database/postgres-match-notification.repository';
 import { PostgresMatchResultRepository } from '../database/postgres-match-result.repository';
 import { PostgresMatchRepository } from '../database/postgres-match.repository';
 import { PostgresMatchInvitationRepository } from '../database/postgres-match-invitation.repository';
@@ -38,6 +39,8 @@ import { MatchInvitationController } from '../matches/match-invitation.controlle
 import { MatchInvitationService } from '../matches/match-invitation.service';
 import { MatchLineupController } from '../matches/match-lineup.controller';
 import { MatchLineupService } from '../matches/match-lineup.service';
+import { MatchNotificationController } from '../matches/match-notification.controller';
+import { MatchNotificationService } from '../matches/match-notification.service';
 import { MatchResultController } from '../matches/match-result.controller';
 import { MatchResultService } from '../matches/match-result.service';
 import { MatchWaitlistController } from '../matches/match-waitlist.controller';
@@ -315,6 +318,7 @@ function createMatchWaitlistService(
   transactions: PostgresTransactionExecutorAdapter,
   waitlist: PostgresMatchWaitlistRepository,
   matches: PostgresMatchRepository,
+  notifications: PostgresMatchNotificationRepository,
   publicProfiles: PostgresPublicPlayerProfileSearchRepository,
   clock: SessionAuthenticationClock,
 ): MatchWaitlistService {
@@ -322,7 +326,20 @@ function createMatchWaitlistService(
     transactions,
     waitlist,
     matches,
+    notifications,
     publicProfiles,
+    clock,
+  });
+}
+
+function createMatchNotificationService(
+  transactions: PostgresTransactionExecutorAdapter,
+  notifications: PostgresMatchNotificationRepository,
+  clock: SessionAuthenticationClock,
+): MatchNotificationService {
+  return new MatchNotificationService({
+    transactions,
+    notifications,
     clock,
   });
 }
@@ -378,6 +395,7 @@ function createMatchResultService(
     MatchInvitationController,
     MatchChatController,
     MatchWaitlistController,
+    MatchNotificationController,
     MatchLineupController,
     MatchResultController,
     ContentModerationController,
@@ -387,6 +405,15 @@ function createMatchResultService(
     SESSION_LIFECYCLE_HTTP_CLOCK_PROVIDER,
     SESSION_AUTHENTICATION_CLOCK_PROVIDER,
     SessionBearerGuard,
+    {
+      provide: MatchNotificationService,
+      inject: [
+        PostgresTransactionExecutorAdapter,
+        PostgresMatchNotificationRepository,
+        SESSION_AUTHENTICATION_CLOCK,
+      ],
+      useFactory: createMatchNotificationService,
+    },
     {
       provide: AdminPlayerRatingService,
       inject: [
@@ -421,6 +448,7 @@ function createMatchResultService(
         PostgresTransactionExecutorAdapter,
         PostgresMatchWaitlistRepository,
         PostgresMatchRepository,
+        PostgresMatchNotificationRepository,
         PostgresPublicPlayerProfileSearchRepository,
         SESSION_AUTHENTICATION_CLOCK,
       ],
@@ -519,6 +547,7 @@ function createMatchResultService(
     MatchInvitationService,
     MatchChatService,
     MatchWaitlistService,
+    MatchNotificationService,
     MatchLineupService,
     MatchResultService,
   ],

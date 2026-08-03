@@ -11,6 +11,7 @@ import {
   MatchWaitlistRepository,
   MatchWaitlistRejection,
 } from '../database/match-waitlist.repository';
+import { MatchNotificationRepository } from '../database/match-notification.repository';
 import { MatchPersistenceError, MatchRepository } from '../database/match.repository';
 import { PostgresTransaction } from '../database/postgres-transaction';
 import {
@@ -26,6 +27,9 @@ import {
   MutateMatchWaitlistApiInput,
   MutateMatchWaitlistApiResult,
 } from './match-waitlist-api.types';
+import {
+  MatchNotificationId,
+} from './match-notification.types';
 import {
   MatchWaitlistCommandId,
   MatchWaitlistEntryId,
@@ -55,6 +59,8 @@ const DOMAINS = Object.freeze({
   }),
   promotion: Object.freeze({
     command: 'prosto-padel.match-waitlist.promotion.match-command.v1',
+    notification:
+      'prosto-padel.match-waitlist.promotion.notification.v1',
     participant: 'prosto-padel.match-waitlist.promotion.participant.v1',
     request: 'prosto-padel.match-waitlist.promotion.match-request.v1',
   }),
@@ -68,6 +74,10 @@ export interface MatchWaitlistServiceDependencies {
   readonly transactions: MatchWaitlistTransactionExecutor;
   readonly waitlist: MatchWaitlistRepository;
   readonly matches: MatchRepository;
+  readonly notifications: Pick<
+    MatchNotificationRepository,
+    'createWaitlistPromotion'
+  >;
   readonly publicProfiles: Pick<PublicPlayerProfileSearchRepository, 'findByPlayerIds'>;
   readonly clock: {
     nowEpochSeconds(): import('../auth/auth.types').UnixEpochSeconds;
@@ -312,6 +322,19 @@ export class MatchWaitlistService {
           outcome: 'promoted',
           now,
         });
+        await this.dependencies.notifications.createWaitlistPromotion(
+          transaction,
+          {
+            notificationId: bindingUuid(
+              DOMAINS.promotion.notification,
+              parts,
+            ) as MatchNotificationId,
+            waitlistEntryId: candidate.entry.entryId,
+            matchId,
+            recipientAccountId: candidate.entry.accountId,
+            now,
+          },
+        );
         promoted += 1;
         continue;
       }
