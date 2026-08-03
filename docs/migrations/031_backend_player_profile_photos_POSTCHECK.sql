@@ -357,7 +357,7 @@ begin
     select 1
     from pg_catalog.pg_class relation
     cross join lateral pg_catalog.aclexplode(
-      pg_catalog.coalesce(relation.relacl, pg_catalog.acldefault('r', relation.relowner))
+      coalesce(relation.relacl, pg_catalog.acldefault('r', relation.relowner))
     ) acl
     where relation.oid in (v_asset_oid, v_state_oid)
       and acl.grantee not in (
@@ -388,7 +388,7 @@ begin
     select 1
     from pg_catalog.pg_proc routine
     cross join lateral pg_catalog.aclexplode(
-      pg_catalog.coalesce(routine.proacl, pg_catalog.acldefault('f', routine.proowner))
+      coalesce(routine.proacl, pg_catalog.acldefault('f', routine.proowner))
     ) acl
     where routine.oid = v_function_oid
       and acl.grantee <> routine.proowner

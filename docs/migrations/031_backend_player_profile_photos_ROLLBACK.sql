@@ -47,7 +47,7 @@ begin
        select 1
        from pg_catalog.pg_proc routine
        cross join lateral pg_catalog.aclexplode(
-         pg_catalog.coalesce(routine.proacl, pg_catalog.acldefault('f', routine.proowner))
+         coalesce(routine.proacl, pg_catalog.acldefault('f', routine.proowner))
        ) acl
        where routine.oid = v_function_oid
          and acl.grantee <> routine.proowner
