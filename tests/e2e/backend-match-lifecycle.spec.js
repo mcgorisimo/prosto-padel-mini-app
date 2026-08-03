@@ -3444,21 +3444,11 @@ test.describe('backend match credential lifecycle', () => {
         },
       };
       supabase.from = () => query;
+      window.__legacyProfileCalls = 0;
       supabase.rpc = async (name) => {
         if (name === 'get_my_profile') {
-          return {
-            data: [{
-              id: legacyUserId,
-              first_name: 'Legacy',
-              last_name: 'Player',
-              username: 'legacy_player',
-              rating: 3,
-              is_verified: true,
-              side_preference: 'Both',
-              role: 'user',
-            }],
-            error: null,
-          };
+          window.__legacyProfileCalls += 1;
+          throw new Error('SUPABASE_PROFILE_MUST_NOT_LOAD_IN_BACKEND_MODE');
         }
         if (name === 'get_unread_notification_count') {
           return { data: 0, error: null };
@@ -3647,6 +3637,7 @@ test.describe('backend match credential lifecycle', () => {
     await expect(
       harness.getByText('Legacy private booking comment').first(),
     ).toBeVisible();
+    expect(await page.evaluate(() => window.__legacyProfileCalls)).toBe(0);
     await expect(
       harness.getByText('Public-only unrelated match comment'),
     ).toHaveCount(0);

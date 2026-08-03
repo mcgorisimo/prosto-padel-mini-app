@@ -1189,7 +1189,7 @@ test.describe('backend session credential lifecycle', () => {
     expect(legacyProfileCalls).toBe(0);
   });
 
-  test('backend-owned profile fields override Supabase while legacy fields retain fallback behavior', async ({
+  test('backend-owned profile does not inherit Supabase or Telegram metadata fields', async ({
     page,
   }) => {
     await prepareTelegramWithSecureStorage(page, null, '');
@@ -1214,7 +1214,7 @@ test.describe('backend session credential lifecycle', () => {
           firstName: 'Backend',
           lastName: 'Identity',
           username: 'backend_identity',
-          photoUrl: null,
+          photoUrl: 'https://cdn.example.test/backend-player.jpg',
           languageCode: 'ru',
           phone: '+79991112233',
           sidePreference: 'Left',
@@ -1251,18 +1251,19 @@ test.describe('backend session credential lifecycle', () => {
         firstName: merged.first_name,
         lastName: merged.last_name,
         username: merged.username,
+        photoUrl: merged.photo_url,
         rating: merged.rating,
         isVerified: merged.is_verified,
         backendPhoneOwned: merged.phone === '+79991112233',
         sidePreference: merged.side_preference,
-        supabaseRolePreserved: merged.role === 'user',
+        backendRoleOwned: merged.role === 'player',
         backendCapabilityWins: merged.is_admin === true,
         exposesAccountId:
           Object.prototype.hasOwnProperty.call(merged, 'accountId'),
-        uninitializedPhoneFallback:
-          uninitialized.phone === '+79990000000',
-        uninitializedSideFallback:
-          uninitialized.side_preference === 'Right',
+        uninitializedPhoneIsEmpty: uninitialized.phone === '',
+        uninitializedSideDefaults:
+          uninitialized.side_preference === 'Both',
+        uninitializedUsernameIsEmpty: uninitialized.username === '',
         legacyAdminDoesNotLeak:
           mergeProfileSources({ role: 'admin' }, {
             accountId: '11111111-1111-4111-8111-111111111111',
@@ -1285,15 +1286,17 @@ test.describe('backend session credential lifecycle', () => {
       firstName: 'Backend',
       lastName: 'Identity',
       username: 'backend_identity',
+      photoUrl: 'https://cdn.example.test/backend-player.jpg',
       rating: 4.25,
       isVerified: true,
       backendPhoneOwned: true,
       sidePreference: 'Left',
-      supabaseRolePreserved: true,
+      backendRoleOwned: true,
       backendCapabilityWins: true,
       exposesAccountId: false,
-      uninitializedPhoneFallback: true,
-      uninitializedSideFallback: true,
+      uninitializedPhoneIsEmpty: true,
+      uninitializedSideDefaults: true,
+      uninitializedUsernameIsEmpty: true,
       legacyAdminDoesNotLeak: true,
     });
   });

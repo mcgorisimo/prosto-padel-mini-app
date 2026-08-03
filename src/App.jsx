@@ -280,6 +280,25 @@ function backendInvitationError(reason) {
 }
 
 export function mergeProfileSources(profile, backendProfile, metadata = {}) {
+  if (backendProfile) {
+    return {
+      first_name: backendProfile.firstName ?? 'Новый',
+      last_name: backendProfile.lastName ?? '',
+      username: backendProfile.username ?? '',
+      photo_url: backendProfile.photoUrl ?? '',
+      language_code: backendProfile.languageCode ?? '',
+      phone: backendProfile.phone ?? '',
+      side_preference: backendProfile.sidePreference ?? 'Both',
+      rating: Number.isFinite(backendProfile.rating)
+        ? backendProfile.rating
+        : 3.0,
+      is_verified: backendProfile.isVerified === true,
+      role: backendProfile.role ?? 'player',
+      is_admin:
+        backendProfile.capabilities?.includes('club_admin') === true,
+    };
+  }
+
   const baseProfile = profile || {
     rating: 3.0,
     role: 'user',
@@ -287,34 +306,14 @@ export function mergeProfileSources(profile, backendProfile, metadata = {}) {
 
   return {
     ...baseProfile,
-    first_name: backendProfile
-      ? backendProfile.firstName
-      : (profile?.first_name || metadata.first_name || 'Новый'),
-    last_name: backendProfile
-      ? (backendProfile.lastName ?? '')
-      : (profile?.last_name || metadata.last_name || 'Игрок'),
-    username: backendProfile
-      ? (backendProfile.username ?? '')
-      : (profile?.username || metadata.username || ''),
-    phone: backendProfile &&
-      (backendProfile.phone !== null ||
-        backendProfile.sidePreference !== null)
-      ? (backendProfile.phone ?? '')
-      : (profile?.phone || ''),
-    side_preference: backendProfile?.sidePreference ??
-      profile?.side_preference ??
-      'Both',
-    rating: backendProfile
-      ? (typeof backendProfile.rating === 'number'
-          ? backendProfile.rating
-          : 3.0)
-      : baseProfile.rating,
-    is_verified: backendProfile
-      ? backendProfile.isVerified === true
-      : baseProfile.is_verified,
-    is_admin: backendProfile
-      ? backendProfile.capabilities?.includes('club_admin') === true
-      : false,
+    first_name: profile?.first_name || metadata.first_name || 'Новый',
+    last_name: profile?.last_name || metadata.last_name || 'Игрок',
+    username: profile?.username || metadata.username || '',
+    phone: profile?.phone || '',
+    side_preference: profile?.side_preference ?? 'Both',
+    rating: baseProfile.rating,
+    is_verified: baseProfile.is_verified,
+    is_admin: false,
   };
 }
 
@@ -396,6 +395,10 @@ export default function App({
 
   const fetchProfile = useCallback(async () => {
     if (!ME_ID) return null;
+    if (usesBackendMatches) {
+      setProfile(null);
+      return null;
+    }
 
     try {
       const data = await getMyProfile();
@@ -405,7 +408,7 @@ export default function App({
       console.error(`Ошибка при получении профиля из Supabase: ${error.message}`);
       return null;
     }
-  }, [ME_ID]);
+  }, [ME_ID, usesBackendMatches]);
 
   const loadMatches = useCallback(async () => {
     setMatchesLoading(true);
@@ -933,9 +936,13 @@ export default function App({
     // 1. Достаем метаданные из сессии (там точно лежат имя и фамилия из формы регистрации)
     const meta = session?.user?.user_metadata || {};
     
-    // 2. Backend owns Telegram identity fields; Supabase still provides the
-    // remaining profile fields until their data flows are migrated.
-    const p = mergeProfileSources(profile, backendProfile, meta);
+    // 2. Backend owns the complete profile in backend mode. Supabase profile
+    // data is used only by the explicitly retained legacy flow.
+    const p = mergeProfileSources(
+      usesBackendMatches ? null : profile,
+      backendProfile,
+      usesBackendMatches ? {} : meta,
+    );
     
     const numericRating = Number.isFinite(p.rating) ? p.rating : 3.0;
     const RATINGS_ORDER = ['D', 'D+', 'C', 'C+', 'B', 'B+', 'A'];
@@ -954,11 +961,14 @@ export default function App({
       lastName: p.last_name,
       phone: p.phone || '',
       side_preference: p.side_preference || 'Both',
-      username: p.username || user?.username || meta.username || '',
+      username: usesBackendMatches
+        ? p.username
+        : (p.username || user?.username || meta.username || ''),
+      photo_url: p.photo_url || '',
       role: p.role,
       isAdmin: p.is_admin === true,
     };
-  }, [backendProfile, profile, session, user?.username]); // <-- добавили session в зависимости
+  }, [backendProfile, profile, session, user?.username, usesBackendMatches]); // <-- добавили session в зависимости
 
   const backendMatchCurrentUser = useMemo(() => ({
     ...currentUser,
