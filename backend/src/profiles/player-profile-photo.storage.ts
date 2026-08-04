@@ -50,7 +50,7 @@ export class S3PlayerProfilePhotoObjectStorage
     this.client = new S3Client({
       endpoint: configuration.endpoint,
       region: configuration.region,
-      forcePathStyle: true,
+      forcePathStyle: false,
       credentials: {
         accessKeyId: configuration.accessKeyId,
         secretAccessKey: configuration.secretAccessKey,

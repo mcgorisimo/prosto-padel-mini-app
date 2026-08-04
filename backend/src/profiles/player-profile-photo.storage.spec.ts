@@ -24,6 +24,13 @@ describe('S3PlayerProfilePhotoObjectStorage', () => {
     jest.restoreAllMocks();
   });
 
+  it('uses vHosted addressing for the configured S3 endpoint', () => {
+    const storage = new S3PlayerProfilePhotoObjectStorage(CONFIGURATION);
+    const client = Reflect.get(storage, 'client') as S3Client;
+
+    expect(client.config.forcePathStyle).toBe(false);
+  });
+
   it('uploads non-cacheable WebP objects only to the configured bucket and key', async () => {
     const send = jest
       .spyOn(S3Client.prototype, 'send')
