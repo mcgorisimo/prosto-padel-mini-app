@@ -633,7 +633,7 @@ test.describe('padel-domain live staging E2E @live', () => {
     await page.getByRole('button', { name: 'Настройки' }).click();
     await page.getByRole('button', { name: /Личная информация/ }).click();
 
-    const inputs = page.locator('input');
+    const inputs = page.locator('input:not([type="file"])');
     await expect(inputs.nth(0)).toHaveValue(before.first_name);
     await expect(inputs.nth(1)).toHaveValue(before.last_name);
     await expect(inputs.nth(3)).toBeDisabled();

@@ -560,15 +560,19 @@ test.describe('Telegram backend login feature enabled', () => {
     await expect(navigation).toBeVisible();
     await navigation.getByRole('button').nth(4).click();
     await page.getByRole('button', { name: 'Настройки' }).click();
-    await page.getByRole('button', { name: /Фото профиля/ }).click();
-    await expect(page.getByTestId('profile-photo-actions')).toBeVisible();
-    await page.getByRole('button', { name: 'Закрыть управление фото' }).click();
-    await page.getByRole('button', { name: 'Настройки' }).click();
+    await expect(page.getByRole('button', { name: /Фото профиля/ })).toHaveCount(0);
     await page.getByRole('button', {
       name: /Личная информация/,
     }).click();
+    const personalPhotoLauncher = page.getByTestId('personal-info-photo-launcher');
+    await expect(personalPhotoLauncher).toBeVisible();
+    await personalPhotoLauncher.click();
+    await expect(page.getByTestId('profile-photo-actions')).toBeVisible();
+    await expect(page.locator('body')).toHaveClass(/profile-photo-modal-open/);
+    await expect(page.getByTestId('profile-photo-select')).toBeInViewport();
+    await page.getByRole('button', { name: 'Закрыть управление фото' }).click();
 
-    const inputs = page.locator('input');
+    const inputs = page.locator('input:not([type="file"])');
     await expect(inputs.nth(0)).toHaveValue('Backend');
     await expect(inputs.nth(2)).toHaveValue('');
     await inputs.nth(0).fill('fuck');

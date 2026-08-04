@@ -1081,6 +1081,7 @@ test.describe('backend session credential lifecycle', () => {
   test('profile photo stays still, opens full-size, uploads, and deletes', async ({
     page,
   }) => {
+    await page.setViewportSize({ width: 390, height: 650 });
     await prepareTelegramWithSecureStorage(page, null, '');
     await page.goto('/');
 
@@ -1185,6 +1186,10 @@ test.describe('backend session credential lifecycle', () => {
     await firstChooser.setFiles(replacementImage);
     const cropper = page.getByTestId('profile-photo-cropper');
     await expect(cropper).toBeVisible();
+    await expect(page.getByTestId('profile-photo-crop-actions')).toBeInViewport();
+    await expect(page.getByTestId('profile-photo-crop-cancel')).toBeInViewport();
+    await expect(page.getByTestId('profile-photo-crop-confirm')).toBeInViewport();
+    await expect(page.locator('body')).toHaveClass(/profile-photo-modal-open/);
     await page.evaluate(() => {
       const originalToBlob = HTMLCanvasElement.prototype.toBlob;
       window.__profilePhotoCropStarted = false;

@@ -666,12 +666,15 @@ function ProfilePhotoCropper({
       data-testid="profile-photo-cropper"
       style={{
         position: 'fixed', inset: 0, zIndex: 10_001,
-        background: 'rgba(0,0,0,0.88)', display: 'flex', alignItems: 'flex-end',
-        justifyContent: 'center', padding: '16px',
+        background: 'rgba(0,0,0,0.88)', display: 'flex', alignItems: 'center',
+        justifyContent: 'center', overflowY: 'auto', WebkitOverflowScrolling: 'touch',
+        padding: 'calc(12px + env(safe-area-inset-top, 0px)) 12px calc(12px + env(safe-area-inset-bottom, 0px))',
+        boxSizing: 'border-box',
       }}
     >
       <div style={{
-        width: 'min(100%, 420px)', maxHeight: 'calc(100dvh - 32px)', overflowY: 'auto',
+        width: 'min(100%, 420px)', maxHeight: 'calc(100dvh - 24px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px))',
+        overflowY: 'auto', WebkitOverflowScrolling: 'touch', margin: 'auto',
         background: C.surface, border: `1px solid ${C.border}`, borderRadius: '22px',
         padding: '20px', boxSizing: 'border-box',
       }}>
@@ -684,7 +687,7 @@ function ProfilePhotoCropper({
         <div
           data-testid="profile-photo-crop-preview"
           style={{
-            position: 'relative', width: 'min(72vw, 280px)', aspectRatio: '1',
+            position: 'relative', width: 'min(58vw, 220px, 30dvh)', aspectRatio: '1',
             margin: '0 auto 18px', overflow: 'hidden', borderRadius: '50%',
             border: `3px solid ${C.gold}`, background: C.bg,
           }}
@@ -720,7 +723,14 @@ function ProfilePhotoCropper({
             />
           </label>
         ))}
-        <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
+        <div
+          data-testid="profile-photo-crop-actions"
+          style={{
+            position: 'sticky', bottom: '-20px', zIndex: 2, display: 'flex', gap: '10px',
+            margin: '20px -20px -20px', padding: '12px 20px calc(12px + env(safe-area-inset-bottom, 0px))',
+            background: 'linear-gradient(to top, #071F16 72%, rgba(7,31,22,0.92))',
+          }}
+        >
           <button
             type="button"
             data-testid="profile-photo-crop-cancel"
@@ -762,6 +772,205 @@ function profilePhotoErrorMessage(reason) {
     session_invalid: 'Сессия завершена. Откройте приложение заново.',
   };
   return messages[reason] ?? 'Не удалось обновить фото. Попробуйте ещё раз.';
+}
+
+export function ProfilePhotoManager({
+  user,
+  onPhotoUpload,
+  onPhotoDelete,
+  showToast,
+  renderLauncher,
+}) {
+  const photoInputRef = useRef(null);
+  const activePhotoAccountIdRef = useRef(user?.accountId ?? null);
+  activePhotoAccountIdRef.current = user?.accountId ?? null;
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const [showPhotoActions, setShowPhotoActions] = useState(false);
+  const [showFullPhoto, setShowFullPhoto] = useState(false);
+  const [photoCrop, setPhotoCrop] = useState(null);
+  const [photoCropSize, setPhotoCropSize] = useState(null);
+  const [photoCropX, setPhotoCropX] = useState(50);
+  const [photoCropY, setPhotoCropY] = useState(50);
+  const [photoCropZoom, setPhotoCropZoom] = useState(1);
+  const displayName = [user?.firstName, user?.lastName].filter(Boolean).join(' ') || 'Игрок';
+  const modalOpen = showPhotoActions || showFullPhoto || Boolean(photoCrop);
+
+  useEffect(() => {
+    const objectUrl = photoCrop?.objectUrl;
+    return () => {
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [photoCrop?.objectUrl]);
+
+  useEffect(() => {
+    setShowPhotoActions(false);
+    setShowFullPhoto(false);
+    setPhotoCrop(null);
+    setPhotoCropSize(null);
+    if (photoInputRef.current) photoInputRef.current.value = '';
+  }, [user?.accountId]);
+
+  useEffect(() => {
+    if (!modalOpen || !globalThis.document?.body) return undefined;
+    document.body.classList.add('profile-photo-modal-open');
+    return () => document.body.classList.remove('profile-photo-modal-open');
+  }, [modalOpen]);
+
+  const uploadProfilePhoto = async (photo) => {
+    setPhotoBusy(true);
+    try {
+      const result = await onPhotoUpload(photo);
+      if (result?.outcome === 'profile_photo_updated') {
+        showToast?.('Фото профиля обновлено', 'success');
+        return true;
+      }
+      if (result?.outcome !== 'cancelled') {
+        showToast?.(profilePhotoErrorMessage(result?.reason), 'error');
+      }
+    } catch {
+      showToast?.('Не удалось обновить фото. Попробуйте ещё раз.', 'error');
+    } finally {
+      setPhotoBusy(false);
+    }
+    return false;
+  };
+
+  const handlePhotoFile = async (event) => {
+    const photo = event.target.files?.[0];
+    const selectedForAccountId = activePhotoAccountIdRef.current;
+    event.target.value = '';
+    if (!photo || photoBusy || typeof onPhotoUpload !== 'function') return;
+    if (
+      !['image/jpeg', 'image/png', 'image/webp'].includes(photo.type) ||
+      photo.size < 1 ||
+      photo.size > PROFILE_PHOTO_MAX_BYTES
+    ) {
+      showToast?.('Выберите JPEG, PNG или WebP размером до 8 МБ.', 'error');
+      return;
+    }
+    const objectUrl = URL.createObjectURL(photo);
+    try {
+      const image = await loadPhoto(objectUrl);
+      if (activePhotoAccountIdRef.current !== selectedForAccountId) {
+        URL.revokeObjectURL(objectUrl);
+        return;
+      }
+      setPhotoCrop({ objectUrl, accountId: selectedForAccountId });
+      setPhotoCropSize({ width: image.naturalWidth, height: image.naturalHeight });
+      setPhotoCropX(50);
+      setPhotoCropY(50);
+      setPhotoCropZoom(1);
+    } catch {
+      URL.revokeObjectURL(objectUrl);
+      showToast?.('Файл не удалось распознать как изображение.', 'error');
+    }
+  };
+
+  const handlePhotoCropConfirm = async () => {
+    const expectedAccountId = photoCrop?.accountId ?? null;
+    if (!photoCrop || photoBusy || expectedAccountId !== activePhotoAccountIdRef.current) return;
+    try {
+      const croppedPhoto = await createCroppedProfilePhoto(
+        photoCrop.objectUrl,
+        photoCropX,
+        photoCropY,
+        photoCropZoom,
+      );
+      if (expectedAccountId !== activePhotoAccountIdRef.current) return;
+      const uploaded = await uploadProfilePhoto(croppedPhoto);
+      if (uploaded) {
+        setPhotoCrop(null);
+        setPhotoCropSize(null);
+      }
+    } catch {
+      showToast?.('Не удалось подготовить выбранный кадр.', 'error');
+    }
+  };
+
+  const handlePhotoDelete = async () => {
+    if (photoBusy || typeof onPhotoDelete !== 'function') return;
+    if (globalThis.window?.confirm?.('Удалить фото профиля?') === false) return;
+    setPhotoBusy(true);
+    try {
+      const result = await onPhotoDelete();
+      if (result?.outcome === 'profile_photo_deleted') {
+        setShowPhotoActions(false);
+        setShowFullPhoto(false);
+        showToast?.('Фото профиля удалено', 'success');
+      } else if (result?.outcome !== 'cancelled') {
+        showToast?.(profilePhotoErrorMessage(result?.reason), 'error');
+      }
+    } catch {
+      showToast?.('Не удалось удалить фото. Попробуйте ещё раз.', 'error');
+    } finally {
+      setPhotoBusy(false);
+    }
+  };
+
+  const open = () => {
+    if (!photoBusy) setShowPhotoActions(true);
+  };
+
+  return (
+    <>
+      <input
+        ref={photoInputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        onChange={handlePhotoFile}
+        data-testid="profile-photo-input"
+        style={{ display: 'none' }}
+      />
+      {typeof renderLauncher === 'function' && renderLauncher({ open, busy: photoBusy })}
+      {showFullPhoto && (
+        <FullProfilePhoto
+          src={user?.full_photo_url || user?.photo_url}
+          name={displayName}
+          onClose={() => setShowFullPhoto(false)}
+        />
+      )}
+      {showPhotoActions && (
+        <ProfilePhotoActions
+          user={user}
+          name={displayName}
+          busy={photoBusy}
+          canUpload={typeof onPhotoUpload === 'function'}
+          canDelete={typeof onPhotoDelete === 'function'}
+          onSelect={() => {
+            setShowPhotoActions(false);
+            photoInputRef.current?.click();
+          }}
+          onDelete={handlePhotoDelete}
+          onOpenFull={() => {
+            setShowPhotoActions(false);
+            setShowFullPhoto(true);
+          }}
+          onClose={() => {
+            if (!photoBusy) setShowPhotoActions(false);
+          }}
+        />
+      )}
+      {photoCrop && (
+        <ProfilePhotoCropper
+          source={photoCrop.objectUrl}
+          imageSize={photoCropSize}
+          cropX={photoCropX}
+          cropY={photoCropY}
+          zoom={photoCropZoom}
+          busy={photoBusy}
+          onCropXChange={setPhotoCropX}
+          onCropYChange={setPhotoCropY}
+          onZoomChange={setPhotoCropZoom}
+          onConfirm={handlePhotoCropConfirm}
+          onCancel={() => {
+            if (photoBusy) return;
+            setPhotoCrop(null);
+            setPhotoCropSize(null);
+          }}
+        />
+      )}
+    </>
+  );
 }
 
 // ─── Level Selector ───────────────────────────────────────────────────────────
@@ -982,7 +1191,7 @@ function FamilyBonusBlock() {
 
 // ─── Main screen ──────────────────────────────────────────────────────────────
 
-export default function PlayerProfile({ user, stats, upcomingMatches = [], completedMatches = [], resultMatches = completedMatches, onViewDetails, notifications = [], notificationsLoading = false, notificationsLoadError = '', invitations = [], invitationActions = new Set(), onRetryNotifications, onViewNotification, onAcceptInvitation, onDeclineInvitation, onCreateMatch, onBookCourt, onOpenSettings, onOpenAdmin, onPhotoUpload, onPhotoDelete, photoManagerRequest = 0, onPhotoManagerRequestHandled, showToast, onLogout, isVerified: initVerified = false, hasFamilyMembership = false }) {
+export default function PlayerProfile({ user, stats, upcomingMatches = [], completedMatches = [], resultMatches = completedMatches, onViewDetails, notifications = [], notificationsLoading = false, notificationsLoadError = '', invitations = [], invitationActions = new Set(), onRetryNotifications, onViewNotification, onAcceptInvitation, onDeclineInvitation, onCreateMatch, onBookCourt, onOpenSettings, onOpenAdmin, onPhotoUpload, onPhotoDelete, showToast, onLogout, isVerified: initVerified = false, hasFamilyMembership = false }) {
   // Numbers come from the App-level computed stats (single source of truth: allMatches + dp_rating_history).
   const currentRating = stats?.numericRating ?? 0;
   const currentLevel  = getLevelForRating(currentRating);
@@ -995,39 +1204,6 @@ export default function PlayerProfile({ user, stats, upcomingMatches = [], compl
 
   const fileInputRef                  = useRef(null);
   const [ratingFile, setRatingFile]   = useState(null);
-  const photoInputRef = useRef(null);
-  const activePhotoAccountIdRef = useRef(user?.accountId ?? null);
-  activePhotoAccountIdRef.current = user?.accountId ?? null;
-  const [photoBusy, setPhotoBusy] = useState(false);
-  const [showPhotoActions, setShowPhotoActions] = useState(false);
-  const [showFullPhoto, setShowFullPhoto] = useState(false);
-  const [photoCrop, setPhotoCrop] = useState(null);
-  const [photoCropSize, setPhotoCropSize] = useState(null);
-  const [photoCropX, setPhotoCropX] = useState(50);
-  const [photoCropY, setPhotoCropY] = useState(50);
-  const [photoCropZoom, setPhotoCropZoom] = useState(1);
-
-  useEffect(() => {
-    const objectUrl = photoCrop?.objectUrl;
-    return () => {
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [photoCrop?.objectUrl]);
-
-  useEffect(() => {
-    setShowPhotoActions(false);
-    setShowFullPhoto(false);
-    setPhotoCrop(null);
-    setPhotoCropSize(null);
-    if (photoInputRef.current) photoInputRef.current.value = '';
-  }, [user?.accountId]);
-
-  useEffect(() => {
-    if (photoManagerRequest > 0) {
-      setShowPhotoActions(true);
-      onPhotoManagerRequestHandled?.();
-    }
-  }, [photoManagerRequest]);
 
   const handleRatingFile = (e) => {
     const file = e.target.files?.[0];
@@ -1036,100 +1212,6 @@ export default function PlayerProfile({ user, stats, upcomingMatches = [], compl
     setVerifPath('screenshot');
     showToast('Уведомление отправлено администратору', 'info');
     e.target.value = ''; // reset input
-  };
-
-  const uploadProfilePhoto = async (photo) => {
-    setPhotoBusy(true);
-    try {
-      const result = await onPhotoUpload(photo);
-      if (result?.outcome === 'profile_photo_updated') {
-        showToast?.('Фото профиля обновлено', 'success');
-        return true;
-      } else if (result?.outcome !== 'cancelled') {
-        showToast?.(profilePhotoErrorMessage(result?.reason), 'error');
-      }
-    } catch {
-      showToast?.('Не удалось обновить фото. Попробуйте ещё раз.', 'error');
-    } finally {
-      setPhotoBusy(false);
-    }
-    return false;
-  };
-
-  const handlePhotoFile = async (event) => {
-    const photo = event.target.files?.[0];
-    const selectedForAccountId = activePhotoAccountIdRef.current;
-    event.target.value = '';
-    if (!photo || photoBusy || typeof onPhotoUpload !== 'function') return;
-    if (
-      !['image/jpeg', 'image/png', 'image/webp'].includes(photo.type) ||
-      photo.size < 1 ||
-      photo.size > PROFILE_PHOTO_MAX_BYTES
-    ) {
-      showToast?.('Выберите JPEG, PNG или WebP размером до 8 МБ.', 'error');
-      return;
-    }
-    const objectUrl = URL.createObjectURL(photo);
-    try {
-      const image = await loadPhoto(objectUrl);
-      if (activePhotoAccountIdRef.current !== selectedForAccountId) {
-        URL.revokeObjectURL(objectUrl);
-        return;
-      }
-      setPhotoCrop({ objectUrl, accountId: selectedForAccountId });
-      setPhotoCropSize({ width: image.naturalWidth, height: image.naturalHeight });
-      setPhotoCropX(50);
-      setPhotoCropY(50);
-      setPhotoCropZoom(1);
-    } catch {
-      URL.revokeObjectURL(objectUrl);
-      showToast?.('Файл не удалось распознать как изображение.', 'error');
-    }
-  };
-
-  const handlePhotoCropConfirm = async () => {
-    const expectedAccountId = photoCrop?.accountId ?? null;
-    if (
-      !photoCrop ||
-      photoBusy ||
-      expectedAccountId !== activePhotoAccountIdRef.current
-    ) return;
-    try {
-      const croppedPhoto = await createCroppedProfilePhoto(
-        photoCrop.objectUrl,
-        photoCropX,
-        photoCropY,
-        photoCropZoom,
-      );
-      if (expectedAccountId !== activePhotoAccountIdRef.current) return;
-      const uploaded = await uploadProfilePhoto(croppedPhoto);
-      if (uploaded) {
-        setPhotoCrop(null);
-        setPhotoCropSize(null);
-      }
-    } catch {
-      showToast?.('Не удалось подготовить выбранный кадр.', 'error');
-    }
-  };
-
-  const handlePhotoDelete = async () => {
-    if (photoBusy || typeof onPhotoDelete !== 'function') return;
-    if (globalThis.window?.confirm?.('Удалить фото профиля?') === false) return;
-    setPhotoBusy(true);
-    try {
-      const result = await onPhotoDelete();
-      if (result?.outcome === 'profile_photo_deleted') {
-        setShowPhotoActions(false);
-        setShowFullPhoto(false);
-        showToast?.('Фото профиля удалено', 'success');
-      } else if (result?.outcome !== 'cancelled') {
-        showToast?.(profilePhotoErrorMessage(result?.reason), 'error');
-      }
-    } catch {
-      showToast?.('Не удалось удалить фото. Попробуйте ещё раз.', 'error');
-    } finally {
-      setPhotoBusy(false);
-    }
   };
 
   const displayName = [user?.firstName, user?.lastName].filter(Boolean).join(' ') || 'Игрок';
@@ -1144,65 +1226,6 @@ export default function PlayerProfile({ user, stats, upcomingMatches = [], compl
         onChange={handleRatingFile}
         style={{ display: 'none' }}
       />
-      <input
-        ref={photoInputRef}
-        type="file"
-        accept="image/jpeg,image/png,image/webp"
-        onChange={handlePhotoFile}
-        data-testid="profile-photo-input"
-        style={{ display: 'none' }}
-      />
-
-      {showFullPhoto && (
-        <FullProfilePhoto
-          src={user?.full_photo_url || user?.photo_url}
-          name={displayName}
-          onClose={() => setShowFullPhoto(false)}
-        />
-      )}
-
-      {showPhotoActions && (
-        <ProfilePhotoActions
-          user={user}
-          name={displayName}
-          busy={photoBusy}
-          canUpload={typeof onPhotoUpload === 'function'}
-          canDelete={typeof onPhotoDelete === 'function'}
-          onSelect={() => {
-            setShowPhotoActions(false);
-            photoInputRef.current?.click();
-          }}
-          onDelete={handlePhotoDelete}
-          onOpenFull={() => {
-            setShowPhotoActions(false);
-            setShowFullPhoto(true);
-          }}
-          onClose={() => {
-            if (!photoBusy) setShowPhotoActions(false);
-          }}
-        />
-      )}
-
-      {photoCrop && (
-        <ProfilePhotoCropper
-          source={photoCrop.objectUrl}
-          imageSize={photoCropSize}
-          cropX={photoCropX}
-          cropY={photoCropY}
-          zoom={photoCropZoom}
-          busy={photoBusy}
-          onCropXChange={setPhotoCropX}
-          onCropYChange={setPhotoCropY}
-          onZoomChange={setPhotoCropZoom}
-          onConfirm={handlePhotoCropConfirm}
-          onCancel={() => {
-            if (photoBusy) return;
-            setPhotoCrop(null);
-            setPhotoCropSize(null);
-          }}
-        />
-      )}
-
       {/* ── Header card ── */}
       <div style={{
             background: 'radial-gradient(circle at 50% -20%, rgba(216,243,74,0.09), transparent 18rem), linear-gradient(180deg, #071F16 0%, #050F0B 100%)',
@@ -1211,15 +1234,23 @@ export default function PlayerProfile({ user, stats, upcomingMatches = [], compl
       }}>
         {/* Avatar row */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '20px' }}>
-          <Avatar
+          <ProfilePhotoManager
             user={user}
-            level={currentLevel}
-            rating={animRating}
-            onManagePhoto={
-              typeof onPhotoUpload === 'function' || user?.photo_url
-                ? () => setShowPhotoActions(true)
-                : undefined
-            }
+            onPhotoUpload={onPhotoUpload}
+            onPhotoDelete={onPhotoDelete}
+            showToast={showToast}
+            renderLauncher={({ open }) => (
+              <Avatar
+                user={user}
+                level={currentLevel}
+                rating={animRating}
+                onManagePhoto={
+                  typeof onPhotoUpload === 'function' || user?.photo_url
+                    ? open
+                    : undefined
+                }
+              />
+            )}
           />
 
           <div style={{ flex: 1, minWidth: 0 }}>

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ChevronRight, User, Image as ImageIcon, Shield, Lock, UserCog } from 'lucide-react';
+import { ChevronRight, User, Shield, Lock, UserCog } from 'lucide-react';
 import { useTelegram } from '../hooks/useTelegram';
 import PersonalInfoScreen from './PersonalInfoScreen';
 import PrivacyScreen from './PrivacyScreen';
@@ -16,7 +16,6 @@ const C = {
 
 const SECTIONS = [
   { key: 'personal', icon: User,    label: 'Личная информация'    },
-  { key: 'photo',    icon: ImageIcon, label: 'Фото профиля'       },
   { key: 'privacy',  icon: Shield,  label: 'Конфиденциальность'   },
   { key: 'security', icon: Lock,    label: 'Безопасность'         },
   { key: 'account',  icon: UserCog, label: 'Управление аккаунтом' },
@@ -53,7 +52,7 @@ function SettingsRow({ icon: Icon, label, onClick, isLast }) {
   );
 }
 
-export default function EditProfileScreen({ user, onBack, showToast, onProfileSaved, onBackendProfileSave, onOpenPhotoSettings, onLogout }) {
+export default function EditProfileScreen({ user, onBack, showToast, onProfileSaved, onBackendProfileSave, onPhotoUpload, onPhotoDelete, onLogout }) {
   const { tg } = useTelegram();
   const [subScreen, setSubScreen] = useState(null);
 
@@ -72,10 +71,6 @@ export default function EditProfileScreen({ user, onBack, showToast, onProfileSa
 
   const handleNavigate = (sectionKey) => {
     tg?.HapticFeedback?.impactOccurred?.('light');
-    if (sectionKey === 'photo') {
-      onOpenPhotoSettings?.();
-      return;
-    }
     setSubScreen(sectionKey);
   };
 
@@ -87,6 +82,8 @@ export default function EditProfileScreen({ user, onBack, showToast, onProfileSa
         showToast={showToast}
         onProfileSaved={onProfileSaved}
         onBackendProfileSave={onBackendProfileSave}
+        onPhotoUpload={onPhotoUpload}
+        onPhotoDelete={onPhotoDelete}
       />
     );
   }
@@ -138,7 +135,7 @@ export default function EditProfileScreen({ user, onBack, showToast, onProfileSa
         border: `1px solid ${C.border}`,
         overflow: 'hidden',
       }}>
-        {SECTIONS.filter((section) => section.key !== 'photo' || typeof onOpenPhotoSettings === 'function').map((section, idx, visibleSections) => (
+        {SECTIONS.map((section, idx, visibleSections) => (
           <SettingsRow
             key={section.key}
             icon={section.icon}

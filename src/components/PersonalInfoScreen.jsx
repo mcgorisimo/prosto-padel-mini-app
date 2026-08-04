@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useTelegram } from '../hooks/useTelegram';
 import { updateMyProfile } from '../lib/profileApi';
+import { ProfilePhotoManager } from './PlayerProfile';
 
 const C = {
   bg:      '#020617',
@@ -119,6 +120,8 @@ export default function PersonalInfoScreen({
   showToast,
   onProfileSaved,
   onBackendProfileSave,
+  onPhotoUpload,
+  onPhotoDelete,
 }) {
   const { tg } = useTelegram();
   const [firstName, setFirstName] = useState(user?.firstName || '');
@@ -231,25 +234,54 @@ export default function PersonalInfoScreen({
       </header>
 
       <div style={{ padding: '20px 16px 0' }}>
-        <Field label="Имя">
-          <TextInput
-            type="text"
-            value={firstName}
-            onChange={(e) => setFirstName(e.target.value)}
-            placeholder="Имя"
-            autoComplete="given-name"
-          />
-        </Field>
+        <div className="personal-info-identity">
+          <div style={{ minWidth: 0 }}>
+            <Field label="Имя">
+              <TextInput
+                type="text"
+                value={firstName}
+                onChange={(e) => setFirstName(e.target.value)}
+                placeholder="Имя"
+                autoComplete="given-name"
+              />
+            </Field>
 
-        <Field label="Фамилия">
-          <TextInput
-            type="text"
-            value={lastName}
-            onChange={(e) => setLastName(e.target.value)}
-            placeholder="Фамилия"
-            autoComplete="family-name"
-          />
-        </Field>
+            <Field label="Фамилия">
+              <TextInput
+                type="text"
+                value={lastName}
+                onChange={(e) => setLastName(e.target.value)}
+                placeholder="Фамилия"
+                autoComplete="family-name"
+              />
+            </Field>
+          </div>
+
+          {(typeof onPhotoUpload === 'function' || user?.photo_url) && (
+            <ProfilePhotoManager
+              user={user}
+              onPhotoUpload={onPhotoUpload}
+              onPhotoDelete={onPhotoDelete}
+              showToast={showToast}
+              renderLauncher={({ open, busy }) => (
+                <button
+                  type="button"
+                  data-testid="personal-info-photo-launcher"
+                  aria-label={user?.photo_url ? 'Изменить фото профиля' : 'Добавить фото профиля'}
+                  disabled={busy}
+                  onClick={open}
+                  className="personal-info-photo-launcher"
+                >
+                  {user?.photo_url ? (
+                    <img src={user.photo_url} alt="Фото профиля" />
+                  ) : (
+                    <span>Добавить<br />фото</span>
+                  )}
+                </button>
+              )}
+            />
+          )}
+        </div>
 
         <Field label="Телефон">
           <TextInput
