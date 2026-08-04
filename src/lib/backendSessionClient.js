@@ -4,6 +4,7 @@ const REFRESH_PATH = '/api/v1/auth/session/refresh';
 const LOGOUT_PATH = '/api/v1/auth/session/logout';
 const AUTHENTICATE_PATH = '/api/v1/auth/session/me';
 const PROFILE_PATH = '/api/v1/profile/me';
+const PROFILE_PHOTO_PATH = '/api/v1/profile/me/photo';
 const MATCHES_PATH = '/api/v1/matches';
 const PLAYER_SEARCH_PATH = '/api/v1/players/search';
 const MATCH_INVITATIONS_PATH = '/api/v1/match-invitations';
@@ -24,6 +25,12 @@ const MAX_MATCH_LINEUP_RESPONSE_BODY_BYTES = 262_144;
 const MAX_MATCH_RESULT_RESPONSE_BODY_BYTES = 65_536;
 const MAX_MATCH_NOTIFICATION_RESPONSE_BODY_BYTES = 262_144;
 const MAX_ADMIN_PLAYER_RESPONSE_BODY_BYTES = 262_144;
+const MAX_PROFILE_PHOTO_UPLOAD_BYTES = 8 * 1_024 * 1_024;
+const PROFILE_PHOTO_MEDIA_TYPES = Object.freeze([
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+]);
 
 const BODY_ABORTED = Symbol('backend-session-body-aborted');
 const BODY_INVALID = Symbol('backend-session-body-invalid');
@@ -159,6 +166,15 @@ function isBoundedString(value, maximumCodePoints) {
   );
 }
 
+function isHttpsUrl(value, maximumCodePoints = 2_048) {
+  if (!isBoundedString(value, maximumCodePoints)) return false;
+  try {
+    return new URL(value).protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
 function hasExactKeys(actual, expected) {
   return (
     actual.length === expected.length &&
@@ -254,7 +270,7 @@ function isBackendMatchPublicPlayer(value, slotRequired = false) {
         'isVerified',
         ...(slotRequired ? ['slotNumber'] : []),
       ],
-      ['lastName', 'username'],
+      ['lastName', 'username', 'photoUrl'],
     ) ||
     !isMatchId(value.playerId) ||
     !isBoundedString(value.firstName, 256) ||
@@ -262,6 +278,7 @@ function isBackendMatchPublicPlayer(value, slotRequired = false) {
       !isBoundedString(value.lastName, 256)) ||
     (value.username !== undefined &&
       !isBoundedString(value.username, 64)) ||
+    (value.photoUrl !== undefined && !isHttpsUrl(value.photoUrl)) ||
     !isRating(value.rating) ||
     Number(value.rating.toFixed(2)) !== value.rating ||
     typeof value.isVerified !== 'boolean'
@@ -323,8 +340,8 @@ function isBackendMatchMessageCursor(value) {
 function isBackendPublicPlayer(value) {
   return (
     isPlainObject(value) &&
-    hasExactKeys(
-      Object.keys(value).sort(),
+    hasOnlyAllowedKeys(
+      value,
       [
         'firstName',
         'isVerified',
@@ -333,11 +350,13 @@ function isBackendPublicPlayer(value) {
         'rating',
         'username',
       ],
+      ['photoUrl'],
     ) &&
     isMatchId(value.playerId) &&
     isBoundedString(value.firstName, 256) &&
     (value.lastName === null || isBoundedString(value.lastName, 256)) &&
     (value.username === null || isBoundedString(value.username, 64)) &&
+    (value.photoUrl === undefined || isHttpsUrl(value.photoUrl)) &&
     isRating(value.rating) &&
     typeof value.isVerified === 'boolean'
   );
@@ -979,6 +998,59 @@ function profileSuccess(body, outcome = 'profile_loaded') {
         : {}),
     }),
   });
+}
+
+function profilePhotoSuccess(body, expectedOutcome) {
+  if (
+    !isPlainObject(body) ||
+    !hasExactKeys(
+      Object.keys(body).sort(),
+      ['fullPhotoUrl', 'outcome', 'photoUrl'],
+    ) ||
+    body.outcome !== expectedOutcome
+  ) {
+    return null;
+  }
+  if (expectedOutcome === 'deleted') {
+    return body.photoUrl === null && body.fullPhotoUrl === null
+      ? frozen('profile_photo_deleted', {
+          photoUrl: null,
+          fullPhotoUrl: null,
+        })
+      : null;
+  }
+  if (
+    !isBoundedString(body.photoUrl, 2_048) ||
+    !isBoundedString(body.fullPhotoUrl, 2_048)
+  ) {
+    return null;
+  }
+  try {
+    if (
+      new URL(body.photoUrl).protocol !== 'https:' ||
+      new URL(body.fullPhotoUrl).protocol !== 'https:'
+    ) {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+  return frozen('profile_photo_updated', {
+    photoUrl: body.photoUrl,
+    fullPhotoUrl: body.fullPhotoUrl,
+  });
+}
+
+function isProfilePhotoUpload(value) {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    PROFILE_PHOTO_MEDIA_TYPES.includes(value.type) &&
+    Number.isSafeInteger(value.size) &&
+    value.size > 0 &&
+    value.size <= MAX_PROFILE_PHOTO_UPLOAD_BYTES &&
+    typeof value.arrayBuffer === 'function'
+  );
 }
 
 function isBackendAdminPlayer(value) {
@@ -2083,6 +2155,101 @@ export function createBackendSessionClient(dependencies = {}) {
   const requestTimeoutMs =
     dependencies.requestTimeoutMs ?? REQUEST_TIMEOUT_MS;
 
+  async function mutateOwnProfilePhoto(
+    credential,
+    method,
+    photo,
+    options = {},
+  ) {
+    if (!isCanonicalSessionCredential(credential)) {
+      return frozen('rejected', { reason: 'invalid' });
+    }
+    if (
+      (method === 'PUT' && !isProfilePhotoUpload(photo)) ||
+      (method === 'DELETE' && photo !== undefined) ||
+      (method !== 'PUT' && method !== 'DELETE')
+    ) {
+      return frozen('rejected', { reason: 'invalid_request' });
+    }
+    if (
+      typeof fetchImpl !== 'function' ||
+      typeof AbortController !== 'function' ||
+      !Number.isFinite(requestTimeoutMs) ||
+      requestTimeoutMs <= 0
+    ) {
+      return frozen('rejected', { reason: 'internal_error' });
+    }
+    const externalSignal = options.signal;
+    if (externalSignal?.aborted) return frozen('cancelled');
+
+    const controller = new AbortController();
+    let timedOut = false;
+    const handleExternalAbort = () => controller.abort();
+    externalSignal?.addEventListener('abort', handleExternalAbort, {
+      once: true,
+    });
+    const timeout = globalThis.setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, requestTimeoutMs);
+
+    try {
+      const response = await fetchImpl(PROFILE_PHOTO_PATH, {
+        method,
+        headers: {
+          Accept: 'application/json',
+          Authorization: `Bearer ${credential}`,
+          ...(method === 'PUT'
+            ? { 'Content-Type': photo.type }
+            : {}),
+        },
+        ...(method === 'PUT' ? { body: photo } : {}),
+        cache: 'no-store',
+        credentials: 'omit',
+        redirect: 'error',
+        signal: controller.signal,
+      });
+      const body = await readBoundedJson(
+        response,
+        controller.signal,
+        MAX_RESPONSE_BODY_BYTES,
+      );
+      if (response.status === 200) {
+        const result = profilePhotoSuccess(
+          body,
+          method === 'PUT' ? 'updated' : 'deleted',
+        );
+        return result ?? frozen('rejected', { reason: 'internal_error' });
+      }
+      const code = exactPublicCode(body);
+      if (response.status === 401 && code === 'session_invalid') {
+        return frozen('rejected', { reason: 'invalid' });
+      }
+      const reasons = Object.freeze({
+        profile_photo_invalid_request: 'invalid_request',
+        profile_photo_invalid_image: 'invalid_image',
+        profile_not_found: 'profile_not_found',
+        profile_photo_conflict: 'conflict',
+        profile_photo_service_unavailable: 'feature_unavailable',
+      });
+      return frozen('rejected', {
+        reason:
+          response.status === 413 || response.status === 415
+            ? 'invalid_request'
+            : reasons[code] ?? 'internal_error',
+      });
+    } catch (error) {
+      if (externalSignal?.aborted) return frozen('cancelled');
+      if (timedOut || error === BODY_ABORTED) {
+        return frozen('rejected', { reason: 'temporary_unavailable' });
+      }
+      return frozen('rejected', { reason: 'temporary_unavailable' });
+    } finally {
+      globalThis.clearTimeout(timeout);
+      externalSignal?.removeEventListener('abort', handleExternalAbort);
+    }
+  }
+
   async function requestOnce(
     operation,
     credential,
@@ -2949,6 +3116,10 @@ export function createBackendSessionClient(dependencies = {}) {
       execute('profile', credential, options),
     updateOwnProfile: (credential, profilePatch, options) =>
       execute('profile_update', credential, options, profilePatch),
+    uploadOwnProfilePhoto: (credential, photo, options) =>
+      mutateOwnProfilePhoto(credential, 'PUT', photo, options),
+    deleteOwnProfilePhoto: (credential, options) =>
+      mutateOwnProfilePhoto(credential, 'DELETE', undefined, options),
     listAdminPlayers: (credential, request = {}, options) =>
       execute('admin_players_list', credential, options, {
         verification: request.verification ?? 'all',

@@ -923,6 +923,139 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
     return promise;
   }
 
+  function mutateOwnProfilePhoto(operation, photo) {
+    const requestGeneration = generation;
+    const expectedPrincipal = privatePrincipal;
+    let presentedCredential = privateCredential;
+
+    if (
+      presentedCredential === null ||
+      expectedPrincipal === null
+    ) {
+      presentedCredential = null;
+      return Promise.resolve(Object.freeze({
+        outcome: 'rejected',
+        reason: 'not_authenticated',
+      }));
+    }
+    if (expectedPrincipal.role !== 'player') {
+      presentedCredential = null;
+      return Promise.resolve(Object.freeze({
+        outcome: 'rejected',
+        reason: 'profile_not_found',
+      }));
+    }
+
+    abortActiveProfileUpdate();
+    abortActiveProfileRead();
+    const controller = new AbortController();
+    let requestRecord;
+    const promise = (async () => {
+      try {
+        let result;
+        try {
+          result = operation === 'upload'
+            ? await profiles.uploadOwnProfilePhoto(
+                presentedCredential,
+                photo,
+                { signal: controller.signal },
+              )
+            : await profiles.deleteOwnProfilePhoto(
+                presentedCredential,
+                { signal: controller.signal },
+              );
+        } catch {
+          result = Object.freeze({
+            outcome: 'rejected',
+            reason: 'internal_error',
+          });
+        }
+
+        if (
+          controller.signal.aborted ||
+          requestGeneration !== generation ||
+          activeProfileUpdate !== requestRecord ||
+          privatePrincipal !== expectedPrincipal
+        ) {
+          return Object.freeze({ outcome: 'cancelled' });
+        }
+        if (
+          result?.outcome === 'profile_photo_updated' &&
+          typeof result.photoUrl === 'string' &&
+          typeof result.fullPhotoUrl === 'string'
+        ) {
+          return Object.freeze({
+            outcome: 'profile_photo_updated',
+            accountId: expectedPrincipal.accountId,
+            photoUrl: result.photoUrl,
+            fullPhotoUrl: result.fullPhotoUrl,
+          });
+        }
+        if (
+          result?.outcome === 'profile_photo_deleted' &&
+          result.photoUrl === null &&
+          result.fullPhotoUrl === null
+        ) {
+          return Object.freeze({
+            outcome: 'profile_photo_deleted',
+            accountId: expectedPrincipal.accountId,
+            photoUrl: null,
+            fullPhotoUrl: null,
+          });
+        }
+        if (result?.outcome === 'cancelled') {
+          return Object.freeze({ outcome: 'cancelled' });
+        }
+
+        const allowedReason = result?.outcome === 'rejected'
+          ? result.reason
+          : 'internal_error';
+        if (allowedReason === 'invalid') {
+          clearBoundary();
+          return Object.freeze({
+            outcome: 'rejected',
+            reason: 'session_invalid',
+          });
+        }
+        return Object.freeze({
+          outcome: 'rejected',
+          reason: [
+            'invalid_request',
+            'invalid_image',
+            'profile_not_found',
+            'conflict',
+            'feature_unavailable',
+            'temporary_unavailable',
+          ].includes(allowedReason)
+            ? allowedReason
+            : 'internal_error',
+        });
+      } finally {
+        presentedCredential = null;
+        if (activeProfileUpdate === requestRecord) {
+          activeProfileUpdate = null;
+        }
+      }
+    })();
+
+    requestRecord = {
+      controller,
+      generation: requestGeneration,
+      principal: expectedPrincipal,
+      promise,
+    };
+    activeProfileUpdate = requestRecord;
+    return promise;
+  }
+
+  function uploadOwnProfilePhoto(photo) {
+    return mutateOwnProfilePhoto('upload', photo);
+  }
+
+  function deleteOwnProfilePhoto() {
+    return mutateOwnProfilePhoto('delete');
+  }
+
   function runMatchOperation(invoke, validateResult) {
     const requestGeneration = generation;
     const expectedPrincipal = privatePrincipal;
@@ -1516,6 +1649,8 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
     hasPrincipal: () => privatePrincipal !== null,
     loadOwnProfile,
     updateOwnProfile,
+    uploadOwnProfilePhoto,
+    deleteOwnProfilePhoto,
     listMatches,
     listAccountMatches,
     loadMatch,
@@ -1596,6 +1731,26 @@ export function useTelegramBackendLogin() {
       }));
     }
     return telegramBackendLoginLifecycle.updateOwnProfile(changes);
+  }, []);
+
+  const uploadOwnProfilePhoto = useCallback((photo) => {
+    if (!FEATURE_ENABLED) {
+      return Promise.resolve(Object.freeze({
+        outcome: 'rejected',
+        reason: 'not_authenticated',
+      }));
+    }
+    return telegramBackendLoginLifecycle.uploadOwnProfilePhoto(photo);
+  }, []);
+
+  const deleteOwnProfilePhoto = useCallback(() => {
+    if (!FEATURE_ENABLED) {
+      return Promise.resolve(Object.freeze({
+        outcome: 'rejected',
+        reason: 'not_authenticated',
+      }));
+    }
+    return telegramBackendLoginLifecycle.deleteOwnProfilePhoto();
   }, []);
 
   const listMatches = useCallback((limit = 20) => {
@@ -1970,6 +2125,8 @@ export function useTelegramBackendLogin() {
     dismissSuccess,
     loadOwnProfile,
     updateOwnProfile,
+    uploadOwnProfilePhoto,
+    deleteOwnProfilePhoto,
     listMatches,
     listAccountMatches,
     loadMatch,

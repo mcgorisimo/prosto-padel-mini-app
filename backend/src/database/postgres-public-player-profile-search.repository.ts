@@ -1,5 +1,7 @@
 import { QueryResultRow } from 'pg';
 import { isAccountId } from '../accounts/account.types';
+import { isInternalUuid } from '../common/internal-uuid';
+import { PlayerProfilePhotoUrlResolver } from '../config/player-profile-photo.config';
 import { classifyPostgresError } from './postgres-error-classifier';
 import { PostgresTransaction } from './postgres-transaction';
 import {
@@ -19,6 +21,7 @@ const MAX_RESULTS = 20;
 const MAX_BATCH_RESULTS = 200;
 const MAX_NAME_CODE_POINTS = 256;
 const MAX_USERNAME_CODE_POINTS = 64;
+const MAX_PHOTO_URL_CODE_POINTS = 2_048;
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f-\u009f]/u;
 const RATING_PATTERN = /^(?:[0-9]\.[0-9]{2}|10\.00)$/u;
 
@@ -28,6 +31,13 @@ const SEARCH_PUBLIC_PLAYER_PROFILES_SQL = `
     details.first_name,
     details.last_name,
     details.username,
+    photo_states.account_id AS photo_state_account_id,
+    photo_states.active_asset_id AS photo_state_active_asset_id,
+    photo_states.version AS photo_state_version,
+    photo_assets.account_id AS photo_asset_account_id,
+    photo_assets.asset_id AS photo_asset_id,
+    photo_assets.generation AS photo_asset_generation,
+    photo_assets.storage_prefix AS photo_storage_prefix,
     rating_states.rating,
     rating_states.is_verified
   FROM backend_auth.accounts AS accounts
@@ -37,6 +47,12 @@ const SEARCH_PUBLIC_PLAYER_PROFILES_SQL = `
     ON details.account_id = profiles.account_id
   JOIN backend_auth.player_rating_states AS rating_states
     ON rating_states.account_id = profiles.account_id
+  LEFT JOIN backend_auth.player_profile_photo_states AS photo_states
+    ON photo_states.account_id = profiles.account_id
+  LEFT JOIN backend_auth.player_profile_photo_assets AS photo_assets
+    ON photo_assets.account_id = photo_states.account_id
+   AND photo_assets.generation = photo_states.version
+   AND photo_assets.asset_id = photo_states.active_asset_id
   WHERE accounts.role = 'player'
     AND accounts.status = 'active'
     AND (
@@ -62,6 +78,13 @@ const READ_PUBLIC_PLAYER_PROFILES_SQL = `
     details.first_name,
     details.last_name,
     details.username,
+    photo_states.account_id AS photo_state_account_id,
+    photo_states.active_asset_id AS photo_state_active_asset_id,
+    photo_states.version AS photo_state_version,
+    photo_assets.account_id AS photo_asset_account_id,
+    photo_assets.asset_id AS photo_asset_id,
+    photo_assets.generation AS photo_asset_generation,
+    photo_assets.storage_prefix AS photo_storage_prefix,
     rating_states.rating,
     rating_states.is_verified
   FROM backend_auth.accounts AS accounts
@@ -71,6 +94,12 @@ const READ_PUBLIC_PLAYER_PROFILES_SQL = `
     ON details.account_id = profiles.account_id
   JOIN backend_auth.player_rating_states AS rating_states
     ON rating_states.account_id = profiles.account_id
+  LEFT JOIN backend_auth.player_profile_photo_states AS photo_states
+    ON photo_states.account_id = profiles.account_id
+  LEFT JOIN backend_auth.player_profile_photo_assets AS photo_assets
+    ON photo_assets.account_id = photo_states.account_id
+   AND photo_assets.generation = photo_states.version
+   AND photo_assets.asset_id = photo_states.active_asset_id
   WHERE accounts.role = 'player'
     AND accounts.status = 'active'
     AND accounts.id = ANY ($1::uuid[])
@@ -82,6 +111,13 @@ interface PublicPlayerProfileRow extends QueryResultRow {
   readonly first_name: unknown;
   readonly last_name: unknown;
   readonly username: unknown;
+  readonly photo_state_account_id: unknown;
+  readonly photo_state_active_asset_id: unknown;
+  readonly photo_state_version: unknown;
+  readonly photo_asset_account_id: unknown;
+  readonly photo_asset_id: unknown;
+  readonly photo_asset_generation: unknown;
+  readonly photo_storage_prefix: unknown;
   readonly rating: unknown;
   readonly is_verified: unknown;
 }
@@ -192,8 +228,88 @@ function readRating(value: unknown): number {
   return rating;
 }
 
+function readPositiveSafeInteger(value: unknown): number {
+  if (
+    typeof value !== 'string' ||
+    !/^[1-9][0-9]*$/u.test(value) ||
+    !Number.isSafeInteger(Number(value))
+  ) {
+    throw failure('invalid_persisted_state');
+  }
+  return Number(value);
+}
+
+function readManagedPhotoUrl(
+  row: PublicPlayerProfileRow,
+  expectedAccountId: PublicPlayerProfileRecord['playerId'],
+  urls: PlayerProfilePhotoUrlResolver,
+): string | undefined {
+  if (row.photo_state_account_id === null) {
+    if (
+      row.photo_state_active_asset_id !== null ||
+      row.photo_state_version !== null ||
+      row.photo_asset_account_id !== null ||
+      row.photo_asset_id !== null ||
+      row.photo_asset_generation !== null ||
+      row.photo_storage_prefix !== null
+    ) {
+      throw failure('invalid_persisted_state');
+    }
+    return undefined;
+  }
+  if (
+    !isAccountId(row.photo_state_account_id) ||
+    row.photo_state_account_id !== expectedAccountId
+  ) {
+    throw failure('invalid_persisted_state');
+  }
+  const stateVersion = readPositiveSafeInteger(row.photo_state_version);
+  if (row.photo_state_active_asset_id === null) {
+    if (
+      row.photo_asset_account_id !== null ||
+      row.photo_asset_id !== null ||
+      row.photo_asset_generation !== null ||
+      row.photo_storage_prefix !== null
+    ) {
+      throw failure('invalid_persisted_state');
+    }
+    return undefined;
+  }
+  if (
+    !isInternalUuid(row.photo_state_active_asset_id) ||
+    !isAccountId(row.photo_asset_account_id) ||
+    row.photo_asset_account_id !== expectedAccountId ||
+    !isInternalUuid(row.photo_asset_id) ||
+    row.photo_asset_id !== row.photo_state_active_asset_id ||
+    readPositiveSafeInteger(row.photo_asset_generation) !== stateVersion ||
+    typeof row.photo_storage_prefix !== 'string' ||
+    row.photo_storage_prefix !==
+      `profile-photos/${expectedAccountId}/${stateVersion}/${row.photo_asset_id}`
+  ) {
+    throw failure('invalid_persisted_state');
+  }
+  const photoUrl = urls.avatar(row.photo_storage_prefix);
+  if (
+    !isBoundedString(photoUrl, MAX_PHOTO_URL_CODE_POINTS)
+  ) {
+    throw failure('invalid_persisted_state');
+  }
+  try {
+    if (new URL(photoUrl).protocol !== 'https:') {
+      throw failure('invalid_persisted_state');
+    }
+  } catch (error) {
+    if (error instanceof PublicPlayerProfileSearchPersistenceError) {
+      throw error;
+    }
+    throw failure('invalid_persisted_state');
+  }
+  return photoUrl;
+}
+
 function hydrateProfile(
   row: PublicPlayerProfileRow,
+  urls: PlayerProfilePhotoUrlResolver,
 ): PublicPlayerProfileRecord {
   if (
     !isAccountId(row.account_id) ||
@@ -210,12 +326,14 @@ function hydrateProfile(
     row.username,
     MAX_USERNAME_CODE_POINTS,
   );
+  const photoUrl = readManagedPhotoUrl(row, row.account_id, urls);
 
   return Object.freeze({
     playerId: row.account_id,
     firstName: row.first_name,
     ...(lastName === undefined ? {} : { lastName }),
     ...(username === undefined ? {} : { username }),
+    ...(photoUrl === undefined ? {} : { photoUrl }),
     rating: readRating(row.rating),
     isVerified: row.is_verified,
   });
@@ -251,6 +369,10 @@ function mapPersistenceError(
 export class PostgresPublicPlayerProfileSearchRepository
   implements PublicPlayerProfileSearchRepository
 {
+  constructor(
+    private readonly photoUrls = new PlayerProfilePhotoUrlResolver(''),
+  ) {}
+
   async search(
     transaction: PostgresTransaction,
     input: SearchPublicPlayerProfilesInput,
@@ -269,7 +391,9 @@ export class PostgresPublicPlayerProfileSearchRepository
         throw failure('invalid_persisted_state');
       }
 
-      const players = selected.rows.map(hydrateProfile);
+      const players = selected.rows.map((row) =>
+        hydrateProfile(row, this.photoUrls),
+      );
       if (
         new Set(players.map((player) => player.playerId)).size !==
         players.length
@@ -305,7 +429,9 @@ export class PostgresPublicPlayerProfileSearchRepository
       }
 
       const requested = new Set(validated.playerIds);
-      const players = selected.rows.map(hydrateProfile);
+      const players = selected.rows.map((row) =>
+        hydrateProfile(row, this.photoUrls),
+      );
       if (
         players.some((player) => !requested.has(player.playerId)) ||
         new Set(players.map((player) => player.playerId)).size !==

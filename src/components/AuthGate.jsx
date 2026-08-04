@@ -214,6 +214,42 @@ export default function AuthGate() {
     return result;
   }, [telegramBackendLogin.updateOwnProfile]);
 
+  const handleBackendProfilePhotoUpload = useCallback(async (photo) => {
+    backendProfileRequestRef.current += 1;
+    const result = await telegramBackendLogin.uploadOwnProfilePhoto(photo);
+    if (result.outcome === 'profile_photo_updated') {
+      setBackendProfile((previous) => (
+        previous?.accountId === result.accountId
+          ? {
+              ...previous,
+              photoUrl: result.photoUrl,
+              fullPhotoUrl: result.fullPhotoUrl,
+            }
+          : previous
+      ));
+      setBackendProfileStatus('ready');
+    }
+    return result;
+  }, [telegramBackendLogin.uploadOwnProfilePhoto]);
+
+  const handleBackendProfilePhotoDelete = useCallback(async () => {
+    backendProfileRequestRef.current += 1;
+    const result = await telegramBackendLogin.deleteOwnProfilePhoto();
+    if (result.outcome === 'profile_photo_deleted') {
+      setBackendProfile((previous) => (
+        previous?.accountId === result.accountId
+          ? {
+              ...previous,
+              photoUrl: null,
+              fullPhotoUrl: null,
+            }
+          : previous
+      ));
+      setBackendProfileStatus('ready');
+    }
+    return result;
+  }, [telegramBackendLogin.deleteOwnProfilePhoto]);
+
   const backendMatchActions = useMemo(
     () => createBackendMatchActions(telegramBackendLogin),
     [
@@ -402,6 +438,16 @@ const handleSignUp = async ({ email, password, options }) => {
           onBackendProfileSave={
             telegramBackendLogin.sessionReady
               ? handleBackendProfileSave
+              : null
+          }
+          onBackendProfilePhotoUpload={
+            telegramBackendLogin.sessionReady
+              ? handleBackendProfilePhotoUpload
+              : null
+          }
+          onBackendProfilePhotoDelete={
+            telegramBackendLogin.sessionReady
+              ? handleBackendProfilePhotoDelete
               : null
           }
           showToast={showToast}

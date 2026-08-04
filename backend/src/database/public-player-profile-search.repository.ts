@@ -11,6 +11,7 @@ export interface PublicPlayerProfileRecord {
   readonly firstName: string;
   readonly lastName?: string;
   readonly username?: string;
+  readonly photoUrl?: string;
   readonly rating: number;
   readonly isVerified: boolean;
 }

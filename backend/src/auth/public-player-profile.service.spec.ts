@@ -145,6 +145,54 @@ describe('PublicPlayerProfileService', () => {
     });
   });
 
+  it('preserves only a safe optional public profile photo URL', async () => {
+    const harness = createHarness();
+    harness.search.mockResolvedValue({
+      outcome: 'found',
+      players: [
+        {
+          playerId: PLAYER_ID,
+          firstName: 'Synthetic',
+          photoUrl: 'https://photos.example.test/player/avatar.webp',
+          rating: 4.2,
+          isVerified: true,
+        },
+      ],
+    });
+
+    await expect(harness.service.search(input())).resolves.toEqual({
+      outcome: 'found',
+      players: [
+        {
+          playerId: PLAYER_ID,
+          firstName: 'Synthetic',
+          lastName: null,
+          username: null,
+          photoUrl: 'https://photos.example.test/player/avatar.webp',
+          rating: 4.2,
+          isVerified: true,
+        },
+      ],
+    });
+
+    harness.search.mockResolvedValue({
+      outcome: 'found',
+      players: [
+        {
+          playerId: PLAYER_ID,
+          firstName: 'Synthetic',
+          photoUrl: 'http://photos.example.test/player/avatar.webp',
+          rating: 4.2,
+          isVerified: true,
+        },
+      ],
+    });
+    await expect(harness.service.search(input())).resolves.toEqual({
+      outcome: 'rejected',
+      reason: 'internal_failure',
+    });
+  });
+
   it('allows an authenticated club administrator to use the public directory', async () => {
     const harness = createHarness();
 

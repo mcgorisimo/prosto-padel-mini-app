@@ -171,15 +171,25 @@ function mapPersistence(error: unknown): MatchWaitlistApiRejection {
 function safePlayer(
   value: import('../database/public-player-profile-search.repository').PublicPlayerProfileRecord,
 ) {
+  let safePhoto = value.photoUrl === undefined;
+  if (typeof value.photoUrl === 'string' && value.photoUrl.length > 0 && [...value.photoUrl].length <= 2_048) {
+    try {
+      safePhoto = new URL(value.photoUrl).protocol === 'https:';
+    } catch {
+      safePhoto = false;
+    }
+  }
   if (
     !isAccountId(value.playerId) || typeof value.firstName !== 'string' || value.firstName.length < 1 ||
-    typeof value.rating !== 'number' || !Number.isFinite(value.rating) || typeof value.isVerified !== 'boolean'
+    typeof value.rating !== 'number' || !Number.isFinite(value.rating) || typeof value.isVerified !== 'boolean' ||
+    !safePhoto
   ) return undefined;
   return Object.freeze({
     playerId: value.playerId,
     firstName: value.firstName,
     ...(typeof value.lastName === 'string' ? { lastName: value.lastName } : {}),
     ...(typeof value.username === 'string' ? { username: value.username } : {}),
+    ...(typeof value.photoUrl === 'string' ? { photoUrl: value.photoUrl } : {}),
     rating: value.rating,
     isVerified: value.isVerified,
   });

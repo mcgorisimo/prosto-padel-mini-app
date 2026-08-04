@@ -193,6 +193,7 @@ export function mapBackendPublicPlayerToApp(player) {
     first_name: player.firstName,
     last_name: player.lastName ?? '',
     username: player.username ?? '',
+    photo_url: player.photoUrl ?? '',
     rating: player.rating,
     is_verified: player.isVerified,
     side_preference: 'Both',
@@ -406,6 +407,11 @@ function profilePlayer(profile, player, isOrganizer, slotIndex) {
         ? profile.rating
         : 3;
   const level = getLevelForRating(numericRating)?.label ?? 'C';
+  const photoUrl =
+    publicPlayer?.photoUrl ??
+    (isCurrentPlayer
+      ? (profile.photoUrl ?? profile.photo_url ?? null)
+      : null);
   return Object.freeze({
     id: playerId,
     firstName:
@@ -421,7 +427,9 @@ function profilePlayer(profile, player, isOrganizer, slotIndex) {
     username:
       publicPlayer?.username ??
       (isCurrentPlayer ? (profile.username ?? '') : ''),
-    photoUrl: isCurrentPlayer ? profile.photoUrl : null,
+    photoUrl,
+    photo_url: photoUrl,
+    photo: photoUrl,
     numericRating,
     rating: numericRating,
     ratingIdx: Math.max(0, LEVELS.indexOf(level)),

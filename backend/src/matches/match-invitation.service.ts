@@ -224,6 +224,15 @@ function mapPersistence(error: unknown): MatchInvitationApiRejection {
 }
 
 function safePlayer(value: unknown): MatchPublicPlayerResponse | undefined {
+  const photoUrl = isRecord(value) ? value.photoUrl : undefined;
+  let safePhoto = photoUrl === undefined;
+  if (typeof photoUrl === 'string' && photoUrl.length > 0 && [...photoUrl].length <= 2_048) {
+    try {
+      safePhoto = new URL(photoUrl).protocol === 'https:';
+    } catch {
+      safePhoto = false;
+    }
+  }
   if (
     !isRecord(value) ||
     !isAccountId(value.playerId) ||
@@ -231,7 +240,8 @@ function safePlayer(value: unknown): MatchPublicPlayerResponse | undefined {
     value.firstName.length < 1 ||
     typeof value.rating !== 'number' ||
     !Number.isFinite(value.rating) ||
-    typeof value.isVerified !== 'boolean'
+    typeof value.isVerified !== 'boolean' ||
+    !safePhoto
   ) {
     return undefined;
   }
@@ -244,6 +254,7 @@ function safePlayer(value: unknown): MatchPublicPlayerResponse | undefined {
     ...(typeof value.username === 'string'
       ? { username: value.username }
       : {}),
+    ...(typeof photoUrl === 'string' ? { photoUrl } : {}),
     rating: value.rating,
     isVerified: value.isVerified,
   });

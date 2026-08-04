@@ -131,7 +131,7 @@ function backendWaitlistPlayer(entry) {
     queue_position: entry.queuePosition,
     first_name: unavailable ? 'Игрок' : entry.player.firstName,
     last_name: unavailable ? null : entry.player.lastName ?? null,
-    photo_url: null,
+    photo_url: unavailable ? null : entry.player.photoUrl ?? null,
     rating: unavailable ? null : entry.player.rating,
     joined_at: new Date(entry.joinedAt * 1_000).toISOString(),
     is_current_user: entry.isCurrentPlayer,
@@ -755,6 +755,9 @@ function SlotActionSheet({ slotIndex, isOwner, currentUser, matchId, onAddGuest,
         firstName: player.first_name,
         lastName: player.last_name,
         username: player.username,
+        photo: player.photo_url || null,
+        photoUrl: player.photo_url || null,
+        photo_url: player.photo_url || null,
         numericRating: player.rating,
         isVerified: player.is_verified,
         sidePreference: player.side_preference || 'LR',
@@ -819,12 +822,15 @@ function SlotActionSheet({ slotIndex, isOwner, currentUser, matchId, onAddGuest,
 
   // 2. ИНТЕРФЕЙС ДЛЯ СТОРОННЕГО ИГРОКА (Занять место)
   const initials = [currentUser?.firstName?.[0], currentUser?.lastName?.[0]].filter(Boolean).join('') || '?';
+  const currentUserPhoto = currentUser?.photo ?? currentUser?.photoUrl ?? currentUser?.photo_url ?? null;
   
   return (
     <BottomSheet onClose={onClose}>
       <div style={{ textAlign: 'center', marginBottom: '24px' }}>
-        <div style={{ width: '64px', height: '64px', borderRadius: '50%', background: 'linear-gradient(145deg, #12382A, #071F16)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '24px', fontWeight: 700, color: C.text, margin: '0 auto 12px' }}>
-          {initials}
+        <div style={{ width: '64px', height: '64px', borderRadius: '50%', background: 'linear-gradient(145deg, #12382A, #071F16)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '24px', fontWeight: 700, color: C.text, margin: '0 auto 12px', overflow: 'hidden' }}>
+          {currentUserPhoto
+            ? <img src={currentUserPhoto} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            : initials}
         </div>
         <div style={{ color: C.text, fontSize: '18px', fontWeight: 700 }}>{currentUser?.firstName} {currentUser?.lastName}</div>
       </div>
@@ -1396,6 +1402,9 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
     ratingIdx:   currentUser.ratingIdx,
     numericRating: currentUser.numericRating,
     isVerified:  currentUser.isVerified,
+    photo:       currentUser.photo ?? currentUser.photoUrl ?? currentUser.photo_url ?? null,
+    photoUrl:    currentUser.photoUrl ?? currentUser.photo_url ?? currentUser.photo ?? null,
+    photo_url:   currentUser.photo_url ?? currentUser.photoUrl ?? currentUser.photo ?? null,
     isOrganizer: true,
   };
 
@@ -1414,6 +1423,9 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
           ratingIdx: currentUser.ratingIdx,
           numericRating: currentUser.numericRating,
           isVerified: currentUser.isVerified,
+          photo: currentUser.photo ?? currentUser.photoUrl ?? currentUser.photo_url ?? p.photo ?? null,
+          photoUrl: currentUser.photoUrl ?? currentUser.photo_url ?? currentUser.photo ?? p.photoUrl ?? null,
+          photo_url: currentUser.photo_url ?? currentUser.photoUrl ?? currentUser.photo ?? p.photo_url ?? null,
         };
       }
       return p;
@@ -1449,6 +1461,9 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
       lastName: player.lastName ?? player.last_name ?? '',
       numericRating: player.numericRating ?? player.rating,
       isVerified: player.isVerified ?? player.is_verified,
+      photo: player.photo ?? player.photoUrl ?? player.photo_url ?? null,
+      photoUrl: player.photoUrl ?? player.photo_url ?? player.photo ?? null,
+      photo_url: player.photo_url ?? player.photoUrl ?? player.photo ?? null,
       isOrganizer: false,
       isPendingInvitation: true,
       invitationId: invitation.id,
@@ -1675,6 +1690,9 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
       id: player.playerId,
       firstName: player.firstName,
       lastName: player.lastName ?? '',
+      photo: player.photoUrl ?? null,
+      photoUrl: player.photoUrl ?? null,
+      photo_url: player.photoUrl ?? null,
       numericRating: player.rating,
       isVerified: player.isVerified,
     };

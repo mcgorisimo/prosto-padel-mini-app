@@ -78,6 +78,9 @@ function publicProfile(
     firstName: profile.firstName,
     lastName: profile.lastName ?? null,
     username: profile.username ?? null,
+    ...(profile.photoUrl === undefined
+      ? {}
+      : { photoUrl: profile.photoUrl }),
     rating: profile.rating,
     isVerified: profile.isVerified,
   });
@@ -96,6 +99,7 @@ function isRepositoryProfile(
     ...requiredKeys,
     'lastName',
     'username',
+    'photoUrl',
   ] as const;
   if (
     !isRecord(value) ||

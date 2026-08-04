@@ -286,6 +286,7 @@ export function mergeProfileSources(profile, backendProfile, metadata = {}) {
       last_name: backendProfile.lastName ?? '',
       username: backendProfile.username ?? '',
       photo_url: backendProfile.photoUrl ?? '',
+      full_photo_url: backendProfile.fullPhotoUrl ?? '',
       language_code: backendProfile.languageCode ?? '',
       phone: backendProfile.phone ?? '',
       side_preference: backendProfile.sidePreference ?? 'Both',
@@ -327,6 +328,8 @@ export default function App({
   backendProfileStatus = backendProfile ? 'ready' : 'inactive',
   backendMatchActions = null,
   onBackendProfileSave = null,
+  onBackendProfilePhotoUpload = null,
+  onBackendProfilePhotoDelete = null,
   showToast,
   onLogout,
 }) { // Accept showToast as a prop
@@ -965,6 +968,8 @@ export default function App({
         ? p.username
         : (p.username || user?.username || meta.username || ''),
       photo_url: p.photo_url || '',
+      full_photo_url: p.full_photo_url || '',
+      accountId: backendProfile?.accountId ?? null,
       role: p.role,
       isAdmin: p.is_admin === true,
     };
@@ -2874,6 +2879,8 @@ const handleBookSlot = async (booking) => {
             onOpenAdmin={() => {
               if (isAdmin) setScreen('admin');
             }}
+            onPhotoUpload={onBackendProfilePhotoUpload}
+            onPhotoDelete={onBackendProfilePhotoDelete}
             // showToast is already passed to App, no need to pass it here again
             showToast={showToast}
           />

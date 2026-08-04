@@ -453,6 +453,33 @@ describe('MatchApiService', () => {
 
   it('lists and reads only safe repository records', async () => {
     const harness = createHarness();
+    harness.findByPlayerIds.mockImplementation(
+      async (_transaction, input) => ({
+        outcome: 'found',
+        players: Object.freeze(
+          input.playerIds.map((playerId) => Object.freeze({
+            playerId,
+            firstName:
+              playerId === ACCOUNT_ID ? 'Synthetic' : 'Other',
+            ...(playerId === ACCOUNT_ID
+              ? {
+                  lastName: 'Owner',
+                  username: 'synthetic_owner',
+                  photoUrl:
+                    'https://photos.example.test/owner/avatar.webp',
+                }
+              : {
+                  lastName: 'Player',
+                  username: 'synthetic_player',
+                  photoUrl:
+                    'https://photos.example.test/player/avatar.webp',
+                }),
+            rating: 3,
+            isVerified: playerId === ACCOUNT_ID,
+          })),
+        ),
+      }),
+    );
     const participants = Object.freeze([
       Object.freeze({
         playerId: OTHER_ACCOUNT_ID,
@@ -499,6 +526,8 @@ describe('MatchApiService', () => {
             firstName: 'Synthetic',
             lastName: 'Owner',
             username: 'synthetic_owner',
+            photoUrl:
+              'https://photos.example.test/owner/avatar.webp',
             rating: 3,
             isVerified: true,
           },
@@ -509,6 +538,8 @@ describe('MatchApiService', () => {
               firstName: 'Other',
               lastName: 'Player',
               username: 'synthetic_player',
+              photoUrl:
+                'https://photos.example.test/player/avatar.webp',
               rating: 3,
               isVerified: false,
             },
@@ -524,6 +555,8 @@ describe('MatchApiService', () => {
           firstName: 'Synthetic',
           lastName: 'Owner',
           username: 'synthetic_owner',
+          photoUrl:
+            'https://photos.example.test/owner/avatar.webp',
           rating: 3,
           isVerified: true,
         },
@@ -534,6 +567,8 @@ describe('MatchApiService', () => {
             firstName: 'Other',
             lastName: 'Player',
             username: 'synthetic_player',
+            photoUrl:
+              'https://photos.example.test/player/avatar.webp',
             rating: 3,
             isVerified: false,
           },
@@ -547,11 +582,15 @@ describe('MatchApiService', () => {
           owner: {
             playerId: ACCOUNT_ID,
             firstName: 'Synthetic',
+            photoUrl:
+              'https://photos.example.test/owner/avatar.webp',
           },
           participants: [
             {
               playerId: OTHER_ACCOUNT_ID,
               slotNumber: 2,
+              photoUrl:
+                'https://photos.example.test/player/avatar.webp',
             },
           ],
         },
@@ -586,7 +625,7 @@ describe('MatchApiService', () => {
       { playerIds: [ACCOUNT_ID, OTHER_ACCOUNT_ID] },
     );
     expect(JSON.stringify({ feed, mine, found })).not.toMatch(
-      /phone|photoUrl|languageCode|sidePreference/iu,
+      /phone|languageCode|sidePreference/iu,
     );
     expect(JSON.stringify({ feed, mine, found })).not.toContain('title');
   });

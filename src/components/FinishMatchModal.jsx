@@ -79,6 +79,7 @@ function Stepper({ value, onChange, color, disabled = false, testId }) {
 function PlayerChip({ player, slotIndex, selected, onTap }) {
   const initials = [player?.firstName?.[0], player?.lastName?.[0]].filter(Boolean).join('') || '?';
   const color    = PLAYER_COLORS[slotIndex % 4];
+  const photoUrl = player?.photo ?? player?.photoUrl ?? player?.photo_url ?? null;
   return (
     <button
       data-testid={`finish-player-${slotIndex}`}
@@ -97,8 +98,12 @@ function PlayerChip({ player, slotIndex, selected, onTap }) {
         width: 32, height: 32, borderRadius: '50%', flexShrink: 0,
         background: `linear-gradient(145deg, ${color}ee, ${color}99)`,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: 12, fontWeight: 700, color: '#fff',
-      }}>{initials}</div>
+        fontSize: 12, fontWeight: 700, color: '#fff', overflow: 'hidden',
+      }}>
+        {photoUrl
+          ? <img src={photoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+          : initials}
+      </div>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 13, fontWeight: 600, lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {player?.firstName} {player?.lastName}

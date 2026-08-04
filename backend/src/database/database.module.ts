@@ -45,7 +45,6 @@ const DATABASE_WORKFLOW_PROVIDERS: Provider[] = [
   PostgresPlayerProfileDetailsRepository,
   PostgresPlayerProfilePhotoRepository,
   PostgresPlayerProfileWriter,
-  PostgresPublicPlayerProfileSearchRepository,
   PostgresSessionAuthenticationRepository,
   PostgresMatchChatRepository,
   PostgresMatchLineupRepository,
@@ -69,6 +68,14 @@ const DATABASE_WORKFLOW_PROVIDERS: Provider[] = [
       urls: PlayerProfilePhotoUrlResolver,
     ): PostgresPlayerProfileReader =>
       new PostgresPlayerProfileReader(urls),
+  },
+  {
+    provide: PostgresPublicPlayerProfileSearchRepository,
+    inject: [PlayerProfilePhotoUrlResolver],
+    useFactory: (
+      urls: PlayerProfilePhotoUrlResolver,
+    ): PostgresPublicPlayerProfileSearchRepository =>
+      new PostgresPublicPlayerProfileSearchRepository(urls),
   },
   {
     provide: MATCH_COURT_CATALOG,

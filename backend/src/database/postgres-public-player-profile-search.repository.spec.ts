@@ -1,6 +1,7 @@
 import { QueryResult, QueryResultRow } from 'pg';
 import { AccountId } from '../accounts/account.types';
 import { deterministicUuid } from '../../test/deterministic-uuid';
+import { PlayerProfilePhotoUrlResolver } from '../config/player-profile-photo.config';
 import { PostgresPublicPlayerProfileSearchRepository } from './postgres-public-player-profile-search.repository';
 import { PostgresTransaction } from './postgres-transaction';
 import {
@@ -14,6 +15,9 @@ const PLAYER_ID = deterministicUuid(
 const OTHER_PLAYER_ID = deterministicUuid(
   'public-player-profile-search-other',
 ) as AccountId;
+const PHOTO_ASSET_ID = deterministicUuid(
+  'public-player-profile-search-photo-asset',
+);
 const PRIVATE_MARKER =
   'SYNTHETIC_PUBLIC_PLAYER_PROFILE_SEARCH_PRIVATE';
 
@@ -69,6 +73,13 @@ function playerRow(
     first_name: 'Synthetic',
     last_name: 'Player',
     username: 'synthetic_player',
+    photo_state_account_id: null,
+    photo_state_active_asset_id: null,
+    photo_state_version: null,
+    photo_asset_account_id: null,
+    photo_asset_id: null,
+    photo_asset_generation: null,
+    photo_storage_prefix: null,
     rating: '3.00',
     is_verified: false,
     ...overrides,
@@ -228,7 +239,8 @@ describe('PostgresPublicPlayerProfileSearchRepository', () => {
       'accounts.id = ANY ($1::uuid[])',
     );
     expect(sql).not.toContain('phone');
-    expect(sql).not.toContain('photo_url');
+    expect(sql).toContain('player_profile_photo_states');
+    expect(sql).toContain('player_profile_photo_assets');
     expect(sql).not.toContain('language_code');
     expect(JSON.stringify(result)).not.toContain(PRIVATE_MARKER);
     expect(Object.isFrozen(result)).toBe(true);
@@ -263,8 +275,11 @@ describe('PostgresPublicPlayerProfileSearchRepository', () => {
     expect(transaction.calls).toHaveLength(1);
     const call = transaction.calls[0];
     expect(call.values).toEqual(['%100\\%\\_\\\\player%', 20]);
-    expect(normalizeSql(call.text)).toBe(
-      "SELECT details.account_id, details.first_name, details.last_name, details.username, rating_states.rating, rating_states.is_verified FROM backend_auth.accounts AS accounts JOIN backend_auth.player_profiles AS profiles ON profiles.account_id = accounts.id JOIN backend_auth.player_profile_details AS details ON details.account_id = profiles.account_id JOIN backend_auth.player_rating_states AS rating_states ON rating_states.account_id = profiles.account_id WHERE accounts.role = 'player' AND accounts.status = 'active' AND ( details.first_name ILIKE $1 ESCAPE E'\\\\' OR details.last_name ILIKE $1 ESCAPE E'\\\\' OR details.username ILIKE $1 ESCAPE E'\\\\' OR pg_catalog.concat_ws( ' ', details.first_name, details.last_name ) ILIKE $1 ESCAPE E'\\\\' ) ORDER BY pg_catalog.lower(details.first_name), pg_catalog.lower(COALESCE(details.last_name, '')), details.account_id LIMIT $2::integer",
+    expect(normalizeSql(call.text)).toContain(
+      'LEFT JOIN backend_auth.player_profile_photo_states AS photo_states',
+    );
+    expect(normalizeSql(call.text)).toContain(
+      'LEFT JOIN backend_auth.player_profile_photo_assets AS photo_assets',
     );
     expect(normalizeSql(call.text).toLowerCase())
       .not.toContain('pg_catalog.coalesce');
@@ -293,6 +308,60 @@ describe('PostgresPublicPlayerProfileSearchRepository', () => {
 
     expect(result).toEqual({ outcome: 'found', players: [] });
     expect(Object.isFrozen(result.players)).toBe(true);
+  });
+
+  it('returns an account-bound managed avatar URL', async () => {
+    const storagePrefix =
+      `profile-photos/${PLAYER_ID}/2/${PHOTO_ASSET_ID}`;
+    const repository = new PostgresPublicPlayerProfileSearchRepository(
+      new PlayerProfilePhotoUrlResolver('https://photos.example.test'),
+    );
+
+    const result = await repository.search(
+      new FakeTransaction([
+        queryResult([
+          playerRow({
+            photo_state_account_id: PLAYER_ID,
+            photo_state_active_asset_id: PHOTO_ASSET_ID,
+            photo_state_version: '2',
+            photo_asset_account_id: PLAYER_ID,
+            photo_asset_id: PHOTO_ASSET_ID,
+            photo_asset_generation: '2',
+            photo_storage_prefix: storagePrefix,
+          }),
+        ]),
+      ]),
+      { query: 'Synthetic', limit: 8 },
+    );
+
+    expect(result.players[0]).toMatchObject({
+      playerId: PLAYER_ID,
+      photoUrl: `https://photos.example.test/${storagePrefix}/avatar.webp`,
+    });
+  });
+
+  it('rejects a managed photo bound to another account', async () => {
+    await expect(
+      new PostgresPublicPlayerProfileSearchRepository(
+        new PlayerProfilePhotoUrlResolver('https://photos.example.test'),
+      ).search(
+        new FakeTransaction([
+          queryResult([
+            playerRow({
+              photo_state_account_id: PLAYER_ID,
+              photo_state_active_asset_id: PHOTO_ASSET_ID,
+              photo_state_version: '1',
+              photo_asset_account_id: OTHER_PLAYER_ID,
+              photo_asset_id: PHOTO_ASSET_ID,
+              photo_asset_generation: '1',
+              photo_storage_prefix:
+                `profile-photos/${OTHER_PLAYER_ID}/1/${PHOTO_ASSET_ID}`,
+            }),
+          ]),
+        ]),
+        { query: 'Synthetic', limit: 8 },
+      ),
+    ).rejects.toMatchObject({ reason: 'invalid_persisted_state' });
   });
 
   it.each([

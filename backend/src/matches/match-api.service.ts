@@ -246,6 +246,18 @@ function optionalSafeText(
   );
 }
 
+function optionalSafePhotoUrl(value: unknown): value is string | undefined {
+  if (value === undefined) return true;
+  if (typeof value !== 'string' || value.length === 0 || [...value].length > 2_048) {
+    return false;
+  }
+  try {
+    return new URL(value).protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
 function isSafeMatchDescription(value: unknown): value is string {
   return (
     typeof value === 'string' &&
@@ -307,7 +319,7 @@ function safePublicPlayer(
     !hasOnlyKeys(
       value,
       ['playerId', 'firstName', 'rating', 'isVerified'],
-      ['lastName', 'username'],
+      ['lastName', 'username', 'photoUrl'],
     ) ||
     !isAccountId(value.playerId) ||
     typeof value.firstName !== 'string' ||
@@ -315,6 +327,7 @@ function safePublicPlayer(
     [...value.firstName].length > 256 ||
     !optionalSafeText(value.lastName, 256) ||
     !optionalSafeText(value.username, 64) ||
+    !optionalSafePhotoUrl(value.photoUrl) ||
     typeof value.rating !== 'number' ||
     !Number.isFinite(value.rating) ||
     value.rating < 0 ||
@@ -333,6 +346,9 @@ function safePublicPlayer(
     ...(value.username === undefined
       ? {}
       : { username: value.username }),
+    ...(value.photoUrl === undefined
+      ? {}
+      : { photoUrl: value.photoUrl }),
     rating: value.rating,
     isVerified: value.isVerified,
   });

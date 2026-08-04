@@ -936,6 +936,253 @@ test.describe('backend session credential lifecycle', () => {
     });
   });
 
+  test('uploads and deletes an own profile photo through the exact private contract', async ({
+    page,
+  }) => {
+    await prepareTelegramWithSecureStorage(page, null, '');
+    await page.goto('/');
+
+    const summary = await page.evaluate(async (credential) => {
+      const { createBackendSessionClient } = await import(
+        '/src/lib/backendSessionClient.js'
+      );
+      const contracts = [];
+      let calls = 0;
+      const client = createBackendSessionClient({
+        fetchImpl: async (url, options) => {
+          calls += 1;
+          contracts.push({
+            pathMatches: url === '/api/v1/profile/me/photo',
+            method: options.method,
+            bearerMatches:
+              options.headers.Authorization === `Bearer ${credential}`,
+            accept: options.headers.Accept,
+            contentType: options.headers['Content-Type'] ?? null,
+            bodyType: options.body?.type ?? null,
+            bodySize: options.body?.size ?? null,
+            hasBody: Object.prototype.hasOwnProperty.call(options, 'body'),
+            cache: options.cache,
+            credentials: options.credentials,
+            redirect: options.redirect,
+          });
+          const body = options.method === 'DELETE'
+            ? { outcome: 'deleted', photoUrl: null, fullPhotoUrl: null }
+            : calls === 3
+              ? {
+                  outcome: 'updated',
+                  photoUrl: 'http://photos.example.test/avatar.webp',
+                  fullPhotoUrl: 'https://photos.example.test/full.webp',
+                }
+              : {
+                  outcome: 'updated',
+                  photoUrl: 'https://photos.example.test/avatar.webp',
+                  fullPhotoUrl: 'https://photos.example.test/full.webp',
+                };
+          return new Response(JSON.stringify(body), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        },
+      });
+      const validPhoto = new File(
+        [new Uint8Array([0xff, 0xd8, 0xff, 0xd9])],
+        'profile.jpg',
+        { type: 'image/jpeg' },
+      );
+
+      const invalidType = await client.uploadOwnProfilePhoto(
+        credential,
+        new File(['not-an-image'], 'profile.txt', { type: 'text/plain' }),
+      );
+      const empty = await client.uploadOwnProfilePhoto(
+        credential,
+        new File([], 'empty.png', { type: 'image/png' }),
+      );
+      const uploaded = await client.uploadOwnProfilePhoto(
+        credential,
+        validPhoto,
+      );
+      const deleted = await client.deleteOwnProfilePhoto(credential);
+      const unsafe = await client.uploadOwnProfilePhoto(
+        credential,
+        validPhoto,
+      );
+
+      return {
+        calls,
+        contracts,
+        invalidType,
+        empty,
+        uploaded,
+        deleted,
+        unsafe,
+      };
+    }, NEXT_CREDENTIAL);
+
+    expect(summary).toEqual({
+      calls: 3,
+      contracts: [
+        {
+          pathMatches: true,
+          method: 'PUT',
+          bearerMatches: true,
+          accept: 'application/json',
+          contentType: 'image/jpeg',
+          bodyType: 'image/jpeg',
+          bodySize: 4,
+          hasBody: true,
+          cache: 'no-store',
+          credentials: 'omit',
+          redirect: 'error',
+        },
+        {
+          pathMatches: true,
+          method: 'DELETE',
+          bearerMatches: true,
+          accept: 'application/json',
+          contentType: null,
+          bodyType: null,
+          bodySize: null,
+          hasBody: false,
+          cache: 'no-store',
+          credentials: 'omit',
+          redirect: 'error',
+        },
+        {
+          pathMatches: true,
+          method: 'PUT',
+          bearerMatches: true,
+          accept: 'application/json',
+          contentType: 'image/jpeg',
+          bodyType: 'image/jpeg',
+          bodySize: 4,
+          hasBody: true,
+          cache: 'no-store',
+          credentials: 'omit',
+          redirect: 'error',
+        },
+      ],
+      invalidType: { outcome: 'rejected', reason: 'invalid_request' },
+      empty: { outcome: 'rejected', reason: 'invalid_request' },
+      uploaded: {
+        outcome: 'profile_photo_updated',
+        photoUrl: 'https://photos.example.test/avatar.webp',
+        fullPhotoUrl: 'https://photos.example.test/full.webp',
+      },
+      deleted: {
+        outcome: 'profile_photo_deleted',
+        photoUrl: null,
+        fullPhotoUrl: null,
+      },
+      unsafe: { outcome: 'rejected', reason: 'internal_error' },
+    });
+  });
+
+  test('profile photo stays still, opens full-size, uploads, and deletes', async ({
+    page,
+  }) => {
+    await prepareTelegramWithSecureStorage(page, null, '');
+    await page.goto('/');
+
+    await page.evaluate(async (accountId) => {
+      const reactModule = await import('/@id/react');
+      const React = reactModule.default ?? reactModule;
+      const reactDomClientModule = await import('/@id/react-dom/client');
+      const { createRoot } =
+        reactDomClientModule.default ?? reactDomClientModule;
+      const { default: PlayerProfile } = await import(
+        '/src/components/PlayerProfile.jsx'
+      );
+      const calls = { uploads: [], deletes: 0, toasts: [] };
+      window.__profilePhotoUiCalls = calls;
+      window.confirm = () => true;
+      document.body.innerHTML = '<div id="profile-root"></div>';
+      createRoot(document.getElementById('profile-root')).render(
+        React.createElement(PlayerProfile, {
+          user: {
+            accountId,
+            firstName: 'Synthetic',
+            lastName: 'Player',
+            username: 'synthetic_player',
+            photo_url:
+              'https://photos.example.test/player/avatar.webp',
+            full_photo_url:
+              'https://photos.example.test/player/full.webp',
+          },
+          stats: { numericRating: 4.2 },
+          showToast(message, kind) {
+            calls.toasts.push({ message, kind });
+          },
+          async onPhotoUpload(photo) {
+            calls.uploads.push({
+              name: photo.name,
+              type: photo.type,
+              size: photo.size,
+            });
+            return {
+              outcome: 'profile_photo_updated',
+              accountId,
+              photoUrl:
+                'https://photos.example.test/player/avatar-v2.webp',
+              fullPhotoUrl:
+                'https://photos.example.test/player/full-v2.webp',
+            };
+          },
+          async onPhotoDelete() {
+            calls.deletes += 1;
+            return {
+              outcome: 'profile_photo_deleted',
+              accountId,
+              photoUrl: null,
+              fullPhotoUrl: null,
+            };
+          },
+        }),
+      );
+    }, SYNTHETIC_ACCOUNT_ID);
+
+    const avatar = page.getByRole('button', {
+      name: 'Открыть фото Synthetic Player',
+    });
+    await expect(avatar).toBeVisible();
+    await avatar.click();
+    const lightbox = page.getByTestId('profile-photo-lightbox');
+    await expect(lightbox).toBeVisible();
+    await expect(lightbox.locator('img')).toHaveAttribute(
+      'src',
+      'https://photos.example.test/player/full.webp',
+    );
+    await page.getByRole('button', { name: 'Закрыть фото' }).click();
+    await expect(lightbox).toBeHidden();
+
+    await page.getByTestId('profile-photo-input').setInputFiles({
+      name: 'replacement.webp',
+      mimeType: 'image/webp',
+      buffer: Buffer.from('synthetic-profile-photo'),
+    });
+    await expect.poll(async () => page.evaluate(
+      () => window.__profilePhotoUiCalls.uploads.length,
+    )).toBe(1);
+    await page.getByTestId('profile-photo-delete').click();
+    await expect.poll(async () => page.evaluate(
+      () => window.__profilePhotoUiCalls.deletes,
+    )).toBe(1);
+
+    const calls = await page.evaluate(() => window.__profilePhotoUiCalls);
+    expect(calls).toEqual({
+      uploads: [{
+        name: 'replacement.webp',
+        type: 'image/webp',
+        size: 23,
+      }],
+      deletes: 1,
+      toasts: [
+        { message: 'Фото профиля обновлено', kind: 'success' },
+        { message: 'Фото профиля удалено', kind: 'success' },
+      ],
+    });
+  });
+
   test('updates an exact backend profile through a credential-bound no-store PATCH', async ({
     page,
   }) => {
@@ -1383,6 +1630,145 @@ test.describe('backend session credential lifecycle', () => {
       uninitializedSideDefaults: true,
       uninitializedUsernameIsEmpty: true,
       legacyAdminDoesNotLeak: true,
+    });
+  });
+
+  test('does not deliver an old profile-photo mutation across an account boundary', async ({
+    page,
+  }) => {
+    await prepareTelegramWithSecureStorage(page, null, '');
+    await page.goto('/');
+
+    const summary = await page.evaluate(async (parameters) => {
+      const { createTelegramBackendLoginLifecycle } = await import(
+        '/src/hooks/useTelegramBackendLogin.js'
+      );
+      let releaseUpload;
+      const uploadGate = new Promise((resolve) => {
+        releaseUpload = resolve;
+      });
+      const uploadCredentials = [];
+      const deleteCredentials = [];
+      let authenticatedAccountId = null;
+      const lifecycle = createTelegramBackendLoginLifecycle({
+        fingerprint: async (rawInitData) => rawInitData,
+        client: {
+          async login(rawInitData) {
+            return {
+              outcome: 'authenticated',
+              credential:
+                rawInitData === parameters.initDataA
+                  ? parameters.credentialA
+                  : parameters.credentialB,
+              expiresAt: Math.floor(Date.now() / 1_000) + 3_600,
+              accountKind: 'existing',
+            };
+          },
+        },
+        sessions: {
+          async refresh() {
+            throw new Error('must not refresh');
+          },
+          async authenticate(credential) {
+            authenticatedAccountId =
+              credential === parameters.credentialA
+                ? parameters.accountIdA
+                : parameters.accountIdB;
+            return {
+              outcome: 'authenticated',
+              principal: {
+                accountId: authenticatedAccountId,
+                role: 'player',
+                expiresAt: Math.floor(Date.now() / 1_000) + 3_600,
+              },
+            };
+          },
+          async logout() {
+            throw new Error('must not logout');
+          },
+        },
+        profiles: {
+          async uploadOwnProfilePhoto(credential) {
+            uploadCredentials.push(credential);
+            await uploadGate;
+            return {
+              outcome: 'profile_photo_updated',
+              photoUrl: 'https://photos.example.test/account-a/avatar.webp',
+              fullPhotoUrl: 'https://photos.example.test/account-a/full.webp',
+            };
+          },
+          async deleteOwnProfilePhoto(credential) {
+            deleteCredentials.push(credential);
+            return {
+              outcome: 'profile_photo_deleted',
+              photoUrl: null,
+              fullPhotoUrl: null,
+            };
+          },
+        },
+        credentialStorage: {
+          async read() {
+            return { outcome: 'empty' };
+          },
+          async write() {
+            return { outcome: 'stored' };
+          },
+          async remove() {
+            return { outcome: 'removed' };
+          },
+        },
+      });
+
+      const detachA = lifecycle.attach(parameters.initDataA, () => {});
+      for (let attempt = 0; attempt < 50; attempt += 1) {
+        if (lifecycle.hasPrincipal()) break;
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      const oldUpload = lifecycle.uploadOwnProfilePhoto(
+        new File(['photo-a'], 'profile-a.webp', { type: 'image/webp' }),
+      );
+      await Promise.resolve();
+
+      const detachB = lifecycle.attach(parameters.initDataB, () => {});
+      for (let attempt = 0; attempt < 50; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        if (
+          lifecycle.hasPrincipal() &&
+          authenticatedAccountId === parameters.accountIdB &&
+          uploadCredentials.length === 1
+        ) break;
+      }
+      releaseUpload();
+      const oldUploadResult = await oldUpload;
+      const currentDeleteResult = await lifecycle.deleteOwnProfilePhoto();
+      detachB();
+      detachA();
+
+      return {
+        uploadCredentials,
+        deleteCredentials,
+        oldUploadResult,
+        currentDeleteResult,
+      };
+    }, {
+      initDataA: 'account-a-init-data',
+      initDataB: 'account-b-init-data',
+      credentialA: LOGIN_CREDENTIAL,
+      credentialB: NEXT_CREDENTIAL,
+      accountIdA: SYNTHETIC_ACCOUNT_ID,
+      accountIdB: '22222222-2222-4222-8222-222222222222',
+    });
+
+    expect(summary).toEqual({
+      uploadCredentials: [LOGIN_CREDENTIAL],
+      deleteCredentials: [NEXT_CREDENTIAL],
+      oldUploadResult: { outcome: 'cancelled' },
+      currentDeleteResult: {
+        outcome: 'profile_photo_deleted',
+        accountId: '22222222-2222-4222-8222-222222222222',
+        photoUrl: null,
+        fullPhotoUrl: null,
+      },
     });
   });
 

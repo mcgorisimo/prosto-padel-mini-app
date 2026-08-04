@@ -9,6 +9,7 @@ export interface PublicPlayerProfile {
   readonly firstName: string;
   readonly lastName: string | null;
   readonly username: string | null;
+  readonly photoUrl?: string;
   readonly rating: number;
   readonly isVerified: boolean;
 }
@@ -121,7 +122,7 @@ function isRating(value: unknown): value is number {
 export function isPublicPlayerProfile(
   value: unknown,
 ): value is PublicPlayerProfile {
-  const expectedKeys = [
+  const requiredKeys = [
     'playerId',
     'firstName',
     'lastName',
@@ -129,17 +130,30 @@ export function isPublicPlayerProfile(
     'rating',
     'isVerified',
   ] as const;
+  const allowedKeys = [...requiredKeys, 'photoUrl'] as const;
   return (
     isRecord(value) &&
-    Object.keys(value).length === expectedKeys.length &&
-    expectedKeys.every((key) =>
+    requiredKeys.every((key) =>
       Object.prototype.hasOwnProperty.call(value, key),
+    ) &&
+    Object.keys(value).every((key) =>
+      allowedKeys.includes(key as (typeof allowedKeys)[number]),
     ) &&
     isAccountId(value.playerId) &&
     isNullableBoundedString(value.firstName, 256) &&
     value.firstName !== null &&
     isNullableBoundedString(value.lastName, 256) &&
     isNullableBoundedString(value.username, 64) &&
+    (value.photoUrl === undefined ||
+      (isNullableBoundedString(value.photoUrl, 2_048) &&
+        value.photoUrl !== null &&
+        (() => {
+          try {
+            return new URL(value.photoUrl).protocol === 'https:';
+          } catch {
+            return false;
+          }
+        })())) &&
     isRating(value.rating) &&
     typeof value.isVerified === 'boolean'
   );

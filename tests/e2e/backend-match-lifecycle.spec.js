@@ -521,6 +521,7 @@ test.describe('backend match credential lifecycle', () => {
         firstName: 'Invited',
         lastName: 'Player',
         username: 'invited',
+        photoUrl: 'https://photos.example.test/invited/avatar.webp',
         rating: 3.5,
         isVerified: true,
       };
@@ -680,6 +681,14 @@ test.describe('backend match credential lifecycle', () => {
         'player\u0000name',
         5,
       );
+      const unsafePhotoSearch = await createBackendSessionClient({
+        fetchImpl: async () => new Response(JSON.stringify({
+          players: [{
+            ...invitedPlayer,
+            photoUrl: 'http://photos.example.test/invited/avatar.webp',
+          }],
+        }), { status: 200 }),
+      }).searchPlayers(parameters.credential, 'Invited', 5);
       const largePlayerSearch = Array.from(
         { length: 20 },
         (_, index) => ({
@@ -711,6 +720,7 @@ test.describe('backend match credential lifecycle', () => {
         malformed,
         malformedLifecycle,
         invalidSearch,
+        unsafePhotoSearch,
         largePlayerSearchAccepted:
           new TextEncoder().encode(largePlayerSearchBody).byteLength > 32_768 &&
           largePlayerSearchResult.outcome === 'players_loaded' &&
@@ -724,6 +734,7 @@ test.describe('backend match credential lifecycle', () => {
           organizer: mappedInvitation.organizer_first_name,
           playerId: mappedInvitation.player.id,
           playerSearchId: mappedPlayer.id,
+          playerPhotoUrl: mappedPlayer.photo_url,
         },
         backendInvitationUiEnabled:
           supportsBackendMatchInvitations(
@@ -823,6 +834,10 @@ test.describe('backend match credential lifecycle', () => {
       outcome: 'rejected',
       reason: 'invalid_request',
     });
+    expect(summary.unsafePhotoSearch).toEqual({
+      outcome: 'rejected',
+      reason: 'internal_error',
+    });
     expect(summary.largePlayerSearchAccepted).toBe(true);
     expect(summary.validatorAcceptsCanonical).toBe(true);
     expect(summary.mapped).toEqual({
@@ -832,6 +847,8 @@ test.describe('backend match credential lifecycle', () => {
       organizer: 'Owner',
       playerId: OTHER_ACCOUNT_ID,
       playerSearchId: OTHER_ACCOUNT_ID,
+      playerPhotoUrl:
+        'https://photos.example.test/invited/avatar.webp',
     });
     expect(summary.backendInvitationUiEnabled).toBe(true);
     expect(summary.backendInvitationUiFailClosed).toBe(true);
@@ -4387,6 +4404,9 @@ test.describe('backend match credential lifecycle', () => {
         lastName,
         numericRating: slotIndex === 1 ? 4.2 : 3,
         ratingIdx: slotIndex === 1 ? 3 : 2,
+        photo: slotIndex === 1
+          ? 'https://photos.example.test/partner/avatar.webp'
+          : null,
         isVerified: true,
         isOrganizer: slotIndex === 0,
         slotIndex,
@@ -4444,6 +4464,7 @@ test.describe('backend match credential lifecycle', () => {
                 playerId: player.id,
                 firstName: player.firstName,
                 lastName: player.lastName,
+                ...(player.photo ? { photoUrl: player.photo } : {}),
                 rating: player.numericRating,
                 isVerified: true,
               },
@@ -4625,6 +4646,10 @@ test.describe('backend match credential lifecycle', () => {
     await submit.click();
     await expect(harness.getByTestId('finish-player-0')).toBeDisabled();
     await expect(harness.getByTestId('finish-player-2')).toBeDisabled();
+    await expect(harness.getByTestId('finish-player-1').locator('img')).toHaveAttribute(
+      'src',
+      'https://photos.example.test/partner/avatar.webp',
+    );
     for (let index = 0; index < 6; index += 1) {
       await harness.getByTestId('finish-set-1-team-1-plus').click();
       await harness.getByTestId('finish-set-2-team-1-plus').click();
