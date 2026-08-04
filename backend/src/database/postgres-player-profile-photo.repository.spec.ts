@@ -76,6 +76,7 @@ describe('PostgresPlayerProfilePhotoRepository', () => {
 
   it('creates an immutable asset and state for the same account', async () => {
     const transaction = new FakeTransaction([
+      result([{ locked: null }]),
       result([
         {
           account_id: ACCOUNT_ID,
@@ -108,26 +109,30 @@ describe('PostgresPlayerProfilePhotoRepository', () => {
       storagePrefixesToRemove: [],
     });
 
-    expect(transaction.calls).toHaveLength(4);
+    expect(transaction.calls).toHaveLength(5);
     expect(transaction.calls[0].values).toEqual([ACCOUNT_ID]);
-    expect(transaction.calls[1].values.slice(0, 4)).toEqual([
+    expect(normalizeSql(transaction.calls[0].text)).toContain(
+      'pg_advisory_xact_lock',
+    );
+    expect(transaction.calls[1].values).toEqual([ACCOUNT_ID]);
+    expect(transaction.calls[2].values.slice(0, 4)).toEqual([
       ASSET_ID,
       ACCOUNT_ID,
       1,
       `profile-photos/${ACCOUNT_ID}/1/${ASSET_ID}`,
     ]);
-    expect(transaction.calls[2].values).toEqual([
+    expect(transaction.calls[3].values).toEqual([
       ACCOUNT_ID,
       ASSET_ID,
       1,
       1_800_000_000,
     ]);
-    expect(transaction.calls[3].values).toEqual([
+    expect(transaction.calls[4].values).toEqual([
       ACCOUNT_ID,
       ASSET_ID,
     ]);
-    expect(normalizeSql(transaction.calls[0].text)).toContain(
-      'FOR UPDATE OF profiles',
+    expect(normalizeSql(transaction.calls[1].text)).not.toContain(
+      'FOR UPDATE',
     );
   });
 
@@ -136,6 +141,7 @@ describe('PostgresPlayerProfilePhotoRepository', () => {
       'postgres-player-profile-photo-replacement',
     ) as InternalUuid;
     const transaction = new FakeTransaction([
+      result([{ locked: null }]),
       result([{
         account_id: ACCOUNT_ID,
         version: '2',
@@ -182,7 +188,7 @@ describe('PostgresPlayerProfilePhotoRepository', () => {
         `profile-photos/${ACCOUNT_ID}/2/${ASSET_ID}`,
       ],
     });
-    expect(transaction.calls[3].values).toEqual([
+    expect(transaction.calls[4].values).toEqual([
       ACCOUNT_ID,
       nextAssetId,
     ]);
@@ -212,6 +218,7 @@ describe('PostgresPlayerProfilePhotoRepository', () => {
 
   it('throws when a state update loses its compare-and-swap after asset insertion', async () => {
     const transaction = new FakeTransaction([
+      result([{ locked: null }]),
       result([
         {
           account_id: ACCOUNT_ID,
@@ -246,11 +253,12 @@ describe('PostgresPlayerProfilePhotoRepository', () => {
       name: 'PlayerProfilePhotoPersistenceError',
       reason: 'transaction_conflict',
     });
-    expect(transaction.calls).toHaveLength(3);
+    expect(transaction.calls).toHaveLength(4);
   });
 
   it('advances only the authenticated account state when clearing a photo', async () => {
     const transaction = new FakeTransaction([
+      result([{ locked: null }]),
       result([
         {
           account_id: ACCOUNT_ID,
@@ -282,7 +290,11 @@ describe('PostgresPlayerProfilePhotoRepository', () => {
       ],
     });
     expect(transaction.calls[0].values).toEqual([ACCOUNT_ID]);
-    expect(transaction.calls[1].values).toEqual([
+    expect(normalizeSql(transaction.calls[0].text)).toContain(
+      'pg_advisory_xact_lock',
+    );
+    expect(transaction.calls[1].values).toEqual([ACCOUNT_ID]);
+    expect(transaction.calls[2].values).toEqual([
       ACCOUNT_ID,
       null,
       4,
@@ -296,6 +308,7 @@ describe('PostgresPlayerProfilePhotoRepository', () => {
 
   it('returns the previous generation prefix when retrying an already cleared photo', async () => {
     const transaction = new FakeTransaction([
+      result([{ locked: null }]),
       result([
         {
           account_id: ACCOUNT_ID,
@@ -335,8 +348,9 @@ describe('PostgresPlayerProfilePhotoRepository', () => {
         `profile-photos/${ACCOUNT_ID}/3/${ASSET_ID}`,
       ],
     });
-    expect(transaction.calls).toHaveLength(2);
+    expect(transaction.calls).toHaveLength(3);
     expect(transaction.calls[0].values).toEqual([ACCOUNT_ID]);
-    expect(transaction.calls[1].values).toEqual([ACCOUNT_ID, null]);
+    expect(transaction.calls[1].values).toEqual([ACCOUNT_ID]);
+    expect(transaction.calls[2].values).toEqual([ACCOUNT_ID, null]);
   });
 });

@@ -17,6 +17,15 @@ const MAX_SAFE_PERSISTED_INTEGER = 9_007_199_254_740_991;
 const STORAGE_PREFIX_PATTERN =
   /^profile-photos\/([0-9a-f-]{36})\/([1-9][0-9]*)\/([0-9a-f-]{36})$/u;
 
+const LOCK_ACCOUNT_PHOTO_SQL = `
+  SELECT pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(
+      'backend_auth:player_profile_photo:'::text || $1::text,
+      0::bigint
+    )
+  ) AS locked
+`;
+
 const READ_NEXT_GENERATION_SQL = `
   SELECT profiles.account_id, states.version
   FROM backend_auth.player_profiles AS profiles
@@ -46,7 +55,6 @@ const LOCK_PROFILE_AND_STATE_SQL = `
    AND previous_assets.account_id = states.account_id
    AND previous_assets.generation = states.version - 1
   WHERE profiles.account_id = $1
-  FOR UPDATE OF profiles
 `;
 
 const INSERT_ASSET_SQL = `
@@ -344,6 +352,7 @@ export class PostgresPlayerProfilePhotoRepository
   ): Promise<ActivatePlayerProfilePhotoResult> {
     validateAssetInput(input);
     try {
+      await transaction.query(LOCK_ACCOUNT_PHOTO_SQL, [input.accountId]);
       const selected = await transaction.query<PhotoStateRow>(
         LOCK_PROFILE_AND_STATE_SQL,
         [input.accountId],
@@ -428,6 +437,7 @@ export class PostgresPlayerProfilePhotoRepository
       throw failure('invalid_input');
     }
     try {
+      await transaction.query(LOCK_ACCOUNT_PHOTO_SQL, [accountId]);
       const selected = await transaction.query<PhotoStateRow>(
         LOCK_PROFILE_AND_STATE_SQL,
         [accountId],
