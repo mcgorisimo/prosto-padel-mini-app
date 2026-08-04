@@ -743,6 +743,12 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
               lastName: result.profile.lastName,
               username: result.profile.username,
               photoUrl: result.profile.photoUrl,
+              ...(Object.prototype.hasOwnProperty.call(
+                result.profile,
+                'fullPhotoUrl',
+              )
+                ? { fullPhotoUrl: result.profile.fullPhotoUrl }
+                : {}),
               languageCode: result.profile.languageCode,
               phone: result.profile.phone,
               sidePreference: result.profile.sidePreference,

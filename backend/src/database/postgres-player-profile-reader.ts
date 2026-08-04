@@ -1,5 +1,7 @@
 import { QueryResultRow } from 'pg';
 import { isAccountId } from '../accounts/account.types';
+import { isInternalUuid } from '../common/internal-uuid';
+import { PlayerProfilePhotoUrlResolver } from '../config/player-profile-photo.config';
 import { classifyPostgresError } from './postgres-error-classifier';
 import {
   PlayerProfileReadPersistenceError,
@@ -29,6 +31,13 @@ const FIND_PLAYER_PROFILE_SQL = `
     details.last_name,
     details.username,
     details.photo_url,
+    photo_states.account_id AS photo_state_account_id,
+    photo_states.active_asset_id AS photo_state_active_asset_id,
+    photo_states.version AS photo_state_version,
+    photo_assets.account_id AS photo_asset_account_id,
+    photo_assets.asset_id AS photo_asset_id,
+    photo_assets.generation AS photo_asset_generation,
+    photo_assets.storage_prefix AS photo_storage_prefix,
     details.language_code,
     details.phone,
     details.side_preference,
@@ -45,6 +54,12 @@ const FIND_PLAYER_PROFILE_SQL = `
   FROM backend_auth.player_profile_details AS details
   LEFT JOIN backend_auth.player_rating_states AS rating_states
     ON rating_states.account_id = details.account_id
+  LEFT JOIN backend_auth.player_profile_photo_states AS photo_states
+    ON photo_states.account_id = details.account_id
+  LEFT JOIN backend_auth.player_profile_photo_assets AS photo_assets
+    ON photo_assets.account_id = photo_states.account_id
+   AND photo_assets.generation = photo_states.version
+   AND photo_assets.asset_id = photo_states.active_asset_id
   WHERE details.account_id = $1
 `;
 
@@ -54,6 +69,13 @@ interface PlayerProfileRow extends QueryResultRow {
   readonly last_name: unknown;
   readonly username: unknown;
   readonly photo_url: unknown;
+  readonly photo_state_account_id: unknown;
+  readonly photo_state_active_asset_id: unknown;
+  readonly photo_state_version: unknown;
+  readonly photo_asset_account_id: unknown;
+  readonly photo_asset_id: unknown;
+  readonly photo_asset_generation: unknown;
+  readonly photo_storage_prefix: unknown;
   readonly language_code: unknown;
   readonly phone: unknown;
   readonly side_preference: unknown;
@@ -134,6 +156,82 @@ function readPhotoUrl(value: unknown): string | undefined {
   return photoUrl;
 }
 
+function readPositiveSafeInteger(value: unknown): number {
+  if (
+    typeof value !== 'string' ||
+    !/^[1-9][0-9]*$/u.test(value) ||
+    !Number.isSafeInteger(Number(value))
+  ) {
+    throw failure('invalid_persisted_state');
+  }
+  return Number(value);
+}
+
+function readEffectivePhotoUrls(
+  row: PlayerProfileRow,
+  expectedAccountId: ReadPlayerProfileInput['accountId'],
+  urls: PlayerProfilePhotoUrlResolver,
+): Readonly<{ photoUrl?: string; fullPhotoUrl?: string }> {
+  if (row.photo_state_account_id === null) {
+    if (
+      row.photo_state_active_asset_id !== null ||
+      row.photo_state_version !== null ||
+      row.photo_asset_account_id !== null ||
+      row.photo_asset_id !== null ||
+      row.photo_asset_generation !== null ||
+      row.photo_storage_prefix !== null
+    ) {
+      throw failure('invalid_persisted_state');
+    }
+    const photoUrl = readPhotoUrl(row.photo_url);
+    return Object.freeze(
+      photoUrl === undefined ? {} : { photoUrl },
+    );
+  }
+  if (
+    !isAccountId(row.photo_state_account_id) ||
+    row.photo_state_account_id !== expectedAccountId
+  ) {
+    throw failure('invalid_persisted_state');
+  }
+  const stateVersion = readPositiveSafeInteger(
+    row.photo_state_version,
+  );
+  if (row.photo_state_active_asset_id === null) {
+    if (
+      row.photo_asset_account_id !== null ||
+      row.photo_asset_id !== null ||
+      row.photo_asset_generation !== null ||
+      row.photo_storage_prefix !== null
+    ) {
+      throw failure('invalid_persisted_state');
+    }
+    return Object.freeze({});
+  }
+  if (
+    !isInternalUuid(row.photo_state_active_asset_id) ||
+    !isAccountId(row.photo_asset_account_id) ||
+    row.photo_asset_account_id !== expectedAccountId ||
+    !isInternalUuid(row.photo_asset_id) ||
+    row.photo_asset_id !== row.photo_state_active_asset_id ||
+    readPositiveSafeInteger(row.photo_asset_generation) !== stateVersion ||
+    typeof row.photo_storage_prefix !== 'string' ||
+    row.photo_storage_prefix !==
+      `profile-photos/${expectedAccountId}/${stateVersion}/${row.photo_asset_id}`
+  ) {
+    throw failure('invalid_persisted_state');
+  }
+  const photoUrl = urls.avatar(row.photo_storage_prefix);
+  const fullPhotoUrl = urls.full(row.photo_storage_prefix);
+  if (photoUrl === undefined || fullPhotoUrl === undefined) {
+    throw failure('invalid_persisted_state');
+  }
+  return Object.freeze({
+    photoUrl: readPhotoUrl(photoUrl),
+    fullPhotoUrl: readPhotoUrl(fullPhotoUrl),
+  });
+}
+
 function readPhone(value: unknown): string | undefined {
   if (value === null) {
     return undefined;
@@ -182,6 +280,7 @@ function readVerification(value: unknown): boolean {
 function hydrateProfile(
   row: PlayerProfileRow,
   expectedAccountId: ReadPlayerProfileInput['accountId'],
+  urls: PlayerProfilePhotoUrlResolver,
 ): PlayerProfileRecord {
   if (
     !isAccountId(row.account_id) ||
@@ -203,7 +302,7 @@ function hydrateProfile(
     row.language_code,
     MAX_SHORT_TEXT_CODE_POINTS,
   );
-  const photoUrl = readPhotoUrl(row.photo_url);
+  const photoUrls = readEffectivePhotoUrls(row, expectedAccountId, urls);
   const phone = readPhone(row.phone);
   const sidePreference = readSidePreference(row.side_preference);
   const rating = readRating(row.rating);
@@ -221,7 +320,7 @@ function hydrateProfile(
     firstName: row.first_name,
     ...(lastName === undefined ? {} : { lastName }),
     ...(username === undefined ? {} : { username }),
-    ...(photoUrl === undefined ? {} : { photoUrl }),
+    ...photoUrls,
     ...(languageCode === undefined ? {} : { languageCode }),
     ...(phone === undefined ? {} : { phone }),
     ...(sidePreference === undefined ? {} : { sidePreference }),
@@ -263,6 +362,10 @@ const NOT_FOUND: ReadPlayerProfileResult = Object.freeze({
 });
 
 export class PostgresPlayerProfileReader implements PlayerProfileReader {
+  constructor(
+    private readonly photoUrls = new PlayerProfilePhotoUrlResolver(''),
+  ) {}
+
   async findByAccountId(
     transaction: PostgresTransaction,
     input: ReadPlayerProfileInput,
@@ -286,6 +389,7 @@ export class PostgresPlayerProfileReader implements PlayerProfileReader {
         profile: hydrateProfile(
           selected.rows[0],
           validated.accountId,
+          this.photoUrls,
         ),
       });
     } catch (error) {

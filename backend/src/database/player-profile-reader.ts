@@ -11,6 +11,7 @@ export interface PlayerProfileRecord {
   readonly lastName?: string;
   readonly username?: string;
   readonly photoUrl?: string;
+  readonly fullPhotoUrl?: string;
   readonly languageCode?: string;
   readonly phone?: string;
   readonly sidePreference?: 'Left' | 'Both' | 'Right';

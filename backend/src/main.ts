@@ -7,6 +7,22 @@ import {
   NestFastifyApplication,
 } from '@nestjs/platform-fastify';
 import { AppModule } from './app.module';
+import { PLAYER_PROFILE_PHOTO_MAX_UPLOAD_BYTES } from './config/player-profile-photo.config';
+
+export function registerPlayerProfilePhotoContentTypes(
+  application: NestFastifyApplication,
+): void {
+  application.getHttpAdapter().getInstance().addContentTypeParser(
+    ['image/jpeg', 'image/png', 'image/webp'],
+    {
+      parseAs: 'buffer',
+      bodyLimit: PLAYER_PROFILE_PHOTO_MAX_UPLOAD_BYTES,
+    },
+    (_request, body, done) => {
+      done(null, body);
+    },
+  );
+}
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestFastifyApplication>(
@@ -15,6 +31,7 @@ async function bootstrap(): Promise<void> {
   );
   const config = app.get(ConfigService);
 
+  registerPlayerProfilePhotoContentTypes(app);
   await app.register(fastifyCookie);
   app.setGlobalPrefix('api/v1');
   app.enableShutdownHooks();

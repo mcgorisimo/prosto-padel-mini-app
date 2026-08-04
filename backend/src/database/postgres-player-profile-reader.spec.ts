@@ -7,6 +7,7 @@ import {
 } from './player-profile-reader';
 import { PostgresPlayerProfileReader } from './postgres-player-profile-reader';
 import { PostgresTransaction } from './postgres-transaction';
+import { PlayerProfilePhotoUrlResolver } from '../config/player-profile-photo.config';
 
 const ACCOUNT_ID = deterministicUuid(
   'player-profile-reader-account',
@@ -14,6 +15,9 @@ const ACCOUNT_ID = deterministicUuid(
 const OTHER_ACCOUNT_ID = deterministicUuid(
   'player-profile-reader-other-account',
 ) as AccountId;
+const PHOTO_ASSET_ID = deterministicUuid(
+  'player-profile-reader-photo-asset',
+);
 const PRIVATE_MARKER = 'SYNTHETIC_PLAYER_PROFILE_READER_PRIVATE';
 
 interface QueryCall {
@@ -69,6 +73,13 @@ function profileRow(
     last_name: 'Player',
     username: 'synthetic_player',
     photo_url: 'https://example.test/avatar.svg',
+    photo_state_account_id: null,
+    photo_state_active_asset_id: null,
+    photo_state_version: null,
+    photo_asset_account_id: null,
+    photo_asset_id: null,
+    photo_asset_generation: null,
+    photo_storage_prefix: null,
     language_code: 'ru',
     phone: '+79990000000',
     side_preference: 'Right',
@@ -180,7 +191,7 @@ describe('PostgresPlayerProfileReader', () => {
     expect(transaction.calls).toHaveLength(1);
     const call = transaction.calls[0];
     expect(normalizeSql(call.text)).toBe(
-      "SELECT details.account_id, details.first_name, details.last_name, details.username, details.photo_url, details.language_code, details.phone, details.side_preference, rating_states.rating, rating_states.is_verified, COALESCE(( SELECT capability_events.event_type = 'granted' FROM backend_auth.admin_capability_events AS capability_events WHERE capability_events.account_id = details.account_id AND capability_events.capability = 'club_admin' ORDER BY capability_events.event_order DESC LIMIT 1 ), false) AS has_club_admin_capability FROM backend_auth.player_profile_details AS details LEFT JOIN backend_auth.player_rating_states AS rating_states ON rating_states.account_id = details.account_id WHERE details.account_id = $1",
+      "SELECT details.account_id, details.first_name, details.last_name, details.username, details.photo_url, photo_states.account_id AS photo_state_account_id, photo_states.active_asset_id AS photo_state_active_asset_id, photo_states.version AS photo_state_version, photo_assets.account_id AS photo_asset_account_id, photo_assets.asset_id AS photo_asset_id, photo_assets.generation AS photo_asset_generation, photo_assets.storage_prefix AS photo_storage_prefix, details.language_code, details.phone, details.side_preference, rating_states.rating, rating_states.is_verified, COALESCE(( SELECT capability_events.event_type = 'granted' FROM backend_auth.admin_capability_events AS capability_events WHERE capability_events.account_id = details.account_id AND capability_events.capability = 'club_admin' ORDER BY capability_events.event_order DESC LIMIT 1 ), false) AS has_club_admin_capability FROM backend_auth.player_profile_details AS details LEFT JOIN backend_auth.player_rating_states AS rating_states ON rating_states.account_id = details.account_id LEFT JOIN backend_auth.player_profile_photo_states AS photo_states ON photo_states.account_id = details.account_id LEFT JOIN backend_auth.player_profile_photo_assets AS photo_assets ON photo_assets.account_id = photo_states.account_id AND photo_assets.generation = photo_states.version AND photo_assets.asset_id = photo_states.active_asset_id WHERE details.account_id = $1",
     );
     expect(call.values).toEqual([ACCOUNT_ID]);
     const upperSql = normalizeSql(call.text).toUpperCase();
@@ -231,6 +242,119 @@ describe('PostgresPlayerProfileReader', () => {
         isVerified: false,
         capabilities: [],
       },
+    });
+  });
+
+  it('uses the account-owned custom photo instead of the Telegram fallback', async () => {
+    const storagePrefix =
+      `profile-photos/${ACCOUNT_ID}/2/${PHOTO_ASSET_ID}`;
+    const result = await new PostgresPlayerProfileReader(
+      new PlayerProfilePhotoUrlResolver('https://photos.example.test'),
+    ).findByAccountId(
+      new FakeTransaction([
+        queryResult([
+          profileRow({
+            photo_state_account_id: ACCOUNT_ID,
+            photo_state_active_asset_id: PHOTO_ASSET_ID,
+            photo_state_version: '2',
+            photo_asset_account_id: ACCOUNT_ID,
+            photo_asset_id: PHOTO_ASSET_ID,
+            photo_asset_generation: '2',
+            photo_storage_prefix: storagePrefix,
+          }),
+        ]),
+      ]),
+      { accountId: ACCOUNT_ID },
+    );
+
+    expect(result).toMatchObject({
+      outcome: 'found',
+      profile: {
+        accountId: ACCOUNT_ID,
+        photoUrl:
+          `https://photos.example.test/${storagePrefix}/avatar.webp`,
+        fullPhotoUrl:
+          `https://photos.example.test/${storagePrefix}/full.webp`,
+      },
+    });
+    if (result.outcome === 'found') {
+      expect(result.profile.photoUrl).toBe(
+        `https://photos.example.test/${storagePrefix}/avatar.webp`,
+      );
+      expect(result.profile.fullPhotoUrl).toBe(
+        `https://photos.example.test/${storagePrefix}/full.webp`,
+      );
+    }
+  });
+
+  it('keeps an explicit deletion from falling back to the Telegram photo', async () => {
+    const result = await new PostgresPlayerProfileReader(
+      new PlayerProfilePhotoUrlResolver('https://photos.example.test'),
+    ).findByAccountId(
+      new FakeTransaction([
+        queryResult([
+          profileRow({
+            photo_state_account_id: ACCOUNT_ID,
+            photo_state_active_asset_id: null,
+            photo_state_version: '3',
+          }),
+        ]),
+      ]),
+      { accountId: ACCOUNT_ID },
+    );
+
+    expect(result.outcome).toBe('found');
+    if (result.outcome === 'found') {
+      expect(result.profile).not.toHaveProperty('photoUrl');
+    }
+  });
+
+  it.each([
+    [
+      'state owned by another account',
+      {
+        photo_state_account_id: OTHER_ACCOUNT_ID,
+        photo_state_active_asset_id: null,
+        photo_state_version: '1',
+      },
+    ],
+    [
+      'asset owned by another account',
+      {
+        photo_state_account_id: ACCOUNT_ID,
+        photo_state_active_asset_id: PHOTO_ASSET_ID,
+        photo_state_version: '1',
+        photo_asset_account_id: OTHER_ACCOUNT_ID,
+        photo_asset_id: PHOTO_ASSET_ID,
+        photo_asset_generation: '1',
+        photo_storage_prefix:
+          `profile-photos/${OTHER_ACCOUNT_ID}/1/${PHOTO_ASSET_ID}`,
+      },
+    ],
+    [
+      'prefix belonging to another account',
+      {
+        photo_state_account_id: ACCOUNT_ID,
+        photo_state_active_asset_id: PHOTO_ASSET_ID,
+        photo_state_version: '1',
+        photo_asset_account_id: ACCOUNT_ID,
+        photo_asset_id: PHOTO_ASSET_ID,
+        photo_asset_generation: '1',
+        photo_storage_prefix:
+          `profile-photos/${OTHER_ACCOUNT_ID}/1/${PHOTO_ASSET_ID}`,
+      },
+    ],
+  ])('rejects a cross-account photo binding: %s', async (_label, overrides) => {
+    await expect(
+      new PostgresPlayerProfileReader(
+        new PlayerProfilePhotoUrlResolver('https://photos.example.test'),
+      ).findByAccountId(
+        new FakeTransaction([queryResult([profileRow(overrides)])]),
+        { accountId: ACCOUNT_ID },
+      ),
+    ).rejects.toMatchObject({
+      name: 'PlayerProfileReadPersistenceError',
+      reason: 'invalid_persisted_state',
     });
   });
 

@@ -8,6 +8,10 @@ import {
   TELEGRAM_SESSION_TTL_SECONDS,
 } from './telegram-login.config';
 import { TELEGRAM_NOTIFICATION_CONFIG_KEYS } from './telegram-notification.config';
+import {
+  PLAYER_PROFILE_PHOTO_CONFIG_KEYS,
+  normalizePlayerProfilePhotoHttpsBaseUrl,
+} from './player-profile-photo.config';
 
 const canonicalBase64Secret = Joi.string()
   .base64()
@@ -42,6 +46,29 @@ function requiredWhenTelegramEnabled(schema: Joi.StringSchema) {
   });
 }
 
+function requiredWhenProfilePhotoStorageEnabled(
+  schema: Joi.StringSchema,
+) {
+  return Joi.when(PLAYER_PROFILE_PHOTO_CONFIG_KEYS.enabled, {
+    is: true,
+    then: schema.required(),
+    otherwise: schema.allow('').default(''),
+  });
+}
+
+const canonicalHttpsBaseUrl = Joi.string()
+  .uri({ scheme: ['https'] })
+  .custom((value: string, helpers) => {
+    const normalized = normalizePlayerProfilePhotoHttpsBaseUrl(value);
+    return normalized === undefined
+      ? helpers.error('string.canonicalHttpsBaseUrl')
+      : normalized;
+  })
+  .messages({
+    'string.canonicalHttpsBaseUrl':
+      '{{#label}} must be an HTTPS base URL without credentials, query or fragment',
+  });
+
 export const envValidationSchema = Joi.object({
   NODE_ENV: Joi.string()
     .valid('development', 'test', 'production')
@@ -63,6 +90,37 @@ export const envValidationSchema = Joi.object({
       .allow('')
       .default(''),
   }),
+  [PLAYER_PROFILE_PHOTO_CONFIG_KEYS.enabled]: Joi.boolean()
+    .truthy('true')
+    .falsy('false')
+    .default(false)
+    .when('DATABASE_ENABLED', {
+      is: false,
+      then: Joi.valid(false).messages({
+        'any.only':
+          'PROFILE_PHOTO_STORAGE_ENABLED requires DATABASE_ENABLED to be enabled',
+      }),
+    }),
+  [PLAYER_PROFILE_PHOTO_CONFIG_KEYS.endpoint]:
+    requiredWhenProfilePhotoStorageEnabled(
+      canonicalHttpsBaseUrl,
+    ),
+  [PLAYER_PROFILE_PHOTO_CONFIG_KEYS.region]:
+    requiredWhenProfilePhotoStorageEnabled(
+      Joi.string().pattern(/^[a-z0-9][a-z0-9-]{0,62}$/u),
+    ),
+  [PLAYER_PROFILE_PHOTO_CONFIG_KEYS.bucket]:
+    requiredWhenProfilePhotoStorageEnabled(
+      Joi.string().pattern(/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/u),
+    ),
+  [PLAYER_PROFILE_PHOTO_CONFIG_KEYS.publicBaseUrl]:
+    requiredWhenProfilePhotoStorageEnabled(
+      canonicalHttpsBaseUrl,
+    ),
+  [PLAYER_PROFILE_PHOTO_CONFIG_KEYS.accessKeyId]:
+    requiredWhenProfilePhotoStorageEnabled(Joi.string().min(1).max(512)),
+  [PLAYER_PROFILE_PHOTO_CONFIG_KEYS.secretAccessKey]:
+    requiredWhenProfilePhotoStorageEnabled(Joi.string().min(1).max(512)),
   TELEGRAM_AUTH_ENABLED: Joi.boolean()
     .truthy('true')
     .falsy('false')

@@ -8,6 +8,10 @@ import {
   TELEGRAM_LOGIN_CONFIG_KEYS,
   decodeTelegramCryptoSecret,
 } from '../config/telegram-login.config';
+import {
+  PlayerProfilePhotoUrlResolver,
+  readPlayerProfilePhotoStorageConfiguration,
+} from '../config/player-profile-photo.config';
 import { DatabaseModule } from '../database/database.module';
 import { ContentModerationController } from '../common/content-moderation.controller';
 import { PostgresAccountStatusReader } from '../database/postgres-account-status.reader';
@@ -24,6 +28,7 @@ import { PostgresMatchInvitationRepository } from '../database/postgres-match-in
 import { PostgresMatchWaitlistRepository } from '../database/postgres-match-waitlist.repository';
 import { PostgresPlayerAccountProvisioningRepository } from '../database/postgres-player-account-provisioning.repository';
 import { PostgresPlayerProfileDetailsRepository } from '../database/postgres-player-profile-details.repository';
+import { PostgresPlayerProfilePhotoRepository } from '../database/postgres-player-profile-photo.repository';
 import { PostgresPlayerProfileReader } from '../database/postgres-player-profile-reader';
 import { PostgresPlayerProfileWriter } from '../database/postgres-player-profile-writer';
 import { PostgresPublicPlayerProfileSearchRepository } from '../database/postgres-public-player-profile-search.repository';
@@ -47,6 +52,14 @@ import { MatchResultController } from '../matches/match-result.controller';
 import { MatchResultService } from '../matches/match-result.service';
 import { MatchWaitlistController } from '../matches/match-waitlist.controller';
 import { MatchWaitlistService } from '../matches/match-waitlist.service';
+import { PlayerProfilePhotoProcessor } from '../profiles/player-profile-photo.processor';
+import { PlayerProfilePhotoService } from '../profiles/player-profile-photo.service';
+import {
+  DisabledPlayerProfilePhotoObjectStorage,
+  PLAYER_PROFILE_PHOTO_OBJECT_STORAGE,
+  PlayerProfilePhotoObjectStorage,
+  S3PlayerProfilePhotoObjectStorage,
+} from '../profiles/player-profile-photo.storage';
 import { NodeSessionCredentialIssuer } from './session-credential-issuer.adapter';
 import { AdminPlayerRatingController } from './admin-player-rating.controller';
 import { AdminPlayerRatingService } from './admin-player-rating.service';
@@ -390,6 +403,34 @@ function createMatchResultService(
   });
 }
 
+function createPlayerProfilePhotoObjectStorage(
+  config: ConfigService,
+): PlayerProfilePhotoObjectStorage {
+  const configuration =
+    readPlayerProfilePhotoStorageConfiguration(config);
+  return configuration.enabled
+    ? new S3PlayerProfilePhotoObjectStorage(configuration)
+    : new DisabledPlayerProfilePhotoObjectStorage();
+}
+
+function createPlayerProfilePhotoService(
+  transactions: PostgresTransactionExecutorAdapter,
+  photos: PostgresPlayerProfilePhotoRepository,
+  processor: PlayerProfilePhotoProcessor,
+  storage: PlayerProfilePhotoObjectStorage,
+  urls: PlayerProfilePhotoUrlResolver,
+  clock: SessionAuthenticationClock,
+): PlayerProfilePhotoService {
+  return new PlayerProfilePhotoService({
+    transactions,
+    photos,
+    processor,
+    storage,
+    urls,
+    clock,
+  });
+}
+
 @Module({
   imports: [DatabaseModule],
   controllers: [
@@ -413,6 +454,24 @@ function createMatchResultService(
     SESSION_LIFECYCLE_HTTP_CLOCK_PROVIDER,
     SESSION_AUTHENTICATION_CLOCK_PROVIDER,
     SessionBearerGuard,
+    PlayerProfilePhotoProcessor,
+    {
+      provide: PLAYER_PROFILE_PHOTO_OBJECT_STORAGE,
+      inject: [ConfigService],
+      useFactory: createPlayerProfilePhotoObjectStorage,
+    },
+    {
+      provide: PlayerProfilePhotoService,
+      inject: [
+        PostgresTransactionExecutorAdapter,
+        PostgresPlayerProfilePhotoRepository,
+        PlayerProfilePhotoProcessor,
+        PLAYER_PROFILE_PHOTO_OBJECT_STORAGE,
+        PlayerProfilePhotoUrlResolver,
+        SESSION_AUTHENTICATION_CLOCK,
+      ],
+      useFactory: createPlayerProfilePhotoService,
+    },
     {
       provide: MatchNotificationService,
       inject: [
@@ -553,6 +612,7 @@ function createMatchResultService(
     SessionBearerGuard,
     AdminPlayerRatingService,
     PlayerProfileService,
+    PlayerProfilePhotoService,
     PublicPlayerProfileService,
     MatchApiService,
     MatchInvitationService,

@@ -117,6 +117,21 @@ const CAPABILITY_PROFILE_KEYS = Object.freeze([
   'sidePreference',
   'username',
 ]);
+const PHOTO_RENDITION_PROFILE_KEYS = Object.freeze([
+  'accountId',
+  'capabilities',
+  'firstName',
+  'fullPhotoUrl',
+  'isVerified',
+  'languageCode',
+  'lastName',
+  'phone',
+  'photoUrl',
+  'rating',
+  'role',
+  'sidePreference',
+  'username',
+]);
 const ADMIN_VERIFICATION_FILTERS = Object.freeze([
   'all',
   'verified',
@@ -860,7 +875,12 @@ function authenticationSuccess(body) {
 export function isBackendOwnProfile(value) {
   if (!isPlainObject(value)) return false;
   const keys = Object.keys(value).sort();
-  const hasCapabilities = hasExactKeys(keys, CAPABILITY_PROFILE_KEYS);
+  const hasPhotoRendition = hasExactKeys(
+    keys,
+    PHOTO_RENDITION_PROFILE_KEYS,
+  );
+  const hasCapabilities =
+    hasPhotoRendition || hasExactKeys(keys, CAPABILITY_PROFILE_KEYS);
   const hasRatingState =
     hasCapabilities || hasExactKeys(keys, RATING_PROFILE_KEYS);
   if (
@@ -871,6 +891,8 @@ export function isBackendOwnProfile(value) {
     !isNullableBoundedString(value.lastName, 256) ||
     !isNullableBoundedString(value.username, 64) ||
     !isNullableBoundedString(value.photoUrl, 2_048) ||
+    (hasPhotoRendition &&
+      !isNullableBoundedString(value.fullPhotoUrl, 2_048)) ||
     !isNullableBoundedString(value.languageCode, 64) ||
     (value.phone !== null &&
       (typeof value.phone !== 'string' ||
@@ -892,6 +914,13 @@ export function isBackendOwnProfile(value) {
   if (value.photoUrl !== null) {
     try {
       if (new URL(value.photoUrl).protocol !== 'https:') return false;
+    } catch {
+      return false;
+    }
+  }
+  if (hasPhotoRendition && value.fullPhotoUrl !== null) {
+    try {
+      if (new URL(value.fullPhotoUrl).protocol !== 'https:') return false;
     } catch {
       return false;
     }
@@ -931,6 +960,9 @@ function profileSuccess(body, outcome = 'profile_loaded') {
       lastName: body.lastName,
       username: body.username,
       photoUrl: body.photoUrl,
+      ...(Object.prototype.hasOwnProperty.call(body, 'fullPhotoUrl')
+        ? { fullPhotoUrl: body.fullPhotoUrl }
+        : {}),
       languageCode: body.languageCode,
       phone: body.phone,
       sidePreference: body.sidePreference,

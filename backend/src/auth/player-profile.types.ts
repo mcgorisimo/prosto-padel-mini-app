@@ -16,6 +16,7 @@ export interface OwnPlayerProfile {
   readonly lastName: string | null;
   readonly username: string | null;
   readonly photoUrl: string | null;
+  readonly fullPhotoUrl: string | null;
   readonly languageCode: string | null;
   readonly phone: string | null;
   readonly sidePreference: 'Left' | 'Both' | 'Right' | null;
@@ -185,6 +186,7 @@ export function isOwnPlayerProfile(
     'lastName',
     'username',
     'photoUrl',
+    'fullPhotoUrl',
     'languageCode',
     'phone',
     'sidePreference',
@@ -205,6 +207,7 @@ export function isOwnPlayerProfile(
     !isNullableBoundedString(value.lastName, 256) ||
     !isNullableBoundedString(value.username, 64) ||
     !isNullableBoundedString(value.photoUrl, 2_048) ||
+    !isNullableBoundedString(value.fullPhotoUrl, 2_048) ||
     !isNullableBoundedString(value.languageCode, 64)
     || (value.phone !== null &&
       (typeof value.phone !== 'string' ||
@@ -225,6 +228,15 @@ export function isOwnPlayerProfile(
   if (value.photoUrl !== null) {
     try {
       if (new URL(value.photoUrl).protocol !== 'https:') {
+        return false;
+      }
+    } catch {
+      return false;
+    }
+  }
+  if (value.fullPhotoUrl !== null) {
+    try {
+      if (new URL(value.fullPhotoUrl).protocol !== 'https:') {
         return false;
       }
     } catch {

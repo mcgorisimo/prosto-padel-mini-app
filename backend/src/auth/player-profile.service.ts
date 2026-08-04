@@ -116,6 +116,7 @@ function readProfileRecord(
           'lastName',
           'username',
           'photoUrl',
+          'fullPhotoUrl',
           'languageCode',
           'phone',
           'sidePreference',
@@ -130,6 +131,7 @@ function readProfileRecord(
     !validOptionalProfileValue(value.lastName, 256) ||
     !validOptionalProfileValue(value.username, 64) ||
     !validOptionalProfileValue(value.photoUrl, 2_048) ||
+    !validOptionalProfileValue(value.fullPhotoUrl, 2_048) ||
     !validOptionalProfileValue(value.languageCode, 64)
     || (value.phone !== undefined &&
       (typeof value.phone !== 'string' ||
@@ -154,6 +156,15 @@ function readProfileRecord(
       return undefined;
     }
   }
+  if (value.fullPhotoUrl !== undefined) {
+    try {
+      if (new URL(value.fullPhotoUrl).protocol !== 'https:') {
+        return undefined;
+      }
+    } catch {
+      return undefined;
+    }
+  }
   return value as unknown as PlayerProfileRecord;
 }
 
@@ -167,6 +178,7 @@ function publicProfile(
     lastName: profile.lastName ?? null,
     username: profile.username ?? null,
     photoUrl: profile.photoUrl ?? null,
+    fullPhotoUrl: profile.fullPhotoUrl ?? null,
     languageCode: profile.languageCode ?? null,
     phone: profile.phone ?? null,
     sidePreference: profile.sidePreference ?? null,

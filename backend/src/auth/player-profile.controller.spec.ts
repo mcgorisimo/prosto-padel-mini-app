@@ -8,6 +8,7 @@ import { deterministicUuid } from '../../test/deterministic-uuid';
 import { unixEpochSeconds } from './auth.types';
 import { PlayerProfileController } from './player-profile.controller';
 import { PlayerProfileService } from './player-profile.service';
+import { PlayerProfilePhotoService } from '../profiles/player-profile-photo.service';
 import {
   ReadOwnPlayerProfileResult,
   UpdateOwnPlayerProfileResult,
@@ -24,6 +25,7 @@ import {
 } from './session-authentication.types';
 
 const ROUTE = '/api/v1/profile/me';
+const PHOTO_ROUTE = `${ROUTE}/photo`;
 const CREDENTIAL = Buffer.alloc(32, 0x51).toString('base64url');
 const ACCOUNT_ID = deterministicUuid(
   'player-profile-controller-account',
@@ -50,6 +52,8 @@ interface Harness {
       readonly changes: Record<string, unknown>;
     }]
   >;
+  readonly uploadOwnPhoto: jest.Mock;
+  readonly deleteOwnPhoto: jest.Mock;
   readonly logs: readonly unknown[][];
 }
 
@@ -91,6 +95,7 @@ async function createHarness(): Promise<Harness> {
       lastName: 'Player',
       username: 'synthetic_player',
       photoUrl: 'https://example.test/avatar.svg',
+      fullPhotoUrl: null,
       languageCode: 'ru',
       phone: '+79990000000',
       sidePreference: 'Right',
@@ -119,6 +124,7 @@ async function createHarness(): Promise<Harness> {
       lastName: null,
       username: 'synthetic_player',
       photoUrl: 'https://example.test/avatar.svg',
+      fullPhotoUrl: null,
       languageCode: 'ru',
       phone: '+79991112233',
       sidePreference: 'Left',
@@ -126,6 +132,16 @@ async function createHarness(): Promise<Harness> {
       isVerified: false,
       capabilities: [],
     },
+  });
+  const uploadOwnPhoto = jest.fn().mockResolvedValue({
+    outcome: 'updated',
+    photoUrl: 'https://photos.example.test/account/avatar.webp',
+    fullPhotoUrl: 'https://photos.example.test/account/full.webp',
+  });
+  const deleteOwnPhoto = jest.fn().mockResolvedValue({
+    outcome: 'deleted',
+    photoUrl: null,
+    fullPhotoUrl: null,
   });
   const moduleRef = await Test.createTestingModule({
     controllers: [PlayerProfileController],
@@ -140,6 +156,10 @@ async function createHarness(): Promise<Harness> {
         useValue: { readOwnProfile, updateOwnProfile },
       },
       {
+        provide: PlayerProfilePhotoService,
+        useValue: { uploadOwnPhoto, deleteOwnPhoto },
+      },
+      {
         provide: SESSION_AUTHENTICATION_CLOCK,
         useValue: { nowEpochSeconds },
       },
@@ -147,6 +167,11 @@ async function createHarness(): Promise<Harness> {
   }).compile();
   const app = moduleRef.createNestApplication<NestFastifyApplication>(
     new FastifyAdapter(),
+  );
+  app.getHttpAdapter().getInstance().addContentTypeParser(
+    ['image/jpeg', 'image/png', 'image/webp'],
+    { parseAs: 'buffer', bodyLimit: 8 * 1_024 * 1_024 },
+    (_request, body, done) => done(null, body),
   );
   const logs: unknown[][] = [];
   app.useLogger(captureLogger(logs));
@@ -158,8 +183,32 @@ async function createHarness(): Promise<Harness> {
     authenticate,
     readOwnProfile,
     updateOwnProfile,
+    uploadOwnPhoto,
+    deleteOwnPhoto,
     logs,
   };
+}
+
+function injectPhoto(
+  harness: Harness,
+  method: 'PUT' | 'DELETE',
+  authorization?: string,
+  payload?: Buffer,
+  contentType = 'image/jpeg',
+) {
+  const headers: Record<string, string> = {};
+  if (authorization !== undefined) {
+    headers.authorization = authorization;
+  }
+  if (payload !== undefined) {
+    headers['content-type'] = contentType;
+  }
+  return harness.app.inject({
+    method,
+    url: PHOTO_ROUTE,
+    headers,
+    ...(payload === undefined ? {} : { payload }),
+  });
 }
 
 function inject(
@@ -224,6 +273,7 @@ describe('PlayerProfileController HTTP boundary', () => {
       lastName: 'Player',
       username: 'synthetic_player',
       photoUrl: 'https://example.test/avatar.svg',
+      fullPhotoUrl: null,
       languageCode: 'ru',
       phone: '+79990000000',
       sidePreference: 'Right',
@@ -236,6 +286,7 @@ describe('PlayerProfileController HTTP boundary', () => {
         'accountId',
         'capabilities',
         'firstName',
+        'fullPhotoUrl',
         'languageCode',
         'lastName',
         'photoUrl',
@@ -415,6 +466,7 @@ describe('PlayerProfileController HTTP boundary', () => {
       lastName: null,
       username: 'synthetic_player',
       photoUrl: 'https://example.test/avatar.svg',
+      fullPhotoUrl: null,
       languageCode: 'ru',
       phone: '+79991112233',
       sidePreference: 'Left',
@@ -500,5 +552,133 @@ describe('PlayerProfileController HTTP boundary', () => {
     expect(response.statusCode).toBe(401);
     expect(harness.authenticate).not.toHaveBeenCalled();
     expect(harness.updateOwnProfile).not.toHaveBeenCalled();
+  });
+
+  it('uploads a binary photo only for the bearer session account', async () => {
+    const body = Buffer.from('synthetic-jpeg');
+    const response = await injectPhoto(
+      harness,
+      'PUT',
+      `Bearer ${CREDENTIAL}`,
+      body,
+    );
+
+    expect(response.statusCode).toBe(200);
+    expectNoStore(response);
+    expect(response.json()).toEqual({
+      outcome: 'updated',
+      photoUrl: 'https://photos.example.test/account/avatar.webp',
+      fullPhotoUrl: 'https://photos.example.test/account/full.webp',
+    });
+    expect(harness.uploadOwnPhoto).toHaveBeenCalledWith({
+      accountId: ACCOUNT_ID,
+      role: 'player',
+      mediaType: 'image/jpeg',
+      body,
+    });
+  });
+
+  it('rejects photo upload without bearer authentication before storage', async () => {
+    const response = await injectPhoto(
+      harness,
+      'PUT',
+      undefined,
+      Buffer.from('synthetic-jpeg'),
+    );
+
+    expect(response.statusCode).toBe(401);
+    expect(harness.uploadOwnPhoto).not.toHaveBeenCalled();
+  });
+
+  it('rejects an unsupported upload media type without storage access', async () => {
+    const response = await injectPhoto(
+      harness,
+      'PUT',
+      `Bearer ${CREDENTIAL}`,
+      Buffer.from('synthetic-gif'),
+      'application/octet-stream',
+    );
+
+    expect(response.statusCode).toBe(415);
+    expect(harness.uploadOwnPhoto).not.toHaveBeenCalled();
+  });
+
+  it('rejects a photo larger than the parser limit before storage', async () => {
+    const response = await injectPhoto(
+      harness,
+      'PUT',
+      `Bearer ${CREDENTIAL}`,
+      Buffer.alloc(8 * 1_024 * 1_024 + 1, 0x51),
+    );
+
+    expect(response.statusCode).toBe(413);
+    expect(harness.uploadOwnPhoto).not.toHaveBeenCalled();
+  });
+
+  it('does not expose unexpected fields returned by the photo service', async () => {
+    harness.uploadOwnPhoto.mockResolvedValueOnce({
+      outcome: 'updated',
+      photoUrl: 'https://photos.example.test/account/avatar.webp',
+      fullPhotoUrl: 'https://photos.example.test/account/full.webp',
+      privateMarker: PRIVATE_MARKER,
+    });
+
+    const response = await injectPhoto(
+      harness,
+      'PUT',
+      `Bearer ${CREDENTIAL}`,
+      Buffer.from('synthetic-jpeg'),
+    );
+
+    expect(response.statusCode).toBe(500);
+    expectNoStore(response);
+    expect(response.json()).toEqual({
+      statusCode: 500,
+      code: 'profile_photo_internal_error',
+      message: 'Profile photo request failed',
+    });
+    expect(JSON.stringify(response.json())).not.toContain(PRIVATE_MARKER);
+  });
+
+  it('maps malformed photo-service rejections to a fixed internal error', async () => {
+    harness.deleteOwnPhoto.mockResolvedValueOnce({
+      outcome: 'rejected',
+      reason: PRIVATE_MARKER,
+    });
+
+    const response = await injectPhoto(
+      harness,
+      'DELETE',
+      `Bearer ${CREDENTIAL}`,
+    );
+
+    expect(response.statusCode).toBe(500);
+    expectNoStore(response);
+    expect(response.json()).toEqual({
+      statusCode: 500,
+      code: 'profile_photo_internal_error',
+      message: 'Profile photo request failed',
+    });
+    expect(JSON.stringify(response.json())).not.toContain(PRIVATE_MARKER);
+  });
+
+  it('deletes only the bearer session account photo', async () => {
+    const response = await injectPhoto(
+      harness,
+      'DELETE',
+      `Bearer ${CREDENTIAL}`,
+    );
+
+    expect(response.statusCode).toBe(200);
+    expectNoStore(response);
+    expect(response.json()).toEqual({
+      outcome: 'deleted',
+      photoUrl: null,
+      fullPhotoUrl: null,
+    });
+    expect(harness.deleteOwnPhoto).toHaveBeenCalledWith({
+      accountId: ACCOUNT_ID,
+      role: 'player',
+    });
   });
 });

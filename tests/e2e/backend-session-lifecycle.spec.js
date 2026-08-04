@@ -851,6 +851,91 @@ test.describe('backend session credential lifecycle', () => {
     });
   });
 
+  test('accepts safe full profile-photo renditions and rejects an unsafe URL', async ({
+    page,
+  }) => {
+    await prepareTelegramWithSecureStorage(page, null, '');
+    await page.goto('/');
+
+    const summary = await page.evaluate(async (parameters) => {
+      const { createBackendSessionClient } = await import(
+        '/src/lib/backendSessionClient.js'
+      );
+      let calls = 0;
+      const client = createBackendSessionClient({
+        fetchImpl: async () => {
+          calls += 1;
+          const body = {
+            accountId: parameters.accountId,
+            role: 'player',
+            firstName: 'Synthetic',
+            lastName: 'Player',
+            username: 'synthetic_player',
+            photoUrl:
+              calls === 2
+                ? null
+                : 'https://photos.example.test/profile/avatar.webp',
+            fullPhotoUrl:
+              calls === 2
+                ? null
+                : calls === 3
+                  ? 'http://photos.example.test/profile/full.webp'
+                  : 'https://photos.example.test/profile/full.webp',
+            languageCode: 'ru',
+            phone: '+79991112233',
+            sidePreference: 'Left',
+            rating: 4.25,
+            isVerified: true,
+            capabilities: ['club_admin'],
+          };
+          return new Response(JSON.stringify(body), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        },
+      });
+
+      const withPhoto = await client.readOwnProfile(parameters.credential);
+      const withoutPhoto = await client.readOwnProfile(parameters.credential);
+      const unsafe = await client.readOwnProfile(parameters.credential);
+      return {
+        calls,
+        withPhotoOutcome: withPhoto.outcome,
+        withPhotoUrl: withPhoto.profile?.photoUrl,
+        withFullPhotoUrl: withPhoto.profile?.fullPhotoUrl,
+        withPhotoExactKeys:
+          Object.keys(withPhoto.profile ?? {}).sort().join(',') ===
+          'accountId,capabilities,firstName,fullPhotoUrl,isVerified,languageCode,lastName,phone,photoUrl,rating,role,sidePreference,username',
+        withoutPhotoOutcome: withoutPhoto.outcome,
+        withoutPhotoUrl: withoutPhoto.profile?.photoUrl,
+        withoutFullPhotoUrl: withoutPhoto.profile?.fullPhotoUrl,
+        unsafeOutcome: unsafe.outcome,
+        unsafeReason: unsafe.reason,
+        unsafeExposesProfile:
+          Object.prototype.hasOwnProperty.call(unsafe, 'profile'),
+      };
+    }, {
+      credential: NEXT_CREDENTIAL,
+      accountId: SYNTHETIC_ACCOUNT_ID,
+    });
+
+    expect(summary).toEqual({
+      calls: 3,
+      withPhotoOutcome: 'profile_loaded',
+      withPhotoUrl:
+        'https://photos.example.test/profile/avatar.webp',
+      withFullPhotoUrl:
+        'https://photos.example.test/profile/full.webp',
+      withPhotoExactKeys: true,
+      withoutPhotoOutcome: 'profile_loaded',
+      withoutPhotoUrl: null,
+      withoutFullPhotoUrl: null,
+      unsafeOutcome: 'rejected',
+      unsafeReason: 'internal_error',
+      unsafeExposesProfile: false,
+    });
+  });
+
   test('updates an exact backend profile through a credential-bound no-store PATCH', async ({
     page,
   }) => {

@@ -11,6 +11,10 @@ import {
   validateRuntimeEnvironment,
 } from './runtime-environment';
 import { TELEGRAM_LOGIN_CONFIG_KEYS } from './telegram-login.config';
+import {
+  PLAYER_PROFILE_PHOTO_CONFIG_KEYS,
+  readPlayerProfilePhotoStorageConfiguration,
+} from './player-profile-photo.config';
 import { PostgresService } from '../database/postgres.service';
 
 const TEST_DATABASE_URL =
@@ -25,6 +29,20 @@ const TEST_UUID_NAMESPACE = '12345678-1234-5678-9234-567812345678';
 const DIRECT_DATABASE_ENVIRONMENT = Object.freeze({
   DATABASE_ENABLED: 'true',
   DATABASE_URL: TEST_DATABASE_URL,
+});
+
+const DIRECT_PROFILE_PHOTO_ENVIRONMENT = Object.freeze({
+  [PLAYER_PROFILE_PHOTO_CONFIG_KEYS.enabled]: 'true',
+  [PLAYER_PROFILE_PHOTO_CONFIG_KEYS.endpoint]:
+    'https://s3.storage.example.test',
+  [PLAYER_PROFILE_PHOTO_CONFIG_KEYS.region]: 'ru-1',
+  [PLAYER_PROFILE_PHOTO_CONFIG_KEYS.bucket]: 'profile-photos-test',
+  [PLAYER_PROFILE_PHOTO_CONFIG_KEYS.publicBaseUrl]:
+    'https://photos.example.test',
+  [PLAYER_PROFILE_PHOTO_CONFIG_KEYS.accessKeyId]:
+    'synthetic-access-key',
+  [PLAYER_PROFILE_PHOTO_CONFIG_KEYS.secretAccessKey]:
+    'synthetic-secret-key',
 });
 
 const DIRECT_TELEGRAM_ENVIRONMENT = Object.freeze({
@@ -809,5 +827,161 @@ describe('runtime environment validation', () => {
         ),
       [path, readerMessage],
     );
+  });
+
+  it('accepts a complete enabled profile-photo storage configuration', () => {
+    const result = validateRuntimeEnvironment({
+      ...DIRECT_DATABASE_ENVIRONMENT,
+      ...DIRECT_PROFILE_PHOTO_ENVIRONMENT,
+    });
+
+    expect({
+      enabled: result[PLAYER_PROFILE_PHOTO_CONFIG_KEYS.enabled],
+      endpoint: result[PLAYER_PROFILE_PHOTO_CONFIG_KEYS.endpoint],
+      bucket: result[PLAYER_PROFILE_PHOTO_CONFIG_KEYS.bucket],
+      publicBaseUrl:
+        result[PLAYER_PROFILE_PHOTO_CONFIG_KEYS.publicBaseUrl],
+      accessKeyMatches:
+        result[PLAYER_PROFILE_PHOTO_CONFIG_KEYS.accessKeyId] ===
+        'synthetic-access-key',
+      secretMatches:
+        result[PLAYER_PROFILE_PHOTO_CONFIG_KEYS.secretAccessKey] ===
+        'synthetic-secret-key',
+    }).toEqual({
+      enabled: true,
+      endpoint: 'https://s3.storage.example.test',
+      bucket: 'profile-photos-test',
+      publicBaseUrl: 'https://photos.example.test',
+      accessKeyMatches: true,
+      secretMatches: true,
+    });
+  });
+
+  it('keeps the public photo base URL when storage writes are disabled', () => {
+    const result = validateRuntimeEnvironment({
+      ...DIRECT_DATABASE_ENVIRONMENT,
+      [PLAYER_PROFILE_PHOTO_CONFIG_KEYS.enabled]: 'false',
+      [PLAYER_PROFILE_PHOTO_CONFIG_KEYS.publicBaseUrl]:
+        'https://photos.example.test/base///',
+    });
+    const storage = readPlayerProfilePhotoStorageConfiguration(
+      new ConfigService(result),
+    );
+
+    expect({
+      enabled: result[PLAYER_PROFILE_PHOTO_CONFIG_KEYS.enabled],
+      publicBaseUrl:
+        result[PLAYER_PROFILE_PHOTO_CONFIG_KEYS.publicBaseUrl],
+      readerEnabled: storage.enabled,
+      readerPublicBaseUrl: storage.publicBaseUrl,
+    }).toEqual({
+      enabled: false,
+      publicBaseUrl: 'https://photos.example.test/base',
+      readerEnabled: false,
+      readerPublicBaseUrl: 'https://photos.example.test/base',
+    });
+  });
+
+  it('reads profile-photo credentials from the allowlisted secret files', () => {
+    const accessPath = '/synthetic/profile-photo-access-key';
+    const secretPath = '/synthetic/profile-photo-secret-key';
+    const environment: Record<string, unknown> = {
+      ...DIRECT_DATABASE_ENVIRONMENT,
+      ...DIRECT_PROFILE_PHOTO_ENVIRONMENT,
+      [FILE_SECRET_KEYS.profilePhotoAccessKeyId]: accessPath,
+      [FILE_SECRET_KEYS.profilePhotoSecretAccessKey]: secretPath,
+    };
+    delete environment[PLAYER_PROFILE_PHOTO_CONFIG_KEYS.accessKeyId];
+    delete environment[PLAYER_PROFILE_PHOTO_CONFIG_KEYS.secretAccessKey];
+
+    const result = validateRuntimeEnvironment(
+      environment,
+      readerFrom({
+        [accessPath]: 'file-access-key\n',
+        [secretPath]: 'file-secret-key\n',
+      }),
+    );
+
+    expect({
+      accessKey:
+        result[PLAYER_PROFILE_PHOTO_CONFIG_KEYS.accessKeyId],
+      secret:
+        result[PLAYER_PROFILE_PHOTO_CONFIG_KEYS.secretAccessKey],
+      retainsAccessPath: Object.values(result).includes(accessPath),
+      retainsSecretPath: Object.values(result).includes(secretPath),
+    }).toEqual({
+      accessKey: 'file-access-key',
+      secret: 'file-secret-key',
+      retainsAccessPath: false,
+      retainsSecretPath: false,
+    });
+  });
+
+  it.each([
+    PLAYER_PROFILE_PHOTO_CONFIG_KEYS.endpoint,
+    PLAYER_PROFILE_PHOTO_CONFIG_KEYS.region,
+    PLAYER_PROFILE_PHOTO_CONFIG_KEYS.bucket,
+    PLAYER_PROFILE_PHOTO_CONFIG_KEYS.publicBaseUrl,
+    PLAYER_PROFILE_PHOTO_CONFIG_KEYS.accessKeyId,
+    PLAYER_PROFILE_PHOTO_CONFIG_KEYS.secretAccessKey,
+  ])('rejects enabled profile-photo storage without %s', (missingKey) => {
+    const environment: Record<string, unknown> = {
+      ...DIRECT_DATABASE_ENVIRONMENT,
+      ...DIRECT_PROFILE_PHOTO_ENVIRONMENT,
+    };
+    delete environment[missingKey];
+
+    expectFixedFailure(() => validateRuntimeEnvironment(environment));
+  });
+
+  it('rejects profile-photo storage when the database is disabled', () => {
+    expectFixedFailure(() =>
+      validateRuntimeEnvironment(DIRECT_PROFILE_PHOTO_ENVIRONMENT),
+    );
+  });
+
+  it.each([
+    'https://user:password@photos.example.test',
+    'https://photos.example.test?signature=private',
+    'https://photos.example.test/base#fragment',
+  ])('rejects an unsafe profile-photo public base URL: %s', (publicBaseUrl) => {
+    expectFixedFailure(() =>
+      validateRuntimeEnvironment({
+        ...DIRECT_DATABASE_ENVIRONMENT,
+        ...DIRECT_PROFILE_PHOTO_ENVIRONMENT,
+        [PLAYER_PROFILE_PHOTO_CONFIG_KEYS.publicBaseUrl]: publicBaseUrl,
+      }),
+    );
+  });
+
+  it('rejects an unsafe public photo base URL while writes are disabled', () => {
+    expectFixedFailure(() =>
+      validateRuntimeEnvironment({
+        ...DIRECT_DATABASE_ENVIRONMENT,
+        [PLAYER_PROFILE_PHOTO_CONFIG_KEYS.enabled]: 'false',
+        [PLAYER_PROFILE_PHOTO_CONFIG_KEYS.publicBaseUrl]:
+          'https://user:password@photos.example.test',
+      }),
+    );
+  });
+
+  it('normalizes trailing slashes in profile-photo service URLs', () => {
+    const result = validateRuntimeEnvironment({
+      ...DIRECT_DATABASE_ENVIRONMENT,
+      ...DIRECT_PROFILE_PHOTO_ENVIRONMENT,
+      [PLAYER_PROFILE_PHOTO_CONFIG_KEYS.endpoint]:
+        'https://s3.storage.example.test/',
+      [PLAYER_PROFILE_PHOTO_CONFIG_KEYS.publicBaseUrl]:
+        'https://photos.example.test/base///',
+    });
+
+    expect({
+      endpoint: result[PLAYER_PROFILE_PHOTO_CONFIG_KEYS.endpoint],
+      publicBaseUrl:
+        result[PLAYER_PROFILE_PHOTO_CONFIG_KEYS.publicBaseUrl],
+    }).toEqual({
+      endpoint: 'https://s3.storage.example.test',
+      publicBaseUrl: 'https://photos.example.test/base',
+    });
   });
 });

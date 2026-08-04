@@ -6,6 +6,10 @@ export const FILE_SECRET_MAX_UTF8_BYTES = 4_096;
 
 export const FILE_SECRET_KEYS = Object.freeze({
   databasePassword: 'DATABASE_PASSWORD_FILE',
+  profilePhotoAccessKeyId:
+    'PROFILE_PHOTO_STORAGE_ACCESS_KEY_ID_FILE',
+  profilePhotoSecretAccessKey:
+    'PROFILE_PHOTO_STORAGE_SECRET_ACCESS_KEY_FILE',
   telegramBotToken: 'TELEGRAM_BOT_TOKEN_FILE',
   telegramLookupPepper:
     'TELEGRAM_IDENTITY_LOOKUP_PEPPER_BASE64_FILE',
@@ -14,6 +18,10 @@ export const FILE_SECRET_KEYS = Object.freeze({
 });
 
 const DIRECT_SECRET_KEYS = Object.freeze({
+  [FILE_SECRET_KEYS.profilePhotoAccessKeyId]:
+    'PROFILE_PHOTO_STORAGE_ACCESS_KEY_ID',
+  [FILE_SECRET_KEYS.profilePhotoSecretAccessKey]:
+    'PROFILE_PHOTO_STORAGE_SECRET_ACCESS_KEY',
   [FILE_SECRET_KEYS.telegramBotToken]: 'TELEGRAM_BOT_TOKEN',
   [FILE_SECRET_KEYS.telegramLookupPepper]:
     'TELEGRAM_IDENTITY_LOOKUP_PEPPER_BASE64',
