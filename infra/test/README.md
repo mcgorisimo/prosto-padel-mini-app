@@ -118,12 +118,14 @@ Never run or share unfiltered `docker compose config` output on the server. It
 can expand and print existing database environment credentials. Do not enable
 shell tracing around any runtime-secret operation.
 
-The four required files are:
+The six required files are:
 
 - the `backend_auth_app` password;
 - the Telegram bot token;
 - the Telegram identity lookup pepper in canonical base64;
-- the Telegram login workflow HMAC secret in canonical base64.
+- the Telegram login workflow HMAC secret in canonical base64;
+- the profile-photo S3 Access Key ID;
+- the profile-photo S3 Secret Access Key.
 
 Create them manually through the approved server secret process, outside the
 Git repository. Each file must be a regular, non-symlink file owned by
@@ -138,6 +140,14 @@ Set these non-secret server values explicitly in `infra/test/.env.test`:
 - `TELEGRAM_AUTH_ENABLED=false` until the approved activation;
 - `TELEGRAM_INIT_DATA_MAX_AGE_SECONDS=<approved value>`;
 - `TELEGRAM_LOGIN_UUID_NAMESPACE=<stable approved UUID>`.
+
+Keep `PROFILE_PHOTO_STORAGE_ENABLED=false` while mounting and verifying the
+new S3 credentials. Configure its endpoint, region, bucket, and public HTTPS
+base URL through the non-secret `PROFILE_PHOTO_STORAGE_*` values from
+`.env.test.example`. Enable writes only after an authenticated S3
+upload/read/delete smoke test succeeds. Once a custom photo exists, retain
+`PROFILE_PHOTO_PUBLIC_BASE_URL` even if writes are disabled again so existing
+profiles remain readable.
 
 No default max age or UUID is supplied by the override. Missing values stop
 Compose interpolation. The authentication feature itself remains disabled by
@@ -188,7 +198,9 @@ for secret_path in \
   "$BACKEND_AUTH_APP_PASSWORD_FILE_HOST" \
   "$TELEGRAM_BOT_TOKEN_FILE_HOST" \
   "$TELEGRAM_IDENTITY_LOOKUP_PEPPER_BASE64_FILE_HOST" \
-  "$TELEGRAM_LOGIN_WORKFLOW_HMAC_SECRET_BASE64_FILE_HOST"
+  "$TELEGRAM_LOGIN_WORKFLOW_HMAC_SECRET_BASE64_FILE_HOST" \
+  "$PROFILE_PHOTO_STORAGE_ACCESS_KEY_ID_FILE_HOST" \
+  "$PROFILE_PHOTO_STORAGE_SECRET_ACCESS_KEY_FILE_HOST"
 do
   test -f "$secret_path" &&
     test ! -L "$secret_path" &&
@@ -213,7 +225,9 @@ docker compose \
     '/run/secrets/backend-auth-app-password',
     '/run/secrets/telegram-bot-token',
     '/run/secrets/telegram-identity-lookup-pepper-base64',
-    '/run/secrets/telegram-login-workflow-hmac-secret-base64'
+    '/run/secrets/telegram-login-workflow-hmac-secret-base64',
+    '/run/secrets/profile-photo-access-key-id',
+    '/run/secrets/profile-photo-secret-access-key'
   ]) fs.accessSync(p, fs.constants.R_OK)"
 ```
 

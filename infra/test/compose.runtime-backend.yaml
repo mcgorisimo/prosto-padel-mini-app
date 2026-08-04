@@ -20,6 +20,15 @@ services:
       TELEGRAM_BOT_TOKEN_FILE: /run/secrets/telegram-bot-token
       TELEGRAM_IDENTITY_LOOKUP_PEPPER_BASE64_FILE: /run/secrets/telegram-identity-lookup-pepper-base64
       TELEGRAM_LOGIN_WORKFLOW_HMAC_SECRET_BASE64_FILE: /run/secrets/telegram-login-workflow-hmac-secret-base64
+      PROFILE_PHOTO_STORAGE_ENABLED: ${PROFILE_PHOTO_STORAGE_ENABLED:-false}
+      PROFILE_PHOTO_STORAGE_ENDPOINT: ${PROFILE_PHOTO_STORAGE_ENDPOINT:-}
+      PROFILE_PHOTO_STORAGE_REGION: ${PROFILE_PHOTO_STORAGE_REGION:-}
+      PROFILE_PHOTO_STORAGE_BUCKET: ${PROFILE_PHOTO_STORAGE_BUCKET:-}
+      PROFILE_PHOTO_PUBLIC_BASE_URL: ${PROFILE_PHOTO_PUBLIC_BASE_URL:-}
+      PROFILE_PHOTO_STORAGE_ACCESS_KEY_ID: !reset null
+      PROFILE_PHOTO_STORAGE_SECRET_ACCESS_KEY: !reset null
+      PROFILE_PHOTO_STORAGE_ACCESS_KEY_ID_FILE: /run/secrets/profile-photo-access-key-id
+      PROFILE_PHOTO_STORAGE_SECRET_ACCESS_KEY_FILE: /run/secrets/profile-photo-secret-access-key
     volumes:
       - type: bind
         source: ${BACKEND_AUTH_APP_PASSWORD_FILE_HOST:?BACKEND_AUTH_APP_PASSWORD_FILE_HOST is required}
@@ -36,4 +45,12 @@ services:
       - type: bind
         source: ${TELEGRAM_LOGIN_WORKFLOW_HMAC_SECRET_BASE64_FILE_HOST:?TELEGRAM_LOGIN_WORKFLOW_HMAC_SECRET_BASE64_FILE_HOST is required}
         target: /run/secrets/telegram-login-workflow-hmac-secret-base64
+        read_only: true
+      - type: bind
+        source: ${PROFILE_PHOTO_STORAGE_ACCESS_KEY_ID_FILE_HOST:?PROFILE_PHOTO_STORAGE_ACCESS_KEY_ID_FILE_HOST is required}
+        target: /run/secrets/profile-photo-access-key-id
+        read_only: true
+      - type: bind
+        source: ${PROFILE_PHOTO_STORAGE_SECRET_ACCESS_KEY_FILE_HOST:?PROFILE_PHOTO_STORAGE_SECRET_ACCESS_KEY_FILE_HOST is required}
+        target: /run/secrets/profile-photo-secret-access-key
         read_only: true
