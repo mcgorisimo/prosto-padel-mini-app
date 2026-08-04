@@ -1097,13 +1097,15 @@ test.describe('backend session credential lifecycle', () => {
       window.__profilePhotoUiCalls = calls;
       window.confirm = () => true;
       document.body.innerHTML = '<div id="profile-root"></div>';
-      createRoot(document.getElementById('profile-root')).render(
+      const root = createRoot(document.getElementById('profile-root'));
+      const renderProfile = (activeAccountId) => root.render(
         React.createElement(PlayerProfile, {
           user: {
-            accountId,
+            accountId: activeAccountId,
             firstName: 'Synthetic',
             lastName: 'Player',
             username: 'synthetic_player',
+            sidePreference: 'Left',
             photo_url:
               'https://photos.example.test/player/avatar.webp',
             full_photo_url:
@@ -1121,7 +1123,7 @@ test.describe('backend session credential lifecycle', () => {
             });
             return {
               outcome: 'profile_photo_updated',
-              accountId,
+              accountId: activeAccountId,
               photoUrl:
                 'https://photos.example.test/player/avatar-v2.webp',
               fullPhotoUrl:
@@ -1132,20 +1134,33 @@ test.describe('backend session credential lifecycle', () => {
             calls.deletes += 1;
             return {
               outcome: 'profile_photo_deleted',
-              accountId,
+              accountId: activeAccountId,
               photoUrl: null,
               fullPhotoUrl: null,
             };
           },
         }),
       );
+      window.__renderProfilePhotoUi = renderProfile;
+      renderProfile(accountId);
     }, SYNTHETIC_ACCOUNT_ID);
 
     const avatar = page.getByRole('button', {
-      name: 'Открыть фото Synthetic Player',
+      name: 'Настроить фото профиля Synthetic Player',
     });
     await expect(avatar).toBeVisible();
+    await expect(page.getByTestId('profile-avatar-rating')).toHaveText('4.2');
+    await expect(page.getByTestId('profile-avatar-side')).toHaveText('L');
+    await expect(page.getByText('ТРЦ «Отрада»')).toHaveCount(0);
+    await expect(page.getByTestId('profile-photo-select')).toHaveCount(0);
     await avatar.click();
+    const photoActions = page.getByTestId('profile-photo-actions');
+    await expect(photoActions).toBeVisible();
+    await expect(photoActions.getByTestId('profile-photo-select')).toHaveText(
+      'Заменить фото',
+    );
+    await expect(photoActions.getByTestId('profile-photo-delete')).toBeVisible();
+    await photoActions.getByTestId('profile-photo-preview').click();
     const lightbox = page.getByTestId('profile-photo-lightbox');
     await expect(lightbox).toBeVisible();
     await expect(lightbox.locator('img')).toHaveAttribute(
@@ -1155,32 +1170,101 @@ test.describe('backend session credential lifecycle', () => {
     await page.getByRole('button', { name: 'Закрыть фото' }).click();
     await expect(lightbox).toBeHidden();
 
-    await page.getByTestId('profile-photo-input').setInputFiles({
-      name: 'replacement.webp',
-      mimeType: 'image/webp',
-      buffer: Buffer.from('synthetic-profile-photo'),
+    const replacementImage = {
+      name: 'replacement.png',
+      mimeType: 'image/png',
+      buffer: Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+        'base64',
+      ),
+    };
+    await avatar.click();
+    const firstChooserPromise = page.waitForEvent('filechooser');
+    await photoActions.getByTestId('profile-photo-select').click();
+    const firstChooser = await firstChooserPromise;
+    await firstChooser.setFiles(replacementImage);
+    const cropper = page.getByTestId('profile-photo-cropper');
+    await expect(cropper).toBeVisible();
+    await page.evaluate(() => {
+      const originalToBlob = HTMLCanvasElement.prototype.toBlob;
+      window.__profilePhotoCropStarted = false;
+      window.__releaseProfilePhotoCrop = null;
+      HTMLCanvasElement.prototype.toBlob = function delayedToBlob(
+        callback,
+        type,
+        quality,
+      ) {
+        window.__profilePhotoCropStarted = true;
+        originalToBlob.call(this, (blob) => {
+          window.__releaseProfilePhotoCrop = () => {
+            HTMLCanvasElement.prototype.toBlob = originalToBlob;
+            callback(blob);
+          };
+        }, type, quality);
+      };
     });
+    await page.getByTestId('profile-photo-crop-confirm').click();
+    await expect.poll(async () => page.evaluate(
+      () => window.__profilePhotoCropStarted,
+    )).toBe(true);
+    await expect.poll(async () => page.evaluate(
+      () => typeof window.__releaseProfilePhotoCrop,
+    )).toBe('function');
+    await page.evaluate(() => {
+      window.__renderProfilePhotoUi('22222222-2222-4222-8222-222222222222');
+    });
+    await expect(cropper).toBeHidden();
+    await page.evaluate(() => window.__releaseProfilePhotoCrop());
+    await expect.poll(async () => page.evaluate(
+      () => window.__profilePhotoUiCalls.uploads.length,
+    )).toBe(0);
+    await page.evaluate((accountId) => {
+      window.__renderProfilePhotoUi(accountId);
+    }, SYNTHETIC_ACCOUNT_ID);
+    await avatar.click();
+    const secondChooserPromise = page.waitForEvent('filechooser');
+    await photoActions.getByTestId('profile-photo-select').click();
+    const secondChooser = await secondChooserPromise;
+    await secondChooser.setFiles(replacementImage);
+    await expect(cropper).toBeVisible();
+    for (const [testId, value] of [
+      ['profile-photo-crop-x', '35'],
+      ['profile-photo-crop-y', '65'],
+      ['profile-photo-crop-zoom', '1.5'],
+    ]) {
+      await page.getByTestId(testId).evaluate((input, nextValue) => {
+        const valueSetter = Object.getOwnPropertyDescriptor(
+          HTMLInputElement.prototype,
+          'value',
+        ).set;
+        valueSetter.call(input, nextValue);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      }, value);
+    }
+    await page.getByTestId('profile-photo-crop-confirm').click();
     await expect.poll(async () => page.evaluate(
       () => window.__profilePhotoUiCalls.uploads.length,
     )).toBe(1);
-    await page.getByTestId('profile-photo-delete').click();
+    await expect(cropper).toBeHidden();
+    await avatar.click();
+    await photoActions.getByTestId('profile-photo-delete').click();
     await expect.poll(async () => page.evaluate(
       () => window.__profilePhotoUiCalls.deletes,
     )).toBe(1);
 
     const calls = await page.evaluate(() => window.__profilePhotoUiCalls);
-    expect(calls).toEqual({
-      uploads: [{
-        name: 'replacement.webp',
-        type: 'image/webp',
-        size: 23,
-      }],
-      deletes: 1,
-      toasts: [
-        { message: 'Фото профиля обновлено', kind: 'success' },
-        { message: 'Фото профиля удалено', kind: 'success' },
-      ],
+    expect(calls.uploads).toHaveLength(1);
+    expect(calls.uploads[0]).toEqual({
+      name: 'profile-photo.jpg',
+      type: 'image/jpeg',
+      size: expect.any(Number),
     });
+    expect(calls.uploads[0].size).toBeGreaterThan(0);
+    expect(calls.deletes).toBe(1);
+    expect(calls.toasts).toEqual([
+      { message: 'Фото профиля обновлено', kind: 'success' },
+      { message: 'Фото профиля удалено', kind: 'success' },
+    ]);
   });
 
   test('updates an exact backend profile through a credential-bound no-store PATCH', async ({

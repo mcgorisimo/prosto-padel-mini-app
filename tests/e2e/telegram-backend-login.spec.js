@@ -560,13 +560,17 @@ test.describe('Telegram backend login feature enabled', () => {
     await expect(navigation).toBeVisible();
     await navigation.getByRole('button').nth(4).click();
     await page.getByRole('button', { name: 'Настройки' }).click();
+    await page.getByRole('button', { name: /Фото профиля/ }).click();
+    await expect(page.getByTestId('profile-photo-actions')).toBeVisible();
+    await page.getByRole('button', { name: 'Закрыть управление фото' }).click();
+    await page.getByRole('button', { name: 'Настройки' }).click();
     await page.getByRole('button', {
       name: /Личная информация/,
     }).click();
 
     const inputs = page.locator('input');
     await expect(inputs.nth(0)).toHaveValue('Backend');
-    await expect(inputs.nth(2)).toHaveValue('+79990000000');
+    await expect(inputs.nth(2)).toHaveValue('');
     await inputs.nth(0).fill('fuck');
     await page.getByRole('button', { name: 'Сохранить' }).click();
     await expect.poll(() => profilePatches).toBe(1);

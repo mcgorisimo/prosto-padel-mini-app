@@ -272,7 +272,7 @@ test.describe('backend match credential lifecycle', () => {
               firstName: 'Other',
               rating: 3,
               isVerified: false,
-              photoUrl: 'https://example.invalid/private',
+              photoUrl: 'http://example.invalid/private',
             }],
           }),
         rollingUpgradeCompatible:
@@ -4246,6 +4246,9 @@ test.describe('backend match credential lifecycle', () => {
           slotVerification: match.filledSlots
             .filter(Boolean)
             .map((player) => player.isVerified),
+          slotSides: match.filledSlots
+            .filter(Boolean)
+            .map((player) => player.sidePreference),
         },
         crossViewerPublicNames:
           matchForOtherViewer.filledSlots
@@ -4298,6 +4301,7 @@ test.describe('backend match credential lifecycle', () => {
       slotNames: ['Synthetic', 'Visible'],
       slotRatings: [3, 4.25],
       slotVerification: [true, true],
+      slotSides: ['Both', null],
     });
     expect(summary.crossViewerPublicNames).toEqual([
       'Synthetic',
@@ -4370,6 +4374,146 @@ test.describe('backend match credential lifecycle', () => {
       backendChatFailsClosedWithoutBoundary: true,
     });
     expect(summary.sensitiveAbsent).toBe(true);
+  });
+
+  test('renders independent match avatar badges and mini-profile rating', async ({
+    page,
+  }) => {
+    await page.goto('/');
+
+    await page.evaluate(async (parameters) => {
+      const reactModule = await import('/@id/react');
+      const React = reactModule.default ?? reactModule;
+      const reactDomClientModule = await import('/@id/react-dom/client');
+      const { createRoot } =
+        reactDomClientModule.default ?? reactDomClientModule;
+      const { default: MatchDetailsScreen } =
+        await import('/src/components/MatchDetailsScreen.jsx');
+
+      const players = [
+        {
+          id: parameters.accountId,
+          firstName: 'Owner',
+          lastName: 'Player',
+          numericRating: 3,
+          ratingIdx: 2,
+          photo: null,
+          isVerified: true,
+          isOrganizer: true,
+          sidePreference: 'Left',
+          slotIndex: 0,
+        },
+        {
+          id: parameters.otherAccountId,
+          firstName: 'Partner',
+          lastName: 'One',
+          numericRating: 4.2,
+          ratingIdx: 3,
+          photo: 'https://photos.example.test/partner/avatar.webp',
+          isVerified: true,
+          isOrganizer: false,
+          sidePreference: 'Right',
+          slotIndex: 1,
+        },
+        {
+          id: parameters.thirdAccountId,
+          firstName: 'Unknown',
+          lastName: 'Side',
+          numericRating: 3.5,
+          ratingIdx: 3,
+          photo: null,
+          isVerified: false,
+          isOrganizer: false,
+          sidePreference: null,
+          slotIndex: 2,
+        },
+      ];
+      const match = {
+        id: parameters.matchId,
+        backendOwned: true,
+        ownerId: parameters.accountId,
+        owner_id: parameters.accountId,
+        description: '',
+        date: '1 января',
+        dateISO: '2030-01-01',
+        time: '10:00',
+        startsAt: 1_893_456_000,
+        duration: 1,
+        durationMinutes: 60,
+        courtName: 'Корт 1',
+        courtType: 'panoramic',
+        type: 'match',
+        scenario: 'social',
+        status: 'upcoming',
+        isPrivate: false,
+        isRatingMatch: true,
+        ratingMin: 0,
+        ratingMax: 6,
+        participants: players.map(({ id }) => id),
+        filledSlots: [...players, null],
+      };
+
+      const container = document.createElement('div');
+      container.dataset.testid = 'backend-player-badges-test-root';
+      document.body.append(container);
+      const root = createRoot(container);
+      root.render(React.createElement(MatchDetailsScreen, {
+        match,
+        currentUser: {
+          ...players[0],
+          role: 'user',
+          rating: 3,
+        },
+        onLoadLineup: async () => ({
+          outcome: 'rejected',
+          reason: 'lineup_not_found',
+        }),
+        onLoadResult: async () => ({
+          outcome: 'rejected',
+          reason: 'result_not_found',
+        }),
+        onBack() {},
+        onJoinSuccess() {},
+        onDelete() {},
+        onComplete() {},
+        onConfirmScore() {},
+        onDisputeScore() {},
+        onSlotsChange() {},
+        onJoinMatch() {},
+        onLeaveMatch() {},
+        pendingInvitations: [],
+        invitationActions: new Set(),
+        allMessages: [],
+        messagesLoading: false,
+        messagesLoadError: '',
+        showToast() {},
+      }));
+      window.__backendPlayerBadgesUiUnmount = () => {
+        root.unmount();
+        container.remove();
+      };
+    }, {
+      accountId: ACCOUNT_ID,
+      otherAccountId: OTHER_ACCOUNT_ID,
+      thirdAccountId: PARTICIPANT_ID,
+      matchId: MATCH_ID,
+    });
+
+    const harness = page.getByTestId('backend-player-badges-test-root');
+    await expect(harness.getByTestId('match-player-rating-0')).toHaveText('3.0');
+    await expect(harness.getByTestId('match-player-side-0')).toHaveText('L');
+    await expect(harness.getByTestId('match-player-status-0')).toHaveText('О');
+    await expect(harness.getByTestId('match-player-rating-1')).toHaveText('4.2');
+    await expect(harness.getByTestId('match-player-side-1')).toHaveText('R');
+    await expect(harness.getByTestId('match-player-status-1')).toHaveText('✓');
+    await expect(harness.getByTestId('match-player-side-2')).toHaveCount(0);
+    await harness.getByTestId('match-filled-slot-1').click();
+    await expect(harness.getByTestId('player-mini-profile-level')).toHaveText('B');
+    await expect(harness.getByTestId('player-mini-profile-rating')).toHaveText('4.2');
+    await expect(harness).not.toContainText('3.0–3.4');
+    await harness.getByTestId('player-mini-profile-close').click();
+
+    await page.evaluate(() => window.__backendPlayerBadgesUiUnmount?.());
   });
 
   test('submits, resolves and polls a backend result with the locked lineup', async ({
@@ -4635,12 +4779,6 @@ test.describe('backend match credential lifecycle', () => {
     });
 
     const harness = page.getByTestId('backend-result-test-root');
-    await harness.getByTestId('match-filled-slot-1').click();
-    await expect(harness.getByTestId('player-mini-profile-level')).toHaveText('B');
-    await expect(harness.getByTestId('player-mini-profile-rating')).toHaveText('4.2');
-    await expect(harness).not.toContainText('3.0–3.4');
-    await harness.getByTestId('player-mini-profile-close').click();
-
     const submit = harness.getByTestId('match-result-submit-open');
     await expect(submit).toBeEnabled();
     await submit.click();

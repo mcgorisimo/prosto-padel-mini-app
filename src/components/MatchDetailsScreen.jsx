@@ -37,6 +37,19 @@ const C = {
 
 const PLAYER_COLORS = ['#FFD700', '#4285F4', '#34A853', '#EA4335'];
 
+const getSideBadge = (sidePreference) => {
+  const normalized = String(sidePreference || '').toLowerCase();
+  if (normalized === 'left' || normalized === 'l' || normalized.includes('лев')) return 'L';
+  if (normalized === 'right' || normalized === 'r' || normalized.includes('прав')) return 'R';
+  if (
+    normalized === 'both' ||
+    normalized === 'lr' ||
+    normalized === 'rl' ||
+    normalized.includes('обе')
+  ) return 'LR';
+  return null;
+};
+
 export function supportsLegacyMatchExtensions(match) {
   return match?.backendOwned !== true;
 }
@@ -390,6 +403,7 @@ function PlayerSlot({ player, onTap, slotIndex = 0, onSlotClick, ratingChange })
     : typeof player?.numericRating === 'number'
       ? player.numericRating.toFixed(1)
       : null;
+  const sideBadge = getSideBadge(player?.sidePreference || player?.side_preference);
   const deltaStr = fmtDelta(ratingChange?.delta);
   const slotColor   = PLAYER_COLORS[slotIndex % PLAYER_COLORS.length];
   const borderColor = isPendingInvitation ? C.loss : hasRealData ? slotColor : C.border;
@@ -457,7 +471,7 @@ function PlayerSlot({ player, onTap, slotIndex = 0, onSlotClick, ratingChange })
 
         {/* Rating Badge */}
         {hasRealData && ratingStr && (
-          <div style={{
+          <div data-testid={`match-player-rating-${slotIndex}`} style={{
             position: 'absolute', top: '-4px', right: '-2px', zIndex: 12,
             minWidth: '28px', height: '18px', padding: '0 5px',
             background: '#071F16',
@@ -471,10 +485,10 @@ function PlayerSlot({ player, onTap, slotIndex = 0, onSlotClick, ratingChange })
             </span>
           </div>
         )}
-        {/* Badge: crown for organizer, checkmark for verified */}
+        {/* Organizer/verification and preferred side are independent badges. */}
         {hasRealData && (isOrganizer || player.isVerified) && (
-          <div style={{
-            position: 'absolute', bottom: 0, right: 0, zIndex: 10,
+          <div data-testid={`match-player-status-${slotIndex}`} style={{
+            position: 'absolute', bottom: 0, left: '-3px', zIndex: 10,
             width: '16px', height: '16px', borderRadius: '50%',
             background: isOrganizer ? 'linear-gradient(135deg, #b7860a, #D4AF37)' : 'linear-gradient(135deg, #f59e0b, #ca8a04)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -482,6 +496,21 @@ function PlayerSlot({ player, onTap, slotIndex = 0, onSlotClick, ratingChange })
             border: `1.5px solid ${C.bg}`,
           }}>
             {isOrganizer ? 'О' : '✓'}
+          </div>
+        )}
+        {hasRealData && sideBadge && (
+          <div
+            data-testid={`match-player-side-${slotIndex}`}
+            aria-label={`Предпочитаемая сторона: ${sideBadge}`}
+            style={{
+              position: 'absolute', bottom: 0, right: '-3px', zIndex: 11,
+              minWidth: sideBadge === 'LR' ? '22px' : '17px', height: '17px', padding: '0 3px',
+              borderRadius: '999px', background: C.gold, border: `1.5px solid ${C.bg}`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              color: C.bg, fontSize: '7px', fontWeight: 900, boxSizing: 'border-box',
+            }}
+          >
+            {sideBadge}
           </div>
         )}
       </div>
@@ -760,7 +789,7 @@ function SlotActionSheet({ slotIndex, isOwner, currentUser, matchId, onAddGuest,
         photo_url: player.photo_url || null,
         numericRating: player.rating,
         isVerified: player.is_verified,
-        sidePreference: player.side_preference || 'LR',
+        sidePreference: player.side_preference || null,
         isOrganizer: false,
       });
       if (result !== false) onClose();

@@ -196,7 +196,6 @@ export function mapBackendPublicPlayerToApp(player) {
     photo_url: player.photoUrl ?? '',
     rating: player.rating,
     is_verified: player.isVerified,
-    side_preference: 'Both',
     backendOwned: true,
   });
 }
@@ -439,8 +438,8 @@ function profilePlayer(profile, player, isOrganizer, slotIndex) {
         isCurrentPlayer &&
         profile.isVerified === true),
     sidePreference: isCurrentPlayer
-      ? (profile.sidePreference ?? 'Both')
-      : 'Both',
+      ? (profile.sidePreference ?? null)
+      : null,
     isOrganizer,
     slotIndex,
   });

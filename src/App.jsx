@@ -370,6 +370,7 @@ export default function App({
   const [toast, setToast]            = useState(null);
   const [selectedMatch, setSelected] = useState(null);
   const [screen, setScreen] = useState(null);
+  const [profilePhotoManagerRequest, setProfilePhotoManagerRequest] = useState(0);
   const backendDetailRequestRef = useRef(0);
   const backendFeedRequestRef = useRef(0);
   const backendAccountRequestRef = useRef(0);
@@ -2805,6 +2806,14 @@ const handleBookSlot = async (booking) => {
         showToast={showToast}
         onProfileSaved={handleProfileSaved}
         onBackendProfileSave={onBackendProfileSave}
+        onOpenPhotoSettings={
+          typeof onBackendProfilePhotoUpload === 'function' || currentUser?.photo_url
+            ? () => {
+                setProfilePhotoManagerRequest((request) => request + 1);
+                setScreen(null);
+              }
+            : null
+        }
         onLogout={handleLogout}
       />
     );
@@ -2881,6 +2890,8 @@ const handleBookSlot = async (booking) => {
             }}
             onPhotoUpload={onBackendProfilePhotoUpload}
             onPhotoDelete={onBackendProfilePhotoDelete}
+            photoManagerRequest={profilePhotoManagerRequest}
+            onPhotoManagerRequestHandled={() => setProfilePhotoManagerRequest(0)}
             // showToast is already passed to App, no need to pass it here again
             showToast={showToast}
           />
