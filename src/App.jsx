@@ -327,6 +327,7 @@ export default function App({
   backendMatchLifecycleStatus = 'disabled',
   backendProfileStatus = backendProfile ? 'ready' : 'inactive',
   backendMatchActions = null,
+  backendBookingAvailabilityActions = null,
   onBackendProfileSave = null,
   onBackendProfilePhotoUpload = null,
   onBackendProfilePhotoDelete = null,
@@ -2938,6 +2939,7 @@ const handleBookSlot = async (booking) => {
         {activeTab === 'booking' && (
           <BookingScreen
             allMatches={allMatches}
+            availabilityActions={backendBookingAvailabilityActions}
             onBookSlot={handleBookSlot}
             showToast={showToast}
           />

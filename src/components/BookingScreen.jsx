@@ -54,25 +54,338 @@ function formatDuration(duration) {
 function getSlotLabel(state) {
   if (state === 'selected') return 'Выбрано';
   if (state === 'free') return 'Свободно';
+  if (state === 'loading') return 'Загрузка';
+  if (state === 'unknown') return 'Нет данных';
   if (state === 'outside') return 'Вне времени';
   if (state === 'past') return 'Прошло';
   return 'Занято';
 }
 
-export default function BookingScreen({ allMatches = [], onBookSlot, showToast }) {
+function readRentalServiceDuration(title) {
+  if (typeof title !== 'string') return null;
+  const match = /^Аренда корта\s+(\d+(?:[.,]\d+)?)\s*ч\./iu.exec(title);
+  if (!match) return null;
+  const duration = Number(match[1].replace(',', '.'));
+  return BOOKING_DURATIONS.includes(duration) ? duration : null;
+}
+
+function groupRentalServices(services) {
+  const groups = new Map();
+  for (const service of services) {
+    const duration = readRentalServiceDuration(service?.title);
+    if (duration === null) continue;
+    const current = groups.get(duration) ?? [];
+    current.push(service);
+    groups.set(duration, current);
+  }
+  return BOOKING_DURATIONS.flatMap((duration) => {
+    const matchingServices = groups.get(duration);
+    return matchingServices
+      ? [{ duration, services: matchingServices }]
+      : [];
+  });
+}
+
+function mergeCourts(results) {
+  const courtsById = new Map();
+  for (const result of results) {
+    for (const court of result.courts) {
+      if (!courtsById.has(court.id)) {
+        courtsById.set(court.id, {
+          ...court,
+          type: COURTS[0]?.type ?? 'panoramic',
+        });
+      }
+    }
+  }
+  return [...courtsById.values()].sort((left, right) => left.id - right.id);
+}
+
+function mergeDates(results) {
+  return [...new Set(results.flatMap((result) => result.dates))].sort();
+}
+
+export default function BookingScreen({
+  allMatches = [],
+  availabilityActions = null,
+  onBookSlot,
+  showToast,
+}) {
   const dates = useMemo(() => buildDates(14), []);
   const times = useMemo(buildTimes, []);
+  const usesBackendAvailability = availabilityActions !== null;
   const [selectedDateISO, setSelectedDateISO] = useState(dates[0]?.dateISO);
   const [duration, setDuration] = useState(1.5);
   const [courtId, setCourtId] = useState(ANY_COURT);
   const [selectedSlot, setSelectedSlot] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
   const [successText, setSuccessText] = useState('');
+  const [servicesState, setServicesState] = useState({
+    status: 'idle',
+    groups: [],
+  });
+  const [courtsState, setCourtsState] = useState({
+    status: 'idle',
+    serviceKey: '',
+    courts: [],
+  });
+  const [datesState, setDatesState] = useState({
+    status: 'idle',
+    queryKey: '',
+    dates: [],
+  });
+  const [timesState, setTimesState] = useState({
+    status: 'idle',
+    queryKey: '',
+    slots: [],
+  });
   const isSavingRef = useRef(false);
 
+  useEffect(() => {
+    if (!usesBackendAvailability) return undefined;
+    let active = true;
+    setServicesState({ status: 'loading', groups: [] });
+
+    void availabilityActions.listServices().then((result) => {
+      if (!active) return;
+      if (result?.outcome !== 'services_loaded') {
+        setServicesState({ status: 'error', groups: [] });
+        return;
+      }
+      const groups = groupRentalServices(result.services);
+      setServicesState({
+        status: groups.length > 0 ? 'ready' : 'error',
+        groups,
+      });
+    }).catch(() => {
+      if (active) setServicesState({ status: 'error', groups: [] });
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [availabilityActions, usesBackendAvailability]);
+
+  useEffect(() => {
+    if (servicesState.status !== 'ready') return;
+    if (servicesState.groups.some((group) => group.duration === duration)) {
+      return;
+    }
+    setDuration(servicesState.groups[0].duration);
+    setSelectedSlot(null);
+  }, [duration, servicesState]);
+
+  const selectedServiceIds = useMemo(() => (
+    servicesState.groups
+      .find((group) => group.duration === duration)
+      ?.services.map((service) => service.id) ?? []
+  ), [duration, servicesState.groups]);
+  const selectedServiceKey = selectedServiceIds.join(',');
+
+  useEffect(() => {
+    if (!usesBackendAvailability || selectedServiceIds.length === 0) {
+      return undefined;
+    }
+    let active = true;
+    const serviceKey = selectedServiceKey;
+    setCourtsState({ status: 'loading', serviceKey, courts: [] });
+
+    void Promise.all(
+      selectedServiceIds.map((serviceId) =>
+        availabilityActions.listCourts(serviceId)),
+    ).then((results) => {
+      if (!active) return;
+      if (results.some((result) => result?.outcome !== 'courts_loaded')) {
+        setCourtsState({ status: 'error', serviceKey, courts: [] });
+        return;
+      }
+      const courts = mergeCourts(results);
+      setCourtsState({
+        status: courts.length > 0 ? 'ready' : 'error',
+        serviceKey,
+        courts,
+      });
+      setCourtId((current) => (
+        current !== ANY_COURT && courts.some((court) => court.id === current)
+          ? current
+          : courts[0]?.id ?? ANY_COURT
+      ));
+    }).catch(() => {
+      if (active) {
+        setCourtsState({ status: 'error', serviceKey, courts: [] });
+      }
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [
+    availabilityActions,
+    selectedServiceIds,
+    selectedServiceKey,
+    usesBackendAvailability,
+  ]);
+
+  const backendCourts = courtsState.serviceKey === selectedServiceKey
+    ? courtsState.courts
+    : [];
+  const queryCourtIds = useMemo(() => {
+    if (courtId === ANY_COURT) {
+      return backendCourts.map((court) => court.id);
+    }
+    return backendCourts.some((court) => court.id === courtId) ? [courtId] : [];
+  }, [backendCourts, courtId]);
+  const queryCourtKey = queryCourtIds.join(',');
+  const datesQueryKey = `${selectedServiceKey}|${queryCourtKey}`;
+
+  useEffect(() => {
+    if (
+      !usesBackendAvailability ||
+      courtsState.status !== 'ready' ||
+      selectedServiceIds.length === 0 ||
+      queryCourtIds.length === 0 ||
+      dates.length === 0
+    ) {
+      return undefined;
+    }
+    let active = true;
+    const queryKey = datesQueryKey;
+    setDatesState({ status: 'loading', queryKey, dates: [] });
+    const requests = selectedServiceIds.flatMap((serviceId) =>
+      queryCourtIds.map((selectedCourtId) =>
+        availabilityActions.listDates({
+          serviceId,
+          courtId: selectedCourtId,
+          dateFrom: dates[0].dateISO,
+          dateTo: dates[dates.length - 1].dateISO,
+        })),
+    );
+
+    void Promise.all(requests).then((results) => {
+      if (!active) return;
+      if (results.some((result) => result?.outcome !== 'dates_loaded')) {
+        setDatesState({ status: 'error', queryKey, dates: [] });
+        return;
+      }
+      setDatesState({ status: 'ready', queryKey, dates: mergeDates(results) });
+    }).catch(() => {
+      if (active) setDatesState({ status: 'error', queryKey, dates: [] });
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [
+    availabilityActions,
+    courtsState.status,
+    dates,
+    datesQueryKey,
+    queryCourtIds,
+    selectedServiceIds,
+    usesBackendAvailability,
+  ]);
+
+  const backendDates = datesState.queryKey === datesQueryKey
+    ? datesState.dates
+    : [];
+  const backendDateSet = useMemo(() => new Set(backendDates), [backendDates]);
+
+  useEffect(() => {
+    if (!usesBackendAvailability || datesState.status !== 'ready') return;
+    if (backendDateSet.has(selectedDateISO)) return;
+    setSelectedDateISO(backendDates[0] ?? dates[0]?.dateISO);
+    setSelectedSlot(null);
+  }, [
+    backendDateSet,
+    backendDates,
+    dates,
+    datesState.status,
+    selectedDateISO,
+    usesBackendAvailability,
+  ]);
+
+  const timesQueryKey = `${datesQueryKey}|${selectedDateISO}`;
+
+  useEffect(() => {
+    if (
+      !usesBackendAvailability ||
+      datesState.status !== 'ready' ||
+      !backendDateSet.has(selectedDateISO) ||
+      selectedServiceIds.length === 0 ||
+      queryCourtIds.length === 0
+    ) {
+      return undefined;
+    }
+    let active = true;
+    const queryKey = timesQueryKey;
+    setTimesState({ status: 'loading', queryKey, slots: [] });
+    const requests = selectedServiceIds.flatMap((serviceId) =>
+      queryCourtIds.map((selectedCourtId) => ({ serviceId, courtId: selectedCourtId })),
+    );
+
+    void Promise.all(requests.map(({ serviceId, courtId: selectedCourtId }) =>
+      availabilityActions.listTimes({
+        serviceId,
+        courtId: selectedCourtId,
+        date: selectedDateISO,
+      }))).then((results) => {
+      if (!active) return;
+      if (results.some((result) => result?.outcome !== 'times_loaded')) {
+        setTimesState({ status: 'error', queryKey, slots: [] });
+        return;
+      }
+      const courtById = new Map(backendCourts.map((court) => [court.id, court]));
+      const slotsByTime = new Map();
+      results.forEach((result, index) => {
+        const request = requests[index];
+        for (const time of result.times) {
+          if (!slotsByTime.has(time.time)) {
+            slotsByTime.set(time.time, {
+              ...time,
+              serviceId: request.serviceId,
+              court: courtById.get(request.courtId),
+            });
+          }
+        }
+      });
+      const slots = [...slotsByTime.values()]
+        .filter((slot) => slot.court)
+        .sort((left, right) => left.time.localeCompare(right.time));
+      setTimesState({ status: 'ready', queryKey, slots });
+    }).catch(() => {
+      if (active) setTimesState({ status: 'error', queryKey, slots: [] });
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [
+    availabilityActions,
+    backendCourts,
+    backendDateSet,
+    datesState.status,
+    queryCourtIds,
+    selectedDateISO,
+    selectedServiceIds,
+    timesQueryKey,
+    usesBackendAvailability,
+  ]);
+
+  const backendTimeSlots = timesState.queryKey === timesQueryKey
+    ? timesState.slots
+    : [];
+  const backendTimeByValue = useMemo(
+    () => new Map(backendTimeSlots.map((slot) => [slot.time, slot])),
+    [backendTimeSlots],
+  );
+
   const selectedDate = dates.find((item) => item.dateISO === selectedDateISO) ?? dates[0];
-  const selectedCourt = selectedSlot?.court ?? COURTS.find((court) => court.id === courtId);
+  const displayedCourts = usesBackendAvailability ? backendCourts : COURTS;
+  const selectedCourt = selectedSlot?.court ?? displayedCourts.find((court) => court.id === courtId);
   const getAvailableCourt = (time) => {
+    if (usesBackendAvailability) {
+      return backendTimeByValue.get(time)?.court ?? null;
+    }
     const candidates = courtId === ANY_COURT
       ? COURTS
       : COURTS.filter((court) => court.id === courtId);
@@ -94,6 +407,16 @@ export default function BookingScreen({ allMatches = [], onBookSlot, showToast }
       return { state: isSelected ? 'past' : 'past', court: null };
     }
 
+    if (usesBackendAvailability && timesState.queryKey !== timesQueryKey) {
+      return { state: 'loading', court: null };
+    }
+    if (usesBackendAvailability && timesState.status === 'loading') {
+      return { state: 'loading', court: null };
+    }
+    if (usesBackendAvailability && timesState.status !== 'ready') {
+      return { state: 'unknown', court: null };
+    }
+
     const court = getAvailableCourt(time);
     if (!court) {
       return { state: isSelected ? 'unavailable' : 'unavailable', court: null };
@@ -106,6 +429,17 @@ export default function BookingScreen({ allMatches = [], onBookSlot, showToast }
     ...section,
     slots: times.filter(({ minute }) => minute >= section.from && minute < section.to),
   }));
+  const availabilityHasError = [
+    servicesState.status,
+    courtsState.status,
+    datesState.status,
+    timesState.status,
+  ].includes('error');
+  const availabilityStatusText = availabilityHasError
+    ? 'Не удалось загрузить доступность. Попробуйте открыть экран ещё раз.'
+    : timesState.status === 'ready' && timesState.queryKey === timesQueryKey
+      ? 'Показаны актуальные свободные слоты клуба.'
+      : 'Загружаем актуальные свободные слоты…';
 
   useEffect(() => {
     if (!selectedSlot) return;
@@ -116,7 +450,14 @@ export default function BookingScreen({ allMatches = [], onBookSlot, showToast }
     } else if (next.court?.id && next.court.id !== selectedSlot.court?.id) {
       setSelectedSlot((prev) => prev ? { ...prev, court: next.court } : prev);
     }
-  }, [selectedDateISO, duration, courtId, allMatches]);
+  }, [
+    allMatches,
+    backendTimeSlots,
+    courtId,
+    duration,
+    selectedDateISO,
+    timesState.status,
+  ]);
 
   useEffect(() => {
     document.body.classList.toggle('booking-sheet-open', Boolean(selectedSlot));
@@ -151,7 +492,7 @@ export default function BookingScreen({ allMatches = [], onBookSlot, showToast }
   };
 
   const handleConfirm = async () => {
-    if (!selectedSlot || isSavingRef.current) return;
+    if (!selectedSlot || isSavingRef.current || usesBackendAvailability) return;
 
     const isPublicFormat = false;
 
@@ -200,6 +541,15 @@ export default function BookingScreen({ allMatches = [], onBookSlot, showToast }
         </p>
       </header>
 
+      {usesBackendAvailability && (
+        <div
+          data-testid="booking-availability-status"
+          className="mb-4 rounded-2xl bg-warm-white/6 px-4 py-3 text-xs leading-relaxed text-warm-white/58"
+        >
+          {availabilityStatusText}
+        </div>
+      )}
+
       <section className="booking-section booking-section-dates">
         <div className="booking-section-label">
           Дата
@@ -207,10 +557,16 @@ export default function BookingScreen({ allMatches = [], onBookSlot, showToast }
         <div className="booking-horizontal-scroll booking-date-strip" style={{ scrollbarWidth: 'none' }}>
           {dates.map((item) => {
             const active = item.dateISO === selectedDateISO;
+            const disabled = usesBackendAvailability && (
+              datesState.status !== 'ready' ||
+              datesState.queryKey !== datesQueryKey ||
+              !backendDateSet.has(item.dateISO)
+            );
             return (
               <button
                 key={item.dateISO}
                 type="button"
+                disabled={disabled}
                 onClick={() => {
                   setSelectedDateISO(item.dateISO);
                   setSelectedSlot(null);
@@ -220,7 +576,9 @@ export default function BookingScreen({ allMatches = [], onBookSlot, showToast }
                   'booking-date-card min-w-[86px] text-left',
                   active
                     ? 'is-active text-warm-white'
-                    : 'text-warm-white/70',
+                    : disabled
+                      ? 'text-warm-white/24'
+                      : 'text-warm-white/70',
                 ].join(' ')}
               >
                 <div className="text-[11px] font-extrabold uppercase tracking-[0.08em]">{item.eyebrow}</div>
@@ -238,17 +596,26 @@ export default function BookingScreen({ allMatches = [], onBookSlot, showToast }
         <div className="booking-duration-control grid grid-cols-4">
           {BOOKING_DURATIONS.map((item) => {
             const active = duration === item;
+            const disabled = usesBackendAvailability && (
+              servicesState.status !== 'ready' ||
+              !servicesState.groups.some((group) => group.duration === item)
+            );
             return (
               <button
                 key={item}
                 type="button"
+                disabled={disabled}
                 onClick={() => {
                   setDuration(item);
                   setSuccessText('');
                 }}
                 className={[
                   'booking-duration-option px-2 text-sm font-extrabold',
-                  active ? 'is-active text-app-bg' : 'text-warm-white/62',
+                  active
+                    ? 'is-active text-app-bg'
+                    : disabled
+                      ? 'text-warm-white/22'
+                      : 'text-warm-white/62',
                 ].join(' ')}
               >
                 {formatDuration(item)}
@@ -263,12 +630,14 @@ export default function BookingScreen({ allMatches = [], onBookSlot, showToast }
           Корт
         </div>
         <div className="booking-court-strip flex gap-2 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
-          {[{ id: ANY_COURT, name: 'Любой свободный' }, ...COURTS].map((court) => {
+          {[{ id: ANY_COURT, name: 'Любой свободный' }, ...displayedCourts].map((court) => {
             const active = courtId === court.id;
+            const disabled = usesBackendAvailability && courtsState.status !== 'ready';
             return (
               <button
                 key={court.id}
                 type="button"
+                disabled={disabled}
                 onClick={() => {
                   setCourtId(court.id);
                   setSelectedSlot(null);
@@ -278,7 +647,9 @@ export default function BookingScreen({ allMatches = [], onBookSlot, showToast }
                   'booking-court-chip shrink-0 px-4 text-sm font-bold',
                   active
                     ? 'is-active text-accent-light'
-                    : 'text-warm-white/64',
+                    : disabled
+                      ? 'text-warm-white/22'
+                      : 'text-warm-white/64',
                 ].join(' ')}
               >
                 {court.name}
@@ -387,18 +758,24 @@ export default function BookingScreen({ allMatches = [], onBookSlot, showToast }
               </div>
 
               <p className="text-xs leading-relaxed text-warm-white/52">
-                Бронь создаётся без онлайн-оплаты. Администратор клуба подтвердит оплату отдельно.
+                {usesBackendAvailability
+                  ? 'Сейчас доступен безопасный просмотр реальных слотов. Создание брони подключим отдельным этапом.'
+                  : 'Бронь создаётся без онлайн-оплаты. Администратор клуба подтвердит оплату отдельно.'}
               </p>
             </div>
 
             <div className="booking-sheet-footer">
               <button
                 type="button"
-                disabled={isSaving}
+                disabled={isSaving || usesBackendAvailability}
                 onClick={handleConfirm}
                 className="booking-confirm-cta"
               >
-                {isSaving ? 'Сохраняем...' : 'Создать бронь'}
+                {usesBackendAvailability
+                  ? 'Только просмотр'
+                  : isSaving
+                    ? 'Сохраняем...'
+                    : 'Создать бронь'}
               </button>
             </div>
           </div>

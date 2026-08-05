@@ -100,6 +100,17 @@ export function createBackendMatchActions(telegramBackendLogin) {
   });
 }
 
+export function createBackendBookingAvailabilityActions(telegramBackendLogin) {
+  if (telegramBackendLogin?.sessionReady !== true) return null;
+
+  return Object.freeze({
+    listServices: telegramBackendLogin.listBookingServices,
+    listCourts: telegramBackendLogin.listBookingCourts,
+    listDates: telegramBackendLogin.listBookingDates,
+    listTimes: telegramBackendLogin.listBookingTimes,
+  });
+}
+
 export default function AuthGate() {
   const telegramBackendLogin = useTelegramBackendLogin();
   const [session, setSession] = useState(null);
@@ -288,6 +299,17 @@ export default function AuthGate() {
     ],
   );
 
+  const backendBookingAvailabilityActions = useMemo(
+    () => createBackendBookingAvailabilityActions(telegramBackendLogin),
+    [
+      telegramBackendLogin.listBookingServices,
+      telegramBackendLogin.listBookingCourts,
+      telegramBackendLogin.listBookingDates,
+      telegramBackendLogin.listBookingTimes,
+      telegramBackendLogin.sessionReady,
+    ],
+  );
+
   const showToast = (message, variant = 'info') => {
     setToastMessage({ message, variant });
     setTimeout(() => setToastMessage(null), 3000);
@@ -435,6 +457,7 @@ const handleSignUp = async ({ email, password, options }) => {
           backendMatchLifecycleStatus={telegramBackendLogin.status}
           backendProfileStatus={effectiveBackendProfileStatus}
           backendMatchActions={backendMatchActions}
+          backendBookingAvailabilityActions={backendBookingAvailabilityActions}
           onBackendProfileSave={
             telegramBackendLogin.sessionReady
               ? handleBackendProfileSave

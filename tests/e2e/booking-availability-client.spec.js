@@ -327,3 +327,164 @@ test('keeps the credential private while lifecycle reads booking availability', 
     publicResultsHideCredential: true,
   });
 });
+
+test('renders backend availability in read-only booking mode', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-08-05T06:00:00.000Z') });
+
+  const factorySummary = await page.evaluate(async () => {
+    const reactModule = await import('/@id/react');
+    const React = reactModule.default ?? reactModule;
+    const reactDomClientModule = await import('/@id/react-dom/client');
+    const { createRoot } =
+      reactDomClientModule.default ?? reactDomClientModule;
+    const { default: BookingScreen } = await import(
+      '/src/components/BookingScreen.jsx'
+    );
+    const { createBackendBookingAvailabilityActions } = await import(
+      '/src/components/AuthGate.jsx'
+    );
+
+    const calls = [];
+    let writes = 0;
+    const login = {
+      sessionReady: true,
+      async listBookingServices() {
+        calls.push({ operation: 'services' });
+        return {
+          outcome: 'services_loaded',
+          services: [
+            {
+              id: 30539694,
+              title: 'Аренда корта 1.5ч.',
+              categoryId: 27980310,
+            },
+            {
+              id: 30539748,
+              title: 'Аренда корта 1.5ч. Прайм',
+              categoryId: 27980310,
+            },
+            {
+              id: 30539922,
+              title: 'Индивид 1ч.',
+              categoryId: 27980391,
+            },
+          ],
+        };
+      },
+      async listBookingCourts(serviceId) {
+        calls.push({ operation: 'courts', serviceId });
+        return {
+          outcome: 'courts_loaded',
+          courts: [
+            { id: 5730531, name: 'Корт №1' },
+            { id: 5762241, name: 'Корт №2' },
+          ],
+        };
+      },
+      async listBookingDates(query) {
+        calls.push({ operation: 'dates', ...query });
+        return { outcome: 'dates_loaded', dates: [query.dateFrom] };
+      },
+      async listBookingTimes(query) {
+        calls.push({ operation: 'times', ...query });
+        const time = query.serviceId === 30539694 ? '16:30' : '17:00';
+        return {
+          outcome: 'times_loaded',
+          times: [{
+            time,
+            durationSeconds: 5_400,
+            datetime: `${query.date}T${time}:00+03:00`,
+          }],
+        };
+      },
+    };
+    const availabilityActions =
+      createBackendBookingAvailabilityActions(login);
+    const container = document.createElement('div');
+    container.dataset.testid = 'booking-readonly-root';
+    document.body.append(container);
+    createRoot(container).render(React.createElement(BookingScreen, {
+      availabilityActions,
+      onBookSlot() {
+        writes += 1;
+      },
+    }));
+    window.__bookingReadOnlySummary = { calls, get writes() { return writes; } };
+
+    return {
+      actionsFrozen: Object.isFrozen(availabilityActions),
+      disabledWithoutSession:
+        createBackendBookingAvailabilityActions({ sessionReady: false }) === null,
+    };
+  });
+
+  expect(factorySummary).toEqual({
+    actionsFrozen: true,
+    disabledWithoutSession: true,
+  });
+
+  const root = page.getByTestId('booking-readonly-root');
+  await expect(root.getByTestId('booking-availability-status')).toHaveText(
+    'Показаны актуальные свободные слоты клуба.',
+  );
+  await expect(root.getByRole('button', { name: 'Корт №1' })).toBeVisible();
+  await expect(root.getByRole('button', { name: '1,5 ч' })).toBeEnabled();
+  await expect(root.getByRole('button', { name: '2,5 ч' })).toBeDisabled();
+
+  const standardTime = root.getByRole('button', {
+    name: '16:30 Свободно',
+  });
+  const primeTime = root.getByRole('button', {
+    name: '17:00 Свободно',
+  });
+  await expect(standardTime).toBeEnabled();
+  await expect(standardTime).toContainText('Свободно');
+  await expect(primeTime).toBeEnabled();
+  await expect(primeTime).toContainText('Свободно');
+
+  await standardTime.click();
+  const dialog = root.getByRole('dialog', { name: 'Подтверждение брони' });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Только просмотр' }))
+    .toBeDisabled();
+  await expect(dialog).toContainText(
+    'Создание брони подключим отдельным этапом.',
+  );
+
+  const summary = await page.evaluate(() => ({
+    calls: window.__bookingReadOnlySummary.calls,
+    writes: window.__bookingReadOnlySummary.writes,
+  }));
+  expect(summary.writes).toBe(0);
+  expect(summary.calls).toEqual([
+    { operation: 'services' },
+    { operation: 'courts', serviceId: 30539694 },
+    { operation: 'courts', serviceId: 30539748 },
+    {
+      operation: 'dates',
+      serviceId: 30539694,
+      courtId: 5730531,
+      dateFrom: '2026-08-05',
+      dateTo: '2026-08-18',
+    },
+    {
+      operation: 'dates',
+      serviceId: 30539748,
+      courtId: 5730531,
+      dateFrom: '2026-08-05',
+      dateTo: '2026-08-18',
+    },
+    {
+      operation: 'times',
+      serviceId: 30539694,
+      courtId: 5730531,
+      date: '2026-08-05',
+    },
+    {
+      operation: 'times',
+      serviceId: 30539748,
+      courtId: 5730531,
+      date: '2026-08-05',
+    },
+  ]);
+});
