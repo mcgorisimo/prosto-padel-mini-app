@@ -608,6 +608,7 @@ function createPlayerProfilePhotoService(
   ],
   exports: [
     TELEGRAM_LOGIN_FEATURE,
+    SESSION_AUTHENTICATION_CLOCK,
     SessionAuthenticationService,
     SessionBearerGuard,
     AdminPlayerRatingService,
