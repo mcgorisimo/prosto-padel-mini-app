@@ -2940,6 +2940,13 @@ const handleBookSlot = async (booking) => {
           <BookingScreen
             allMatches={allMatches}
             availabilityActions={backendBookingAvailabilityActions}
+            bookingClient={{
+              fullName: [currentUser.firstName, currentUser.lastName]
+                .filter(Boolean)
+                .join(' '),
+              phone: currentUser.phone,
+              email: session?.user?.email ?? '',
+            }}
             onBookSlot={handleBookSlot}
             showToast={showToast}
           />

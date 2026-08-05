@@ -105,15 +105,58 @@ function mergeDates(results) {
   return [...new Set(results.flatMap((result) => result.dates))].sort();
 }
 
+function createRequestKey() {
+  const bytes = new Uint8Array(16);
+  globalThis.crypto?.getRandomValues?.(bytes);
+  if (bytes.every((value) => value === 0)) return null;
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = [...bytes].map((value) => value.toString(16).padStart(2, '0'));
+  return [
+    hex.slice(0, 4).join(''),
+    hex.slice(4, 6).join(''),
+    hex.slice(6, 8).join(''),
+    hex.slice(8, 10).join(''),
+    hex.slice(10).join(''),
+  ].join('-');
+}
+
+function normalizeBookingClient(value) {
+  const fullName = typeof value?.fullName === 'string'
+    ? value.fullName.trim()
+    : '';
+  const phone = typeof value?.phone === 'string'
+    ? value.phone.replace(/\D/gu, '')
+    : '';
+  const email = typeof value?.email === 'string'
+    ? value.email.trim().toLowerCase()
+    : '';
+  if (
+    fullName.length === 0 ||
+    fullName.length > 256 ||
+    !/^\d{10,15}$/u.test(phone) ||
+    email.length > 320 ||
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(email)
+  ) {
+    return null;
+  }
+  return Object.freeze({ phone, fullName, email });
+}
+
 export default function BookingScreen({
   allMatches = [],
   availabilityActions = null,
+  bookingClient = null,
   onBookSlot,
   showToast,
 }) {
   const dates = useMemo(() => buildDates(14), []);
   const times = useMemo(buildTimes, []);
   const usesBackendAvailability = availabilityActions !== null;
+  const normalizedBookingClient = useMemo(
+    () => normalizeBookingClient(bookingClient),
+    [bookingClient?.email, bookingClient?.fullName, bookingClient?.phone],
+  );
   const [selectedDateISO, setSelectedDateISO] = useState(dates[0]?.dateISO);
   const [duration, setDuration] = useState(1.5);
   const [courtId, setCourtId] = useState(ANY_COURT);
@@ -429,12 +472,20 @@ export default function BookingScreen({
       return { state: 'unknown', court: null };
     }
 
-    const court = getAvailableCourt(time);
+    const backendSlot = usesBackendAvailability
+      ? backendTimeByValue.get(time)
+      : null;
+    const court = backendSlot?.court ?? getAvailableCourt(time);
     if (!court) {
       return { state: isSelected ? 'unavailable' : 'unavailable', court: null };
     }
 
-    return { state: isSelected ? 'selected' : 'free', court };
+    return {
+      state: isSelected ? 'selected' : 'free',
+      court,
+      serviceId: backendSlot?.serviceId,
+      datetime: backendSlot?.datetime,
+    };
   };
 
   const sectionedSlots = TIME_SECTIONS.map((section) => ({
@@ -461,8 +512,20 @@ export default function BookingScreen({
     const next = getSlotState(selectedSlot.time, minute);
     if (next.state !== 'selected') {
       setSelectedSlot(null);
-    } else if (next.court?.id && next.court.id !== selectedSlot.court?.id) {
-      setSelectedSlot((prev) => prev ? { ...prev, court: next.court } : prev);
+    } else if (
+      next.court?.id &&
+      (
+        next.court.id !== selectedSlot.court?.id ||
+        next.serviceId !== selectedSlot.serviceId ||
+        next.datetime !== selectedSlot.datetime
+      )
+    ) {
+      setSelectedSlot((prev) => prev ? {
+        ...prev,
+        court: next.court,
+        serviceId: next.serviceId,
+        datetime: next.datetime,
+      } : prev);
     }
   }, [
     allMatches,
@@ -497,6 +560,8 @@ export default function BookingScreen({
       dateISO: selectedDateISO,
       time,
       court: slot.court,
+      serviceId: slot.serviceId,
+      datetime: slot.datetime,
     });
   };
 
@@ -506,13 +571,75 @@ export default function BookingScreen({
   };
 
   const handleConfirm = async () => {
-    if (!selectedSlot || isSavingRef.current || usesBackendAvailability) return;
+    if (!selectedSlot || isSavingRef.current) return;
 
     const isPublicFormat = false;
 
     isSavingRef.current = true;
     setIsSaving(true);
     try {
+      if (usesBackendAvailability) {
+        const requestKey = createRequestKey();
+        if (
+          normalizedBookingClient === null ||
+          requestKey === null ||
+          !Number.isSafeInteger(selectedSlot.serviceId) ||
+          !Number.isSafeInteger(selectedSlot.court?.id) ||
+          typeof selectedSlot.datetime !== 'string' ||
+          typeof availabilityActions.createBooking !== 'function'
+        ) {
+          showToast?.(
+            'Проверьте имя, телефон и email в профиле перед бронированием.',
+            'error',
+          );
+          return;
+        }
+        const result = await availabilityActions.createBooking({
+          requestKey,
+          serviceId: selectedSlot.serviceId,
+          courtId: selectedSlot.court.id,
+          datetime: selectedSlot.datetime,
+          client: normalizedBookingClient,
+        });
+        if (result?.outcome === 'booking_created') {
+          const message =
+            'Бронь создана в YCLIENTS без онлайн-оплаты. Оплату подтвердит администратор клуба.';
+          setSuccessText(message);
+          showToast?.(message, 'success');
+          setTimesState((current) => ({
+            ...current,
+            slots: current.slots.filter((slot) =>
+              !(
+                slot.time === selectedSlot.time &&
+                slot.court?.id === selectedSlot.court.id
+              )),
+          }));
+          setSelectedSlot(null);
+          return;
+        }
+        if (result?.reason === 'not_bookable') {
+          setSelectedSlot(null);
+          showToast?.(
+            'Этот слот уже недоступен. Выберите другое время.',
+            'error',
+          );
+          return;
+        }
+        if (result?.reason === 'unknown_outcome') {
+          setSelectedSlot(null);
+          showToast?.(
+            'Статус брони не определён. Не повторяйте запрос — обратитесь к администратору клуба.',
+            'error',
+          );
+          return;
+        }
+        showToast?.(
+          'Не удалось создать бронь. Проверьте доступность и попробуйте позже.',
+          'error',
+        );
+        return;
+      }
+
       await onBookSlot?.({
         court: selectedSlot.court,
         time: selectedSlot.time,
@@ -773,7 +900,9 @@ export default function BookingScreen({
 
               <p className="text-xs leading-relaxed text-warm-white/52">
                 {usesBackendAvailability
-                  ? 'Сейчас доступен безопасный просмотр реальных слотов. Создание брони подключим отдельным этапом.'
+                  ? normalizedBookingClient
+                    ? 'Бронь появится в YCLIENTS без онлайн-оплаты. Оплату подтвердит администратор клуба.'
+                    : 'Для бронирования заполните имя, телефон и email в профиле.'
                   : 'Бронь создаётся без онлайн-оплаты. Администратор клуба подтвердит оплату отдельно.'}
               </p>
             </div>
@@ -781,14 +910,16 @@ export default function BookingScreen({
             <div className="booking-sheet-footer">
               <button
                 type="button"
-                disabled={isSaving || usesBackendAvailability}
+                disabled={isSaving || (
+                  usesBackendAvailability && normalizedBookingClient === null
+                )}
                 onClick={handleConfirm}
                 className="booking-confirm-cta"
               >
-                {usesBackendAvailability
-                  ? 'Только просмотр'
-                  : isSaving
-                    ? 'Сохраняем...'
+                {isSaving
+                  ? 'Создаём бронь...'
+                  : usesBackendAvailability && normalizedBookingClient === null
+                    ? 'Заполните профиль'
                     : 'Создать бронь'}
               </button>
             </div>

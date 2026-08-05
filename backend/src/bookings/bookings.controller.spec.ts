@@ -13,6 +13,7 @@ import {
 import { SessionAuthenticationService } from '../auth/session-authentication.service';
 import { SessionAuthenticationResult } from '../auth/session-authentication.types';
 import { YclientsAvailabilityService } from '../integrations/yclients/yclients-availability.service';
+import { YclientsBookingService } from '../integrations/yclients/yclients-booking.service';
 import { BookingsController } from './bookings.controller';
 
 const CREDENTIAL = Buffer.alloc(32, 0x62).toString('base64url');
@@ -26,6 +27,7 @@ interface Harness {
   readonly listCourtsForService: jest.Mock;
   readonly listAvailableDates: jest.Mock;
   readonly listAvailableTimes: jest.Mock;
+  readonly createBooking: jest.Mock;
   readonly authenticate: jest.Mock<
     Promise<SessionAuthenticationResult>,
     [unknown]
@@ -58,6 +60,12 @@ async function createHarness(): Promise<Harness> {
       },
     ],
   });
+  const createBooking = jest.fn().mockResolvedValue({
+    outcome: 'created',
+    appointmentId: 1,
+    recordId: 2_820_023,
+    recordHash: 'private-record-hash',
+  });
   const authenticate = jest
     .fn<Promise<SessionAuthenticationResult>, [unknown]>()
     .mockResolvedValue({
@@ -86,6 +94,10 @@ async function createHarness(): Promise<Harness> {
         useValue: { authenticate },
       },
       {
+        provide: YclientsBookingService,
+        useValue: { createBooking },
+      },
+      {
         provide: SESSION_AUTHENTICATION_CLOCK,
         useValue: { nowEpochSeconds: () => NOW },
       },
@@ -112,6 +124,7 @@ async function createHarness(): Promise<Harness> {
     listCourtsForService,
     listAvailableDates,
     listAvailableTimes,
+    createBooking,
     authenticate,
     logs,
   };
@@ -206,6 +219,109 @@ describe('BookingsController', () => {
     expect(response.statusCode).toBe(401);
     expect(harness.listActiveServices).not.toHaveBeenCalled();
   });
+
+  it('creates one bearer-protected booking without exposing provider secrets', async () => {
+    const requestKey = deterministicUuid('booking-controller-request');
+    const response = await harness.app.inject({
+      method: 'POST',
+      url: '/bookings',
+      headers: headers(),
+      payload: {
+        requestKey,
+        serviceId: 30_539_679,
+        courtId: 5_730_531,
+        datetime: '2026-08-06T07:00:00+03:00',
+        client: {
+          phone: '79000000000',
+          fullName: 'Test Player',
+          email: 'test@example.test',
+        },
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toEqual({ recordId: 2_820_023 });
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.headers.pragma).toBe('no-cache');
+    expect(harness.createBooking).toHaveBeenCalledTimes(1);
+    expect(harness.createBooking).toHaveBeenCalledWith({
+      apiId: expect.any(Number),
+      serviceId: 30_539_679,
+      courtId: 5_730_531,
+      datetime: '2026-08-06T07:00:00+03:00',
+      client: {
+        phone: '79000000000',
+        fullName: 'Test Player',
+        email: 'test@example.test',
+      },
+    });
+    const command = harness.createBooking.mock.calls[0][0];
+    expect(Number.isSafeInteger(command.apiId)).toBe(true);
+    expect(command.apiId).toBeGreaterThan(0);
+    expect(command.apiId).toBeLessThanOrEqual(2_147_483_647);
+    expect(JSON.stringify(response.json())).not.toContain('record-hash');
+  });
+
+  it('rejects malformed booking creation before the write service', async () => {
+    const response = await harness.app.inject({
+      method: 'POST',
+      url: '/bookings',
+      headers: headers(),
+      payload: {
+        requestKey: 'not-a-uuid',
+        serviceId: 30_539_679,
+        courtId: 5_730_531,
+        datetime: '2026-08-06T07:00:00+03:00',
+        client: {
+          phone: PRIVATE_MARKER,
+          fullName: 'Test Player',
+          email: 'test@example.test',
+        },
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      code: 'booking_creation_invalid_request',
+    });
+    expect(harness.createBooking).not.toHaveBeenCalled();
+    expect(JSON.stringify(response.json())).not.toContain(PRIVATE_MARKER);
+    expect(JSON.stringify(harness.logs)).not.toContain(PRIVATE_MARKER);
+  });
+
+  it.each([
+    ['not_bookable', 409, 'booking_slot_not_bookable'],
+    ['rejected', 422, 'booking_creation_rejected'],
+    ['invalid_response', 502, 'booking_creation_invalid_response'],
+    ['unknown_outcome', 502, 'booking_creation_unknown_outcome'],
+    ['write_disabled', 503, 'booking_creation_unavailable'],
+    ['unavailable', 503, 'booking_creation_unavailable'],
+  ] as const)(
+    'maps booking creation outcome %s to a safe public error',
+    async (outcome, statusCode, code) => {
+      harness.createBooking.mockResolvedValueOnce({ outcome });
+      const response = await harness.app.inject({
+        method: 'POST',
+        url: '/bookings',
+        headers: headers(),
+        payload: {
+          requestKey: deterministicUuid(`booking-controller-${outcome}`),
+          serviceId: 30_539_679,
+          courtId: 5_730_531,
+          datetime: '2026-08-06T07:00:00+03:00',
+          client: {
+            phone: '79000000000',
+            fullName: 'Test Player',
+            email: 'test@example.test',
+          },
+        },
+      });
+
+      expect(response.statusCode).toBe(statusCode);
+      expect(response.json()).toMatchObject({ statusCode, code });
+      expect(harness.createBooking).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it('rejects malformed path and query inputs before service calls', async () => {
     const court = await harness.app.inject({

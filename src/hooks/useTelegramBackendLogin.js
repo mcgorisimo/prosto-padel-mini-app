@@ -1181,6 +1181,17 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
     );
   }
 
+  function createBooking(command) {
+    return runMatchOperation(
+      (credential, signal) =>
+        bookings.createBooking(credential, command, { signal }),
+      (result) =>
+        result?.outcome === 'booking_created' &&
+        Number.isSafeInteger(result.recordId) &&
+        result.recordId > 0,
+    );
+  }
+
   function listMatches(limit = 20) {
     return runMatchOperation(
       (credential, signal) =>
@@ -1697,6 +1708,7 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
     listBookingCourts,
     listBookingDates,
     listBookingTimes,
+    createBooking,
     listMatches,
     listAccountMatches,
     loadMatch,
@@ -1837,6 +1849,16 @@ export function useTelegramBackendLogin() {
       }));
     }
     return telegramBackendLoginLifecycle.listBookingTimes(query);
+  }, []);
+
+  const createBooking = useCallback((command) => {
+    if (!FEATURE_ENABLED) {
+      return Promise.resolve(Object.freeze({
+        outcome: 'rejected',
+        reason: 'not_authenticated',
+      }));
+    }
+    return telegramBackendLoginLifecycle.createBooking(command);
   }, []);
 
   const listMatches = useCallback((limit = 20) => {
@@ -2217,6 +2239,7 @@ export function useTelegramBackendLogin() {
     listBookingCourts,
     listBookingDates,
     listBookingTimes,
+    createBooking,
     listMatches,
     listAccountMatches,
     loadMatch,

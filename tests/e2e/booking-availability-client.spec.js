@@ -111,6 +111,113 @@ test('reads services, courts, dates and times using only authenticated GET reque
   });
 });
 
+test('creates exactly one authenticated booking without payment fields', async ({
+  page,
+}) => {
+  const summary = await page.evaluate(async (credential) => {
+    const { createBookingAvailabilityClient } = await import(
+      '/src/lib/bookingAvailabilityClient.js'
+    );
+    const calls = [];
+    const client = createBookingAvailabilityClient({
+      fetchImpl: async (path, options) => {
+        calls.push({
+          path,
+          method: options.method,
+          cache: options.cache,
+          credentials: options.credentials,
+          redirect: options.redirect,
+          acceptsJson: options.headers.Accept === 'application/json',
+          sendsJson: options.headers['Content-Type'] === 'application/json',
+          authorizationMatches:
+            options.headers.Authorization === `Bearer ${credential}`,
+          body: JSON.parse(options.body),
+        });
+        return new Response(JSON.stringify({ recordId: 2820023 }), {
+          status: 201,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      },
+    });
+    const result = await client.createBooking(credential, {
+      requestKey: '11111111-1111-4111-8111-111111111111',
+      serviceId: 30539679,
+      courtId: 5730531,
+      datetime: '2026-08-06T07:00:00+03:00',
+      client: {
+        phone: '79000000000',
+        fullName: 'Test Player',
+        email: 'test@example.test',
+      },
+    });
+    return { calls, result };
+  }, CREDENTIAL);
+
+  expect(summary.result).toEqual({
+    outcome: 'booking_created',
+    recordId: 2820023,
+  });
+  expect(summary.calls).toEqual([{
+    path: '/api/v1/bookings',
+    method: 'POST',
+    cache: 'no-store',
+    credentials: 'omit',
+    redirect: 'error',
+    acceptsJson: true,
+    sendsJson: true,
+    authorizationMatches: true,
+    body: {
+      requestKey: '11111111-1111-4111-8111-111111111111',
+      serviceId: 30539679,
+      courtId: 5730531,
+      datetime: '2026-08-06T07:00:00+03:00',
+      client: {
+        phone: '79000000000',
+        fullName: 'Test Player',
+        email: 'test@example.test',
+      },
+    },
+  }]);
+  expect(summary.calls[0].body).not.toHaveProperty('paymentStatus');
+  expect(summary.calls[0].body).not.toHaveProperty('ownerPaid');
+  expect(summary.calls[0].body).not.toHaveProperty('holdAmount');
+  expect(summary.calls[0].body).not.toHaveProperty('prepay');
+});
+
+test('does not retry a booking when its network outcome is unknown', async ({
+  page,
+}) => {
+  const summary = await page.evaluate(async (credential) => {
+    const { createBookingAvailabilityClient } = await import(
+      '/src/lib/bookingAvailabilityClient.js'
+    );
+    let calls = 0;
+    const client = createBookingAvailabilityClient({
+      fetchImpl: async () => {
+        calls += 1;
+        throw new TypeError('synthetic network failure');
+      },
+    });
+    const result = await client.createBooking(credential, {
+      requestKey: '22222222-2222-4222-8222-222222222222',
+      serviceId: 30539679,
+      courtId: 5730531,
+      datetime: '2026-08-06T07:00:00+03:00',
+      client: {
+        phone: '79000000000',
+        fullName: 'Test Player',
+        email: 'test@example.test',
+      },
+    });
+    return { calls, result };
+  }, CREDENTIAL);
+
+  expect(summary).toEqual({
+    calls: 1,
+    result: { outcome: 'rejected', reason: 'unknown_outcome' },
+  });
+});
+
 test('rejects invalid input before fetch', async ({ page }) => {
   const summary = await page.evaluate(async (credential) => {
     const { createBookingAvailabilityClient } = await import(
@@ -138,6 +245,17 @@ test('rejects invalid input before fetch', async ({ page }) => {
         courtId: 5730531,
         date: '2026-02-30',
       }),
+      invalidCreate: await client.createBooking(credential, {
+        requestKey: 'invalid',
+        serviceId: 30539679,
+        courtId: 5730531,
+        datetime: '2026-08-06T07:00:00+03:00',
+        client: {
+          phone: '79000000000',
+          fullName: 'Test Player',
+          email: 'test@example.test',
+        },
+      }),
     };
   }, CREDENTIAL);
 
@@ -150,6 +268,7 @@ test('rejects invalid input before fetch', async ({ page }) => {
     summary.invalidCourt,
     summary.invalidDates,
     summary.invalidTimeDate,
+    summary.invalidCreate,
   ]) {
     expect(result).toEqual({ outcome: 'rejected', reason: 'invalid_request' });
   }
@@ -257,6 +376,13 @@ test('keeps the credential private while lifecycle reads booking availability', 
             }],
           };
         },
+        async createBooking(credential, command) {
+          checkCredential(credential, 'create');
+          return {
+            outcome: 'booking_created',
+            recordId: command.serviceId,
+          };
+        },
       },
       credentialStorage: {
         async read() {
@@ -289,6 +415,17 @@ test('keeps the credential private while lifecycle reads booking availability', 
       courtId: 5730531,
       date: '2026-08-05',
     });
+    const booking = await lifecycle.createBooking({
+      requestKey: '33333333-3333-4333-8333-333333333333',
+      serviceId: 30539679,
+      courtId: 5730531,
+      datetime: '2026-08-06T07:00:00+03:00',
+      client: {
+        phone: '79000000000',
+        fullName: 'Test Player',
+        email: 'test@example.test',
+      },
+    });
     detach();
 
     return {
@@ -298,8 +435,9 @@ test('keeps the credential private while lifecycle reads booking availability', 
       courts,
       dates,
       times,
+      booking,
       publicResultsHideCredential:
-        !JSON.stringify({ services, courts, dates, times })
+        !JSON.stringify({ services, courts, dates, times, booking })
           .includes(parameters.credential),
     };
   }, {
@@ -309,7 +447,7 @@ test('keeps the credential private while lifecycle reads booking availability', 
 
   expect(summary).toEqual({
     credentialMatched: true,
-    calls: ['authenticate', 'services', 'courts', 'dates', 'times'],
+    calls: ['authenticate', 'services', 'courts', 'dates', 'times', 'create'],
     services: { outcome: 'services_loaded', services: [] },
     courts: {
       outcome: 'courts_loaded',
@@ -324,11 +462,12 @@ test('keeps the credential private while lifecycle reads booking availability', 
         datetime: '2026-08-05T16:30:00+03:00',
       }],
     },
+    booking: { outcome: 'booking_created', recordId: 30539679 },
     publicResultsHideCredential: true,
   });
 });
 
-test('renders backend availability in read-only booking mode', async ({ page }) => {
+test('creates a backend booking from the availability confirmation', async ({ page }) => {
   await page.clock.install({ time: new Date('2026-08-05T06:00:00.000Z') });
 
   const factorySummary = await page.evaluate(async () => {
@@ -400,6 +539,11 @@ test('renders backend availability in read-only booking mode', async ({ page }) 
           }],
         };
       },
+      async createBooking(command) {
+        writes += 1;
+        calls.push({ operation: 'create', command });
+        return { outcome: 'booking_created', recordId: 2820023 };
+      },
     };
     const availabilityActions =
       createBackendBookingAvailabilityActions(login);
@@ -408,8 +552,13 @@ test('renders backend availability in read-only booking mode', async ({ page }) 
     document.body.append(container);
     createRoot(container).render(React.createElement(BookingScreen, {
       availabilityActions,
+      bookingClient: {
+        fullName: 'Test Player',
+        phone: '+7 900 000-00-00',
+        email: 'test@example.test',
+      },
       onBookSlot() {
-        writes += 1;
+        writes += 100;
       },
     }));
     window.__bookingReadOnlySummary = { calls, get writes() { return writes; } };
@@ -443,18 +592,22 @@ test('renders backend availability in read-only booking mode', async ({ page }) 
   await primeTime.click();
   const dialog = root.getByRole('dialog', { name: 'Подтверждение брони' });
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByRole('button', { name: 'Только просмотр' }))
-    .toBeDisabled();
+  const createButton = dialog.getByRole('button', { name: 'Создать бронь' });
+  await expect(createButton).toBeEnabled();
   await expect(dialog).toContainText(
-    'Создание брони подключим отдельным этапом.',
+    'Бронь появится в YCLIENTS без онлайн-оплаты.',
+  );
+  await createButton.click();
+  await expect(root).toContainText(
+    'Бронь создана в YCLIENTS без онлайн-оплаты.',
   );
 
   const summary = await page.evaluate(() => ({
     calls: window.__bookingReadOnlySummary.calls,
     writes: window.__bookingReadOnlySummary.writes,
   }));
-  expect(summary.writes).toBe(0);
-  expect(summary.calls).toEqual([
+  expect(summary.writes).toBe(1);
+  expect(summary.calls.slice(0, -1)).toEqual([
     { operation: 'services' },
     { operation: 'courts', serviceId: 30539694 },
     { operation: 'courts', serviceId: 30539748 },
@@ -485,4 +638,21 @@ test('renders backend availability in read-only booking mode', async ({ page }) 
       date: '2026-08-05',
     },
   ]);
+  expect(summary.calls.at(-1)).toMatchObject({
+    operation: 'create',
+    command: {
+      serviceId: 30539748,
+      courtId: 5730531,
+      datetime: '2026-08-05T17:00:00+03:00',
+      client: {
+        phone: '79000000000',
+        fullName: 'Test Player',
+        email: 'test@example.test',
+      },
+    },
+  });
+  expect(summary.calls.at(-1).command.requestKey).toMatch(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
+  );
+  expect(summary.calls.at(-1).command).not.toHaveProperty('paymentStatus');
 });

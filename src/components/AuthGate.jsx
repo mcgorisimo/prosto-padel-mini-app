@@ -108,6 +108,7 @@ export function createBackendBookingAvailabilityActions(telegramBackendLogin) {
     listCourts: telegramBackendLogin.listBookingCourts,
     listDates: telegramBackendLogin.listBookingDates,
     listTimes: telegramBackendLogin.listBookingTimes,
+    createBooking: telegramBackendLogin.createBooking,
   });
 }
 
@@ -306,6 +307,7 @@ export default function AuthGate() {
       telegramBackendLogin.listBookingCourts,
       telegramBackendLogin.listBookingDates,
       telegramBackendLogin.listBookingTimes,
+      telegramBackendLogin.createBooking,
       telegramBackendLogin.sessionReady,
     ],
   );
