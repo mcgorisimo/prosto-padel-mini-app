@@ -105,6 +105,19 @@ function mergeDates(results) {
   return [...new Set(results.flatMap((result) => result.dates))].sort();
 }
 
+function nextAvailableDate(selectedDateISO, availableDates) {
+  if (
+    typeof selectedDateISO !== 'string' ||
+    !Array.isArray(availableDates) ||
+    availableDates.length === 0 ||
+    availableDates.includes(selectedDateISO)
+  ) {
+    return selectedDateISO;
+  }
+  return availableDates.find((date) => date > selectedDateISO)
+    ?? selectedDateISO;
+}
+
 function createRequestKey() {
   const bytes = new Uint8Array(16);
   globalThis.crypto?.getRandomValues?.(bytes);
@@ -335,14 +348,22 @@ export default function BookingScreen({
   const backendDateSet = useMemo(() => new Set(backendDates), [backendDates]);
 
   useEffect(() => {
-    if (!usesBackendAvailability || datesState.status !== 'ready') return;
-    if (backendDateSet.has(selectedDateISO)) return;
-    setSelectedDateISO(backendDates[0] ?? dates[0]?.dateISO);
+    if (
+      !usesBackendAvailability ||
+      datesState.status !== 'ready' ||
+      datesState.queryKey !== datesQueryKey
+    ) {
+      return;
+    }
+    const nextDate = nextAvailableDate(selectedDateISO, backendDates);
+    if (nextDate === selectedDateISO) return;
+    setSelectedDateISO(nextDate);
     setSelectedSlot(null);
   }, [
     backendDateSet,
     backendDates,
-    dates,
+    datesQueryKey,
+    datesState.queryKey,
     datesState.status,
     selectedDateISO,
     usesBackendAvailability,
@@ -354,10 +375,25 @@ export default function BookingScreen({
     if (
       !usesBackendAvailability ||
       datesState.status !== 'ready' ||
-      !backendDateSet.has(selectedDateISO) ||
+      datesState.queryKey !== datesQueryKey ||
       selectedServiceIds.length === 0 ||
       queryCourtIds.length === 0
     ) {
+      return undefined;
+    }
+    if (!backendDateSet.has(selectedDateISO)) {
+      setTimesState((current) => (
+        current.status === 'ready' &&
+        current.queryKey === timesQueryKey &&
+        current.slots.length === 0
+          ? current
+          : {
+              status: 'ready',
+              queryKey: timesQueryKey,
+              slots: [],
+              partial: false,
+            }
+      ));
       return undefined;
     }
     let active = true;
@@ -418,6 +454,8 @@ export default function BookingScreen({
     availabilityActions,
     backendCourts,
     backendDateSet,
+    datesQueryKey,
+    datesState.queryKey,
     datesState.status,
     queryCourtIds,
     selectedDateISO,
@@ -500,6 +538,10 @@ export default function BookingScreen({
   ].includes('error');
   const availabilityStatusText = availabilityHasError
     ? 'Не удалось загрузить доступность. Попробуйте открыть экран ещё раз.'
+    : datesState.status === 'ready' &&
+        datesState.queryKey === datesQueryKey &&
+        backendDates.length === 0
+      ? 'Для выбранной длительности и корта нет доступных дат.'
     : timesState.status === 'ready' && timesState.queryKey === timesQueryKey
       ? timesState.partial
         ? 'Показаны доступные слоты. Часть вариантов услуги временно недоступна.'
@@ -748,6 +790,7 @@ export default function BookingScreen({
                 disabled={disabled}
                 onClick={() => {
                   setDuration(item);
+                  setSelectedSlot(null);
                   setSuccessText('');
                 }}
                 className={[

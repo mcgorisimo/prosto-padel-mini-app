@@ -656,3 +656,103 @@ test('creates a backend booking from the availability confirmation', async ({ pa
   );
   expect(summary.calls.at(-1).command).not.toHaveProperty('paymentStatus');
 });
+
+test('preserves a future date across duration changes and only falls forward', async ({
+  page,
+}) => {
+  await page.clock.install({ time: new Date('2026-08-05T06:00:00.000Z') });
+
+  await page.evaluate(async () => {
+    const reactModule = await import('/@id/react');
+    const React = reactModule.default ?? reactModule;
+    const reactDomClientModule = await import('/@id/react-dom/client');
+    const { createRoot } =
+      reactDomClientModule.default ?? reactDomClientModule;
+    const { default: BookingScreen } = await import(
+      '/src/components/BookingScreen.jsx'
+    );
+
+    const services = [
+      { id: 101, title: 'Аренда корта 1ч.', categoryId: 1 },
+      { id: 102, title: 'Аренда корта 1.5ч.', categoryId: 1 },
+      { id: 103, title: 'Аренда корта 2ч.', categoryId: 1 },
+    ];
+    const datesByService = new Map([
+      [101, ['2026-08-05', '2026-08-09', '2026-08-10']],
+      [102, ['2026-08-05', '2026-08-09']],
+      [103, ['2026-08-05', '2026-08-10']],
+    ]);
+    const calls = [];
+    const availabilityActions = Object.freeze({
+      async listServices() {
+        return { outcome: 'services_loaded', services };
+      },
+      async listCourts() {
+        return {
+          outcome: 'courts_loaded',
+          courts: [{ id: 201, name: 'Корт №1' }],
+        };
+      },
+      async listDates(query) {
+        calls.push({ operation: 'dates', ...query });
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return {
+          outcome: 'dates_loaded',
+          dates: datesByService.get(query.serviceId) ?? [],
+        };
+      },
+      async listTimes(query) {
+        calls.push({ operation: 'times', ...query });
+        return {
+          outcome: 'times_loaded',
+          times: [{
+            time: '17:00',
+            durationSeconds: 3600,
+            datetime: `${query.date}T17:00:00+03:00`,
+          }],
+        };
+      },
+      async createBooking() {
+        return { outcome: 'rejected', reason: 'unavailable' };
+      },
+    });
+
+    const container = document.createElement('div');
+    container.dataset.testid = 'booking-date-state-root';
+    document.body.append(container);
+    createRoot(container).render(React.createElement(BookingScreen, {
+      availabilityActions,
+    }));
+    window.__bookingDateStateCalls = calls;
+  });
+
+  const root = page.getByTestId('booking-date-state-root');
+  const august5 = root.getByRole('button', { name: /(?:^| )5 авг$/u });
+  const august9 = root.getByRole('button', { name: /(?:^| )9 авг$/u });
+  const august10 = root.getByRole('button', { name: /(?:^| )10 авг$/u });
+
+  await expect(august9).toBeEnabled();
+  await august9.click();
+  await expect(august9).toHaveClass(/is-active/u);
+
+  await root.getByRole('button', { name: '1 ч' }).click();
+  await expect(august9).toBeEnabled();
+  await expect(august9).toHaveClass(/is-active/u);
+  await expect(august5).not.toHaveClass(/is-active/u);
+
+  await root.getByRole('button', { name: '2 ч' }).click();
+  await expect(august10).toBeEnabled();
+  await expect(august10).toHaveClass(/is-active/u);
+  await expect(august5).not.toHaveClass(/is-active/u);
+
+  await root.getByRole('button', { name: '1,5 ч' }).click();
+  await expect(august10).toBeDisabled();
+  await expect(august10).toHaveClass(/is-active/u);
+  await expect(august5).not.toHaveClass(/is-active/u);
+
+  const timeDates = await page.evaluate(() =>
+    window.__bookingDateStateCalls
+      .filter((call) => call.operation === 'times')
+      .map((call) => call.date));
+  expect(timeDates.at(-1)).toBe('2026-08-10');
+});
