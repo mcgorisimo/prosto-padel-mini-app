@@ -241,6 +241,47 @@ describe('file secret resolver', () => {
     expect(reader).not.toHaveBeenCalled();
   });
 
+  it('maps both allowlisted YCLIENTS token files without retaining their paths', () => {
+    const partnerPath = '/synthetic/yclients-partner-token';
+    const userPath = '/synthetic/yclients-user-token';
+    const partnerToken = 'synthetic-partner-token';
+    const userToken = 'synthetic-user-token';
+    const resolved = resolveFileSecrets(
+      {
+        [FILE_SECRET_KEYS.yclientsPartnerToken]: partnerPath,
+        [FILE_SECRET_KEYS.yclientsUserToken]: userPath,
+      },
+      readerFrom({
+        [partnerPath]: partnerToken,
+        [userPath]: userToken,
+      }),
+    );
+
+    expect(resolved.environment).toEqual({
+      YCLIENTS_PARTNER_TOKEN: partnerToken,
+      YCLIENTS_USER_TOKEN: userToken,
+    });
+  });
+
+  it('rejects an ambiguous direct and file YCLIENTS token before reading it', () => {
+    const path = '/synthetic/ambiguous-yclients-token';
+    const secret = 'synthetic-direct-partner-token';
+    const reader = readerFrom({ [path]: 'synthetic-file-partner-token' });
+
+    expectFixedFailure(
+      () =>
+        resolveFileSecrets(
+          {
+            YCLIENTS_PARTNER_TOKEN: secret,
+            [FILE_SECRET_KEYS.yclientsPartnerToken]: path,
+          },
+          reader,
+        ),
+      [path, secret],
+    );
+    expect(reader).not.toHaveBeenCalled();
+  });
+
   it('rejects an unsupported file key before reading any file', () => {
     const path = '/synthetic/unsupported-secret';
     const reader = readerFrom({ [path]: 'secret' });

@@ -11,6 +11,12 @@ services:
       DATABASE_PASSWORD_FILE: /run/secrets/backend-auth-app-password
       YCLIENTS_WEBHOOK_ENABLED: ${YCLIENTS_WEBHOOK_ENABLED:-false}
       YCLIENTS_COMPANY_ID: ${YCLIENTS_COMPANY_ID:-}
+      YCLIENTS_API_ENABLED: ${YCLIENTS_API_ENABLED:-false}
+      YCLIENTS_API_BASE_URL: ${YCLIENTS_API_BASE_URL:-https://api.yclients.com}
+      YCLIENTS_PARTNER_TOKEN: !reset null
+      YCLIENTS_USER_TOKEN: !reset null
+      YCLIENTS_PARTNER_TOKEN_FILE: /run/secrets/yclients-partner-token
+      YCLIENTS_USER_TOKEN_FILE: /run/secrets/yclients-user-token
       TELEGRAM_AUTH_ENABLED: ${TELEGRAM_AUTH_ENABLED:-false}
       TELEGRAM_BOT_TOKEN: !reset null
       TELEGRAM_IDENTITY_LOOKUP_PEPPER_BASE64: !reset null
@@ -55,4 +61,12 @@ services:
       - type: bind
         source: ${PROFILE_PHOTO_STORAGE_SECRET_ACCESS_KEY_FILE_HOST:?PROFILE_PHOTO_STORAGE_SECRET_ACCESS_KEY_FILE_HOST is required}
         target: /run/secrets/profile-photo-secret-access-key
+        read_only: true
+      - type: bind
+        source: ${YCLIENTS_PARTNER_TOKEN_FILE_HOST:?YCLIENTS_PARTNER_TOKEN_FILE_HOST is required}
+        target: /run/secrets/yclients-partner-token
+        read_only: true
+      - type: bind
+        source: ${YCLIENTS_USER_TOKEN_FILE_HOST:?YCLIENTS_USER_TOKEN_FILE_HOST is required}
+        target: /run/secrets/yclients-user-token
         read_only: true

@@ -118,20 +118,22 @@ Never run or share unfiltered `docker compose config` output on the server. It
 can expand and print existing database environment credentials. Do not enable
 shell tracing around any runtime-secret operation.
 
-The six required files are:
+The eight required files are:
 
 - the `backend_auth_app` password;
 - the Telegram bot token;
 - the Telegram identity lookup pepper in canonical base64;
 - the Telegram login workflow HMAC secret in canonical base64;
 - the profile-photo S3 Access Key ID;
-- the profile-photo S3 Secret Access Key.
+- the profile-photo S3 Secret Access Key;
+- the YCLIENTS Partner Bearer token;
+- the YCLIENTS application User token.
 
 Create them manually through the approved server secret process, outside the
 Git repository. Each file must be a regular, non-symlink file owned by
 `prostopadel` with mode `600`. Put only its corresponding secret in the file;
 the backend removes a final CR/LF itself. Configure only their non-secret host
-paths in `infra/test/.env.test`, using the six `*_FILE_HOST` variables from the
+paths in `infra/test/.env.test`, using the eight `*_FILE_HOST` variables from the
 example. Never put the file contents in that env file, Compose, an image build
 argument, or Git.
 
@@ -141,10 +143,12 @@ Set these non-secret server values explicitly in `infra/test/.env.test`:
 - `TELEGRAM_INIT_DATA_MAX_AGE_SECONDS=<approved value>`;
 - `TELEGRAM_LOGIN_UUID_NAMESPACE=<stable approved UUID>`.
 
-Keep `YCLIENTS_WEBHOOK_ENABLED=false` and `YCLIENTS_COMPANY_ID=` until
-migration 032 and the disabled webhook boundary have passed. Before the
-separately approved activation, set `YCLIENTS_COMPANY_ID` to the verified
-positive YCLIENTS company ID; it is configuration, not a token or bearer.
+Keep both `YCLIENTS_API_ENABLED=false` and `YCLIENTS_WEBHOOK_ENABLED=false`
+while mounting the Partner and User token files. Set
+`YCLIENTS_API_BASE_URL=https://api.yclients.com` and stage the verified positive
+`YCLIENTS_COMPANY_ID`; neither value is a token or bearer. Enable the API only
+after a separately approved one-shot read-only company probe succeeds. Do not
+enable webhook intake merely because API credentials are present.
 
 Keep `PROFILE_PHOTO_STORAGE_ENABLED=false` while mounting and verifying the
 new S3 credentials. Configure its endpoint, region, bucket, and public HTTPS
@@ -205,7 +209,9 @@ for secret_path in \
   "$TELEGRAM_IDENTITY_LOOKUP_PEPPER_BASE64_FILE_HOST" \
   "$TELEGRAM_LOGIN_WORKFLOW_HMAC_SECRET_BASE64_FILE_HOST" \
   "$PROFILE_PHOTO_STORAGE_ACCESS_KEY_ID_FILE_HOST" \
-  "$PROFILE_PHOTO_STORAGE_SECRET_ACCESS_KEY_FILE_HOST"
+  "$PROFILE_PHOTO_STORAGE_SECRET_ACCESS_KEY_FILE_HOST" \
+  "$YCLIENTS_PARTNER_TOKEN_FILE_HOST" \
+  "$YCLIENTS_USER_TOKEN_FILE_HOST"
 do
   test -f "$secret_path" &&
     test ! -L "$secret_path" &&
@@ -232,7 +238,9 @@ docker compose \
     '/run/secrets/telegram-identity-lookup-pepper-base64',
     '/run/secrets/telegram-login-workflow-hmac-secret-base64',
     '/run/secrets/profile-photo-access-key-id',
-    '/run/secrets/profile-photo-secret-access-key'
+    '/run/secrets/profile-photo-secret-access-key',
+    '/run/secrets/yclients-partner-token',
+    '/run/secrets/yclients-user-token'
   ]) fs.accessSync(p, fs.constants.R_OK)"
 ```
 

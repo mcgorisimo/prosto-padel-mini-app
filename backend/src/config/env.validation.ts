@@ -13,6 +13,11 @@ import {
   normalizePlayerProfilePhotoHttpsBaseUrl,
 } from './player-profile-photo.config';
 import { YCLIENTS_WEBHOOK_CONFIG_KEYS } from './yclients-webhook.config';
+import {
+  YCLIENTS_API_CONFIG_KEYS,
+  YCLIENTS_API_DEFAULT_BASE_URL,
+  normalizeYclientsHttpsBaseUrl,
+} from './yclients-api.config';
 
 const canonicalBase64Secret = Joi.string()
   .base64()
@@ -70,6 +75,32 @@ const canonicalHttpsBaseUrl = Joi.string()
       '{{#label}} must be an HTTPS base URL without credentials, query or fragment',
   });
 
+const canonicalYclientsHttpsBaseUrl = Joi.string()
+  .uri({ scheme: ['https'] })
+  .custom((value: string, helpers) => {
+    const normalized = normalizeYclientsHttpsBaseUrl(value);
+    return normalized === undefined
+      ? helpers.error('string.canonicalHttpsBaseUrl')
+      : normalized;
+  })
+  .messages({
+    'string.canonicalHttpsBaseUrl':
+      '{{#label}} must be an HTTPS base URL without credentials, query or fragment',
+  });
+
+const yclientsToken = Joi.string()
+  .min(16)
+  .max(512)
+  .pattern(/^[^\s\u0000-\u001f\u007f-\u009f]+$/u);
+
+function requiredWhenYclientsApiEnabled(schema: Joi.StringSchema) {
+  return Joi.when(YCLIENTS_API_CONFIG_KEYS.enabled, {
+    is: true,
+    then: schema.required(),
+    otherwise: schema.allow('').default(''),
+  });
+}
+
 export const envValidationSchema = Joi.object({
   NODE_ENV: Joi.string()
     .valid('development', 'test', 'production')
@@ -77,6 +108,24 @@ export const envValidationSchema = Joi.object({
   HOST: Joi.string().hostname().default('127.0.0.1'),
   PORT: Joi.number().port().default(3000),
   CRM_PROVIDER: Joi.string().valid('disabled').default('disabled'),
+  [YCLIENTS_API_CONFIG_KEYS.enabled]: Joi.boolean()
+    .truthy('true')
+    .falsy('false')
+    .default(false)
+    .when('DATABASE_ENABLED', {
+      is: false,
+      then: Joi.valid(false).messages({
+        'any.only':
+          'YCLIENTS_API_ENABLED requires DATABASE_ENABLED to be enabled',
+      }),
+    }),
+  [YCLIENTS_API_CONFIG_KEYS.baseUrl]: canonicalYclientsHttpsBaseUrl.default(
+    YCLIENTS_API_DEFAULT_BASE_URL,
+  ),
+  [YCLIENTS_API_CONFIG_KEYS.partnerToken]:
+    requiredWhenYclientsApiEnabled(yclientsToken),
+  [YCLIENTS_API_CONFIG_KEYS.userToken]:
+    requiredWhenYclientsApiEnabled(yclientsToken),
   [YCLIENTS_WEBHOOK_CONFIG_KEYS.enabled]: Joi.boolean()
     .truthy('true')
     .falsy('false')
@@ -89,7 +138,7 @@ export const envValidationSchema = Joi.object({
       }),
     }),
   [YCLIENTS_WEBHOOK_CONFIG_KEYS.companyId]: Joi.when(
-    YCLIENTS_WEBHOOK_CONFIG_KEYS.enabled,
+    YCLIENTS_API_CONFIG_KEYS.enabled,
     {
       is: true,
       then: Joi.number()
@@ -97,12 +146,20 @@ export const envValidationSchema = Joi.object({
         .positive()
         .max(Number.MAX_SAFE_INTEGER)
         .required(),
-      otherwise: Joi.number()
-        .integer()
-        .positive()
-        .max(Number.MAX_SAFE_INTEGER)
-        .allow('')
-        .default(''),
+      otherwise: Joi.when(YCLIENTS_WEBHOOK_CONFIG_KEYS.enabled, {
+        is: true,
+        then: Joi.number()
+          .integer()
+          .positive()
+          .max(Number.MAX_SAFE_INTEGER)
+          .required(),
+        otherwise: Joi.number()
+          .integer()
+          .positive()
+          .max(Number.MAX_SAFE_INTEGER)
+          .allow('')
+          .default(''),
+      }),
     },
   ),
   DATABASE_ENABLED: Joi.boolean()

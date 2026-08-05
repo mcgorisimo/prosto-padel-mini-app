@@ -8,6 +8,10 @@ import {
 } from './telegram-login.config';
 import { TELEGRAM_NOTIFICATION_CONFIG_KEYS } from './telegram-notification.config';
 import { YCLIENTS_WEBHOOK_CONFIG_KEYS } from './yclients-webhook.config';
+import {
+  YCLIENTS_API_CONFIG_KEYS,
+  YCLIENTS_API_DEFAULT_BASE_URL,
+} from './yclients-api.config';
 
 const SAFE_TEST_TELEGRAM_CRYPTO_CONFIG = Object.freeze({
   [TELEGRAM_LOGIN_CONFIG_KEYS.lookupPepperBase64]: Buffer.alloc(
@@ -27,6 +31,11 @@ const SAFE_TEST_DATABASE_CONFIG = Object.freeze({
 });
 const SAFE_TEST_BOT_TOKEN =
   '123456789:AA_TEST_ONLY_FAKE_TELEGRAM_BOT_TOKEN';
+const SAFE_TEST_YCLIENTS_CONFIG = Object.freeze({
+  [YCLIENTS_API_CONFIG_KEYS.companyId]: '2079564',
+  [YCLIENTS_API_CONFIG_KEYS.partnerToken]: 'synthetic-partner-token',
+  [YCLIENTS_API_CONFIG_KEYS.userToken]: 'synthetic-user-token',
+});
 
 function validate(environment: Record<string, unknown> = {}) {
   return envValidationSchema.validate(environment, {
@@ -36,6 +45,80 @@ function validate(environment: Record<string, unknown> = {}) {
 }
 
 describe('envValidationSchema', () => {
+  it('disables the YCLIENTS API by default and keeps the canonical base URL', () => {
+    const { error, value } = validate();
+
+    expect(error).toBeUndefined();
+    expect(value[YCLIENTS_API_CONFIG_KEYS.enabled]).toBe(false);
+    expect(value[YCLIENTS_API_CONFIG_KEYS.baseUrl]).toBe(
+      YCLIENTS_API_DEFAULT_BASE_URL,
+    );
+  });
+
+  it('requires the database, company and both tokens for the enabled YCLIENTS API', () => {
+    const missingDatabase = validate({
+      ...SAFE_TEST_YCLIENTS_CONFIG,
+      [YCLIENTS_API_CONFIG_KEYS.enabled]: 'true',
+    });
+    const missingCompany = validate({
+      ...SAFE_TEST_DATABASE_CONFIG,
+      [YCLIENTS_API_CONFIG_KEYS.enabled]: 'true',
+      [YCLIENTS_API_CONFIG_KEYS.partnerToken]: 'synthetic-partner-token',
+      [YCLIENTS_API_CONFIG_KEYS.userToken]: 'synthetic-user-token',
+    });
+    const missingPartnerToken = validate({
+      ...SAFE_TEST_DATABASE_CONFIG,
+      ...SAFE_TEST_YCLIENTS_CONFIG,
+      [YCLIENTS_API_CONFIG_KEYS.enabled]: 'true',
+      [YCLIENTS_API_CONFIG_KEYS.partnerToken]: '',
+    });
+    const missingUserToken = validate({
+      ...SAFE_TEST_DATABASE_CONFIG,
+      ...SAFE_TEST_YCLIENTS_CONFIG,
+      [YCLIENTS_API_CONFIG_KEYS.enabled]: 'true',
+      [YCLIENTS_API_CONFIG_KEYS.userToken]: '',
+    });
+    const valid = validate({
+      ...SAFE_TEST_DATABASE_CONFIG,
+      ...SAFE_TEST_YCLIENTS_CONFIG,
+      [YCLIENTS_API_CONFIG_KEYS.enabled]: 'true',
+    });
+
+    expect(missingDatabase.error).toBeDefined();
+    expect(missingCompany.error).toBeDefined();
+    expect(missingPartnerToken.error).toBeDefined();
+    expect(missingUserToken.error).toBeDefined();
+    expect(valid.error).toBeUndefined();
+    expect(valid.value[YCLIENTS_API_CONFIG_KEYS.companyId]).toBe(2079564);
+  });
+
+  it.each([
+    'http://api.yclients.com',
+    'https://user:password@api.yclients.com',
+    'https://api.yclients.com?secret=value',
+    'https://api.yclients.com/#fragment',
+  ])('rejects unsafe YCLIENTS API base URL %s', (baseUrl) => {
+    const { error } = validate({
+      [YCLIENTS_API_CONFIG_KEYS.baseUrl]: baseUrl,
+    });
+
+    expect(error).toBeDefined();
+  });
+
+  it.each(['too-short', 'token with spaces', 'token\nwith-newline'])(
+    'rejects unsafe YCLIENTS tokens when API is enabled',
+    (token) => {
+      const { error } = validate({
+        ...SAFE_TEST_DATABASE_CONFIG,
+        ...SAFE_TEST_YCLIENTS_CONFIG,
+        [YCLIENTS_API_CONFIG_KEYS.enabled]: 'true',
+        [YCLIENTS_API_CONFIG_KEYS.partnerToken]: token,
+      });
+
+      expect(error).toBeDefined();
+    },
+  );
+
   it('disables the YCLIENTS webhook by default', () => {
     const { error, value } = validate();
 

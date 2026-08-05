@@ -156,6 +156,12 @@ function Assert-RuntimeBackendContract {
         DATABASE_NAME = 'prosto_padel_test_migration_cycle'
         DATABASE_USER = 'backend_auth_app'
         DATABASE_PASSWORD_FILE = '/run/secrets/backend-auth-app-password'
+        YCLIENTS_API_ENABLED = '${YCLIENTS_API_ENABLED:-false}'
+        YCLIENTS_API_BASE_URL = '${YCLIENTS_API_BASE_URL:-https://api.yclients.com}'
+        YCLIENTS_PARTNER_TOKEN = '!reset null'
+        YCLIENTS_USER_TOKEN = '!reset null'
+        YCLIENTS_PARTNER_TOKEN_FILE = '/run/secrets/yclients-partner-token'
+        YCLIENTS_USER_TOKEN_FILE = '/run/secrets/yclients-user-token'
         YCLIENTS_WEBHOOK_ENABLED = '${YCLIENTS_WEBHOOK_ENABLED:-false}'
         YCLIENTS_COMPANY_ID = '${YCLIENTS_COMPANY_ID:-}'
         TELEGRAM_AUTH_ENABLED = '${TELEGRAM_AUTH_ENABLED:-false}'
@@ -191,7 +197,7 @@ function Assert-RuntimeBackendContract {
         -ServiceBlock $ServiceBlock `
         -ChildName 'volumes'
     $mountBlocks = @(Get-MountBlocks -VolumesBlock $volumes)
-    if ($mountBlocks.Count -ne 6) {
+    if ($mountBlocks.Count -ne 8) {
         throw "RUNTIME_BACKEND_COMPOSE_MOUNT_INVALID"
     }
 
@@ -202,6 +208,8 @@ function Assert-RuntimeBackendContract {
         '${TELEGRAM_LOGIN_WORKFLOW_HMAC_SECRET_BASE64_FILE_HOST:?TELEGRAM_LOGIN_WORKFLOW_HMAC_SECRET_BASE64_FILE_HOST is required}' = '/run/secrets/telegram-login-workflow-hmac-secret-base64'
         '${PROFILE_PHOTO_STORAGE_ACCESS_KEY_ID_FILE_HOST:?PROFILE_PHOTO_STORAGE_ACCESS_KEY_ID_FILE_HOST is required}' = '/run/secrets/profile-photo-access-key-id'
         '${PROFILE_PHOTO_STORAGE_SECRET_ACCESS_KEY_FILE_HOST:?PROFILE_PHOTO_STORAGE_SECRET_ACCESS_KEY_FILE_HOST is required}' = '/run/secrets/profile-photo-secret-access-key'
+        '${YCLIENTS_PARTNER_TOKEN_FILE_HOST:?YCLIENTS_PARTNER_TOKEN_FILE_HOST is required}' = '/run/secrets/yclients-partner-token'
+        '${YCLIENTS_USER_TOKEN_FILE_HOST:?YCLIENTS_USER_TOKEN_FILE_HOST is required}' = '/run/secrets/yclients-user-token'
     }
     $seenSources = @{}
     $seenTargets = @{}
@@ -328,6 +336,8 @@ if (
     ($runtimeBackend -join "`n") -match 'TELEGRAM_BOT_TOKEN:\s+[^!]' -or
     ($runtimeBackend -join "`n") -match 'TELEGRAM_IDENTITY_LOOKUP_PEPPER_BASE64:\s+[^!]' -or
     ($runtimeBackend -join "`n") -match 'TELEGRAM_LOGIN_WORKFLOW_HMAC_SECRET_BASE64:\s+[^!]' -or
+    ($runtimeBackend -join "`n") -match 'YCLIENTS_PARTNER_TOKEN:\s+[^!]' -or
+    ($runtimeBackend -join "`n") -match 'YCLIENTS_USER_TOKEN:\s+[^!]' -or
     ($backendDockerfile -replace "`r`n", "`n") -notmatch '(?m)^USER node$'
 ) {
     throw "RUNTIME_BACKEND_COMPOSE_SECRET_BOUNDARY_INVALID"
@@ -355,6 +365,14 @@ $hardcodedYclientsWebhook = Replace-First `
     -NewValue '      YCLIENTS_WEBHOOK_ENABLED: true'
 Assert-RejectedMutation `
     -ServiceBlock $hardcodedYclientsWebhook `
+    -ExpectedError 'RUNTIME_BACKEND_COMPOSE_ENVIRONMENT_INVALID'
+
+$hardcodedYclientsApi = Replace-First `
+    -Text $runtimeBackendBlock `
+    -OldValue '      YCLIENTS_API_ENABLED: ${YCLIENTS_API_ENABLED:-false}' `
+    -NewValue '      YCLIENTS_API_ENABLED: true'
+Assert-RejectedMutation `
+    -ServiceBlock $hardcodedYclientsApi `
     -ExpectedError 'RUNTIME_BACKEND_COMPOSE_ENVIRONMENT_INVALID'
 
 $firstTarget = '        target: /run/secrets/backend-auth-app-password'

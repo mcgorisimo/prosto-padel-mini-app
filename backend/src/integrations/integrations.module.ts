@@ -15,6 +15,11 @@ import { CRM_ADAPTER } from './crm/crm.tokens';
 import { DisabledCrmAdapter } from './crm/disabled-crm.adapter';
 import { YclientsWebhookController } from './yclients/yclients-webhook.controller';
 import { YclientsWebhookService } from './yclients/yclients-webhook.service';
+import {
+  YCLIENTS_API_REQUEST_TIMEOUT_MILLISECONDS,
+  readYclientsApiConfiguration,
+} from '../config/yclients-api.config';
+import { YclientsApiClient } from './yclients/yclients-api.client';
 
 @Module({
   imports: [DatabaseModule],
@@ -22,6 +27,17 @@ import { YclientsWebhookService } from './yclients/yclients-webhook.service';
   providers: [
     DisabledCrmAdapter,
     YclientsWebhookService,
+    {
+      provide: YclientsApiClient,
+      inject: [ConfigService],
+      useFactory: (config: ConfigService): YclientsApiClient =>
+        new YclientsApiClient({
+          runtime: readYclientsApiConfiguration(config),
+          requestTimeoutMilliseconds:
+            YCLIENTS_API_REQUEST_TIMEOUT_MILLISECONDS,
+          fetch: globalThis.fetch,
+        }),
+    },
     {
       provide: CRM_ADAPTER,
       useExisting: DisabledCrmAdapter,
@@ -68,6 +84,6 @@ import { YclientsWebhookService } from './yclients/yclients-webhook.service';
       },
     },
   ],
-  exports: [CRM_ADAPTER],
+  exports: [CRM_ADAPTER, YclientsApiClient],
 })
 export class IntegrationsModule {}

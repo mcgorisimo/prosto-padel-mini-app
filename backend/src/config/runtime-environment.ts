@@ -26,6 +26,10 @@ const RUNTIME_SECRET_SOURCE_KEYS = Object.freeze([
   FILE_SECRET_KEYS.telegramLookupPepper,
   'TELEGRAM_LOGIN_WORKFLOW_HMAC_SECRET_BASE64',
   FILE_SECRET_KEYS.telegramWorkflowHmac,
+  'YCLIENTS_PARTNER_TOKEN',
+  FILE_SECRET_KEYS.yclientsPartnerToken,
+  'YCLIENTS_USER_TOKEN',
+  FILE_SECRET_KEYS.yclientsUserToken,
 ] as const);
 const ASCII_CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f-\u009f]/u;
 const DATABASE_HOST_PATTERN =

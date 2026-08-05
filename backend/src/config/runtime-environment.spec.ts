@@ -16,6 +16,11 @@ import {
   readPlayerProfilePhotoStorageConfiguration,
 } from './player-profile-photo.config';
 import { PostgresService } from '../database/postgres.service';
+import {
+  YCLIENTS_API_CONFIG_KEYS,
+  YCLIENTS_API_DEFAULT_BASE_URL,
+  readYclientsApiConfiguration,
+} from './yclients-api.config';
 
 const TEST_DATABASE_URL =
   'postgresql://test-only.invalid/prosto_padel';
@@ -53,6 +58,14 @@ const DIRECT_TELEGRAM_ENVIRONMENT = Object.freeze({
   [TELEGRAM_LOGIN_CONFIG_KEYS.workflowHmacSecretBase64]:
     TEST_WORKFLOW_SECRET,
   [TELEGRAM_LOGIN_CONFIG_KEYS.uuidNamespace]: TEST_UUID_NAMESPACE,
+});
+
+const DIRECT_YCLIENTS_ENVIRONMENT = Object.freeze({
+  [YCLIENTS_API_CONFIG_KEYS.enabled]: 'true',
+  [YCLIENTS_API_CONFIG_KEYS.baseUrl]: YCLIENTS_API_DEFAULT_BASE_URL,
+  [YCLIENTS_API_CONFIG_KEYS.companyId]: '2079564',
+  [YCLIENTS_API_CONFIG_KEYS.partnerToken]: 'synthetic-partner-token',
+  [YCLIENTS_API_CONFIG_KEYS.userToken]: 'synthetic-user-token',
 });
 
 const COMPONENT_DATABASE_ENVIRONMENT = Object.freeze({
@@ -179,6 +192,8 @@ describe('runtime environment validation', () => {
     FILE_SECRET_KEYS.telegramBotToken,
     FILE_SECRET_KEYS.telegramLookupPepper,
     FILE_SECRET_KEYS.telegramWorkflowHmac,
+    FILE_SECRET_KEYS.yclientsPartnerToken,
+    FILE_SECRET_KEYS.yclientsUserToken,
   ])(
     'fails closed for an explicitly configured missing %s while features are disabled',
     (fileKey) => {
@@ -827,6 +842,99 @@ describe('runtime environment validation', () => {
         ),
       [path, readerMessage],
     );
+  });
+
+  it('reads YCLIENTS API tokens from allowlisted files and removes source paths', () => {
+    const partnerPath = '/synthetic/yclients-partner-token';
+    const userPath = '/synthetic/yclients-user-token';
+    const environment: Record<string, unknown> = {
+      ...DIRECT_DATABASE_ENVIRONMENT,
+      ...DIRECT_YCLIENTS_ENVIRONMENT,
+      [FILE_SECRET_KEYS.yclientsPartnerToken]: partnerPath,
+      [FILE_SECRET_KEYS.yclientsUserToken]: userPath,
+    };
+    delete environment[YCLIENTS_API_CONFIG_KEYS.partnerToken];
+    delete environment[YCLIENTS_API_CONFIG_KEYS.userToken];
+
+    const result = validateRuntimeEnvironment(
+      environment,
+      readerFrom({
+        [partnerPath]: 'synthetic-file-partner-token\n',
+        [userPath]: 'synthetic-file-user-token\n',
+      }),
+    );
+    const runtime = readYclientsApiConfiguration(
+      new ConfigService(result),
+    );
+
+    expect({
+      enabled: runtime.enabled,
+      baseUrl: runtime.baseUrl,
+      companyId: runtime.companyId,
+      partnerToken: runtime.partnerToken,
+      userToken: runtime.userToken,
+      retainsPartnerPath: Object.values(result).includes(partnerPath),
+      retainsUserPath: Object.values(result).includes(userPath),
+    }).toEqual({
+      enabled: true,
+      baseUrl: YCLIENTS_API_DEFAULT_BASE_URL,
+      companyId: 2079564,
+      partnerToken: 'synthetic-file-partner-token',
+      userToken: 'synthetic-file-user-token',
+      retainsPartnerPath: false,
+      retainsUserPath: false,
+    });
+  });
+
+  it('removes YCLIENTS token source keys from process.env after creating the loader snapshot', () => {
+    const originalEnvironment = { ...process.env };
+    const partnerPath = '/synthetic/loader-yclients-partner-token';
+    const userPath = '/synthetic/loader-yclients-user-token';
+
+    try {
+      Object.assign(process.env, {
+        ...DIRECT_DATABASE_ENVIRONMENT,
+        ...DIRECT_YCLIENTS_ENVIRONMENT,
+        [FILE_SECRET_KEYS.yclientsPartnerToken]: partnerPath,
+        [FILE_SECRET_KEYS.yclientsUserToken]: userPath,
+      });
+      delete process.env[YCLIENTS_API_CONFIG_KEYS.partnerToken];
+      delete process.env[YCLIENTS_API_CONFIG_KEYS.userToken];
+
+      const loader = createRuntimeConfigurationLoader(
+        readerFrom({
+          [partnerPath]: 'synthetic-loader-partner-token',
+          [userPath]: 'synthetic-loader-user-token',
+        }),
+      );
+      const result = loader();
+
+      expect({
+        partnerResolved:
+          result[YCLIENTS_API_CONFIG_KEYS.partnerToken] ===
+          'synthetic-loader-partner-token',
+        userResolved:
+          result[YCLIENTS_API_CONFIG_KEYS.userToken] ===
+          'synthetic-loader-user-token',
+        directPartnerInProcess:
+          process.env[YCLIENTS_API_CONFIG_KEYS.partnerToken] !== undefined,
+        directUserInProcess:
+          process.env[YCLIENTS_API_CONFIG_KEYS.userToken] !== undefined,
+        partnerPathInProcess:
+          process.env[FILE_SECRET_KEYS.yclientsPartnerToken] !== undefined,
+        userPathInProcess:
+          process.env[FILE_SECRET_KEYS.yclientsUserToken] !== undefined,
+      }).toEqual({
+        partnerResolved: true,
+        userResolved: true,
+        directPartnerInProcess: false,
+        directUserInProcess: false,
+        partnerPathInProcess: false,
+        userPathInProcess: false,
+      });
+    } finally {
+      restoreProcessEnvironment(originalEnvironment);
+    }
   });
 
   it('accepts a complete enabled profile-photo storage configuration', () => {

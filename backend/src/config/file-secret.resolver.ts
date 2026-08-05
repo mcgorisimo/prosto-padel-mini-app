@@ -15,6 +15,8 @@ export const FILE_SECRET_KEYS = Object.freeze({
     'TELEGRAM_IDENTITY_LOOKUP_PEPPER_BASE64_FILE',
   telegramWorkflowHmac:
     'TELEGRAM_LOGIN_WORKFLOW_HMAC_SECRET_BASE64_FILE',
+  yclientsPartnerToken: 'YCLIENTS_PARTNER_TOKEN_FILE',
+  yclientsUserToken: 'YCLIENTS_USER_TOKEN_FILE',
 });
 
 const DIRECT_SECRET_KEYS = Object.freeze({
@@ -27,6 +29,8 @@ const DIRECT_SECRET_KEYS = Object.freeze({
     'TELEGRAM_IDENTITY_LOOKUP_PEPPER_BASE64',
   [FILE_SECRET_KEYS.telegramWorkflowHmac]:
     'TELEGRAM_LOGIN_WORKFLOW_HMAC_SECRET_BASE64',
+  [FILE_SECRET_KEYS.yclientsPartnerToken]: 'YCLIENTS_PARTNER_TOKEN',
+  [FILE_SECRET_KEYS.yclientsUserToken]: 'YCLIENTS_USER_TOKEN',
 });
 
 const ALLOWED_FILE_KEYS = new Set<string>(Object.values(FILE_SECRET_KEYS));
