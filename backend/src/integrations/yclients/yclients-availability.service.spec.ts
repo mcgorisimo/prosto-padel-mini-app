@@ -4,10 +4,12 @@ import { YclientsAvailabilityService } from './yclients-availability.service';
 function createSubject() {
   const listBookableServices = jest.fn();
   const listBookableDates = jest.fn();
+  const listBookableTimes = jest.fn();
   const listBookableResources = jest.fn();
   const yclients = {
     listBookableServices,
     listBookableDates,
+    listBookableTimes,
     listBookableResources,
   } as unknown as YclientsApiClient;
 
@@ -15,6 +17,7 @@ function createSubject() {
     service: new YclientsAvailabilityService(yclients),
     listBookableServices,
     listBookableDates,
+    listBookableTimes,
     listBookableResources,
   };
 }
@@ -256,6 +259,149 @@ describe('YclientsAvailabilityService', () => {
         courtId: 5_730_531,
         dateFrom: '2026-08-05',
         dateTo: '2026-08-18',
+      }),
+    ).resolves.toEqual({ outcome: 'unavailable' });
+  });
+
+  it.each([
+    { serviceId: 0, courtId: 5_730_531, date: '2026-08-05' },
+    { serviceId: 30_539_679, courtId: -1, date: '2026-08-05' },
+    { serviceId: 30_539_679, courtId: 5_730_531, date: '05.08.2026' },
+    { serviceId: 30_539_679, courtId: 5_730_531, date: '2026-02-30' },
+  ])('rejects invalid times query %# without calling YCLIENTS', async (query) => {
+    const { service, listBookableTimes } = createSubject();
+
+    await expect(service.listAvailableTimes(query)).resolves.toEqual({
+      outcome: 'invalid_request',
+    });
+    expect(listBookableTimes).not.toHaveBeenCalled();
+  });
+
+  it('returns unique sorted times using safe application fields', async () => {
+    const { service, listBookableTimes } = createSubject();
+    listBookableTimes.mockResolvedValue({
+      outcome: 'loaded',
+      times: [
+        {
+          time: '17:00',
+          seanceLengthSeconds: 3_600,
+          datetime: '2026-08-05T17:00:00+03:00',
+          privateMarker: 'not returned',
+        },
+        {
+          time: '16:30',
+          seanceLengthSeconds: 3_600,
+          datetime: '2026-08-05T16:30:00+03:00',
+        },
+        {
+          time: '16:30',
+          seanceLengthSeconds: 3_600,
+          datetime: '2026-08-05T16:30:00+03:00',
+        },
+      ],
+    });
+
+    await expect(
+      service.listAvailableTimes({
+        serviceId: 30_539_679,
+        courtId: 5_730_531,
+        date: '2026-08-05',
+      }),
+    ).resolves.toEqual({
+      outcome: 'loaded',
+      times: [
+        {
+          time: '16:30',
+          durationSeconds: 3_600,
+          datetime: '2026-08-05T16:30:00+03:00',
+        },
+        {
+          time: '17:00',
+          durationSeconds: 3_600,
+          datetime: '2026-08-05T17:00:00+03:00',
+        },
+      ],
+    });
+    expect(listBookableTimes).toHaveBeenCalledTimes(1);
+    expect(listBookableTimes).toHaveBeenCalledWith({
+      serviceIds: [30_539_679],
+      resourceId: 5_730_531,
+      date: '2026-08-05',
+    });
+  });
+
+  it('returns an empty loaded result when no times are available', async () => {
+    const { service, listBookableTimes } = createSubject();
+    listBookableTimes.mockResolvedValue({
+      outcome: 'loaded',
+      times: [],
+    });
+
+    await expect(
+      service.listAvailableTimes({
+        serviceId: 30_539_679,
+        courtId: 5_730_531,
+        date: '2026-08-05',
+      }),
+    ).resolves.toEqual({ outcome: 'loaded', times: [] });
+  });
+
+  it('fails closed when duplicate local times conflict', async () => {
+    const { service, listBookableTimes } = createSubject();
+    listBookableTimes.mockResolvedValue({
+      outcome: 'loaded',
+      times: [
+        {
+          time: '16:30',
+          seanceLengthSeconds: 3_600,
+          datetime: '2026-08-05T16:30:00+03:00',
+        },
+        {
+          time: '16:30',
+          seanceLengthSeconds: 5_400,
+          datetime: '2026-08-05T16:30:00+03:00',
+        },
+      ],
+    });
+
+    await expect(
+      service.listAvailableTimes({
+        serviceId: 30_539_679,
+        courtId: 5_730_531,
+        date: '2026-08-05',
+      }),
+    ).resolves.toEqual({ outcome: 'invalid_response' });
+  });
+
+  it.each([
+    'disabled',
+    'unauthorized',
+    'invalid_response',
+    'unavailable',
+  ] as const)('preserves the times client outcome %s', async (outcome) => {
+    const { service, listBookableTimes } = createSubject();
+    listBookableTimes.mockResolvedValue({ outcome });
+
+    await expect(
+      service.listAvailableTimes({
+        serviceId: 30_539_679,
+        courtId: 5_730_531,
+        date: '2026-08-05',
+      }),
+    ).resolves.toEqual({ outcome });
+  });
+
+  it('maps unexpected times client failures to unavailable', async () => {
+    const { service, listBookableTimes } = createSubject();
+    listBookableTimes.mockRejectedValue(
+      new Error('private upstream marker'),
+    );
+
+    await expect(
+      service.listAvailableTimes({
+        serviceId: 30_539_679,
+        courtId: 5_730_531,
+        date: '2026-08-05',
       }),
     ).resolves.toEqual({ outcome: 'unavailable' });
   });

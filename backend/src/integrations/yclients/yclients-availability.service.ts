@@ -46,6 +46,29 @@ export type YclientsAvailableDatesResult =
   | Readonly<{ outcome: 'invalid_response' }>
   | Readonly<{ outcome: 'unavailable' }>;
 
+export type YclientsAvailableTimesQuery = Readonly<{
+  serviceId: number;
+  courtId: number;
+  date: string;
+}>;
+
+export type YclientsAvailableTime = Readonly<{
+  time: string;
+  durationSeconds: number;
+  datetime: string;
+}>;
+
+export type YclientsAvailableTimesResult =
+  | Readonly<{ outcome: 'invalid_request' }>
+  | Readonly<{ outcome: 'disabled' }>
+  | Readonly<{
+      outcome: 'loaded';
+      times: ReadonlyArray<YclientsAvailableTime>;
+    }>
+  | Readonly<{ outcome: 'unauthorized' }>
+  | Readonly<{ outcome: 'invalid_response' }>
+  | Readonly<{ outcome: 'unavailable' }>;
+
 export type YclientsCourtsForServiceResult =
   | Readonly<{ outcome: 'invalid_request' }>
   | Readonly<{ outcome: 'disabled' }>
@@ -178,6 +201,63 @@ export class YclientsAvailabilityService {
       return Object.freeze({
         outcome: 'loaded' as const,
         dates: Object.freeze(dates),
+      });
+    } catch {
+      return Object.freeze({ outcome: 'unavailable' as const });
+    }
+  }
+
+  async listAvailableTimes(
+    query: YclientsAvailableTimesQuery,
+  ): Promise<YclientsAvailableTimesResult> {
+    if (
+      !Number.isSafeInteger(query?.serviceId) ||
+      Number(query.serviceId) <= 0 ||
+      !Number.isSafeInteger(query?.courtId) ||
+      Number(query.courtId) <= 0 ||
+      readIsoDateMilliseconds(query?.date) === undefined
+    ) {
+      return Object.freeze({ outcome: 'invalid_request' as const });
+    }
+
+    try {
+      const result = await this.yclients.listBookableTimes({
+        serviceIds: [query.serviceId],
+        resourceId: query.courtId,
+        date: query.date,
+      });
+      if (result.outcome !== 'loaded') {
+        return Object.freeze({ outcome: result.outcome });
+      }
+
+      const timesByLocalTime = new Map<string, (typeof result.times)[number]>();
+      for (const time of result.times) {
+        const existing = timesByLocalTime.get(time.time);
+        if (
+          existing !== undefined &&
+          (existing.seanceLengthSeconds !== time.seanceLengthSeconds ||
+            existing.datetime !== time.datetime)
+        ) {
+          return Object.freeze({ outcome: 'invalid_response' as const });
+        }
+        if (existing === undefined) {
+          timesByLocalTime.set(time.time, time);
+        }
+      }
+
+      const times = [...timesByLocalTime.values()]
+        .sort((left, right) => left.time.localeCompare(right.time))
+        .map((time) =>
+          Object.freeze({
+            time: time.time,
+            durationSeconds: time.seanceLengthSeconds,
+            datetime: time.datetime,
+          }),
+        );
+
+      return Object.freeze({
+        outcome: 'loaded' as const,
+        times: Object.freeze(times),
       });
     } catch {
       return Object.freeze({ outcome: 'unavailable' as const });
