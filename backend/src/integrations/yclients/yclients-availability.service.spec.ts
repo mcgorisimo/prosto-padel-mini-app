@@ -2,11 +2,13 @@ import { YclientsApiClient } from './yclients-api.client';
 import { YclientsAvailabilityService } from './yclients-availability.service';
 
 function createSubject() {
+  const checkBookableAppointment = jest.fn();
   const listBookableServices = jest.fn();
   const listBookableDates = jest.fn();
   const listBookableTimes = jest.fn();
   const listBookableResources = jest.fn();
   const yclients = {
+    checkBookableAppointment,
     listBookableServices,
     listBookableDates,
     listBookableTimes,
@@ -15,6 +17,7 @@ function createSubject() {
 
   return {
     service: new YclientsAvailabilityService(yclients),
+    checkBookableAppointment,
     listBookableServices,
     listBookableDates,
     listBookableTimes,
@@ -23,6 +26,69 @@ function createSubject() {
 }
 
 describe('YclientsAvailabilityService', () => {
+  describe('booking preflight', () => {
+    const query = Object.freeze({
+      serviceId: 30_539_679,
+      courtId: 5_730_531,
+      datetime: '2026-08-05T16:30:00+03:00',
+    });
+
+    it('checks the selected service, court and datetime', async () => {
+      const { service, checkBookableAppointment } = createSubject();
+      checkBookableAppointment.mockResolvedValue({ outcome: 'bookable' });
+
+      await expect(service.preflightBooking(query)).resolves.toEqual({
+        outcome: 'bookable',
+      });
+      expect(checkBookableAppointment).toHaveBeenCalledTimes(1);
+      expect(checkBookableAppointment).toHaveBeenCalledWith({
+        serviceId: 30_539_679,
+        resourceId: 5_730_531,
+        datetime: '2026-08-05T16:30:00+03:00',
+      });
+    });
+
+    it.each([
+      { ...query, serviceId: 0 },
+      { ...query, courtId: -1 },
+      { ...query, datetime: '2026-08-05 16:30:00' },
+      { ...query, datetime: '2026-02-30T16:30:00+03:00' },
+    ])('rejects invalid preflight query %#', async (invalidQuery) => {
+      const { service, checkBookableAppointment } = createSubject();
+
+      await expect(service.preflightBooking(invalidQuery)).resolves.toEqual({
+        outcome: 'invalid_request',
+      });
+      expect(checkBookableAppointment).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      'disabled',
+      'not_bookable',
+      'unauthorized',
+      'invalid_response',
+      'unavailable',
+    ] as const)('preserves the preflight client outcome %s', async (outcome) => {
+      const { service, checkBookableAppointment } = createSubject();
+      checkBookableAppointment.mockResolvedValue({ outcome });
+
+      await expect(service.preflightBooking(query)).resolves.toEqual({
+        outcome,
+      });
+    });
+
+    it('maps unexpected client failures to unavailable', async () => {
+      const { service, checkBookableAppointment } = createSubject();
+      checkBookableAppointment.mockRejectedValue(
+        new Error('private upstream marker'),
+      );
+
+      await expect(service.preflightBooking(query)).resolves.toEqual({
+        outcome: 'unavailable',
+      });
+    });
+  });
+
   it('returns only unique active services using safe fields', async () => {
     const { service, listBookableServices } = createSubject();
     listBookableServices.mockResolvedValue({

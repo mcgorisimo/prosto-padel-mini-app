@@ -41,6 +41,154 @@ function client(
 }
 
 describe('YclientsApiClient', () => {
+  describe('bookable appointment check', () => {
+    const query = Object.freeze({
+      serviceId: 30_539_679,
+      resourceId: 5_730_531,
+      datetime: '2026-08-05T16:30:00+03:00',
+    });
+
+    it('does not perform a network request while disabled', async () => {
+      const fetch = fetchMock();
+
+      await expect(
+        client(fetch, runtime({ enabled: false })).checkBookableAppointment(
+          query,
+        ),
+      ).resolves.toEqual({ outcome: 'disabled' });
+      expect(fetch).not.toHaveBeenCalled();
+    });
+
+    it('checks one appointment using only the partner token', async () => {
+      const fetch = fetchMock().mockResolvedValue(
+        response(201, { success: true, meta: { message: 'Created' } }),
+      );
+
+      await expect(
+        client(fetch).checkBookableAppointment(query),
+      ).resolves.toEqual({ outcome: 'bookable' });
+
+      expect(fetch).toHaveBeenCalledTimes(1);
+      const [input, init] = fetch.mock.calls[0];
+      expect(String(input)).toBe(
+        'https://api.example.test/vendor/api/v1/book_check/2079564',
+      );
+      expect(init).toEqual(
+        expect.objectContaining({
+          method: 'POST',
+          headers: {
+            accept: 'application/vnd.yclients.v2+json',
+            authorization: `Bearer ${PARTNER_TOKEN}`,
+            'content-type': 'application/json',
+          },
+        }),
+      );
+      expect(JSON.parse(String(init?.body))).toEqual({
+        appointments: [
+          {
+            id: 1,
+            services: [30_539_679],
+            staff_id: 5_730_531,
+            datetime: '2026-08-05T16:30:00+03:00',
+          },
+        ],
+      });
+      expect(String(init?.body)).not.toContain(USER_TOKEN);
+      expect(String(init?.body)).not.toMatch(
+        /paymentStatus|ownerPaid|holdAmount|prepay|notify_by_/u,
+      );
+    });
+
+    it('accepts the documented empty 201 response', async () => {
+      const fetch = fetchMock().mockResolvedValue(
+        new Response('', { status: 201 }),
+      );
+
+      await expect(
+        client(fetch).checkBookableAppointment(query),
+      ).resolves.toEqual({ outcome: 'bookable' });
+    });
+
+    it.each([401, 403])(
+      'maps authorization status %s safely',
+      async (status) => {
+        const fetch = fetchMock().mockResolvedValue(
+          response(status, { private: 'response marker' }),
+        );
+
+        await expect(
+          client(fetch).checkBookableAppointment(query),
+        ).resolves.toEqual({ outcome: 'unauthorized' });
+      },
+    );
+
+    it('maps a rejected appointment without exposing provider details', async () => {
+      const fetch = fetchMock().mockResolvedValue(
+        response(422, {
+          success: false,
+          meta: { code: 433, message: 'private provider marker' },
+        }),
+      );
+
+      await expect(
+        client(fetch).checkBookableAppointment(query),
+      ).resolves.toEqual({ outcome: 'not_bookable' });
+    });
+
+    it.each([
+      [{ ...query, serviceId: 0 }],
+      [{ ...query, resourceId: 0 }],
+      [{ ...query, datetime: '2026-08-05 16:30:00' }],
+      [{ ...query, datetime: '2026-02-30T16:30:00+03:00' }],
+    ])('fails closed before fetch for invalid query %#', async (invalidQuery) => {
+      const fetch = fetchMock();
+
+      await expect(
+        client(fetch).checkBookableAppointment(invalidQuery),
+      ).resolves.toEqual({ outcome: 'invalid_response' });
+      expect(fetch).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      [200, { success: true }, 'invalid_response'],
+      [201, { success: false }, 'invalid_response'],
+      [201, 'not-an-object', 'invalid_response'],
+      [400, { success: false }, 'invalid_response'],
+      [429, { success: false }, 'unavailable'],
+      [500, { success: false }, 'unavailable'],
+    ] as const)(
+      'maps status %s and response shape to %s',
+      async (status, body, outcome) => {
+        const fetch = fetchMock().mockResolvedValue(response(status, body));
+
+        await expect(
+          client(fetch).checkBookableAppointment(query),
+        ).resolves.toEqual({ outcome });
+      },
+    );
+
+    it('fails closed before fetch for an incomplete enabled configuration', async () => {
+      const fetch = fetchMock();
+
+      await expect(
+        client(fetch, runtime({ partnerToken: '' })).checkBookableAppointment(
+          query,
+        ),
+      ).resolves.toEqual({ outcome: 'invalid_response' });
+      expect(fetch).not.toHaveBeenCalled();
+    });
+
+    it('maps transport failures without exposing the exception', async () => {
+      const fetch = fetchMock().mockRejectedValue(
+        new Error('private network marker'),
+      );
+
+      await expect(
+        client(fetch).checkBookableAppointment(query),
+      ).resolves.toEqual({ outcome: 'unavailable' });
+    });
+  });
+
   describe('bookable times', () => {
     const query = Object.freeze({
       serviceIds: [30_539_679],

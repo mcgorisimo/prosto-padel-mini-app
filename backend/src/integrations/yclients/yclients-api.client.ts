@@ -94,6 +94,20 @@ export type YclientsBookableTimesResult =
   | Readonly<{ outcome: 'invalid_response' }>
   | Readonly<{ outcome: 'unavailable' }>;
 
+export type YclientsBookableAppointmentQuery = Readonly<{
+  serviceId: number;
+  resourceId: number;
+  datetime: string;
+}>;
+
+export type YclientsBookableAppointmentCheckResult =
+  | Readonly<{ outcome: 'disabled' }>
+  | Readonly<{ outcome: 'bookable' }>
+  | Readonly<{ outcome: 'not_bookable' }>
+  | Readonly<{ outcome: 'unauthorized' }>
+  | Readonly<{ outcome: 'invalid_response' }>
+  | Readonly<{ outcome: 'unavailable' }>;
+
 export interface YclientsApiClientConfiguration {
   readonly runtime: YclientsApiConfiguration;
   readonly requestTimeoutMilliseconds: number;
@@ -183,6 +197,18 @@ function readIsoDate(value: unknown): string | undefined {
   return value;
 }
 
+function readIsoDatetime(value: unknown): string | undefined {
+  if (
+    typeof value !== 'string' ||
+    !ISO_DATETIME_PATTERN.test(value) ||
+    readIsoDate(value.slice(0, 10)) === undefined ||
+    !Number.isFinite(Date.parse(value))
+  ) {
+    return undefined;
+  }
+  return value;
+}
+
 function readIsoDateList(value: unknown): ReadonlyArray<string> | undefined {
   if (!Array.isArray(value)) return undefined;
   const dates = value.map(readIsoDate);
@@ -226,6 +252,84 @@ function readBookableTime(
 
 export class YclientsApiClient {
   constructor(private readonly configuration: YclientsApiClientConfiguration) {}
+
+  async checkBookableAppointment(
+    query: YclientsBookableAppointmentQuery,
+  ): Promise<YclientsBookableAppointmentCheckResult> {
+    const runtime = this.configuration.runtime;
+    if (!runtime.enabled) {
+      return Object.freeze({ outcome: 'disabled' as const });
+    }
+    const companyId = runtime.companyId;
+    const datetime = readIsoDatetime(query?.datetime);
+    if (
+      runtime.baseUrl.length === 0 ||
+      typeof companyId !== 'number' ||
+      !Number.isSafeInteger(companyId) ||
+      companyId <= 0 ||
+      runtime.partnerToken.length === 0 ||
+      !Number.isSafeInteger(query?.serviceId) ||
+      Number(query.serviceId) <= 0 ||
+      !Number.isSafeInteger(query?.resourceId) ||
+      Number(query.resourceId) <= 0 ||
+      datetime === undefined
+    ) {
+      return Object.freeze({ outcome: 'invalid_response' as const });
+    }
+
+    try {
+      const url = new URL(
+        `api/v1/book_check/${companyId}`,
+        `${runtime.baseUrl}/`,
+      );
+      const response = await this.configuration.fetch(url, {
+        method: 'POST',
+        headers: {
+          accept: YCLIENTS_ACCEPT,
+          authorization: `Bearer ${runtime.partnerToken}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          appointments: [
+            {
+              id: 1,
+              services: [query.serviceId],
+              staff_id: query.resourceId,
+              datetime,
+            },
+          ],
+        }),
+        signal: AbortSignal.timeout(
+          this.configuration.requestTimeoutMilliseconds,
+        ),
+      });
+
+      if (response.status === 401 || response.status === 403) {
+        return Object.freeze({ outcome: 'unauthorized' as const });
+      }
+      if (response.status === 422) {
+        return Object.freeze({ outcome: 'not_bookable' as const });
+      }
+      if (response.status === 429 || response.status >= 500) {
+        return Object.freeze({ outcome: 'unavailable' as const });
+      }
+      if (response.status !== 201) {
+        return Object.freeze({ outcome: 'invalid_response' as const });
+      }
+
+      const responseText = await response.text();
+      if (responseText.trim().length === 0) {
+        return Object.freeze({ outcome: 'bookable' as const });
+      }
+      const body = readBody(responseText);
+      if (body?.success !== true) {
+        return Object.freeze({ outcome: 'invalid_response' as const });
+      }
+      return Object.freeze({ outcome: 'bookable' as const });
+    } catch {
+      return Object.freeze({ outcome: 'unavailable' as const });
+    }
+  }
 
   async listBookableTimes(
     query: YclientsBookableTimesQuery,

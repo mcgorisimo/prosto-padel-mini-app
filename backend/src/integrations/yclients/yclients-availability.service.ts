@@ -80,6 +80,21 @@ export type YclientsCourtsForServiceResult =
   | Readonly<{ outcome: 'invalid_response' }>
   | Readonly<{ outcome: 'unavailable' }>;
 
+export type YclientsBookingPreflightQuery = Readonly<{
+  serviceId: number;
+  courtId: number;
+  datetime: string;
+}>;
+
+export type YclientsBookingPreflightResult =
+  | Readonly<{ outcome: 'invalid_request' }>
+  | Readonly<{ outcome: 'disabled' }>
+  | Readonly<{ outcome: 'bookable' }>
+  | Readonly<{ outcome: 'not_bookable' }>
+  | Readonly<{ outcome: 'unauthorized' }>
+  | Readonly<{ outcome: 'invalid_response' }>
+  | Readonly<{ outcome: 'unavailable' }>;
+
 function isCourtLabel(value: string | undefined): boolean {
   return (
     typeof value === 'string' &&
@@ -112,9 +127,49 @@ function readIsoDateMilliseconds(value: unknown): number | undefined {
   return milliseconds;
 }
 
+function readIsoDatetime(value: unknown): string | undefined {
+  if (
+    typeof value !== 'string' ||
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/.test(
+      value,
+    ) ||
+    readIsoDateMilliseconds(value.slice(0, 10)) === undefined ||
+    !Number.isFinite(Date.parse(value))
+  ) {
+    return undefined;
+  }
+  return value;
+}
+
 @Injectable()
 export class YclientsAvailabilityService {
   constructor(private readonly yclients: YclientsApiClient) {}
+
+  async preflightBooking(
+    query: YclientsBookingPreflightQuery,
+  ): Promise<YclientsBookingPreflightResult> {
+    const datetime = readIsoDatetime(query?.datetime);
+    if (
+      !Number.isSafeInteger(query?.serviceId) ||
+      Number(query.serviceId) <= 0 ||
+      !Number.isSafeInteger(query?.courtId) ||
+      Number(query.courtId) <= 0 ||
+      datetime === undefined
+    ) {
+      return Object.freeze({ outcome: 'invalid_request' as const });
+    }
+
+    try {
+      const result = await this.yclients.checkBookableAppointment({
+        serviceId: query.serviceId,
+        resourceId: query.courtId,
+        datetime,
+      });
+      return Object.freeze({ outcome: result.outcome });
+    } catch {
+      return Object.freeze({ outcome: 'unavailable' as const });
+    }
+  }
 
   async listActiveServices(): Promise<YclientsBookingServicesResult> {
     try {
