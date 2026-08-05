@@ -4,6 +4,7 @@ import {
   isBackendOwnProfile,
   isBackendOwnProfilePatch,
 } from '../lib/backendSessionClient';
+import { bookingAvailabilityClient } from '../lib/bookingAvailabilityClient';
 import { telegramBackendLoginClient } from '../lib/telegramBackendLogin';
 import { telegramSecureCredentialStorage } from '../lib/telegramSecureCredentialStorage';
 
@@ -63,6 +64,7 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
   const sessions = dependencies.sessions ?? backendSessionClient;
   const profiles = dependencies.profiles ?? sessions;
   const matches = dependencies.matches ?? sessions;
+  const bookings = dependencies.bookings ?? bookingAvailabilityClient;
   const credentialStorage =
     dependencies.credentialStorage ?? telegramSecureCredentialStorage;
   const fingerprint = dependencies.fingerprint ?? fingerprintInitData;
@@ -1139,6 +1141,46 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
     })();
   }
 
+  function listBookingServices() {
+    return runMatchOperation(
+      (credential, signal) =>
+        bookings.listServices(credential, { signal }),
+      (result) =>
+        result?.outcome === 'services_loaded' &&
+        Array.isArray(result.services),
+    );
+  }
+
+  function listBookingCourts(serviceId) {
+    return runMatchOperation(
+      (credential, signal) =>
+        bookings.listCourts(credential, serviceId, { signal }),
+      (result) =>
+        result?.outcome === 'courts_loaded' &&
+        Array.isArray(result.courts),
+    );
+  }
+
+  function listBookingDates(query) {
+    return runMatchOperation(
+      (credential, signal) =>
+        bookings.listDates(credential, query, { signal }),
+      (result) =>
+        result?.outcome === 'dates_loaded' &&
+        Array.isArray(result.dates),
+    );
+  }
+
+  function listBookingTimes(query) {
+    return runMatchOperation(
+      (credential, signal) =>
+        bookings.listTimes(credential, query, { signal }),
+      (result) =>
+        result?.outcome === 'times_loaded' &&
+        Array.isArray(result.times),
+    );
+  }
+
   function listMatches(limit = 20) {
     return runMatchOperation(
       (credential, signal) =>
@@ -1651,6 +1693,10 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
     updateOwnProfile,
     uploadOwnProfilePhoto,
     deleteOwnProfilePhoto,
+    listBookingServices,
+    listBookingCourts,
+    listBookingDates,
+    listBookingTimes,
     listMatches,
     listAccountMatches,
     loadMatch,
@@ -1751,6 +1797,46 @@ export function useTelegramBackendLogin() {
       }));
     }
     return telegramBackendLoginLifecycle.deleteOwnProfilePhoto();
+  }, []);
+
+  const listBookingServices = useCallback(() => {
+    if (!FEATURE_ENABLED) {
+      return Promise.resolve(Object.freeze({
+        outcome: 'rejected',
+        reason: 'not_authenticated',
+      }));
+    }
+    return telegramBackendLoginLifecycle.listBookingServices();
+  }, []);
+
+  const listBookingCourts = useCallback((serviceId) => {
+    if (!FEATURE_ENABLED) {
+      return Promise.resolve(Object.freeze({
+        outcome: 'rejected',
+        reason: 'not_authenticated',
+      }));
+    }
+    return telegramBackendLoginLifecycle.listBookingCourts(serviceId);
+  }, []);
+
+  const listBookingDates = useCallback((query) => {
+    if (!FEATURE_ENABLED) {
+      return Promise.resolve(Object.freeze({
+        outcome: 'rejected',
+        reason: 'not_authenticated',
+      }));
+    }
+    return telegramBackendLoginLifecycle.listBookingDates(query);
+  }, []);
+
+  const listBookingTimes = useCallback((query) => {
+    if (!FEATURE_ENABLED) {
+      return Promise.resolve(Object.freeze({
+        outcome: 'rejected',
+        reason: 'not_authenticated',
+      }));
+    }
+    return telegramBackendLoginLifecycle.listBookingTimes(query);
   }, []);
 
   const listMatches = useCallback((limit = 20) => {
@@ -2127,6 +2213,10 @@ export function useTelegramBackendLogin() {
     updateOwnProfile,
     uploadOwnProfilePhoto,
     deleteOwnProfilePhoto,
+    listBookingServices,
+    listBookingCourts,
+    listBookingDates,
+    listBookingTimes,
     listMatches,
     listAccountMatches,
     loadMatch,
