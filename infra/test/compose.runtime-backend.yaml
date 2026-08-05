@@ -9,6 +9,8 @@ services:
       DATABASE_NAME: prosto_padel_test_migration_cycle
       DATABASE_USER: backend_auth_app
       DATABASE_PASSWORD_FILE: /run/secrets/backend-auth-app-password
+      YCLIENTS_WEBHOOK_ENABLED: ${YCLIENTS_WEBHOOK_ENABLED:-false}
+      YCLIENTS_COMPANY_ID: ${YCLIENTS_COMPANY_ID:-}
       TELEGRAM_AUTH_ENABLED: ${TELEGRAM_AUTH_ENABLED:-false}
       TELEGRAM_BOT_TOKEN: !reset null
       TELEGRAM_IDENTITY_LOOKUP_PEPPER_BASE64: !reset null

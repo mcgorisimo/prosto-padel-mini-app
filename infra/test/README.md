@@ -92,9 +92,9 @@ The override changes only `backend`. PostgreSQL and `db-tools` continue to use
 `prosto_padel_test`; the backend connects to
 `prosto_padel_test_migration_cycle` as `backend_auth_app`. The override uses the
 Compose `!reset null` merge tag to remove the base `DATABASE_URL` and all direct
-Telegram secret variables. Stop if the installed Compose version cannot parse
-that tag. This safe command validates interpolation and merge syntax while
-printing nothing:
+Telegram and profile-photo secret variables. Stop if the installed Compose
+version cannot parse that tag. This safe command validates interpolation and
+merge syntax while printing nothing:
 
 ```bash
 docker compose \
@@ -131,7 +131,7 @@ Create them manually through the approved server secret process, outside the
 Git repository. Each file must be a regular, non-symlink file owned by
 `prostopadel` with mode `600`. Put only its corresponding secret in the file;
 the backend removes a final CR/LF itself. Configure only their non-secret host
-paths in `infra/test/.env.test`, using the four `*_FILE_HOST` variables from the
+paths in `infra/test/.env.test`, using the six `*_FILE_HOST` variables from the
 example. Never put the file contents in that env file, Compose, an image build
 argument, or Git.
 
@@ -140,6 +140,11 @@ Set these non-secret server values explicitly in `infra/test/.env.test`:
 - `TELEGRAM_AUTH_ENABLED=false` until the approved activation;
 - `TELEGRAM_INIT_DATA_MAX_AGE_SECONDS=<approved value>`;
 - `TELEGRAM_LOGIN_UUID_NAMESPACE=<stable approved UUID>`.
+
+Keep `YCLIENTS_WEBHOOK_ENABLED=false` and `YCLIENTS_COMPANY_ID=` until
+migration 032 and the disabled webhook boundary have passed. Before the
+separately approved activation, set `YCLIENTS_COMPANY_ID` to the verified
+positive YCLIENTS company ID; it is configuration, not a token or bearer.
 
 Keep `PROFILE_PHOTO_STORAGE_ENABLED=false` while mounting and verifying the
 new S3 credentials. Configure its endpoint, region, bucket, and public HTTPS

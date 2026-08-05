@@ -156,6 +156,8 @@ function Assert-RuntimeBackendContract {
         DATABASE_NAME = 'prosto_padel_test_migration_cycle'
         DATABASE_USER = 'backend_auth_app'
         DATABASE_PASSWORD_FILE = '/run/secrets/backend-auth-app-password'
+        YCLIENTS_WEBHOOK_ENABLED = '${YCLIENTS_WEBHOOK_ENABLED:-false}'
+        YCLIENTS_COMPANY_ID = '${YCLIENTS_COMPANY_ID:-}'
         TELEGRAM_AUTH_ENABLED = '${TELEGRAM_AUTH_ENABLED:-false}'
         TELEGRAM_BOT_TOKEN = '!reset null'
         TELEGRAM_IDENTITY_LOOKUP_PEPPER_BASE64 = '!reset null'
@@ -167,6 +169,15 @@ function Assert-RuntimeBackendContract {
         TELEGRAM_BOT_TOKEN_FILE = '/run/secrets/telegram-bot-token'
         TELEGRAM_IDENTITY_LOOKUP_PEPPER_BASE64_FILE = '/run/secrets/telegram-identity-lookup-pepper-base64'
         TELEGRAM_LOGIN_WORKFLOW_HMAC_SECRET_BASE64_FILE = '/run/secrets/telegram-login-workflow-hmac-secret-base64'
+        PROFILE_PHOTO_STORAGE_ENABLED = '${PROFILE_PHOTO_STORAGE_ENABLED:-false}'
+        PROFILE_PHOTO_STORAGE_ENDPOINT = '${PROFILE_PHOTO_STORAGE_ENDPOINT:-}'
+        PROFILE_PHOTO_STORAGE_REGION = '${PROFILE_PHOTO_STORAGE_REGION:-}'
+        PROFILE_PHOTO_STORAGE_BUCKET = '${PROFILE_PHOTO_STORAGE_BUCKET:-}'
+        PROFILE_PHOTO_PUBLIC_BASE_URL = '${PROFILE_PHOTO_PUBLIC_BASE_URL:-}'
+        PROFILE_PHOTO_STORAGE_ACCESS_KEY_ID = '!reset null'
+        PROFILE_PHOTO_STORAGE_SECRET_ACCESS_KEY = '!reset null'
+        PROFILE_PHOTO_STORAGE_ACCESS_KEY_ID_FILE = '/run/secrets/profile-photo-access-key-id'
+        PROFILE_PHOTO_STORAGE_SECRET_ACCESS_KEY_FILE = '/run/secrets/profile-photo-secret-access-key'
     }
 
     foreach ($entry in $expectedEnvironment.GetEnumerator()) {
@@ -180,7 +191,7 @@ function Assert-RuntimeBackendContract {
         -ServiceBlock $ServiceBlock `
         -ChildName 'volumes'
     $mountBlocks = @(Get-MountBlocks -VolumesBlock $volumes)
-    if ($mountBlocks.Count -ne 4) {
+    if ($mountBlocks.Count -ne 6) {
         throw "RUNTIME_BACKEND_COMPOSE_MOUNT_INVALID"
     }
 
@@ -189,6 +200,8 @@ function Assert-RuntimeBackendContract {
         '${TELEGRAM_BOT_TOKEN_FILE_HOST:?TELEGRAM_BOT_TOKEN_FILE_HOST is required}' = '/run/secrets/telegram-bot-token'
         '${TELEGRAM_IDENTITY_LOOKUP_PEPPER_BASE64_FILE_HOST:?TELEGRAM_IDENTITY_LOOKUP_PEPPER_BASE64_FILE_HOST is required}' = '/run/secrets/telegram-identity-lookup-pepper-base64'
         '${TELEGRAM_LOGIN_WORKFLOW_HMAC_SECRET_BASE64_FILE_HOST:?TELEGRAM_LOGIN_WORKFLOW_HMAC_SECRET_BASE64_FILE_HOST is required}' = '/run/secrets/telegram-login-workflow-hmac-secret-base64'
+        '${PROFILE_PHOTO_STORAGE_ACCESS_KEY_ID_FILE_HOST:?PROFILE_PHOTO_STORAGE_ACCESS_KEY_ID_FILE_HOST is required}' = '/run/secrets/profile-photo-access-key-id'
+        '${PROFILE_PHOTO_STORAGE_SECRET_ACCESS_KEY_FILE_HOST:?PROFILE_PHOTO_STORAGE_SECRET_ACCESS_KEY_FILE_HOST is required}' = '/run/secrets/profile-photo-secret-access-key'
     }
     $seenSources = @{}
     $seenTargets = @{}
@@ -334,6 +347,14 @@ $extraDatabasePassword = Replace-First `
     -NewValue "      DATABASE_PASSWORD: !reset null`n      DATABASE_PASSWORD: forbidden-test-value"
 Assert-RejectedMutation `
     -ServiceBlock $extraDatabasePassword `
+    -ExpectedError 'RUNTIME_BACKEND_COMPOSE_ENVIRONMENT_INVALID'
+
+$hardcodedYclientsWebhook = Replace-First `
+    -Text $runtimeBackendBlock `
+    -OldValue '      YCLIENTS_WEBHOOK_ENABLED: ${YCLIENTS_WEBHOOK_ENABLED:-false}' `
+    -NewValue '      YCLIENTS_WEBHOOK_ENABLED: true'
+Assert-RejectedMutation `
+    -ServiceBlock $hardcodedYclientsWebhook `
     -ExpectedError 'RUNTIME_BACKEND_COMPOSE_ENVIRONMENT_INVALID'
 
 $firstTarget = '        target: /run/secrets/backend-auth-app-password'
