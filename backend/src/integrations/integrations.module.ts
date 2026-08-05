@@ -20,12 +20,14 @@ import {
   readYclientsApiConfiguration,
 } from '../config/yclients-api.config';
 import { YclientsApiClient } from './yclients/yclients-api.client';
+import { YclientsAvailabilityService } from './yclients/yclients-availability.service';
 
 @Module({
   imports: [DatabaseModule],
   controllers: [YclientsWebhookController],
   providers: [
     DisabledCrmAdapter,
+    YclientsAvailabilityService,
     YclientsWebhookService,
     {
       provide: YclientsApiClient,
@@ -84,6 +86,6 @@ import { YclientsApiClient } from './yclients/yclients-api.client';
       },
     },
   ],
-  exports: [CRM_ADAPTER, YclientsApiClient],
+  exports: [CRM_ADAPTER, YclientsApiClient, YclientsAvailabilityService],
 })
 export class IntegrationsModule {}
