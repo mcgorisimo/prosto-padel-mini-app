@@ -9,6 +9,22 @@ export type YclientsCourt = Readonly<{
   name: string;
 }>;
 
+export type YclientsBookingService = Readonly<{
+  id: number;
+  title: string;
+  categoryId: number;
+}>;
+
+export type YclientsBookingServicesResult =
+  | Readonly<{ outcome: 'disabled' }>
+  | Readonly<{
+      outcome: 'loaded';
+      services: ReadonlyArray<YclientsBookingService>;
+    }>
+  | Readonly<{ outcome: 'unauthorized' }>
+  | Readonly<{ outcome: 'invalid_response' }>
+  | Readonly<{ outcome: 'unavailable' }>;
+
 export type YclientsCourtsForServiceResult =
   | Readonly<{ outcome: 'invalid_request' }>
   | Readonly<{ outcome: 'disabled' }>
@@ -39,6 +55,40 @@ function isBookableCourt(resource: YclientsBookableResource): boolean {
 @Injectable()
 export class YclientsAvailabilityService {
   constructor(private readonly yclients: YclientsApiClient) {}
+
+  async listActiveServices(): Promise<YclientsBookingServicesResult> {
+    try {
+      const result = await this.yclients.listBookableServices();
+      if (result.outcome !== 'loaded') {
+        return Object.freeze({ outcome: result.outcome });
+      }
+
+      const seenServiceIds = new Set<number>();
+      const services = result.services
+        .filter((service) => service.active)
+        .filter((service) => {
+          if (seenServiceIds.has(service.id)) {
+            return false;
+          }
+          seenServiceIds.add(service.id);
+          return true;
+        })
+        .map((service) =>
+          Object.freeze({
+            id: service.id,
+            title: service.title,
+            categoryId: service.categoryId,
+          }),
+        );
+
+      return Object.freeze({
+        outcome: 'loaded' as const,
+        services: Object.freeze(services),
+      });
+    } catch {
+      return Object.freeze({ outcome: 'unavailable' as const });
+    }
+  }
 
   async listCourtsForService(
     serviceId: number,

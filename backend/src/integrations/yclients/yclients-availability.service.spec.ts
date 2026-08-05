@@ -2,18 +2,116 @@ import { YclientsApiClient } from './yclients-api.client';
 import { YclientsAvailabilityService } from './yclients-availability.service';
 
 function createSubject() {
+  const listBookableServices = jest.fn();
   const listBookableResources = jest.fn();
   const yclients = {
+    listBookableServices,
     listBookableResources,
   } as unknown as YclientsApiClient;
 
   return {
     service: new YclientsAvailabilityService(yclients),
+    listBookableServices,
     listBookableResources,
   };
 }
 
 describe('YclientsAvailabilityService', () => {
+  it('returns only unique active services using safe fields', async () => {
+    const { service, listBookableServices } = createSubject();
+    listBookableServices.mockResolvedValue({
+      outcome: 'loaded',
+      services: [
+        {
+          id: 30_539_679,
+          title: 'Аренда корта 1ч.',
+          categoryId: 27_980_310,
+          active: true,
+          privateMarker: 'not returned',
+        },
+        {
+          id: 30_539_694,
+          title: 'Аренда корта 1.5ч.',
+          categoryId: 27_980_310,
+          active: false,
+        },
+        {
+          id: 30_539_886,
+          title: 'Индивидуальная тренировка 1ч.',
+          categoryId: 27_980_391,
+          active: true,
+        },
+        {
+          id: 30_539_679,
+          title: 'Duplicate service',
+          categoryId: 27_980_310,
+          active: true,
+        },
+      ],
+    });
+
+    await expect(service.listActiveServices()).resolves.toEqual({
+      outcome: 'loaded',
+      services: [
+        {
+          id: 30_539_679,
+          title: 'Аренда корта 1ч.',
+          categoryId: 27_980_310,
+        },
+        {
+          id: 30_539_886,
+          title: 'Индивидуальная тренировка 1ч.',
+          categoryId: 27_980_391,
+        },
+      ],
+    });
+    expect(listBookableServices).toHaveBeenCalledTimes(1);
+    expect(listBookableServices).toHaveBeenCalledWith();
+  });
+
+  it('returns an empty loaded result when no services are active', async () => {
+    const { service, listBookableServices } = createSubject();
+    listBookableServices.mockResolvedValue({
+      outcome: 'loaded',
+      services: [
+        {
+          id: 30_539_694,
+          title: 'Аренда корта 1.5ч.',
+          categoryId: 27_980_310,
+          active: false,
+        },
+      ],
+    });
+
+    await expect(service.listActiveServices()).resolves.toEqual({
+      outcome: 'loaded',
+      services: [],
+    });
+  });
+
+  it.each([
+    'disabled',
+    'unauthorized',
+    'invalid_response',
+    'unavailable',
+  ] as const)('preserves the services client outcome %s', async (outcome) => {
+    const { service, listBookableServices } = createSubject();
+    listBookableServices.mockResolvedValue({ outcome });
+
+    await expect(service.listActiveServices()).resolves.toEqual({ outcome });
+  });
+
+  it('maps unexpected services client failures to unavailable', async () => {
+    const { service, listBookableServices } = createSubject();
+    listBookableServices.mockRejectedValue(
+      new Error('private upstream marker'),
+    );
+
+    await expect(service.listActiveServices()).resolves.toEqual({
+      outcome: 'unavailable',
+    });
+  });
+
   it.each([0, -1, 1.5, Number.NaN, Number.MAX_SAFE_INTEGER + 1])(
     'rejects invalid service id %s without calling YCLIENTS',
     async (serviceId) => {
