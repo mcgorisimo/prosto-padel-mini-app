@@ -45,19 +45,20 @@ export class YclientsApiClient {
       typeof companyId !== 'number' ||
       !Number.isSafeInteger(companyId) ||
       companyId <= 0 ||
-      runtime.partnerToken.length === 0
+      runtime.partnerToken.length === 0 ||
+      runtime.userToken.length === 0
     ) {
       return Object.freeze({ outcome: 'invalid_response' as const });
     }
 
     try {
       const url = new URL('api/v1/companies', `${runtime.baseUrl}/`);
-      url.searchParams.set('id', String(companyId));
+      url.searchParams.set('my', '1');
       const response = await this.configuration.fetch(url, {
         method: 'GET',
         headers: {
           accept: YCLIENTS_ACCEPT,
-          authorization: `Bearer ${runtime.partnerToken}`,
+          authorization: `Bearer ${runtime.partnerToken}, User ${runtime.userToken}`,
         },
         signal: AbortSignal.timeout(
           this.configuration.requestTimeoutMilliseconds,

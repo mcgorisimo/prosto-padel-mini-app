@@ -50,7 +50,7 @@ describe('YclientsApiClient', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it('probes only the configured company using the partner bearer', async () => {
+  it('lists accessible companies using the partner and application user tokens', async () => {
     const fetch = fetchMock().mockResolvedValue(
       response(200, {
         success: true,
@@ -67,18 +67,17 @@ describe('YclientsApiClient', () => {
     expect(fetch).toHaveBeenCalledTimes(1);
     const [input, init] = fetch.mock.calls[0];
     expect(String(input)).toBe(
-      `https://api.example.test/vendor/api/v1/companies?id=${COMPANY_ID}`,
+      'https://api.example.test/vendor/api/v1/companies?my=1',
     );
     expect(init).toEqual(
       expect.objectContaining({
         method: 'GET',
         headers: {
           accept: 'application/vnd.yclients.v2+json',
-          authorization: `Bearer ${PARTNER_TOKEN}`,
+          authorization: `Bearer ${PARTNER_TOKEN}, User ${USER_TOKEN}`,
         },
       }),
     );
-    expect(JSON.stringify(init)).not.toContain(USER_TOKEN);
   });
 
   it.each([401, 403])('maps authorization status %s safely', async (status) => {
@@ -117,14 +116,21 @@ describe('YclientsApiClient', () => {
     },
   );
 
-  it('fails closed before fetch for an incomplete enabled configuration', async () => {
-    const fetch = fetchMock();
+  it.each([
+    { companyId: undefined },
+    { partnerToken: '' },
+    { userToken: '' },
+  ] satisfies ReadonlyArray<Partial<YclientsApiConfiguration>>)(
+    'fails closed before fetch for incomplete enabled configuration %#',
+    async (overrides) => {
+      const fetch = fetchMock();
 
-    await expect(
-      client(fetch, runtime({ companyId: undefined })).probeConfiguredCompany(),
-    ).resolves.toEqual({ outcome: 'invalid_response' });
-    expect(fetch).not.toHaveBeenCalled();
-  });
+      await expect(
+        client(fetch, runtime(overrides)).probeConfiguredCompany(),
+      ).resolves.toEqual({ outcome: 'invalid_response' });
+      expect(fetch).not.toHaveBeenCalled();
+    },
+  );
 
   it('maps transport failures without exposing the exception', async () => {
     const fetch = fetchMock().mockRejectedValue(
