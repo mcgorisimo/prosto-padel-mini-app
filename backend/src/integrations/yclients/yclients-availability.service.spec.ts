@@ -3,15 +3,18 @@ import { YclientsAvailabilityService } from './yclients-availability.service';
 
 function createSubject() {
   const listBookableServices = jest.fn();
+  const listBookableDates = jest.fn();
   const listBookableResources = jest.fn();
   const yclients = {
     listBookableServices,
+    listBookableDates,
     listBookableResources,
   } as unknown as YclientsApiClient;
 
   return {
     service: new YclientsAvailabilityService(yclients),
     listBookableServices,
+    listBookableDates,
     listBookableResources,
   };
 }
@@ -110,6 +113,151 @@ describe('YclientsAvailabilityService', () => {
     await expect(service.listActiveServices()).resolves.toEqual({
       outcome: 'unavailable',
     });
+  });
+
+  it.each([
+    {
+      serviceId: 0,
+      courtId: 5_730_531,
+      dateFrom: '2026-08-05',
+      dateTo: '2026-08-18',
+    },
+    {
+      serviceId: 30_539_679,
+      courtId: -1,
+      dateFrom: '2026-08-05',
+      dateTo: '2026-08-18',
+    },
+    {
+      serviceId: 30_539_679,
+      courtId: 5_730_531,
+      dateFrom: '05.08.2026',
+      dateTo: '2026-08-18',
+    },
+    {
+      serviceId: 30_539_679,
+      courtId: 5_730_531,
+      dateFrom: '2026-02-30',
+      dateTo: '2026-03-01',
+    },
+    {
+      serviceId: 30_539_679,
+      courtId: 5_730_531,
+      dateFrom: '2026-08-18',
+      dateTo: '2026-08-05',
+    },
+    {
+      serviceId: 30_539_679,
+      courtId: 5_730_531,
+      dateFrom: '2026-08-05',
+      dateTo: '2026-09-05',
+    },
+  ])('rejects invalid dates query %# without calling YCLIENTS', async (query) => {
+    const { service, listBookableDates } = createSubject();
+
+    await expect(service.listAvailableDates(query)).resolves.toEqual({
+      outcome: 'invalid_request',
+    });
+    expect(listBookableDates).not.toHaveBeenCalled();
+  });
+
+  it('returns unique sorted booking dates for the selected court', async () => {
+    const { service, listBookableDates } = createSubject();
+    listBookableDates.mockResolvedValue({
+      outcome: 'loaded',
+      workingDates: ['2026-08-05', '2026-08-06', '2026-08-07'],
+      bookingDates: ['2026-08-07', '2026-08-05', '2026-08-05'],
+    });
+
+    await expect(
+      service.listAvailableDates({
+        serviceId: 30_539_679,
+        courtId: 5_730_531,
+        dateFrom: '2026-08-05',
+        dateTo: '2026-08-18',
+      }),
+    ).resolves.toEqual({
+      outcome: 'loaded',
+      dates: ['2026-08-05', '2026-08-07'],
+    });
+    expect(listBookableDates).toHaveBeenCalledTimes(1);
+    expect(listBookableDates).toHaveBeenCalledWith({
+      serviceIds: [30_539_679],
+      resourceId: 5_730_531,
+      dateFrom: '2026-08-05',
+      dateTo: '2026-08-18',
+    });
+  });
+
+  it('returns an empty loaded result when no booking dates are available', async () => {
+    const { service, listBookableDates } = createSubject();
+    listBookableDates.mockResolvedValue({
+      outcome: 'loaded',
+      workingDates: ['2026-08-05'],
+      bookingDates: [],
+    });
+
+    await expect(
+      service.listAvailableDates({
+        serviceId: 30_539_679,
+        courtId: 5_730_531,
+        dateFrom: '2026-08-05',
+        dateTo: '2026-08-05',
+      }),
+    ).resolves.toEqual({ outcome: 'loaded', dates: [] });
+  });
+
+  it('fails closed when YCLIENTS returns a date outside the requested range', async () => {
+    const { service, listBookableDates } = createSubject();
+    listBookableDates.mockResolvedValue({
+      outcome: 'loaded',
+      workingDates: ['2026-08-05'],
+      bookingDates: ['2026-08-19'],
+    });
+
+    await expect(
+      service.listAvailableDates({
+        serviceId: 30_539_679,
+        courtId: 5_730_531,
+        dateFrom: '2026-08-05',
+        dateTo: '2026-08-18',
+      }),
+    ).resolves.toEqual({ outcome: 'invalid_response' });
+  });
+
+  it.each([
+    'disabled',
+    'unauthorized',
+    'invalid_response',
+    'unavailable',
+  ] as const)('preserves the dates client outcome %s', async (outcome) => {
+    const { service, listBookableDates } = createSubject();
+    listBookableDates.mockResolvedValue({ outcome });
+
+    await expect(
+      service.listAvailableDates({
+        serviceId: 30_539_679,
+        courtId: 5_730_531,
+        dateFrom: '2026-08-05',
+        dateTo: '2026-08-18',
+      }),
+    ).resolves.toEqual({ outcome });
+  });
+
+  it('maps unexpected dates client failures to unavailable', async () => {
+    const { service, listBookableDates } = createSubject();
+    listBookableDates.mockRejectedValue(
+      new Error('private upstream marker'),
+    );
+
+    await expect(
+      service.listAvailableDates({
+        serviceId: 30_539_679,
+        courtId: 5_730_531,
+        dateFrom: '2026-08-05',
+        dateTo: '2026-08-18',
+      }),
+    ).resolves.toEqual({ outcome: 'unavailable' });
   });
 
   it.each([0, -1, 1.5, Number.NaN, Number.MAX_SAFE_INTEGER + 1])(

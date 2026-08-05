@@ -4,6 +4,9 @@ import {
   YclientsBookableResource,
 } from './yclients-api.client';
 
+const DAY_MILLISECONDS = 86_400_000;
+const MAX_AVAILABILITY_DATE_RANGE_DAYS = 31;
+
 export type YclientsCourt = Readonly<{
   id: number;
   name: string;
@@ -20,6 +23,24 @@ export type YclientsBookingServicesResult =
   | Readonly<{
       outcome: 'loaded';
       services: ReadonlyArray<YclientsBookingService>;
+    }>
+  | Readonly<{ outcome: 'unauthorized' }>
+  | Readonly<{ outcome: 'invalid_response' }>
+  | Readonly<{ outcome: 'unavailable' }>;
+
+export type YclientsAvailableDatesQuery = Readonly<{
+  serviceId: number;
+  courtId: number;
+  dateFrom: string;
+  dateTo: string;
+}>;
+
+export type YclientsAvailableDatesResult =
+  | Readonly<{ outcome: 'invalid_request' }>
+  | Readonly<{ outcome: 'disabled' }>
+  | Readonly<{
+      outcome: 'loaded';
+      dates: ReadonlyArray<string>;
     }>
   | Readonly<{ outcome: 'unauthorized' }>
   | Readonly<{ outcome: 'invalid_response' }>
@@ -50,6 +71,22 @@ function isBookableCourt(resource: YclientsBookableResource): boolean {
       isCourtLabel(resource.specialization) ||
       isCourtLabel(resource.positionTitle))
   );
+}
+
+function readIsoDateMilliseconds(value: unknown): number | undefined {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return undefined;
+  }
+
+  const milliseconds = Date.parse(`${value}T00:00:00.000Z`);
+  if (
+    !Number.isFinite(milliseconds) ||
+    new Date(milliseconds).toISOString().slice(0, 10) !== value
+  ) {
+    return undefined;
+  }
+
+  return milliseconds;
 }
 
 @Injectable()
@@ -84,6 +121,63 @@ export class YclientsAvailabilityService {
       return Object.freeze({
         outcome: 'loaded' as const,
         services: Object.freeze(services),
+      });
+    } catch {
+      return Object.freeze({ outcome: 'unavailable' as const });
+    }
+  }
+
+  async listAvailableDates(
+    query: YclientsAvailableDatesQuery,
+  ): Promise<YclientsAvailableDatesResult> {
+    const dateFromMilliseconds = readIsoDateMilliseconds(query?.dateFrom);
+    const dateToMilliseconds = readIsoDateMilliseconds(query?.dateTo);
+    const rangeDays =
+      dateFromMilliseconds === undefined || dateToMilliseconds === undefined
+        ? Number.NaN
+        : (dateToMilliseconds - dateFromMilliseconds) / DAY_MILLISECONDS + 1;
+    if (
+      !Number.isSafeInteger(query?.serviceId) ||
+      Number(query.serviceId) <= 0 ||
+      !Number.isSafeInteger(query?.courtId) ||
+      Number(query.courtId) <= 0 ||
+      dateFromMilliseconds === undefined ||
+      dateToMilliseconds === undefined ||
+      !Number.isInteger(rangeDays) ||
+      rangeDays <= 0 ||
+      rangeDays > MAX_AVAILABILITY_DATE_RANGE_DAYS
+    ) {
+      return Object.freeze({ outcome: 'invalid_request' as const });
+    }
+
+    try {
+      const result = await this.yclients.listBookableDates({
+        serviceIds: [query.serviceId],
+        resourceId: query.courtId,
+        dateFrom: query.dateFrom,
+        dateTo: query.dateTo,
+      });
+      if (result.outcome !== 'loaded') {
+        return Object.freeze({ outcome: result.outcome });
+      }
+
+      const dates = [...new Set(result.bookingDates)].sort();
+      if (
+        dates.some((date) => {
+          const milliseconds = readIsoDateMilliseconds(date);
+          return (
+            milliseconds === undefined ||
+            milliseconds < dateFromMilliseconds ||
+            milliseconds > dateToMilliseconds
+          );
+        })
+      ) {
+        return Object.freeze({ outcome: 'invalid_response' as const });
+      }
+
+      return Object.freeze({
+        outcome: 'loaded' as const,
+        dates: Object.freeze(dates),
       });
     } catch {
       return Object.freeze({ outcome: 'unavailable' as const });
