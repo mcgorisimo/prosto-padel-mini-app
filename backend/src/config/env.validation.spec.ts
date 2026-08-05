@@ -45,14 +45,33 @@ function validate(environment: Record<string, unknown> = {}) {
 }
 
 describe('envValidationSchema', () => {
-  it('disables the YCLIENTS API by default and keeps the canonical base URL', () => {
+  it('disables YCLIENTS API and booking writes by default', () => {
     const { error, value } = validate();
 
     expect(error).toBeUndefined();
     expect(value[YCLIENTS_API_CONFIG_KEYS.enabled]).toBe(false);
+    expect(value[YCLIENTS_API_CONFIG_KEYS.bookingWriteEnabled]).toBe(false);
     expect(value[YCLIENTS_API_CONFIG_KEYS.baseUrl]).toBe(
       YCLIENTS_API_DEFAULT_BASE_URL,
     );
+  });
+
+  it('allows booking writes only when the YCLIENTS API is enabled', () => {
+    const apiDisabled = validate({
+      [YCLIENTS_API_CONFIG_KEYS.bookingWriteEnabled]: 'true',
+    });
+    const apiEnabled = validate({
+      ...SAFE_TEST_DATABASE_CONFIG,
+      ...SAFE_TEST_YCLIENTS_CONFIG,
+      [YCLIENTS_API_CONFIG_KEYS.enabled]: 'true',
+      [YCLIENTS_API_CONFIG_KEYS.bookingWriteEnabled]: 'true',
+    });
+
+    expect(apiDisabled.error).toBeDefined();
+    expect(apiEnabled.error).toBeUndefined();
+    expect(
+      apiEnabled.value[YCLIENTS_API_CONFIG_KEYS.bookingWriteEnabled],
+    ).toBe(true);
   });
 
   it('requires the database, company and both tokens for the enabled YCLIENTS API', () => {

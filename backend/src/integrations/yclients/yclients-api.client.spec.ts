@@ -10,6 +10,7 @@ function runtime(
 ): YclientsApiConfiguration {
   return {
     enabled: true,
+    bookingWriteEnabled: false,
     baseUrl: 'https://api.example.test/vendor',
     companyId: COMPANY_ID,
     partnerToken: PARTNER_TOKEN,

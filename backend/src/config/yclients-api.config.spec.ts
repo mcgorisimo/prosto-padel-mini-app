@@ -27,6 +27,7 @@ describe('YCLIENTS API configuration', () => {
     const runtime = readYclientsApiConfiguration(
       new ConfigService({
         [YCLIENTS_API_CONFIG_KEYS.enabled]: false,
+        [YCLIENTS_API_CONFIG_KEYS.bookingWriteEnabled]: false,
         [YCLIENTS_API_CONFIG_KEYS.companyId]: 2079564,
         [YCLIENTS_API_CONFIG_KEYS.partnerToken]: 'private-partner-token',
         [YCLIENTS_API_CONFIG_KEYS.userToken]: 'private-user-token',
@@ -35,6 +36,7 @@ describe('YCLIENTS API configuration', () => {
 
     expect(runtime).toEqual({
       enabled: false,
+      bookingWriteEnabled: false,
       baseUrl: YCLIENTS_API_DEFAULT_BASE_URL,
       companyId: 2079564,
       partnerToken: '',
@@ -46,6 +48,7 @@ describe('YCLIENTS API configuration', () => {
     const runtime = readYclientsApiConfiguration(
       new ConfigService({
         [YCLIENTS_API_CONFIG_KEYS.enabled]: true,
+        [YCLIENTS_API_CONFIG_KEYS.bookingWriteEnabled]: true,
         [YCLIENTS_API_CONFIG_KEYS.baseUrl]: 'https://api.example.test/base',
         [YCLIENTS_API_CONFIG_KEYS.companyId]: 2079564,
         [YCLIENTS_API_CONFIG_KEYS.partnerToken]: 'partner-token-value',
@@ -55,6 +58,7 @@ describe('YCLIENTS API configuration', () => {
 
     expect(runtime).toEqual({
       enabled: true,
+      bookingWriteEnabled: true,
       baseUrl: 'https://api.example.test/base',
       companyId: 2079564,
       partnerToken: 'partner-token-value',
@@ -73,5 +77,16 @@ describe('YCLIENTS API configuration', () => {
         }),
       ),
     ).toThrow();
+  });
+
+  it('fails closed when booking writes are enabled without the API', () => {
+    expect(() =>
+      readYclientsApiConfiguration(
+        new ConfigService({
+          [YCLIENTS_API_CONFIG_KEYS.enabled]: false,
+          [YCLIENTS_API_CONFIG_KEYS.bookingWriteEnabled]: true,
+        }),
+      ),
+    ).toThrow('Invalid YCLIENTS API configuration');
   });
 });

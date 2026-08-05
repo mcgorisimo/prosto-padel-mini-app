@@ -119,6 +119,17 @@ export const envValidationSchema = Joi.object({
           'YCLIENTS_API_ENABLED requires DATABASE_ENABLED to be enabled',
       }),
     }),
+  [YCLIENTS_API_CONFIG_KEYS.bookingWriteEnabled]: Joi.boolean()
+    .truthy('true')
+    .falsy('false')
+    .default(false)
+    .when(YCLIENTS_API_CONFIG_KEYS.enabled, {
+      is: false,
+      then: Joi.valid(false).messages({
+        'any.only':
+          'YCLIENTS_BOOKING_WRITE_ENABLED requires YCLIENTS_API_ENABLED to be enabled',
+      }),
+    }),
   [YCLIENTS_API_CONFIG_KEYS.baseUrl]: canonicalYclientsHttpsBaseUrl.default(
     YCLIENTS_API_DEFAULT_BASE_URL,
   ),

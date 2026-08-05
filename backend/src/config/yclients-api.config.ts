@@ -5,6 +5,7 @@ export const YCLIENTS_API_REQUEST_TIMEOUT_MILLISECONDS = 10_000;
 
 export const YCLIENTS_API_CONFIG_KEYS = Object.freeze({
   enabled: 'YCLIENTS_API_ENABLED',
+  bookingWriteEnabled: 'YCLIENTS_BOOKING_WRITE_ENABLED',
   baseUrl: 'YCLIENTS_API_BASE_URL',
   companyId: 'YCLIENTS_COMPANY_ID',
   partnerToken: 'YCLIENTS_PARTNER_TOKEN',
@@ -13,6 +14,7 @@ export const YCLIENTS_API_CONFIG_KEYS = Object.freeze({
 
 export type YclientsApiConfiguration = Readonly<{
   enabled: boolean;
+  bookingWriteEnabled: boolean;
   baseUrl: string;
   companyId: number | undefined;
   partnerToken: string;
@@ -45,6 +47,8 @@ export function readYclientsApiConfiguration(
 ): YclientsApiConfiguration {
   const enabled =
     config.get<boolean>(YCLIENTS_API_CONFIG_KEYS.enabled) === true;
+  const bookingWriteEnabled =
+    config.get<boolean>(YCLIENTS_API_CONFIG_KEYS.bookingWriteEnabled) === true;
   const baseUrl =
     normalizeYclientsHttpsBaseUrl(
       config.get<string>(YCLIENTS_API_CONFIG_KEYS.baseUrl) ??
@@ -53,8 +57,12 @@ export function readYclientsApiConfiguration(
   const companyId = config.get<number>(YCLIENTS_API_CONFIG_KEYS.companyId);
 
   if (!enabled) {
+    if (bookingWriteEnabled) {
+      throw new Error('Invalid YCLIENTS API configuration');
+    }
     return Object.freeze({
       enabled: false,
+      bookingWriteEnabled: false,
       baseUrl,
       companyId:
         Number.isSafeInteger(companyId) && (companyId ?? 0) > 0
@@ -71,6 +79,7 @@ export function readYclientsApiConfiguration(
 
   return Object.freeze({
     enabled: true,
+    bookingWriteEnabled,
     baseUrl,
     companyId: config.getOrThrow<number>(YCLIENTS_API_CONFIG_KEYS.companyId),
     partnerToken: config.getOrThrow<string>(

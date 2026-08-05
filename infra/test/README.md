@@ -143,12 +143,13 @@ Set these non-secret server values explicitly in `infra/test/.env.test`:
 - `TELEGRAM_INIT_DATA_MAX_AGE_SECONDS=<approved value>`;
 - `TELEGRAM_LOGIN_UUID_NAMESPACE=<stable approved UUID>`.
 
-Keep both `YCLIENTS_API_ENABLED=false` and `YCLIENTS_WEBHOOK_ENABLED=false`
-while mounting the Partner and User token files. Set
+Keep `YCLIENTS_API_ENABLED=false`, `YCLIENTS_BOOKING_WRITE_ENABLED=false`, and
+`YCLIENTS_WEBHOOK_ENABLED=false` while mounting the Partner and User token files. Set
 `YCLIENTS_API_BASE_URL=https://api.yclients.com` and stage the verified positive
 `YCLIENTS_COMPANY_ID`; neither value is a token or bearer. Enable the API only
 after a separately approved one-shot read-only company probe succeeds. Do not
-enable webhook intake merely because API credentials are present.
+enable booking writes or webhook intake merely because API credentials are
+present.
 
 Keep `PROFILE_PHOTO_STORAGE_ENABLED=false` while mounting and verifying the
 new S3 credentials. Configure its endpoint, region, bucket, and public HTTPS
