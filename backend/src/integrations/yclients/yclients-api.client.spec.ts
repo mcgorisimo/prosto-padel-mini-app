@@ -99,6 +99,32 @@ describe('YclientsApiClient', () => {
       );
     });
 
+    it('normalizes a single-digit provider hour', async () => {
+      const fetch = fetchMock().mockResolvedValue(
+        response(200, {
+          success: true,
+          data: [
+            {
+              time: '7:00',
+              seance_length: 3_600,
+              datetime: '2026-08-05T07:00:00+03:00',
+            },
+          ],
+        }),
+      );
+
+      await expect(client(fetch).listBookableTimes(query)).resolves.toEqual({
+        outcome: 'loaded',
+        times: [
+          {
+            time: '07:00',
+            seanceLengthSeconds: 3_600,
+            datetime: '2026-08-05T07:00:00+03:00',
+          },
+        ],
+      });
+    });
+
     it.each([401, 403])(
       'maps authorization status %s safely',
       async (status) => {

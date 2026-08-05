@@ -8,7 +8,7 @@ const DAY_MILLISECONDS = 86_400_000;
 const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/u;
 const ISO_DATETIME_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/u;
-const TIME_PATTERN = /^\d{2}:\d{2}$/u;
+const TIME_PATTERN = /^(\d{1,2}):(\d{2})$/u;
 const YCLIENTS_ACCEPT = 'application/vnd.yclients.v2+json';
 
 export type YclientsCompanyProbeResult =
@@ -194,26 +194,31 @@ function readBookableTime(
   value: unknown,
   expectedDate: string,
 ): YclientsBookableTime | undefined {
+  if (!isRecord(value) || typeof value.time !== 'string') {
+    return undefined;
+  }
+  const timeMatch = TIME_PATTERN.exec(value.time);
+  const hour = Number(timeMatch?.[1]);
+  const minute = Number(timeMatch?.[2]);
+  const normalizedTime = timeMatch === null || hour > 23 || minute > 59
+    ? undefined
+    : `${String(hour).padStart(2, '0')}:${timeMatch[2]}`;
   if (
-    !isRecord(value) ||
-    typeof value.time !== 'string' ||
-    !TIME_PATTERN.test(value.time) ||
-    Number(value.time.slice(0, 2)) > 23 ||
-    Number(value.time.slice(3, 5)) > 59 ||
+    normalizedTime === undefined ||
     !Number.isSafeInteger(value.seance_length) ||
     Number(value.seance_length) <= 0 ||
     Number(value.seance_length) > MAX_SEANCE_LENGTH_SECONDS ||
     typeof value.datetime !== 'string' ||
     !ISO_DATETIME_PATTERN.test(value.datetime) ||
     !value.datetime.startsWith(`${expectedDate}T`) ||
-    value.datetime.slice(11, 16) !== value.time ||
+    value.datetime.slice(11, 16) !== normalizedTime ||
     !Number.isFinite(Date.parse(value.datetime))
   ) {
     return undefined;
   }
 
   return Object.freeze({
-    time: value.time,
+    time: normalizedTime,
     seanceLengthSeconds: Number(value.seance_length),
     datetime: value.datetime,
   });
