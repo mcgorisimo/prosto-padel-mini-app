@@ -12,6 +12,7 @@ import {
   PLAYER_PROFILE_PHOTO_CONFIG_KEYS,
   normalizePlayerProfilePhotoHttpsBaseUrl,
 } from './player-profile-photo.config';
+import { YCLIENTS_WEBHOOK_CONFIG_KEYS } from './yclients-webhook.config';
 
 const canonicalBase64Secret = Joi.string()
   .base64()
@@ -76,6 +77,34 @@ export const envValidationSchema = Joi.object({
   HOST: Joi.string().hostname().default('127.0.0.1'),
   PORT: Joi.number().port().default(3000),
   CRM_PROVIDER: Joi.string().valid('disabled').default('disabled'),
+  [YCLIENTS_WEBHOOK_CONFIG_KEYS.enabled]: Joi.boolean()
+    .truthy('true')
+    .falsy('false')
+    .default(false)
+    .when('DATABASE_ENABLED', {
+      is: false,
+      then: Joi.valid(false).messages({
+        'any.only':
+          'YCLIENTS_WEBHOOK_ENABLED requires DATABASE_ENABLED to be enabled',
+      }),
+    }),
+  [YCLIENTS_WEBHOOK_CONFIG_KEYS.companyId]: Joi.when(
+    YCLIENTS_WEBHOOK_CONFIG_KEYS.enabled,
+    {
+      is: true,
+      then: Joi.number()
+        .integer()
+        .positive()
+        .max(Number.MAX_SAFE_INTEGER)
+        .required(),
+      otherwise: Joi.number()
+        .integer()
+        .positive()
+        .max(Number.MAX_SAFE_INTEGER)
+        .allow('')
+        .default(''),
+    },
+  ),
   DATABASE_ENABLED: Joi.boolean()
     .truthy('true')
     .falsy('false')

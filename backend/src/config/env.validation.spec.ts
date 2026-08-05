@@ -7,6 +7,7 @@ import {
   TELEGRAM_SESSION_TTL_SECONDS,
 } from './telegram-login.config';
 import { TELEGRAM_NOTIFICATION_CONFIG_KEYS } from './telegram-notification.config';
+import { YCLIENTS_WEBHOOK_CONFIG_KEYS } from './yclients-webhook.config';
 
 const SAFE_TEST_TELEGRAM_CRYPTO_CONFIG = Object.freeze({
   [TELEGRAM_LOGIN_CONFIG_KEYS.lookupPepperBase64]: Buffer.alloc(
@@ -35,6 +36,47 @@ function validate(environment: Record<string, unknown> = {}) {
 }
 
 describe('envValidationSchema', () => {
+  it('disables the YCLIENTS webhook by default', () => {
+    const { error, value } = validate();
+
+    expect(error).toBeUndefined();
+    expect(value[YCLIENTS_WEBHOOK_CONFIG_KEYS.enabled]).toBe(false);
+  });
+
+  it('requires a database and safe company ID for an enabled YCLIENTS webhook', () => {
+    const missingDatabase = validate({
+      [YCLIENTS_WEBHOOK_CONFIG_KEYS.enabled]: 'true',
+      [YCLIENTS_WEBHOOK_CONFIG_KEYS.companyId]: '123',
+    });
+    const missingCompany = validate({
+      ...SAFE_TEST_DATABASE_CONFIG,
+      [YCLIENTS_WEBHOOK_CONFIG_KEYS.enabled]: 'true',
+    });
+    const valid = validate({
+      ...SAFE_TEST_DATABASE_CONFIG,
+      [YCLIENTS_WEBHOOK_CONFIG_KEYS.enabled]: 'true',
+      [YCLIENTS_WEBHOOK_CONFIG_KEYS.companyId]: '123',
+    });
+
+    expect(missingDatabase.error).toBeDefined();
+    expect(missingCompany.error).toBeDefined();
+    expect(valid.error).toBeUndefined();
+    expect(valid.value[YCLIENTS_WEBHOOK_CONFIG_KEYS.companyId]).toBe(123);
+  });
+
+  it.each(['0', '-1', '1.5', '9007199254740992', 'not-a-number'])(
+    'rejects invalid YCLIENTS company ID %s when enabled',
+    (companyId) => {
+      const { error } = validate({
+        ...SAFE_TEST_DATABASE_CONFIG,
+        [YCLIENTS_WEBHOOK_CONFIG_KEYS.enabled]: 'true',
+        [YCLIENTS_WEBHOOK_CONFIG_KEYS.companyId]: companyId,
+      });
+
+      expect(error).toBeDefined();
+    },
+  );
+
   it('disables Telegram authentication by default', () => {
     const { error, value } = validate();
 

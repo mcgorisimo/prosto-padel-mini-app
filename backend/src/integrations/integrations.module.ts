@@ -13,11 +13,15 @@ import { TelegramBotClient } from '../notifications/telegram-bot.client';
 import { TelegramNotificationDispatcher } from '../notifications/telegram-notification.dispatcher';
 import { CRM_ADAPTER } from './crm/crm.tokens';
 import { DisabledCrmAdapter } from './crm/disabled-crm.adapter';
+import { YclientsWebhookController } from './yclients/yclients-webhook.controller';
+import { YclientsWebhookService } from './yclients/yclients-webhook.service';
 
 @Module({
   imports: [DatabaseModule],
+  controllers: [YclientsWebhookController],
   providers: [
     DisabledCrmAdapter,
+    YclientsWebhookService,
     {
       provide: CRM_ADAPTER,
       useExisting: DisabledCrmAdapter,
