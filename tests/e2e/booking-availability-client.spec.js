@@ -387,7 +387,10 @@ test('renders backend availability in read-only booking mode', async ({ page }) 
       },
       async listBookingTimes(query) {
         calls.push({ operation: 'times', ...query });
-        const time = query.serviceId === 30539694 ? '16:30' : '17:00';
+        if (query.serviceId === 30539694) {
+          return { outcome: 'rejected', reason: 'invalid_response' };
+        }
+        const time = '17:00';
         return {
           outcome: 'times_loaded',
           times: [{
@@ -425,24 +428,19 @@ test('renders backend availability in read-only booking mode', async ({ page }) 
 
   const root = page.getByTestId('booking-readonly-root');
   await expect(root.getByTestId('booking-availability-status')).toHaveText(
-    'Показаны актуальные свободные слоты клуба.',
+    'Показаны доступные слоты. Часть вариантов услуги временно недоступна.',
   );
   await expect(root.getByRole('button', { name: 'Корт №1' })).toBeVisible();
   await expect(root.getByRole('button', { name: '1,5 ч' })).toBeEnabled();
   await expect(root.getByRole('button', { name: '2,5 ч' })).toBeDisabled();
 
-  const standardTime = root.getByRole('button', {
-    name: '16:30 Свободно',
-  });
   const primeTime = root.getByRole('button', {
     name: '17:00 Свободно',
   });
-  await expect(standardTime).toBeEnabled();
-  await expect(standardTime).toContainText('Свободно');
   await expect(primeTime).toBeEnabled();
   await expect(primeTime).toContainText('Свободно');
 
-  await standardTime.click();
+  await primeTime.click();
   const dialog = root.getByRole('dialog', { name: 'Подтверждение брони' });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole('button', { name: 'Только просмотр' }))

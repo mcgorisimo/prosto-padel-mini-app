@@ -138,6 +138,7 @@ export default function BookingScreen({
     status: 'idle',
     queryKey: '',
     slots: [],
+    partial: false,
   });
   const isSavingRef = useRef(false);
 
@@ -318,7 +319,7 @@ export default function BookingScreen({
     }
     let active = true;
     const queryKey = timesQueryKey;
-    setTimesState({ status: 'loading', queryKey, slots: [] });
+    setTimesState({ status: 'loading', queryKey, slots: [], partial: false });
     const requests = selectedServiceIds.flatMap((serviceId) =>
       queryCourtIds.map((selectedCourtId) => ({ serviceId, courtId: selectedCourtId })),
     );
@@ -330,14 +331,18 @@ export default function BookingScreen({
         date: selectedDateISO,
       }))).then((results) => {
       if (!active) return;
-      if (results.some((result) => result?.outcome !== 'times_loaded')) {
-        setTimesState({ status: 'error', queryKey, slots: [] });
+      const loadedResults = results.flatMap((result, index) => (
+        result?.outcome === 'times_loaded'
+          ? [{ request: requests[index], result }]
+          : []
+      ));
+      if (loadedResults.length === 0) {
+        setTimesState({ status: 'error', queryKey, slots: [], partial: false });
         return;
       }
       const courtById = new Map(backendCourts.map((court) => [court.id, court]));
       const slotsByTime = new Map();
-      results.forEach((result, index) => {
-        const request = requests[index];
+      loadedResults.forEach(({ request, result }) => {
         for (const time of result.times) {
           if (!slotsByTime.has(time.time)) {
             slotsByTime.set(time.time, {
@@ -351,9 +356,16 @@ export default function BookingScreen({
       const slots = [...slotsByTime.values()]
         .filter((slot) => slot.court)
         .sort((left, right) => left.time.localeCompare(right.time));
-      setTimesState({ status: 'ready', queryKey, slots });
+      setTimesState({
+        status: 'ready',
+        queryKey,
+        slots,
+        partial: loadedResults.length < results.length,
+      });
     }).catch(() => {
-      if (active) setTimesState({ status: 'error', queryKey, slots: [] });
+      if (active) {
+        setTimesState({ status: 'error', queryKey, slots: [], partial: false });
+      }
     });
 
     return () => {
@@ -438,7 +450,9 @@ export default function BookingScreen({
   const availabilityStatusText = availabilityHasError
     ? 'Не удалось загрузить доступность. Попробуйте открыть экран ещё раз.'
     : timesState.status === 'ready' && timesState.queryKey === timesQueryKey
-      ? 'Показаны актуальные свободные слоты клуба.'
+      ? timesState.partial
+        ? 'Показаны доступные слоты. Часть вариантов услуги временно недоступна.'
+        : 'Показаны актуальные свободные слоты клуба.'
       : 'Загружаем актуальные свободные слоты…';
 
   useEffect(() => {
