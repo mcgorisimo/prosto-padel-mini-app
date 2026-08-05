@@ -42,6 +42,203 @@ function client(
 }
 
 describe('YclientsApiClient', () => {
+  describe('booking record creation', () => {
+    const command = Object.freeze({
+      apiId: 7_770_001,
+      serviceId: 30_539_679,
+      resourceId: 5_730_531,
+      datetime: '2026-08-05T16:30:00+03:00',
+      client: Object.freeze({
+        phone: '79000000000',
+        fullName: 'Тест Просто Падел',
+        email: 'test@example.test',
+      }),
+    });
+
+    it('does not perform a network request while the API is disabled', async () => {
+      const fetch = fetchMock();
+
+      await expect(
+        client(fetch, runtime({ enabled: false })).createBookingRecord(command),
+      ).resolves.toEqual({ outcome: 'disabled' });
+      expect(fetch).not.toHaveBeenCalled();
+    });
+
+    it('does not perform a network request while booking writes are disabled', async () => {
+      const fetch = fetchMock();
+
+      await expect(client(fetch).createBookingRecord(command)).resolves.toEqual({
+        outcome: 'write_disabled',
+      });
+      expect(fetch).not.toHaveBeenCalled();
+    });
+
+    it('creates one notification-free record using only the partner token', async () => {
+      const fetch = fetchMock().mockResolvedValue(
+        response(201, {
+          success: true,
+          data: [
+            {
+              id: 1,
+              record_id: 2_820_023,
+              record_hash: '567df655304da9b98487769426d4e76e',
+              privateMarker: 'not returned',
+            },
+          ],
+          meta: [],
+        }),
+      );
+
+      await expect(
+        client(fetch, runtime({ bookingWriteEnabled: true })).createBookingRecord(
+          command,
+        ),
+      ).resolves.toEqual({
+        outcome: 'created',
+        appointmentId: 1,
+        recordId: 2_820_023,
+        recordHash: '567df655304da9b98487769426d4e76e',
+      });
+
+      expect(fetch).toHaveBeenCalledTimes(1);
+      const [input, init] = fetch.mock.calls[0];
+      expect(String(input)).toBe(
+        'https://api.example.test/vendor/api/v1/book_record/2079564',
+      );
+      expect(init).toEqual(
+        expect.objectContaining({
+          method: 'POST',
+          headers: {
+            accept: 'application/vnd.yclients.v2+json',
+            authorization: `Bearer ${PARTNER_TOKEN}`,
+            'content-type': 'application/json',
+          },
+        }),
+      );
+      expect(JSON.parse(String(init?.body))).toEqual({
+        phone: '79000000000',
+        fullname: 'Тест Просто Падел',
+        email: 'test@example.test',
+        notify_by_sms: 0,
+        notify_by_email: 0,
+        api_id: 7_770_001,
+        appointments: [
+          {
+            id: 1,
+            services: [30_539_679],
+            staff_id: 5_730_531,
+            datetime: '2026-08-05T16:30:00+03:00',
+          },
+        ],
+      });
+      expect(String(init?.body)).not.toContain(USER_TOKEN);
+      expect(String(init?.body)).not.toMatch(
+        /paymentStatus|ownerPaid|holdAmount|prepay|payment/u,
+      );
+    });
+
+    it.each([
+      [{ ...command, apiId: 0 }],
+      [{ ...command, serviceId: 0 }],
+      [{ ...command, resourceId: 0 }],
+      [{ ...command, datetime: '2026-08-05 16:30:00' }],
+      [{ ...command, datetime: '2026-02-30T16:30:00+03:00' }],
+      [{ ...command, client: { ...command.client, phone: '+79000000000' } }],
+      [{ ...command, client: { ...command.client, fullName: '   ' } }],
+      [{ ...command, client: { ...command.client, email: 'invalid-email' } }],
+    ])('rejects invalid command %# without fetch', async (invalidCommand) => {
+      const fetch = fetchMock();
+
+      await expect(
+        client(fetch, runtime({ bookingWriteEnabled: true })).createBookingRecord(
+          invalidCommand,
+        ),
+      ).resolves.toEqual({ outcome: 'invalid_request' });
+      expect(fetch).not.toHaveBeenCalled();
+    });
+
+    it('maps an authentication failure safely', async () => {
+      const fetch = fetchMock().mockResolvedValue(
+        response(401, { private: 'provider marker' }),
+      );
+
+      await expect(
+        client(fetch, runtime({ bookingWriteEnabled: true })).createBookingRecord(
+          command,
+        ),
+      ).resolves.toEqual({ outcome: 'unauthorized' });
+    });
+
+    it.each([400, 403, 404, 409, 422])(
+      'maps definitive provider rejection %s without details',
+      async (status) => {
+        const fetch = fetchMock().mockResolvedValue(
+          response(status, { private: 'provider marker' }),
+        );
+
+        await expect(
+          client(fetch, runtime({ bookingWriteEnabled: true })).createBookingRecord(
+            command,
+          ),
+        ).resolves.toEqual({ outcome: 'rejected' });
+      },
+    );
+
+    it.each([
+      [200, { success: true, data: [] }],
+      [201, { success: false, data: [] }],
+      [201, { success: true, data: [] }],
+      [
+        201,
+        {
+          success: true,
+          data: [{ id: 1, record_id: 2_820_023, record_hash: 'short' }],
+        },
+      ],
+      [
+        201,
+        {
+          success: true,
+          data: [
+            {
+              id: 1,
+              record_id: 2_820_023,
+              record_hash: ' 567df655304da9b98487769426d4e76e ',
+            },
+          ],
+        },
+      ],
+      [408, { success: false }],
+      [425, { success: false }],
+      [429, { success: false }],
+      [500, { success: false }],
+    ] as const)(
+      'maps ambiguous status %s or body to unknown outcome',
+      async (status, body) => {
+        const fetch = fetchMock().mockResolvedValue(response(status, body));
+
+        await expect(
+          client(fetch, runtime({ bookingWriteEnabled: true })).createBookingRecord(
+            command,
+          ),
+        ).resolves.toEqual({ outcome: 'unknown_outcome' });
+      },
+    );
+
+    it('does not retry or expose a transport failure', async () => {
+      const fetch = fetchMock().mockRejectedValue(
+        new Error('private network marker'),
+      );
+
+      await expect(
+        client(fetch, runtime({ bookingWriteEnabled: true })).createBookingRecord(
+          command,
+        ),
+      ).resolves.toEqual({ outcome: 'unknown_outcome' });
+      expect(fetch).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('bookable appointment check', () => {
     const query = Object.freeze({
       serviceId: 30_539_679,

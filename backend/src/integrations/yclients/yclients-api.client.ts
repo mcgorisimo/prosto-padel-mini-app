@@ -108,6 +108,32 @@ export type YclientsBookableAppointmentCheckResult =
   | Readonly<{ outcome: 'invalid_response' }>
   | Readonly<{ outcome: 'unavailable' }>;
 
+export type YclientsCreateBookingCommand = Readonly<{
+  apiId: number;
+  serviceId: number;
+  resourceId: number;
+  datetime: string;
+  client: Readonly<{
+    phone: string;
+    fullName: string;
+    email: string;
+  }>;
+}>;
+
+export type YclientsCreateBookingResult =
+  | Readonly<{ outcome: 'disabled' }>
+  | Readonly<{ outcome: 'write_disabled' }>
+  | Readonly<{ outcome: 'invalid_request' }>
+  | Readonly<{
+      outcome: 'created';
+      appointmentId: number;
+      recordId: number;
+      recordHash: string;
+    }>
+  | Readonly<{ outcome: 'unauthorized' }>
+  | Readonly<{ outcome: 'rejected' }>
+  | Readonly<{ outcome: 'unknown_outcome' }>;
+
 export interface YclientsApiClientConfiguration {
   readonly runtime: YclientsApiConfiguration;
   readonly requestTimeoutMilliseconds: number;
@@ -209,6 +235,74 @@ function readIsoDatetime(value: unknown): string | undefined {
   return value;
 }
 
+function readProviderText(
+  value: unknown,
+  maximumLength: number,
+): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.trim();
+  if (
+    normalized.length === 0 ||
+    normalized.length > maximumLength ||
+    /[\u0000-\u001f\u007f-\u009f]/u.test(normalized)
+  ) {
+    return undefined;
+  }
+  return normalized;
+}
+
+function readProviderOpaqueValue(
+  value: unknown,
+  minimumLength: number,
+  maximumLength: number,
+): string | undefined {
+  if (
+    typeof value !== 'string' ||
+    value.length < minimumLength ||
+    value.length > maximumLength ||
+    /[\s\u0000-\u001f\u007f-\u009f]/u.test(value)
+  ) {
+    return undefined;
+  }
+  return value;
+}
+
+function readCreatedBooking(
+  body: Record<string, unknown> | undefined,
+):
+  | Omit<
+      Extract<YclientsCreateBookingResult, { outcome: 'created' }>,
+      'outcome'
+    >
+  | undefined {
+  if (
+    body?.success !== true ||
+    !Array.isArray(body.data) ||
+    body.data.length !== 1
+  ) {
+    return undefined;
+  }
+  const record = body.data[0];
+  if (
+    !isRecord(record) ||
+    !Number.isSafeInteger(record.id) ||
+    Number(record.id) !== 1 ||
+    !Number.isSafeInteger(record.record_id) ||
+    Number(record.record_id) <= 0
+  ) {
+    return undefined;
+  }
+  const recordHash = readProviderOpaqueValue(record.record_hash, 16, 512);
+  if (recordHash === undefined) {
+    return undefined;
+  }
+  return Object.freeze({
+    appointmentId: 1,
+    recordId: Number(record.record_id),
+    recordHash,
+  });
+}
+
 function readIsoDateList(value: unknown): ReadonlyArray<string> | undefined {
   if (!Array.isArray(value)) return undefined;
   const dates = value.map(readIsoDate);
@@ -252,6 +346,105 @@ function readBookableTime(
 
 export class YclientsApiClient {
   constructor(private readonly configuration: YclientsApiClientConfiguration) {}
+
+  async createBookingRecord(
+    command: YclientsCreateBookingCommand,
+  ): Promise<YclientsCreateBookingResult> {
+    const runtime = this.configuration.runtime;
+    if (!runtime.enabled) {
+      return Object.freeze({ outcome: 'disabled' as const });
+    }
+    if (!runtime.bookingWriteEnabled) {
+      return Object.freeze({ outcome: 'write_disabled' as const });
+    }
+
+    const companyId = runtime.companyId;
+    const datetime = readIsoDatetime(command?.datetime);
+    const phone = readProviderText(command?.client?.phone, 32);
+    const fullName = readProviderText(command?.client?.fullName, 256);
+    const email = readProviderText(command?.client?.email, 320);
+    if (
+      runtime.baseUrl.length === 0 ||
+      typeof companyId !== 'number' ||
+      !Number.isSafeInteger(companyId) ||
+      companyId <= 0 ||
+      runtime.partnerToken.length === 0 ||
+      !Number.isSafeInteger(command?.apiId) ||
+      Number(command.apiId) <= 0 ||
+      !Number.isSafeInteger(command?.serviceId) ||
+      Number(command.serviceId) <= 0 ||
+      !Number.isSafeInteger(command?.resourceId) ||
+      Number(command.resourceId) <= 0 ||
+      datetime === undefined ||
+      phone === undefined ||
+      !/^\d{10,15}$/u.test(phone) ||
+      fullName === undefined ||
+      email === undefined ||
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(email)
+    ) {
+      return Object.freeze({ outcome: 'invalid_request' as const });
+    }
+
+    try {
+      const url = new URL(
+        `api/v1/book_record/${companyId}`,
+        `${runtime.baseUrl}/`,
+      );
+      const response = await this.configuration.fetch(url, {
+        method: 'POST',
+        headers: {
+          accept: YCLIENTS_ACCEPT,
+          authorization: `Bearer ${runtime.partnerToken}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          phone,
+          fullname: fullName,
+          email,
+          notify_by_sms: 0,
+          notify_by_email: 0,
+          api_id: command.apiId,
+          appointments: [
+            {
+              id: 1,
+              services: [command.serviceId],
+              staff_id: command.resourceId,
+              datetime,
+            },
+          ],
+        }),
+        signal: AbortSignal.timeout(
+          this.configuration.requestTimeoutMilliseconds,
+        ),
+      });
+
+      if (response.status === 401) {
+        return Object.freeze({ outcome: 'unauthorized' as const });
+      }
+      if (
+        response.status === 408 ||
+        response.status === 425 ||
+        response.status === 429 ||
+        response.status >= 500
+      ) {
+        return Object.freeze({ outcome: 'unknown_outcome' as const });
+      }
+      if (response.status >= 400 && response.status < 500) {
+        return Object.freeze({ outcome: 'rejected' as const });
+      }
+      if (response.status !== 201) {
+        return Object.freeze({ outcome: 'unknown_outcome' as const });
+      }
+
+      const created = readCreatedBooking(readBody(await response.text()));
+      if (created === undefined) {
+        return Object.freeze({ outcome: 'unknown_outcome' as const });
+      }
+      return Object.freeze({ outcome: 'created' as const, ...created });
+    } catch {
+      return Object.freeze({ outcome: 'unknown_outcome' as const });
+    }
+  }
 
   async checkBookableAppointment(
     query: YclientsBookableAppointmentQuery,
