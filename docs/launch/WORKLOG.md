@@ -1131,3 +1131,56 @@
   независимого P0/P1 review; push/merge/deploy запрещены.
 - Следующий шаг: вернуть correction commit на независимый review управляющего
   чата. Approval disposable identity/slots A/B пока не запрашивать.
+
+### 2026-08-07 — D2 / controlled reschedule notification-state gate correction
+
+- Задача/ветка: `codex/week1-d2-reservation-core`; clean base
+  `ad924e484ae24094367a6c71c77b7c9ffa178f23`.
+- Status: `ad924e484ae24094367a6c71c77b7c9ffa178f23` superseded для
+  controlled writes. Его builder молча заменял наблюдаемые nonzero
+  `sms_remain_hours`/`email_remain_hours` нулями и мог изменить reminder policy
+  вместе с resource/datetime. Correction подготовлена для независимого review;
+  любые controlled writes и approval disposable identity/slots A/B всё ещё
+  запрещены и не запрашиваются. D2 остаётся `in_progress`.
+- Исправлено:
+  - official-shape exact GET parser по-прежнему принимает документированные
+    notification/reminder observations, включая nonzero/true state, string
+    `api_id` и отсутствие `send_sms`;
+  - PUT builder теперь fail closed до limiter/fetch, если не доказано строгое
+    off-состояние: `sms_before=0`, `sms_now=false`, `sms_now_text=''`,
+    `email_now=false`, оба remain-hours равны нулю и `notified=false`;
+  - `sms_now_text` сохраняется parser без trim, поэтому whitespace не может
+    ошибочно стать доказанным пустым значением;
+  - outbound `send_sms=false` остаётся явным command choice, а оба
+    remain-hours берутся из проверенного snapshot и после gate равны нулю;
+    silently-reset поведения больше нет;
+  - normal controlled lifecycle fixture использует только доказанное off-state;
+    C5/C8/C10/C13, hard budget 14, no-blind-retry и cancel proof не менялись.
+- Regression coverage: parser отдельно читает non-off official fields; builder и
+  write client отдельно отклоняют до fetch каждый unsafe state для
+  `sms_before`, `sms_now`, nonempty/whitespace `sms_now_text`, `email_now`,
+  `sms_remain_hours`, `email_remain_hours` и `notified`.
+- Tests:
+  - focused controlled admin/lifecycle specs: PASS, 41/41;
+  - backend typecheck: PASS;
+  - backend unit: PASS, 116 suites / 3039 tests;
+  - backend E2E: PASS, 2 suites / 4 tests;
+  - backend build: PASS;
+  - root E2E: PASS, 82 passed / 1 skipped / 0 failed;
+  - root build: PASS, 1615 modules; sandboxed запуск получил известный local
+    access-denied к `vite.config.js`, тот же build вне sandbox прошёл, остаётся
+    только штатный chunk-size warning.
+- External effects: YCLIENTS/API/DB/server calls, provider writes, secrets/env,
+  executable runner, migration и runtime/Nest/module/controller wiring
+  отсутствовали. Migration 033 не повторялась и остаётся `applied_verified`.
+- Deployment: `not_needed` — correction остаётся недостижимой из runtime;
+  integration/test rollout D2 остаётся `pending`.
+- Deployed environment/commit: Selectel test runtime без изменений на D1
+  `c04074459948d0bf545e865b885aea7a4e5fec3c`; containers/production не менялись.
+- Health/HTTP, manual Telegram smoke, provider lifecycle и log audit: not run /
+  not needed — server/runtime не менялись и внешние calls запрещены.
+- Independent read-only review всего correction diff: `P0/P1: none`; отдельно
+  проверены pre-fetch gate, exact notification text, verified reminder values,
+  parser/write split, lifecycle и PII/runtime boundaries.
+- Следующий шаг: создать отдельный локальный correction commit и вернуть его на
+  независимый review управляющего чата; push/merge/deploy не выполнять.

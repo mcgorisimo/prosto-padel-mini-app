@@ -116,6 +116,17 @@ function providerText(
   return normalized;
 }
 
+function providerExactText(
+  value: unknown,
+  maximumLength: number,
+): string | undefined {
+  return typeof value === 'string' &&
+    value.length <= maximumLength &&
+    !/[\u0000-\u001f\u007f-\u009f]/u.test(value)
+    ? value
+    : undefined;
+}
+
 function money(value: unknown): number | undefined {
   return typeof value === 'number' &&
     Number.isFinite(value) &&
@@ -241,7 +252,7 @@ export function readYclientsControlledFullRecord(
       ? value.attendance
       : undefined;
   const smsNow = booleanFlag(value.sms_now);
-  const smsNowText = providerText(value.sms_now_text, 512, true);
+  const smsNowText = providerExactText(value.sms_now_text, 512);
   const emailNow = booleanFlag(value.email_now);
   const notified = booleanFlag(value.notified);
   const normalizedApiId = normalizeYclientsSystemApiId(value.api_id);
@@ -337,6 +348,13 @@ export function buildYclientsControlledReschedulePayload(
   if (
     verified === undefined ||
     verified.deleted ||
+    verified.notification.smsBefore !== 0 ||
+    verified.notification.smsNow ||
+    verified.notification.smsNowText !== '' ||
+    verified.notification.emailNow ||
+    verified.notification.smsRemainHours !== 0 ||
+    verified.notification.emailRemainHours !== 0 ||
+    verified.notification.notified ||
     !positiveSafeInteger(target?.resourceId) ||
     !validIsoDatetime(target?.datetime)
   ) {
@@ -357,10 +375,10 @@ export function buildYclientsControlledReschedulePayload(
     save_if_busy: false as const,
     datetime: target.datetime,
     seance_length: verified.seanceLengthSeconds,
-    // PUT controls are explicit harness choices; GET does not expose send_sms.
+    // GET does not expose send_sms, so the controlled harness never requests it.
     send_sms: false as const,
-    sms_remain_hours: 0,
-    email_remain_hours: 0,
+    sms_remain_hours: verified.notification.smsRemainHours,
+    email_remain_hours: verified.notification.emailRemainHours,
     attendance: verified.attendance,
     api_id: String(verified.apiId),
   });

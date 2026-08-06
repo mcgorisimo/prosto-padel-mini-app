@@ -4,6 +4,7 @@ import {
   YclientsControlledFullRecordReader,
 } from './yclients-controlled-admin.client';
 import {
+  buildYclientsControlledReschedulePayload,
   safeYclientsControlledRecordProjection,
   YclientsControlledFullRecordSnapshot,
 } from './yclients-controlled-record';
@@ -23,6 +24,44 @@ const DATETIME_B = '2026-08-11T18:00:00+03:00';
 const PRIVATE_PHONE = '79990000000';
 const PRIVATE_NAME = 'Private Client';
 const PRIVATE_EMAIL = 'private@example.test';
+
+const OFF_NOTIFICATION = Object.freeze({
+  smsBefore: 0,
+  smsNow: false,
+  smsNowText: '',
+  emailNow: false,
+  smsRemainHours: 0,
+  emailRemainHours: 0,
+  notified: false,
+});
+
+const UNSAFE_NOTIFICATION_STATES: ReadonlyArray<
+  readonly [
+    string,
+    YclientsControlledFullRecordSnapshot['notification'],
+  ]
+> = Object.freeze([
+  ['sms_before', Object.freeze({ ...OFF_NOTIFICATION, smsBefore: 1 })],
+  ['sms_now', Object.freeze({ ...OFF_NOTIFICATION, smsNow: true })],
+  [
+    'sms_now_text',
+    Object.freeze({ ...OFF_NOTIFICATION, smsNowText: 'provider observation' }),
+  ],
+  [
+    'sms_now_text whitespace',
+    Object.freeze({ ...OFF_NOTIFICATION, smsNowText: ' ' }),
+  ],
+  ['email_now', Object.freeze({ ...OFF_NOTIFICATION, emailNow: true })],
+  [
+    'sms_remain_hours',
+    Object.freeze({ ...OFF_NOTIFICATION, smsRemainHours: 5 }),
+  ],
+  [
+    'email_remain_hours',
+    Object.freeze({ ...OFF_NOTIFICATION, emailRemainHours: 1 }),
+  ],
+  ['notified', Object.freeze({ ...OFF_NOTIFICATION, notified: true })],
+]);
 
 class ImmediateClock implements YclientsRequestLimiterClock {
   private now = 0;
@@ -106,15 +145,7 @@ function snapshot(): YclientsControlledFullRecordSnapshot {
     datetime: DATETIME_A,
     seanceLengthSeconds: 3_600,
     attendance: 0,
-    notification: Object.freeze({
-      smsBefore: 0,
-      smsNow: false,
-      smsNowText: '',
-      emailNow: false,
-      smsRemainHours: 5,
-      emailRemainHours: 1,
-      notified: false,
-    }),
+    notification: OFF_NOTIFICATION,
     apiId: API_ID,
     deleted: false,
     client: Object.freeze({
@@ -174,6 +205,39 @@ describe('YCLIENTS controlled full-record reader', () => {
       'Bearer test-partner-credential, User test-user-credential',
     );
     expect(JSON.stringify(result)).not.toContain('credential');
+  });
+
+  it('parses documented non-off notification observations without making them write-safe', async () => {
+    const fetch = fetchMock().mockResolvedValue(
+      jsonResponse(200, {
+        success: true,
+        data: providerRecord({
+          sms_before: 6,
+          sms_now: 1,
+          sms_now_text: 'provider observation',
+          email_now: 1,
+          sms_remain_hours: 5,
+          email_remain_hours: 1,
+          notified: 1,
+        }),
+      }),
+    );
+
+    const result = await new YclientsControlledFullRecordReader(
+      configuration(fetch),
+    ).getRecordSnapshot(RECORD_ID);
+
+    expect(result.outcome).toBe('found');
+    if (result.outcome !== 'found') throw new Error('expected full snapshot');
+    expect(result.snapshot.notification).toEqual({
+      smsBefore: 6,
+      smsNow: true,
+      smsNowText: 'provider observation',
+      emailNow: true,
+      smsRemainHours: 5,
+      emailRemainHours: 1,
+      notified: true,
+    });
   });
 
   it.each([
@@ -288,42 +352,31 @@ describe('YclientsAdminWriteClient', () => {
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 
-  it('does not copy GET notification observations into outbound send controls', async () => {
-    const fetch = fetchMock();
-    const observed = {
-      ...snapshot(),
-      notification: {
-        ...snapshot().notification,
-        smsBefore: 6,
-        smsNow: true,
-        smsNowText: 'provider observation',
-        emailNow: true,
-        smsRemainHours: 12,
-        emailRemainHours: 24,
-        notified: true,
-      },
-    };
-    fetch.mockResolvedValue(
-      jsonResponse(201, { success: true, data: { id: RECORD_ID } }),
-    );
-    await expect(
-      new YclientsAdminWriteClient(configuration(fetch)).reschedule(observed, {
+  it.each(UNSAFE_NOTIFICATION_STATES)(
+    'refuses PUT before fetch when %s is not fully off',
+    async (_field, notification) => {
+      const fetch = fetchMock();
+      const observed = Object.freeze({
+        ...snapshot(),
+        notification,
+      });
+      const target = Object.freeze({
         resourceId: RESOURCE_B,
         datetime: DATETIME_B,
-      }),
-    ).resolves.toEqual({ outcome: 'accepted' });
-    const body = JSON.parse(String(fetch.mock.calls[0][1]?.body));
-    expect(body).toMatchObject({
-      send_sms: false,
-      sms_remain_hours: 0,
-      email_remain_hours: 0,
-    });
-    expect(body).not.toHaveProperty('sms_before');
-    expect(body).not.toHaveProperty('sms_now');
-    expect(body).not.toHaveProperty('sms_now_text');
-    expect(body).not.toHaveProperty('email_now');
-    expect(body).not.toHaveProperty('notified');
-  });
+      });
+
+      expect(
+        buildYclientsControlledReschedulePayload(observed, target),
+      ).toBeUndefined();
+      await expect(
+        new YclientsAdminWriteClient(configuration(fetch)).reschedule(
+          observed,
+          target,
+        ),
+      ).resolves.toEqual({ outcome: 'invalid_request' });
+      expect(fetch).not.toHaveBeenCalled();
+    },
+  );
 
   it('sends exactly one DELETE and accepts only documented 204 with no body', async () => {
     const fetch = fetchMock().mockResolvedValue(new Response(null, { status: 204 }));
