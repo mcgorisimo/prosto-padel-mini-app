@@ -1072,3 +1072,62 @@
   любых controlled YCLIENTS writes владелец отдельно одобряет exact checkpoint,
   disposable test identity/слоты A/B и basic lifecycle. Optional duplicate
   `api_id` experiment требует ещё одного отдельного high-risk approval.
+
+### 2026-08-07 — D2 / official GET api_id and notification-shape correction
+
+- Задача/ветка: `codex/week1-d2-reservation-core`; clean base
+  `e6c8f1b089b6c15ccb7c99cf2d9b0fa14bcf8895`.
+- Status: checkpoint `e6c8f1b` superseded для controlled writes до этой
+  correction. D2 остаётся `in_progress`; executable runner и controlled
+  lifecycle по-прежнему запрещены.
+- Официальный contract уточнён по текущей странице YCLIENTS:
+  - exact GET `/api/v1/record/{company_id}/{record_id}` показывает `api_id` как
+    string (`""`, когда внешний ID отсутствует), а также `sms_before`,
+    `sms_now`, `sms_now_text`, `email_now`, `notified`, `sms_remain_hours` и
+    `email_remain_hours`; response не содержит `send_sms`;
+  - PUT того же record принимает `api_id` string и `send_sms` boolean.
+  Предыдущее утверждение про нераскрытые notification reminder fields было
+  неточным: нераскрытым в sample остаётся nested element shape services/client,
+  но перечисленные top-level notification fields документированы.
+- Исправлено:
+  - единая strict normalization принимает положительный safe integer number или
+    уже canonical decimal string без whitespace/sign/exponent/leading zero и
+    без превышения `Number.MAX_SAFE_INTEGER`; lossy parsing отсутствует;
+  - пустой/whitespace string остаётся только safe-read признаком отсутствующего
+    external ID; malformed/ambiguous значения fail closed;
+  - safe exact/list readback нормализует system-created string `api_id` в
+    существующий internal number, поэтому bounded candidate scan сравнивает его
+    без изменения uniqueness/search claims;
+  - controlled full GET parser больше не требует недокументированный
+    `send_sms`, строго читает официальный notification shape и требует
+    canonical positive `api_id`;
+  - outbound PUT не копирует response observations: `send_sms=false`,
+    `sms_remain_hours=0`, `email_remain_hours=0` являются явными безопасными
+    command choices; SMS/email не запрашиваются.
+- Lifecycle boundaries: C5/C8/C10/C13, hard budget 14, one in-flight,
+  no-blind-retry и canonical cancel proof не изменены. Реальных provider writes
+  и API calls не было.
+- Tests:
+  - focused api_id/read/reconciliation/full/lifecycle specs: PASS, 147/147;
+  - backend typecheck: PASS;
+  - backend unit: PASS, 116 suites / 3031 tests;
+  - backend E2E: PASS, 2 suites / 4 tests;
+  - backend build: PASS;
+  - root E2E: PASS, 82 passed / 1 skipped / 0 failed;
+  - root build: PASS, 1615 modules; только штатный chunk-size warning.
+- External effects: secrets/env, YCLIENTS/API/DB/server calls, provider writes,
+  migration, runtime/Nest/module/controller wiring отсутствовали. Migration 033
+  не повторялась и остаётся `applied_verified`.
+- Deployment: `not_needed` — correction code остаётся недостижимым из runtime;
+  D2 integration/test rollout остаётся `pending`.
+- Deployed environment/commit: Selectel test runtime без изменений на D1
+  `c04074459948d0bf545e865b885aea7a4e5fec3c`; containers/production не менялись.
+- Health/HTTP, manual Telegram smoke, log audit: not run / not needed — runtime,
+  server и containers не менялись.
+- Independent read-only P0/P1 review: `P0/P1: none`; canonical normalization,
+  safe/full parser split, notification-off PUT allowlist, lifecycle comparisons,
+  PII и zero-runtime-import boundary проверены на всём staged correction diff.
+- Git integration: отдельный local correction commit после final tests и
+  независимого P0/P1 review; push/merge/deploy запрещены.
+- Следующий шаг: вернуть correction commit на независимый review управляющего
+  чата. Approval disposable identity/slots A/B пока не запрашивать.

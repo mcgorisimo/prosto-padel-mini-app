@@ -1,4 +1,5 @@
 import type { YclientsApiConfiguration } from '../../config/yclients-api.config';
+import { normalizeYclientsSystemApiId } from './yclients-api-id';
 import { YclientsConservativeRequestLimiter } from './yclients-request-limiter';
 
 const MAX_EXACT_RESPONSE_BYTES = 262_144;
@@ -253,15 +254,9 @@ function readSafeAdminRecord(
   const resourceId = readConsistentId(value, 'staff_id', 'staff');
   const serviceIds = readServiceIds(value.services);
   const datetime = readIsoDatetime(value.datetime);
-  const rawApiId = value.api_id;
+  const normalizedApiId = normalizeYclientsSystemApiId(value.api_id);
   const apiId =
-    rawApiId === undefined ||
-    rawApiId === null ||
-    (typeof rawApiId === 'string' && rawApiId.trim().length === 0)
-      ? undefined
-      : positiveSafeInteger(rawApiId)
-        ? Number(rawApiId)
-        : Number.NaN;
+    normalizedApiId.outcome === 'present' ? normalizedApiId.value : undefined;
   const lastChangeDate =
     value.last_change_date === undefined || value.last_change_date === null
       ? undefined
@@ -273,7 +268,7 @@ function readSafeAdminRecord(
     serviceIds === undefined ||
     datetime === undefined ||
     typeof value.deleted !== 'boolean' ||
-    Number.isNaN(apiId) ||
+    normalizedApiId.outcome === 'invalid' ||
     (value.last_change_date !== undefined &&
       value.last_change_date !== null &&
       lastChangeDate === undefined)

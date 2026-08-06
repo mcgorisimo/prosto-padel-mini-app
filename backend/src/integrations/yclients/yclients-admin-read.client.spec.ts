@@ -76,7 +76,7 @@ function providerRecord(overrides: Record<string, unknown> = {}) {
     services: [{ id: SERVICE_ID, title: 'ignored service title' }],
     datetime: '2026-08-05T16:30:00+03:00',
     deleted: false,
-    api_id: API_ID,
+    api_id: String(API_ID),
     last_change_date: '2026-08-05 15:00:00',
     client: {
       name: 'private-client-name',
@@ -242,7 +242,12 @@ describe('YclientsAdminReadClient', () => {
       { success: true, data: providerRecord({ id: RECORD_ID + 1 }) },
       { success: true, data: providerRecord({ deleted: 0 }) },
       { success: true, data: providerRecord({ api_id: 'not-a-number' }) },
-      { success: true, data: providerRecord({ api_id: String(API_ID) }) },
+      { success: true, data: providerRecord({ api_id: ` ${API_ID}` }) },
+      { success: true, data: providerRecord({ api_id: `+${API_ID}` }) },
+      { success: true, data: providerRecord({ api_id: `0${API_ID}` }) },
+      { success: true, data: providerRecord({ api_id: `${API_ID}e0` }) },
+      { success: true, data: providerRecord({ api_id: '0' }) },
+      { success: true, data: providerRecord({ api_id: '9007199254740992' }) },
       { success: true, data: providerRecord({ datetime: '2026-02-30T16:30:00+03:00' }) },
       { success: true, data: providerRecord({ services: [] }) },
       {
@@ -361,10 +366,11 @@ describe('YclientsAdminReadClient', () => {
         jsonResponse(200, {
           success: true,
           data: [
-            providerRecord({ id: RECORD_ID + 1, api_id: '   ' }),
+            providerRecord({ id: RECORD_ID + 1, api_id: '' }),
+            providerRecord({ id: RECORD_ID + 2, api_id: '   ' }),
             providerRecord(),
           ],
-          meta: { page: 1, total_count: 2 },
+          meta: { page: 1, total_count: 3 },
         }),
       );
       const reader = client(fetch);

@@ -74,11 +74,14 @@ function providerRecord(overrides: Record<string, unknown> = {}) {
     datetime: DATETIME_A,
     seance_length: 3_600,
     attendance: 0,
-    send_sms: false,
-    sms_remain_hours: 0,
-    email_remain_hours: 0,
+    sms_before: 0,
+    sms_now: 0,
+    sms_now_text: '',
+    email_now: 0,
+    sms_remain_hours: 5,
+    email_remain_hours: 1,
     notified: 0,
-    api_id: API_ID,
+    api_id: String(API_ID),
     deleted: false,
     client: {
       phone: PRIVATE_PHONE,
@@ -104,9 +107,12 @@ function snapshot(): YclientsControlledFullRecordSnapshot {
     seanceLengthSeconds: 3_600,
     attendance: 0,
     notification: Object.freeze({
-      sendSms: false,
-      smsRemainHours: 0,
-      emailRemainHours: 0,
+      smsBefore: 0,
+      smsNow: false,
+      smsNowText: '',
+      emailNow: false,
+      smsRemainHours: 5,
+      emailRemainHours: 1,
       notified: false,
     }),
     apiId: API_ID,
@@ -139,6 +145,16 @@ describe('YCLIENTS controlled full-record reader', () => {
       patronymic: '',
       email: PRIVATE_EMAIL,
     });
+    expect(result.snapshot.apiId).toBe(API_ID);
+    expect(result.snapshot.notification).toEqual({
+      smsBefore: 0,
+      smsNow: false,
+      smsNowText: '',
+      emailNow: false,
+      smsRemainHours: 5,
+      emailRemainHours: 1,
+      notified: false,
+    });
     const safe = JSON.stringify(
       safeYclientsControlledRecordProjection(result.snapshot),
     );
@@ -163,9 +179,11 @@ describe('YCLIENTS controlled full-record reader', () => {
   it.each([
     providerRecord({ services: [{ id: SERVICE_ID }] }),
     providerRecord({ client: {} }),
-    providerRecord({ send_sms: undefined }),
+    providerRecord({ sms_now: undefined }),
     providerRecord({ email_remain_hours: undefined }),
-    providerRecord({ api_id: String(API_ID) }),
+    providerRecord({ api_id: `0${API_ID}` }),
+    providerRecord({ api_id: ` ${API_ID}` }),
+    providerRecord({ api_id: '9007199254740992' }),
   ])('fails closed when a full-payload field is absent or unsafe', async (data) => {
     const fetch = fetchMock().mockResolvedValue(
       jsonResponse(200, { success: true, data }),
@@ -179,7 +197,7 @@ describe('YCLIENTS controlled full-record reader', () => {
 });
 
 describe('YclientsAdminWriteClient', () => {
-  it('sends one allowlisted full PUT, preserves the snapshot, and changes only target effect', async () => {
+  it('sends one allowlisted PUT with explicit notification-off choices', async () => {
     const fetch = fetchMock().mockResolvedValue(
       jsonResponse(201, { success: true, data: { id: RECORD_ID } }),
     );
@@ -270,22 +288,41 @@ describe('YclientsAdminWriteClient', () => {
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 
-  it('refuses a reschedule unless all controlled notification fields are off', async () => {
+  it('does not copy GET notification observations into outbound send controls', async () => {
     const fetch = fetchMock();
-    const unsafe = {
+    const observed = {
       ...snapshot(),
       notification: {
         ...snapshot().notification,
-        smsRemainHours: 1,
+        smsBefore: 6,
+        smsNow: true,
+        smsNowText: 'provider observation',
+        emailNow: true,
+        smsRemainHours: 12,
+        emailRemainHours: 24,
+        notified: true,
       },
     };
+    fetch.mockResolvedValue(
+      jsonResponse(201, { success: true, data: { id: RECORD_ID } }),
+    );
     await expect(
-      new YclientsAdminWriteClient(configuration(fetch)).reschedule(unsafe, {
+      new YclientsAdminWriteClient(configuration(fetch)).reschedule(observed, {
         resourceId: RESOURCE_B,
         datetime: DATETIME_B,
       }),
-    ).resolves.toEqual({ outcome: 'invalid_request' });
-    expect(fetch).not.toHaveBeenCalled();
+    ).resolves.toEqual({ outcome: 'accepted' });
+    const body = JSON.parse(String(fetch.mock.calls[0][1]?.body));
+    expect(body).toMatchObject({
+      send_sms: false,
+      sms_remain_hours: 0,
+      email_remain_hours: 0,
+    });
+    expect(body).not.toHaveProperty('sms_before');
+    expect(body).not.toHaveProperty('sms_now');
+    expect(body).not.toHaveProperty('sms_now_text');
+    expect(body).not.toHaveProperty('email_now');
+    expect(body).not.toHaveProperty('notified');
   });
 
   it('sends exactly one DELETE and accepts only documented 204 with no body', async () => {

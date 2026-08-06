@@ -1,4 +1,5 @@
 import type { YclientsSafeAdminRecord } from './yclients-admin-read.client';
+import { normalizeYclientsSystemApiId } from './yclients-api-id';
 
 const MAX_SERVICES = 64;
 const MAX_SEANCE_LENGTH_SECONDS = 86_400;
@@ -32,7 +33,10 @@ export type YclientsControlledFullRecordSnapshot = Readonly<{
   seanceLengthSeconds: number;
   attendance: -1 | 0 | 1 | 2;
   notification: Readonly<{
-    sendSms: boolean;
+    smsBefore: number;
+    smsNow: boolean;
+    smsNowText: string;
+    emailNow: boolean;
     smsRemainHours: number;
     emailRemainHours: number;
     notified: boolean;
@@ -62,7 +66,7 @@ export type YclientsControlledReschedulePayload = Readonly<{
   save_if_busy: false;
   datetime: string;
   seance_length: number;
-  send_sms: boolean;
+  send_sms: false;
   sms_remain_hours: number;
   email_remain_hours: number;
   attendance: -1 | 0 | 1 | 2;
@@ -236,8 +240,11 @@ export function readYclientsControlledFullRecord(
     value.attendance === 2
       ? value.attendance
       : undefined;
-  const sendSms = booleanFlag(value.send_sms);
+  const smsNow = booleanFlag(value.sms_now);
+  const smsNowText = providerText(value.sms_now_text, 512, true);
+  const emailNow = booleanFlag(value.email_now);
   const notified = booleanFlag(value.notified);
+  const normalizedApiId = normalizeYclientsSystemApiId(value.api_id);
   if (
     companyId !== expectedCompanyId ||
     resourceId === undefined ||
@@ -246,11 +253,14 @@ export function readYclientsControlledFullRecord(
     !positiveSafeInteger(value.seance_length) ||
     Number(value.seance_length) > MAX_SEANCE_LENGTH_SECONDS ||
     attendance === undefined ||
-    sendSms === undefined ||
+    !nonNegativeSafeInteger(value.sms_before) ||
+    smsNow === undefined ||
+    smsNowText === undefined ||
+    emailNow === undefined ||
     !nonNegativeSafeInteger(value.sms_remain_hours) ||
     !nonNegativeSafeInteger(value.email_remain_hours) ||
     notified === undefined ||
-    !positiveSafeInteger(value.api_id) ||
+    normalizedApiId.outcome !== 'present' ||
     typeof value.deleted !== 'boolean' ||
     client === undefined
   ) {
@@ -265,12 +275,15 @@ export function readYclientsControlledFullRecord(
     seanceLengthSeconds: Number(value.seance_length),
     attendance,
     notification: Object.freeze({
-      sendSms,
+      smsBefore: Number(value.sms_before),
+      smsNow,
+      smsNowText,
+      emailNow,
       smsRemainHours: Number(value.sms_remain_hours),
       emailRemainHours: Number(value.email_remain_hours),
       notified,
     }),
-    apiId: Number(value.api_id),
+    apiId: normalizedApiId.value,
     deleted: value.deleted,
     client,
   });
@@ -307,7 +320,10 @@ export function buildYclientsControlledReschedulePayload(
       datetime: snapshot?.datetime,
       seance_length: snapshot?.seanceLengthSeconds,
       attendance: snapshot?.attendance,
-      send_sms: snapshot?.notification?.sendSms,
+      sms_before: snapshot?.notification?.smsBefore,
+      sms_now: snapshot?.notification?.smsNow,
+      sms_now_text: snapshot?.notification?.smsNowText,
+      email_now: snapshot?.notification?.emailNow,
       sms_remain_hours: snapshot?.notification?.smsRemainHours,
       email_remain_hours: snapshot?.notification?.emailRemainHours,
       notified: snapshot?.notification?.notified,
@@ -321,10 +337,6 @@ export function buildYclientsControlledReschedulePayload(
   if (
     verified === undefined ||
     verified.deleted ||
-    verified.notification.sendSms ||
-    verified.notification.smsRemainHours !== 0 ||
-    verified.notification.emailRemainHours !== 0 ||
-    verified.notification.notified ||
     !positiveSafeInteger(target?.resourceId) ||
     !validIsoDatetime(target?.datetime)
   ) {
@@ -345,9 +357,10 @@ export function buildYclientsControlledReschedulePayload(
     save_if_busy: false as const,
     datetime: target.datetime,
     seance_length: verified.seanceLengthSeconds,
-    send_sms: verified.notification.sendSms,
-    sms_remain_hours: verified.notification.smsRemainHours,
-    email_remain_hours: verified.notification.emailRemainHours,
+    // PUT controls are explicit harness choices; GET does not expose send_sms.
+    send_sms: false as const,
+    sms_remain_hours: 0,
+    email_remain_hours: 0,
     attendance: verified.attendance,
     api_id: String(verified.apiId),
   });
