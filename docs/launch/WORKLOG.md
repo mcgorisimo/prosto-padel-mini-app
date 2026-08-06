@@ -1000,3 +1000,75 @@
 - Business smoke:
 - Log audit:
 ```
+
+### 2026-08-07 — D2 / runtime-disabled controlled reschedule/cancel foundation
+
+- Задача/ветка: `codex/week1-d2-reservation-core`; clean base
+  `d6c905d4672790a098e5af006e6d43ff837e1eeb`.
+- Реализован только code-only foundation, не импортируемый Nest modules/runtime:
+  - строгий PII-bearing full-record snapshot для controlled backend harness и
+    отдельная безопасная projection без client data/record hash;
+  - exact admin GET snapshot reader и admin PUT/DELETE client с Partner+User
+    auth, bounded 256 KiB streaming, body cancellation, общим limiter,
+    `save_if_busy=false`, одним request и без retry/fallback;
+  - full PUT строится только из canonical snapshot и approved target; меняются
+    только resource/datetime, notification state обязан быть полностью off;
+  - pure lifecycle A→B реализует steps 1–14 и C5/C8/C10/C13, один in-flight,
+    интервал не менее 1 секунды, hard budget 14; uncertain write запрещает все
+    последующие writes и допускает только утверждённый readback;
+  - create не переопределён: runner зависит от существующего guarded
+    `YclientsApiClient.createBookingRecord`; CLI/package script/env loader нет.
+- Official contract check: GET/PUT/DELETE paths, Partner+User auth,
+  `save_if_busy`, PUT `201`, DELETE `204` и rate ceilings сверены с актуальной
+  официальной страницей YCLIENTS. PUT effect, repeat-delete, partial-update и
+  no-effect write error semantics не документированы: PUT `201` означает только
+  accepted и требует exact GET proof; все недоказанные write `4xx`, timeout,
+  `408/425/429/5xx`, transport и invalid/ambiguous success остаются `unknown`.
+- Residual contract risk: официальный exact GET не раскрывает полный nested
+  shape service cost/discount и notification reminder fields. Parser намеренно
+  fail-closed; отсутствие любого полного payload field даёт `unknown` до write.
+  Это должно быть подтверждено controlled readback в отдельно одобренном test
+  lifecycle, а не ослаблением parser.
+- PII/privacy: fullName/phone/email существуют только в typed in-memory snapshot
+  и outbound allowlisted PUT body; evidence содержит только A/B aliases,
+  equality/effect flags, status classes, step/request count и timestamp. Raw
+  request/response, Authorization, PII, record hash и provider IDs в evidence,
+  errors и logs не попадают.
+- Cancellation policy: D2 refund не реализует и payment fields не меняет.
+  Утверждённый 23h30 grace остаётся D4 policy/version snapshot decision;
+  освобождение слота в этом harness возможно только после canonical cancel
+  proof.
+- Изменённые файлы: `yclients-controlled-record.ts`,
+  `yclients-controlled-admin.client.ts`, `yclients-controlled-lifecycle.ts`, два
+  colocated unit/contract spec и этот append-only `WORKLOG.md`.
+- Tests:
+  - focused controlled YCLIENTS specs: PASS, 31/31;
+  - backend typecheck: PASS;
+  - backend unit: PASS, 115 suites / 3002 tests;
+  - backend E2E: PASS, 2 suites / 4 tests;
+  - backend build: PASS;
+  - root E2E: PASS, 82 passed / 1 skipped / 0 failed;
+  - root build: PASS, 1615 modules; первый sandboxed запуск получил локальный
+    access-denied к `vite.config.js`, разрешённый повтор вне sandbox прошёл;
+    остаётся только штатный chunk-size warning.
+- External effects: YCLIENTS/API/DB/server calls, provider writes, secrets/env,
+  migration, runtime/module/controller wiring отсутствовали. Migration 033 не
+  повторялась и остаётся `applied_verified`.
+- Deployment: `not_needed` — foundation недостижим из runtime, image/config/
+  containers/frontend bundle не меняются. Общий D2 остаётся `in_progress`, его
+  integration/test rollout — `pending`.
+- Deployed environment/commit: Selectel test runtime без изменений на D1
+  `c04074459948d0bf545e865b885aea7a4e5fec3c`; production не менялся.
+- Containers changed: none.
+- Health/HTTP, manual Telegram business smoke, log audit: not run / not needed —
+  server/runtime не менялись, controlled provider lifecycle не запускался.
+- Independent read-only P0/P1 review: найдены и исправлены два P1 — auth/config
+  failure repeat-delete больше не превращается в Basic PASS; recovery list
+  calendar/range constraints теперь полностью проверяются до первого provider
+  call. Добавлены точные regressions. Открытых P0/P1 после correction нет.
+- Git integration: локальный checkpoint создаётся после независимого P0/P1
+  review; push/merge/deploy не выполняются.
+- Следующий approval gate: до executable runner/secret loading/runtime wiring и
+  любых controlled YCLIENTS writes владелец отдельно одобряет exact checkpoint,
+  disposable test identity/слоты A/B и basic lifecycle. Optional duplicate
+  `api_id` experiment требует ещё одного отдельного high-risk approval.
