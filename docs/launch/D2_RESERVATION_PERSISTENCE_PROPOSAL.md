@@ -1,9 +1,8 @@
 # D2 — proposal хранения reservation и operation
 
-Статус: `contract_approved`; migration 033 — `prepared_for_review`, `not_applied`.
-Runtime, YCLIENTS wiring и реальные provider writes не меняются. Применение SQL,
-runtime wiring и Selectel rollout требуют отдельного явного одобрения. D2
-остаётся `in_progress`.
+Статус: `contract_approved`; migration 033 — `applied_verified` на Selectel test,
+runtime к ней не подключён. Этот документ не разрешает повтор migration, новый
+SQL, runtime wiring, provider writes или rollout. D2 остаётся `in_progress`.
 
 Вне scope: payment-поля, match binding/lifecycle D3, webhook implementation,
 секреты и реальные ID клиентов.
@@ -134,6 +133,27 @@ table:
 - Уникальность `(yclients_company_id, external_api_id)` для create добавлять
   только после подтверждения семантики YCLIENTS idempotency/search.
 
+### Approved cancellation/refund boundary
+
+Единый контракт для частной брони корта, reservation матча и тренировки:
+
+- customer-facing правило — отмена с возвратом за 24 часа до начала;
+- внутренний grace period — refundable, если
+  `startsAt - cancellationRequestedAt >= 23h30m`; ровно `23:30:00` считается
+  refundable, меньше — late cancellation без refund;
+- сравнение выполняется по UTC instants; пользователю время показывается в
+  timezone клуба;
+- cancellation reservation/provider record и payment refund — разные операции;
+  late cancellation всё равно отменяет YCLIENTS record и освобождает корт только
+  после canonical YCLIENTS cancel proof, но не запускает automatic refund;
+- refund decision и исполнение относятся к D4 Payment Core и не выводятся из
+  одного reservation status. D4 обязан хранить policy/version snapshot, чтобы
+  изменение правила не меняло старые операции;
+- существующие `paymentStatus`, `ownerPaid`, `holdAmount`, `prepay` не меняются.
+
+Текущий checkpoint не добавляет cancellation policy fields, schema change или
+payment implementation.
+
 ## 3. Privacy и security decision
 
 Варианты:
@@ -200,8 +220,9 @@ Retention, anonymization и delete-account требуют отдельных р�
 ### Zero-downtime migration order
 
 1. Зафиксировать approved поля, privacy/key contract и YCLIENTS assumptions.
-2. Подготовить отдельный SQL diff и contract tests на review; migration 033
-   подготовлена. До отдельного явного apply approval не применять её.
+2. Migration 033 была отдельно просмотрена, применена и проверена на Selectel
+   test. Не повторять её; последующие additive schema changes требуют нового
+   proposal, contract tests и явного approval.
 3. Expand-only: создать новые таблицы/constraints/indexes без изменения текущих
    tables/endpoints. Existing runtime продолжает работать как раньше.
 4. Backfill по умолчанию не нужен: локальной reservation persistence ещё нет.
@@ -213,8 +234,8 @@ Retention, anonymization и delete-account требуют отдельных р�
    отдельной approved migration. После первых writes: rollback только app; данные
    и keys сохраняются, destructive down migration в тот же rollout запрещена.
 
-Migration 033 и её contract tests подготовлены только для review; SQL нигде не
-применялся.
+Migration 033 имеет статус `applied_verified` на Selectel test; runtime остаётся
+disconnected. В текущем checkpoint SQL/DB commands не выполняются.
 
 ## 5. Approval checklist
 
@@ -238,7 +259,7 @@ Migration 033 и её contract tests подготовлены только дл�
 - [x] migration/rollback order и разрешение подготовить SQL только для review.
 
 Checklist одобрен полностью как persistence/privacy contract. Это не является
-разрешением применить migration, подключить runtime или обновить сервер.
+разрешением повторить migration, подключить runtime или обновить сервер.
 
 Всё ещё блокируются внешним контрактом YCLIENTS: get/lookup, reschedule, cancel,
 provider idempotency/search, timeout reconciliation, webhook verification/dedupe/

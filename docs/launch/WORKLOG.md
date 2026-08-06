@@ -26,7 +26,7 @@
 | Этап | Статус | Ветка/commit | Проверки | Блокер/следующий шаг |
 |---|---|---|---|---|
 | D1 Backend-only/contracts | done | `main` / deployed `c04074459948d0bf545e865b885aea7a4e5fec3c` | frontend E2E PASS (82/1 skipped); focused fail-closed 2/2 PASS; frontend build PASS; backend all PASS; Selectel test smoke PASS | D1 закрыт; следующий отдельный этап — D2 |
-| D2 YCLIENTS reservation core | in_progress | D2 branch / matrix `46bc35c7b6be5848bb5556b14eaee6fa33a20c2e` / plan `040773172a2fa556ffaaf1d12dac540095070976` / correction from that exact base | migration 033 applied/verified; plan correction docs-only, `git diff --check` перед commit | basic и optional provider tests требуют два отдельных approval; runtime wiring не начат |
+| D2 YCLIENTS reservation core | in_progress | D2 branch / matrix `46bc35c7b6be5848bb5556b14eaee6fa33a20c2e` / controlled-plan correction `a08de13c95e7cf67ff272942f484d2e3d3ebd988` / read-foundation checkpoint from that exact base | migration 033 applied/verified; backend gates PASS; root build PASS; root E2E 61 passed / 1 skipped / 21 unrelated `outside_telegram` failures | review runtime-disabled read foundation; basic и optional provider tests требуют два отдельных approval; runtime wiring не начат |
 | D3 Match ↔ reservation lifecycle | pending | — | — | cancel match, owner participant removal, match ↔ reservation binding |
 | D4 Payment Core | pending | — | — | payment provider, pricing/payment snapshot, чеки и возвраты |
 | D5 Settings/moderation/compliance | pending | — | — | standalone phone/email auth и verified backend email; затем schema review |
@@ -45,6 +45,7 @@
 | D2 persistence/privacy proposal | not applicable | docs-only checkpoint | `not_needed` | только Markdown; runtime, schema, containers и конфигурация не менялись |
 | D2 YCLIENTS contract matrix | not applicable | docs-only checkpoint поверх `3e8739b` | `not_needed` | только Markdown; API/DB/server/runtime не вызывались и не менялись |
 | D2 YCLIENTS controlled test plan | not applicable | `040773172a2fa556ffaaf1d12dac540095070976` + docs-only correction from that exact base | `not_needed` | plan only; provider/server/DB/runtime calls и writes не выполнялись |
+| D2 YCLIENTS read foundation | not applicable | checkpoint from `a08de13c95e7cf67ff272942f484d2e3d3ebd988` | `not_needed` | новый code не импортирован Nest modules/controllers/runtime; image, config, server и containers не менялись |
 
 Допустимые deployment-статусы: `not_needed`, `pending`, `test_deployed`,
 `production_deployed`, `deployment_deferred_by_user`.
@@ -79,6 +80,7 @@
 | 2026-08-06 | Owner видит собственный полный client snapshot; `club_admin` после backend role/permission check видит полный snapshot без masking/reveal | явное privacy-решение владельца | чужие players доступа не имеют; decrypt только на backend; каждый admin read требует security audit event без PII |
 | 2026-08-06 | D2 persistence/privacy contract и весь proposal checklist одобрены; SQL и contract tests разрешены только для review | явное решение владельца продукта | migration 033 можно подготовить, но нельзя применять; runtime wiring и Selectel rollout требуют нового отдельного одобрения |
 | 2026-08-06 | Официальный YCLIENTS contract допускает code-only exact get/bounded list/rate limiter, но не доказывает provider idempotency или webhook authenticity | read-only provider checkpoint | write adapter/runtime остаются gated controlled tests; webhook выключен, unknown write не повторяется вслепую |
+| 2026-08-06 | Customer-facing cancellation policy — 24 часа; внутренний refundable grace включает интервал до `23:30:00` включительно | финальное решение владельца продукта | сравнение `startsAt - cancellationRequestedAt` выполняется по UTC instants; меньше `23:30:00` — late/no refund; late cancellation всё равно требует canonical YCLIENTS cancel proof для освобождения корта; D4 решает/исполняет refund и хранит policy/version snapshot, D2 payment fields не меняет |
 
 ### 2026-08-06 — D1 / backend-only inventory и production boundary
 
@@ -705,6 +707,73 @@
 - Следующий конкретный шаг: независимый review correction commit; только после
   отдельного approval можно выполнять basic lifecycle. Optional duplicate
   experiment по-прежнему требует второго независимого approval.
+
+### 2026-08-06 — D2 / runtime-disabled YCLIENTS read foundation
+
+- Задача/ветка: `codex/week1-d2-reservation-core`; exact reviewed base
+  `a08de13c95e7cf67ff272942f484d2e3d3ebd988`, исходный worktree clean.
+- Commit: отдельный локальный checkpoint, содержащий эту запись; exact SHA
+  фиксируется Git handoff после commit. Push/merge не выполняются.
+- Изменённые файлы: standalone YCLIENTS admin read client, conservative request
+  limiter, read-only reconciliation primitives и их mocked unit/contract specs;
+  `D2_RESERVATION_PERSISTENCE_PROPOSAL.md` и этот WORKLOG.
+- Реализовано:
+  - typed exact admin GET и один явно bounded list page с узкими documented
+    filters, строгими page/count/date caps и без заявления lookup-by-`api_id`;
+  - fail-closed parser возвращает только allowlisted effect fields, не выдаёт
+    raw provider body, client PII или record hash;
+  - безопасная классификация `unauthorized`, documented exact `not_found`,
+    `rejected`, `rate_limited`, `unavailable`, `unknown` без автоматических
+    retries;
+  - shared limiter сериализует запросы и по умолчанию ограничивает их одним в
+    секунду и 60 в минуту, то есть строже обоих provider ceilings;
+  - exact known-record readback и one-page local candidate scan не выполняют
+    initial write/fallback; zero, multiple и effect mismatch остаются `unknown`.
+- Runtime boundary: новые файлы не импортированы в Nest module/controller или
+  application runtime. PUT/DELETE/create runner, provider writes и duplicate
+  experiment не реализованы.
+- Cancellation decision: customer-facing правило остаётся «за 24 часа»;
+  внутренний grace считает refundable при
+  `startsAt - cancellationRequestedAt >= 23h30m`, включая ровно `23:30:00`.
+  Сравнение — по UTC instants, display — timezone клуба. Late cancellation не
+  запускает refund, но должна отменить provider record и освободить корт только
+  после canonical cancel proof. Refund и policy/version snapshot принадлежат D4;
+  D2 не меняет `paymentStatus`, `ownerPaid`, `holdAmount`, `prepay`.
+- Migration: 033 остаётся `applied_verified` на Selectel test; runtime
+  disconnected. Migration/DB/PRECHECK/POSTCHECK/rollback не запускались.
+- Tests:
+  - focused backend unit/contract: PASS, 3 suites / 76 tests;
+  - backend typecheck: PASS;
+  - backend unit: PASS, 113 suites / 2953 tests;
+  - backend E2E: PASS, 2 suites / 4 tests;
+  - backend build: PASS;
+  - root build: PASS, 1615 modules; только штатное chunk-size warning;
+  - root E2E: FAIL, 61 passed / 1 skipped / 21 failed; параллельный и повторный
+    `--workers=1` прогоны одинаково получили `outside_telegram` во всех 21
+    session/login failures. Frontend/auth/runtime source этим checkpoint не
+    изменялся; failure зафиксирован как существующий harness/config blocker, а
+    не скрыт и не исправлялся расширением D2 scope.
+- Read-only P0/P1 review: реальные network/provider calls недостижимы без
+  отдельного явного construction и runtime wiring; auth header не возвращается
+  и не логируется; parser/result allowlist исключает PII/hash; readback не делает
+  blind write retry, list fallback или дополнительную page; открытых P0/P1 в
+  checkpoint diff не найдено.
+- Внешние calls/writes: YCLIENTS/API/DB/server calls, provider writes и чтение
+  secrets/env не выполнялись.
+- Git integration: локальный checkpoint commit; push/merge/deploy запрещены и не
+  выполняются.
+- Deployment: `not_needed` для checkpoint — code существует, но не импортирован
+  и недостижим из runtime; общий D2 остаётся `in_progress` с deployment
+  `pending`.
+- Deployed environment/commit: Selectel test runtime остаётся detached на D1
+  `c04074459948d0bf545e865b885aea7a4e5fec3c`; schema 033 отдельно
+  `applied_verified`, runtime к ней не подключён; production не менялся.
+- Containers changed: none.
+- Health/HTTP, business smoke, log audit: `not run / not needed` — server,
+  runtime и containers не менялись, внешние provider calls отсутствовали.
+- Следующий конкретный шаг: независимый review read foundation; PUT/DELETE и
+  executable controlled write runner не начинать до отдельного решения по
+  безопасному provider contract/test gate.
 
 ## Шаблон записи после этапа
 
