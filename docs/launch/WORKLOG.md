@@ -26,7 +26,7 @@
 | Этап | Статус | Ветка/commit | Проверки | Блокер/следующий шаг |
 |---|---|---|---|---|
 | D1 Backend-only/contracts | done | `main` / deployed `c04074459948d0bf545e865b885aea7a4e5fec3c` | frontend E2E PASS (82/1 skipped); focused fail-closed 2/2 PASS; frontend build PASS; backend all PASS; Selectel test smoke PASS | D1 закрыт; следующий отдельный этап — D2 |
-| D2 YCLIENTS reservation core | in_progress | `main` `3e8739b2e9308976bccfd125883f03917fa22962` / provider matrix checkpoint в D2 branch | migration 033 applied/verified; provider checkpoint docs-only, `git diff --check` перед commit | safe read adapter subset определён; write recovery/provider verification blockers остаются, runtime wiring не начат |
+| D2 YCLIENTS reservation core | in_progress | D2 branch / matrix `46bc35c7b6be5848bb5556b14eaee6fa33a20c2e` / controlled-plan checkpoint | migration 033 applied/verified; controlled plan docs-only, `git diff --check` перед commit | basic и optional provider tests требуют два отдельных approval; runtime wiring не начат |
 | D3 Match ↔ reservation lifecycle | pending | — | — | cancel match, owner participant removal, match ↔ reservation binding |
 | D4 Payment Core | pending | — | — | payment provider, pricing/payment snapshot, чеки и возвраты |
 | D5 Settings/moderation/compliance | pending | — | — | standalone phone/email auth и verified backend email; затем schema review |
@@ -44,6 +44,7 @@
 | D2 YCLIENTS reservation core | Selectel test | correction `7c31d29b639d6b29016d2378ccc7006df6129b52` | `pending` | migration 033 `applied_verified`, tables empty и runtime disconnected; runtime/containers остаются на D1 commit |
 | D2 persistence/privacy proposal | not applicable | docs-only checkpoint | `not_needed` | только Markdown; runtime, schema, containers и конфигурация не менялись |
 | D2 YCLIENTS contract matrix | not applicable | docs-only checkpoint поверх `3e8739b` | `not_needed` | только Markdown; API/DB/server/runtime не вызывались и не менялись |
+| D2 YCLIENTS controlled test plan | not applicable | docs-only checkpoint поверх `46bc35c` | `not_needed` | plan only; provider/server/DB/runtime calls и writes не выполнялись |
 
 Допустимые deployment-статусы: `not_needed`, `pending`, `test_deployed`,
 `production_deployed`, `deployment_deferred_by_user`.
@@ -56,6 +57,8 @@
    write wiring остаются controlled/provider confirmations: `api_id`
    uniqueness/search/idempotency, cross-resource reschedule full/partial payload,
    repeat cancel + deleted readback и webhook source verification/event identity.
+   Basic lifecycle и optional duplicate-`api_id` experiment требуют отдельных
+   явных approvals; ни один пока не разрешён.
 2. Не подтверждён платёжный провайдер, sandbox и фискальные настройки.
 3. Не записаны фактические Selectel resources/accesses для staging/production.
 4. Не известны тип и дата создания Google Play developer account.
@@ -612,6 +615,51 @@
   PASS.
 - Следующий конкретный шаг: review contract matrix; repository/provider wiring
   до итогового review не начинать.
+
+### 2026-08-06 — D2 / YCLIENTS controlled test plan checkpoint
+
+- Задача/ветка: `codex/week1-d2-reservation-core`; base matrix checkpoint
+  `46bc35c7b6be5848bb5556b14eaee6fa33a20c2e`, исходный worktree clean.
+- Изменённые файлы: `docs/launch/D2_YCLIENTS_CONTROLLED_TEST_PLAN.md` и
+  `docs/launch/WORKLOG.md`.
+- Plan only:
+  - basic lifecycle использует disposable server-side identity, slots `A/B`,
+    availability/preflight → create → exact/list visibility → full-payload
+    cross-resource reschedule с `save_if_busy=false` → GET effect → cancel →
+    exact/list deleted proof → repeat-delete;
+  - basic budget максимум 14 requests, строго не чаще 1 request/second;
+  - optional same-`api_id` duplicate-create изолирован в отдельный run/slots
+    `C/D`, допускает максимум две disposable records и 12 requests;
+  - timeout/429/5xx/invalid/ambiguous outcome немедленно даёт `unknown`, blind
+    retries запрещены, slot release без canonical cancel proof запрещён;
+  - root-only audit layout и allowlisted PII/secret-free evidence/cleanup
+    procedure зафиксированы.
+- Approval gate: перед basic нужен отдельный явный approval на create/reschedule/
+  cancel/repeat-delete writes; optional duplicate experiment требует второго
+  независимого approval с принятием риска двух записей. Текущий docs prompt не
+  разрешает выполнение ни одного плана.
+- Migration: 033 остаётся `applied_verified` на Selectel test, runtime
+  disconnected; migration/PRECHECK/POSTCHECK/rollback не запускались.
+- Tests: `not run / not needed` — изменены только Markdown, runtime и test source
+  не менялись. Выполняется `git diff --check`.
+- Read-only P0/P1 review: production/webhook/PII/blind-retry risks ограничены
+  prerequisites, separate approvals и stop rules; request budgets, serialized
+  rate, full reschedule payload и cancel proof закрывают concurrency/effect gaps.
+  Provider semantics могут остаться `unknown`, что является предусмотренным
+  terminal stop outcome плана.
+- Git integration: отдельный docs-only checkpoint commit; push/merge не
+  выполняются.
+- Deployment: `not_needed` для docs-only checkpoint; общий D2 остаётся
+  `in_progress` с deployment `pending`.
+- Deployed environment/commit: Selectel test runtime остаётся detached на D1
+  `c04074459948d0bf545e865b885aea7a4e5fec3c`; schema 033 отдельно
+  `applied_verified`, runtime к ней не подключён.
+- Containers changed: none.
+- Health/HTTP, business smoke, log audit: `not run / not needed` — server/runtime
+  не менялись и YCLIENTS/API/DB/server calls не выполнялись.
+- Следующий конкретный шаг: owner review и отдельное решение по basic lifecycle;
+  optional duplicate experiment не разрешается basic approval. До решения
+  repository/provider wiring не начинать.
 
 ## Шаблон записи после этапа
 
