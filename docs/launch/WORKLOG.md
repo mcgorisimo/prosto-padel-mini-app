@@ -26,7 +26,7 @@
 | Этап | Статус | Ветка/commit | Проверки | Блокер/следующий шаг |
 |---|---|---|---|---|
 | D1 Backend-only/contracts | done | `main` / deployed `c04074459948d0bf545e865b885aea7a4e5fec3c` | frontend E2E PASS (82/1 skipped); focused fail-closed 2/2 PASS; frontend build PASS; backend all PASS; Selectel test smoke PASS | D1 закрыт; следующий отдельный этап — D2 |
-| D2 YCLIENTS reservation core | in_progress | `codex/week1-d2-reservation-core` / `c47c245` + correction + review checkpoints | focused migration contract 8/8 PASS; backend typecheck PASS; предыдущий full gate PASS | migration 033 P1 correction `prepared_for_review`, `not_applied`; wiring/contracts и Selectel test rollout остаются |
+| D2 YCLIENTS reservation core | in_progress | `main` / `4451dddc3cf229419a9de574d9ed98a7aa6f78c9` | focused migration contract 8/8 PASS; backend typecheck PASS; PRECHECK PASS; SQL applied; POSTCHECK blocked by checker type bug | исправить только POSTCHECK `name[]`/`text[]`, review и повторить read-only POSTCHECK; runtime wiring остаётся |
 | D3 Match ↔ reservation lifecycle | pending | — | — | cancel match, owner participant removal, match ↔ reservation binding |
 | D4 Payment Core | pending | — | — | payment provider, pricing/payment snapshot, чеки и возвраты |
 | D5 Settings/moderation/compliance | pending | — | — | standalone phone/email auth и verified backend email; затем schema review |
@@ -41,7 +41,7 @@
 | Этап | Среда | Целевой commit | Статус | Проверка |
 |---|---|---|---|---|
 | D1 Backend-only/contracts | Selectel test | `c04074459948d0bf545e865b885aea7a4e5fec3c` | `test_deployed` | frontend healthy; HTTPS root/health и новый asset 200; TMA auth/profile/feed/details/booking availability PASS; bundle/log audit PASS |
-| D2 YCLIENTS reservation core | Selectel test | — | `pending` | code-only checkpoints ещё не integrated/deployed; среда остаётся на D1 commit |
+| D2 YCLIENTS reservation core | Selectel test | `4451dddc3cf229419a9de574d9ed98a7aa6f78c9` | `pending` | migration 033 applied, но не verified: POSTCHECK остановился на `name[] = text[]`; runtime/containers остаются на D1 commit |
 | D2 persistence/privacy proposal | not applicable | docs-only checkpoint | `not_needed` | только Markdown; runtime, schema, containers и конфигурация не менялись |
 
 Допустимые deployment-статусы: `not_needed`, `pending`, `test_deployed`,
@@ -493,6 +493,40 @@
 - Containers changed: none.
 - Health/HTTP, business smoke, log audit: не запускались — migration не
   применялась, runtime/server не менялись.
+
+### 2026-08-06 — D2 / Selectel test migration 033 apply stop
+
+- Git integration: D2 checkpoint
+  `4451dddc3cf229419a9de574d9ed98a7aa6f78c9` fast-forward integrated в
+  `main` и pushed; local `main` и `origin/main` совпадают, worktree чистый.
+- Backup: PASS для `prosto_padel_test_migration_cycle`; опубликован root-only
+  backup set `20260806T183151Z_90250559-df50-4540-a8e8-dbabbbeaa404`
+  (`database.dump`, `globals.sql`, `manifest.txt`), directory mode `700`, files
+  mode `600`; штатные archive/checksum/manifest guards PASS.
+- PRECHECK: PASS, `ready=true`, target schema absent, canonical `btree_gist`
+  GiST opclasses и foundation fingerprints подтверждены.
+- Migration: `applied`, но пока не `verified`. Точный SQL commit `4451ddd`
+  выполнен с `ON_ERROR_STOP=1` и завершился `COMMIT`; runtime remains
+  disconnected, backfill и YCLIENTS writes отсутствуют.
+- POSTCHECK: STOPPED до завершения exact validation. Read-only checker упал в
+  первом trigger block: `pg_trigger.tgname` агрегируется как `name[]`, но
+  сравнивается с `text[]`; тот же локальный defect есть в трёх trigger blocks.
+  После ошибки дальнейшие DB commands, повторный POSTCHECK и rollback не
+  выполнялись.
+- Audit artifacts: exact migration files и PRECHECK/APPLY/POSTCHECK outputs
+  сохранены в root-only server directory
+  `/root/prosto-padel-migration-audit/033-4451ddd-20260806T183151Z`.
+- Containers changed: runtime frontend/backend/nginx/PostgreSQL не
+  пересобирались и не пересоздавались; backup использовал удалённый после
+  завершения one-shot `db-tools` container.
+- Deployment: `pending`; D2 остаётся `in_progress`. Runtime Selectel test
+  продолжает работать на D1 commit
+  `c04074459948d0bf545e865b885aea7a4e5fec3c`; production не менялся.
+- Health/HTTP, business smoke, log audit: после POSTCHECK error не запускались
+  из-за обязательного stop rule.
+- Следующий конкретный шаг: отдельным одобрением исправить только POSTCHECK
+  casts/contract test, провести read-only review, затем повторить POSTCHECK.
+  SQL migration повторно не применять и rollback не выполнять.
 
 ## Шаблон записи после этапа
 
