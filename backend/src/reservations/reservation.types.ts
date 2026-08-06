@@ -1,3 +1,4 @@
+import { AccountId, isAccountId } from '../accounts/account.types';
 import { UnixEpochSeconds } from '../auth/auth.types';
 import {
   InternalUuid,
@@ -15,6 +16,7 @@ const SHA_256_HEX_PATTERN = /^[0-9a-f]{64}$/u;
 const OFFSET_DATE_TIME_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/u;
 const PROVIDER_REJECTION_REASON_PATTERN = /^[a-z][a-z0-9_]{0,127}$/u;
+const CLIENT_CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f-\u009f]/u;
 
 export type CourtReservationId = InternalUuid & {
   readonly [courtReservationIdBrand]: 'CourtReservationId';
@@ -65,6 +67,16 @@ export interface ReservationTarget {
   readonly startsAt: string;
 }
 
+export interface YclientsReservationExternalReference {
+  readonly apiId: number;
+}
+
+export interface ReservationClientSnapshot {
+  readonly phone: string;
+  readonly fullName: string;
+  readonly email: string;
+}
+
 export interface YclientsReservationBinding {
   readonly provider: 'yclients';
   readonly appointmentId: number;
@@ -74,6 +86,7 @@ export interface YclientsReservationBinding {
 
 export interface CourtReservation {
   readonly reservationId: CourtReservationId;
+  readonly ownerAccountId: AccountId;
   readonly status: ReservationStatus;
   readonly target: ReservationTarget;
   readonly providerBinding?: YclientsReservationBinding;
@@ -84,7 +97,10 @@ export interface CourtReservation {
 
 interface ReservationOperationRequestBase {
   readonly reservationId: CourtReservationId;
+  readonly ownerAccountId: AccountId;
   readonly type: ReservationOperationType;
+  readonly externalReference: YclientsReservationExternalReference;
+  readonly client: ReservationClientSnapshot;
 }
 
 export interface CreateReservationRequest
@@ -112,6 +128,8 @@ export type ReservationOperationRequest =
 interface ReservationOperationBase {
   readonly operationId: ReservationOperationId;
   readonly reservationId: CourtReservationId;
+  readonly ownerAccountId: AccountId;
+  readonly actorAccountId: AccountId;
   readonly type: ReservationOperationType;
   readonly idempotencyKey: ReservationIdempotencyKey;
   readonly requestDigest: ReservationRequestDigest;
@@ -273,6 +291,11 @@ export function isReservationTarget(
     return false;
   }
   const candidate = value as Record<string, unknown>;
+  const date =
+    typeof candidate.startsAt === 'string'
+      ? candidate.startsAt.slice(0, 10)
+      : '';
+  const dateTimestamp = Date.parse(`${date}T00:00:00.000Z`);
   return (
     Object.keys(candidate).length === 3 &&
     Number.isSafeInteger(candidate.serviceId) &&
@@ -281,7 +304,53 @@ export function isReservationTarget(
     Number(candidate.courtId) > 0 &&
     typeof candidate.startsAt === 'string' &&
     OFFSET_DATE_TIME_PATTERN.test(candidate.startsAt) &&
+    Number.isFinite(dateTimestamp) &&
+    new Date(dateTimestamp).toISOString().slice(0, 10) === date &&
     !Number.isNaN(Date.parse(candidate.startsAt))
+  );
+}
+
+export function isYclientsReservationExternalReference(
+  value: unknown,
+): value is YclientsReservationExternalReference {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const candidate = value as Record<string, unknown>;
+  return (
+    Object.keys(candidate).length === 1 &&
+    Number.isSafeInteger(candidate.apiId) &&
+    Number(candidate.apiId) > 0
+  );
+}
+
+function isCanonicalClientText(
+  value: unknown,
+  maximumLength: number,
+): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= maximumLength &&
+    value.trim() === value &&
+    !CLIENT_CONTROL_CHARACTER_PATTERN.test(value)
+  );
+}
+
+export function isReservationClientSnapshot(
+  value: unknown,
+): value is ReservationClientSnapshot {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const candidate = value as Record<string, unknown>;
+  return (
+    Object.keys(candidate).length === 3 &&
+    isCanonicalClientText(candidate.phone, 32) &&
+    /^\d{10,15}$/u.test(candidate.phone) &&
+    isCanonicalClientText(candidate.fullName, 256) &&
+    isCanonicalClientText(candidate.email, 320) &&
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(candidate.email)
   );
 }
 
@@ -316,12 +385,18 @@ export function isReservationOperationRequest(
   const candidate = value as Record<string, unknown>;
   if (
     !isCourtReservationId(candidate.reservationId) ||
-    !isReservationOperationType(candidate.type)
+    !isAccountId(candidate.ownerAccountId) ||
+    !isReservationOperationType(candidate.type) ||
+    !isYclientsReservationExternalReference(candidate.externalReference) ||
+    !isReservationClientSnapshot(candidate.client)
   ) {
     return false;
   }
   if (candidate.type === 'cancel') {
-    return Object.keys(candidate).length === 2;
+    return Object.keys(candidate).length === 5;
   }
-  return Object.keys(candidate).length === 3 && isReservationTarget(candidate.target);
+  return (
+    Object.keys(candidate).length === 6 &&
+    isReservationTarget(candidate.target)
+  );
 }

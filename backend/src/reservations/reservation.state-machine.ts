@@ -1,3 +1,4 @@
+import { isAccountId } from '../accounts/account.types';
 import { isUnixEpochSeconds } from '../auth/auth.types';
 import { digestReservationOperationRequest } from './reservation-request-digest';
 import {
@@ -15,18 +16,21 @@ import {
   isReservationIdempotencyKey,
   isReservationOperationId,
   isReservationOperationRequest,
+  isReservationRequestDigest,
   isReservationTarget,
   isYclientsReservationBinding,
 } from './reservation.types';
 
 export interface CreateCourtReservationInput {
   readonly reservationId: CourtReservation['reservationId'];
+  readonly ownerAccountId: CourtReservation['ownerAccountId'];
   readonly target: CourtReservation['target'];
   readonly now: CourtReservation['createdAt'];
 }
 
 export interface StartReservationOperationInput {
   readonly operationId: ReservationOperationId;
+  readonly actorAccountId: CourtReservation['ownerAccountId'];
   readonly idempotencyKey: ReservationIdempotencyKey;
   readonly request: ReservationOperationRequest;
   readonly now: CourtReservation['updatedAt'];
@@ -47,6 +51,8 @@ export type StartReservationOperationResult =
       outcome: 'rejected';
       reason:
         | 'invalid_input'
+        | 'ownership_conflict'
+        | 'operation_binding_conflict'
         | 'idempotency_lookup_mismatch'
         | 'idempotency_key_conflict'
         | 'forbidden_transition';
@@ -56,20 +62,24 @@ export type StartReservationOperationResult =
 export type ReservationOperationTransitionCommand =
   | Readonly<{
       type: 'confirm';
+      actorAccountId: CourtReservation['ownerAccountId'];
       now: CourtReservation['updatedAt'];
       providerBinding?: YclientsReservationBinding;
     }>
   | Readonly<{
       type: 'reject';
+      actorAccountId: CourtReservation['ownerAccountId'];
       now: CourtReservation['updatedAt'];
       reason: ReservationProviderRejectionReason;
     }>
   | Readonly<{
       type: 'mark_unknown';
+      actorAccountId: CourtReservation['ownerAccountId'];
       now: CourtReservation['updatedAt'];
     }>
   | Readonly<{
       type: 'reconcile';
+      actorAccountId: CourtReservation['ownerAccountId'];
       now: CourtReservation['updatedAt'];
       result:
         | Readonly<{
@@ -92,6 +102,7 @@ export type ReservationOperationTransitionResult =
       outcome: 'rejected';
       reason:
         | 'invalid_command'
+        | 'ownership_conflict'
         | 'operation_binding_conflict'
         | 'forbidden_transition';
       reservation: CourtReservation;
@@ -119,6 +130,22 @@ function immutableProviderBinding(
   });
 }
 
+function immutableClient(
+  client: ReservationOperationRequest['client'],
+): ReservationOperationRequest['client'] {
+  return Object.freeze({
+    phone: client.phone,
+    fullName: client.fullName,
+    email: client.email,
+  });
+}
+
+function immutableExternalReference(
+  reference: ReservationOperationRequest['externalReference'],
+): ReservationOperationRequest['externalReference'] {
+  return Object.freeze({ apiId: reference.apiId });
+}
+
 function immutableRequest(
   request: ReservationOperationRequest,
 ): ReservationOperationRequest {
@@ -126,10 +153,20 @@ function immutableRequest(
     ? Object.freeze({
         type: request.type,
         reservationId: request.reservationId,
+        ownerAccountId: request.ownerAccountId,
+        externalReference: immutableExternalReference(
+          request.externalReference,
+        ),
+        client: immutableClient(request.client),
       })
     : Object.freeze({
         type: request.type,
         reservationId: request.reservationId,
+        ownerAccountId: request.ownerAccountId,
+        externalReference: immutableExternalReference(
+          request.externalReference,
+        ),
+        client: immutableClient(request.client),
         target: immutableTarget(request.target),
       });
 }
@@ -153,6 +190,7 @@ function withReservationState(
 
   return Object.freeze({
     reservationId: reservation.reservationId,
+    ownerAccountId: reservation.ownerAccountId,
     status: input.status,
     target:
       input.target === undefined
@@ -170,6 +208,7 @@ export function createCourtReservation(
 ): CourtReservation {
   if (
     !isCourtReservationId(input?.reservationId) ||
+    !isAccountId(input?.ownerAccountId) ||
     !isReservationTarget(input?.target) ||
     !isUnixEpochSeconds(input?.now)
   ) {
@@ -178,6 +217,7 @@ export function createCourtReservation(
 
   return Object.freeze({
     reservationId: input.reservationId,
+    ownerAccountId: input.ownerAccountId,
     status: 'unbooked',
     target: immutableTarget(input.target),
     createdAt: input.now,
@@ -215,6 +255,7 @@ export function startReservationOperation(
 ): StartReservationOperationResult {
   if (
     !isReservationOperationId(input?.operationId) ||
+    !isAccountId(input?.actorAccountId) ||
     !isReservationIdempotencyKey(input?.idempotencyKey) ||
     !isReservationOperationRequest(input?.request) ||
     input.request.reservationId !== reservation.reservationId ||
@@ -228,12 +269,51 @@ export function startReservationOperation(
     });
   }
 
+  if (
+    input.actorAccountId !== reservation.ownerAccountId ||
+    input.request.ownerAccountId !== reservation.ownerAccountId
+  ) {
+    return Object.freeze({
+      outcome: 'rejected',
+      reason: 'ownership_conflict',
+      reservation,
+    });
+  }
+
   const requestDigest = digestReservationOperationRequest(input.request);
   if (existingOperation !== undefined) {
+    if (
+      !isReservationOperationRequest(existingOperation.request) ||
+      existingOperation.ownerAccountId !== reservation.ownerAccountId ||
+      existingOperation.actorAccountId !== reservation.ownerAccountId ||
+      existingOperation.reservationId !== reservation.reservationId ||
+      existingOperation.type !== input.request.type ||
+      existingOperation.type !== existingOperation.request.type ||
+      existingOperation.request.ownerAccountId !==
+        reservation.ownerAccountId ||
+      existingOperation.request.reservationId !== reservation.reservationId
+    ) {
+      return Object.freeze({
+        outcome: 'rejected',
+        reason: 'operation_binding_conflict',
+        reservation,
+      });
+    }
     if (existingOperation.idempotencyKey !== input.idempotencyKey) {
       return Object.freeze({
         outcome: 'rejected',
         reason: 'idempotency_lookup_mismatch',
+        reservation,
+      });
+    }
+    if (
+      !isReservationRequestDigest(existingOperation.requestDigest) ||
+      digestReservationOperationRequest(existingOperation.request) !==
+        existingOperation.requestDigest
+    ) {
+      return Object.freeze({
+        outcome: 'rejected',
+        reason: 'operation_binding_conflict',
         reservation,
       });
     }
@@ -270,6 +350,8 @@ export function startReservationOperation(
   const operation: PendingReservationOperation = Object.freeze({
     operationId: input.operationId,
     reservationId: reservation.reservationId,
+    ownerAccountId: reservation.ownerAccountId,
+    actorAccountId: input.actorAccountId,
     type: input.request.type,
     idempotencyKey: input.idempotencyKey,
     requestDigest,
@@ -286,11 +368,21 @@ export function startReservationOperation(
   });
 }
 
-function operationMatchesReservationState(
+export function reservationOperationMatchesReservation(
   reservation: CourtReservation,
   operation: ReservationOperation,
 ): boolean {
-  if (operation.reservationId !== reservation.reservationId) {
+  if (
+    !isReservationOperationRequest(operation.request) ||
+    operation.reservationId !== reservation.reservationId ||
+    operation.ownerAccountId !== reservation.ownerAccountId ||
+    operation.actorAccountId !== reservation.ownerAccountId ||
+    operation.type !== operation.request.type ||
+    operation.request.reservationId !== reservation.reservationId ||
+    operation.request.ownerAccountId !== reservation.ownerAccountId ||
+    digestReservationOperationRequest(operation.request) !==
+      operation.requestDigest
+  ) {
     return false;
   }
   if (operation.status === 'pending') {
@@ -348,7 +440,10 @@ function terminalReservation(
 function isValidTransitionCommand(
   command: ReservationOperationTransitionCommand,
 ): boolean {
-  if (!isUnixEpochSeconds(command?.now)) {
+  if (
+    !isAccountId(command?.actorAccountId) ||
+    !isUnixEpochSeconds(command?.now)
+  ) {
     return false;
   }
   switch (command.type) {
@@ -385,7 +480,15 @@ export function transitionReservationOperation(
       operation,
     });
   }
-  if (!operationMatchesReservationState(reservation, operation)) {
+  if (command.actorAccountId !== reservation.ownerAccountId) {
+    return Object.freeze({
+      outcome: 'rejected',
+      reason: 'ownership_conflict',
+      reservation,
+      operation,
+    });
+  }
+  if (!reservationOperationMatchesReservation(reservation, operation)) {
     return Object.freeze({
       outcome: 'rejected',
       reason: 'operation_binding_conflict',
@@ -516,6 +619,8 @@ export function transitionReservationOperation(
     const nextOperation: ReservationOperation = Object.freeze({
       operationId: operation.operationId,
       reservationId: operation.reservationId,
+      ownerAccountId: operation.ownerAccountId,
+      actorAccountId: operation.actorAccountId,
       type: operation.type,
       idempotencyKey: operation.idempotencyKey,
       requestDigest: operation.requestDigest,

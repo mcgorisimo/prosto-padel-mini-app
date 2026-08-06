@@ -26,7 +26,7 @@
 | Этап | Статус | Ветка/commit | Проверки | Блокер/следующий шаг |
 |---|---|---|---|---|
 | D1 Backend-only/contracts | done | `main` / deployed `c04074459948d0bf545e865b885aea7a4e5fec3c` | frontend E2E PASS (82/1 skipped); focused fail-closed 2/2 PASS; frontend build PASS; backend all PASS; Selectel test smoke PASS | D1 закрыт; следующий отдельный этап — D2 |
-| D2 YCLIENTS reservation core | in_progress | `codex/week1-d2-reservation-core` / checkpoint | backend typecheck, unit 109/2853, E2E 2/4, build PASS; frontend E2E 82/1 skipped, build PASS | code-only domain готов; persistence/wiring/contracts и Selectel test rollout остаются |
+| D2 YCLIENTS reservation core | in_progress | `codex/week1-d2-reservation-core` / `c47c245` + correction checkpoint | backend typecheck, unit 109/2869, E2E 2/4, build PASS; frontend E2E 82/1 skipped, build PASS | code-only domain correction готов; persistence/privacy review, wiring/contracts и Selectel test rollout остаются |
 | D3 Match ↔ reservation lifecycle | pending | — | — | cancel match, owner participant removal, match ↔ reservation binding |
 | D4 Payment Core | pending | — | — | payment provider, pricing/payment snapshot, чеки и возвраты |
 | D5 Settings/moderation/compliance | pending | — | — | standalone phone/email auth и verified backend email; затем schema review |
@@ -41,7 +41,7 @@
 | Этап | Среда | Целевой commit | Статус | Проверка |
 |---|---|---|---|---|
 | D1 Backend-only/contracts | Selectel test | `c04074459948d0bf545e865b885aea7a4e5fec3c` | `test_deployed` | frontend healthy; HTTPS root/health и новый asset 200; TMA auth/profile/feed/details/booking availability PASS; bundle/log audit PASS |
-| D2 YCLIENTS reservation core | Selectel test | — | `deployment_deferred_by_user` | code-only checkpoint не merge/push/deploy; среда остаётся на D1 commit |
+| D2 YCLIENTS reservation core | Selectel test | — | `pending` | code-only checkpoints ещё не integrated/deployed; среда остаётся на D1 commit |
 
 Допустимые deployment-статусы: `not_needed`, `pending`, `test_deployed`,
 `production_deployed`, `deployment_deferred_by_user`.
@@ -255,8 +255,8 @@
 - Ручная проверка: focused reservation unit suite PASS, 10/10; `git diff
   --check` PASS; SQL, controllers, modules, env/secrets, webhook, App.jsx,
   payment-поля и существующий YCLIENTS write path не менялись.
-- Read-only P0/P1 review: замечаний P0/P1 нет; проверены переходы, idempotency
-  conflict, unknown/reconcile boundary и slot-hold semantics.
+- Read-only P0/P1 review: последующий correction review нашёл ownership scope,
+  provider payload и calendar validation gaps; исправления зафиксированы ниже.
 - Известные риски: это только code-only domain; состояния ещё не сохраняются и
   не влияют на runtime booking flow.
 - Внешний блокер: остаются подтверждённые YCLIENTS get/lookup, reschedule,
@@ -266,7 +266,7 @@
   затем реализовать production repository/provider/orchestration wiring и
   выполнить Selectel test rollout точного integrated commit.
 - Git integration: `committed`; push/merge не выполнялись по явной команде.
-- Deployment: `deployment_deferred_by_user`; D2 нельзя отмечать `done` до
+- Deployment: `pending`; D2 нельзя отмечать `done` до
   integration в `main`, Selectel test rollout, health, business smoke и log audit.
 - Deployed environment/commit: D2 не deployed; Selectel test остаётся на D1
   commit `c04074459948d0bf545e865b885aea7a4e5fec3c`.
@@ -274,6 +274,62 @@
 - Health/HTTP: не запускались без D2 rollout; последний D1 test gate PASS.
 - Business smoke: не запускался без D2 rollout; реальные YCLIENTS writes в D2
   checkpoint не выполнялись.
+- Log audit: не запускался без D2 rollout.
+
+### 2026-08-06 — D2 / reservation domain correction checkpoint
+
+- Задача/ветка: `codex/week1-d2-reservation-core`.
+- Commits: первый checkpoint `c47c24506743d579ed9cfadc8ad658a0f768f93f`
+  сохранён без изменения; correction checkpoint — текущий branch head после этой
+  записи. Push/merge не выполнялись.
+- Изменённые файлы: reservation types/digest/state machine/provider port/unit
+  tests, repository port и `docs/launch/WORKLOG.md`.
+- Реализовано:
+  - `CourtReservation` и `ReservationOperation` привязаны к `ownerAccountId`,
+    start/transition — к `actorAccountId`;
+  - repository lookup/start/transition явно account-scoped, idempotency scope —
+    `(ownerAccountId, idempotencyKey)`;
+  - existing-operation retry проверяет owner, reservation, operation/request
+    type, key и сохранённый digest до возврата прежней operation;
+  - provider write/reconciliation commands содержат полный immutable snapshot:
+    `apiId`, target, client phone/fullName/email и текущий YCLIENTS binding для
+    reschedule/cancel; PII не логируется;
+  - request digest покрывает owner, external reference, client snapshot и все
+    target-поля внешнего эффекта;
+  - ISO datetime validation выровнена с YCLIENTS calendar-date round trip и
+    отклоняет невозможные даты.
+- Migration: `not needed` для correction checkpoint; schema/SQL не менялись.
+  Будущее хранение client snapshot и privacy/retention contract является только
+  proposal и требует отдельного review/явного одобрения до любой migration.
+- Tests:
+  - frontend E2E: PASS, 82 passed / 1 skipped;
+  - frontend build: PASS, 1615 modules;
+  - backend typecheck: PASS;
+  - backend unit: PASS, 109 suites / 2869 tests;
+  - backend E2E: PASS, 2 suites / 4 tests;
+  - backend build: PASS.
+- Ручная проверка: focused reservation suite PASS, 26/26; `git diff --check`
+  PASS; scope guard подтверждает отсутствие schema/migrations, controllers,
+  modules, runtime YCLIENTS changes, webhook/env/secrets, App.jsx и payment-полей.
+- Read-only P0/P1 review: обязательные P1 замечания correction pass закрыты;
+  новых P0/P1 в diff не найдено.
+- Известные риски: code-only ports/entities ещё не имеют persistence, privacy
+  retention policy и runtime orchestration.
+- Внешний блокер: остаются подтверждённые YCLIENTS get/lookup, reschedule,
+  cancel, provider idempotency/search, timeout reconciliation, webhook
+  verification/dedupe/order и rate-limit contracts; webhook выключен.
+- Следующий конкретный шаг: отдельно согласовать persistence/privacy contract и
+  migration proposal, затем production repository/provider/orchestration wiring,
+  integration в `main` и Selectel test rollout точного commit.
+- Git integration: correction checkpoint `committed`; push/merge не выполнялись.
+- Deployment: `pending`; D2 остаётся `in_progress` до Selectel test rollout,
+  health, business smoke и log audit.
+- Deployed environment/commit: D2 не deployed; Selectel test остаётся на D1
+  commit `c04074459948d0bf545e865b885aea7a4e5fec3c`.
+- Containers changed: none.
+- Health/HTTP: не запускались без D2 rollout; последний D1 test gate PASS.
+- Business smoke: не запускался без D2 rollout; реальные YCLIENTS writes в
+  correction pass не выполнялись.
 - Log audit: не запускался без D2 rollout.
 
 ## Шаблон записи после этапа

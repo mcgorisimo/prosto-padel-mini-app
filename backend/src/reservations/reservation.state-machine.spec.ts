@@ -1,14 +1,24 @@
+import { accountId } from '../accounts/account.types';
 import { unixEpochSeconds } from '../auth/auth.types';
 import { deterministicUuid } from '../../test/deterministic-uuid';
 import { digestReservationOperationRequest } from './reservation-request-digest';
 import {
+  reservationProviderReconciliationCommand,
+  reservationProviderWriteCommand,
+} from './reservation-provider.port';
+import {
+  CourtReservation,
+  ReservationClientSnapshot,
   ReservationOperationRequest,
   ReservationTarget,
+  YclientsReservationExternalReference,
   YclientsReservationBinding,
   courtReservationId,
+  isReservationTarget,
   reservationIdempotencyKey,
   reservationOperationId,
   reservationProviderRejectionReason,
+  reservationRequestDigest,
 } from './reservation.types';
 import {
   createCourtReservation,
@@ -23,6 +33,11 @@ const TERMINAL_AT = unixEpochSeconds(1_786_025_020);
 const RESERVATION_ID = courtReservationId(
   deterministicUuid('d2-reservation'),
 );
+const OTHER_RESERVATION_ID = courtReservationId(
+  deterministicUuid('d2-other-reservation'),
+);
+const OWNER_ACCOUNT_ID = accountId(deterministicUuid('d2-owner-account'));
+const OTHER_ACCOUNT_ID = accountId(deterministicUuid('d2-other-account'));
 const OPERATION_ID = reservationOperationId(
   deterministicUuid('d2-reservation-operation'),
 );
@@ -32,6 +47,12 @@ const IDEMPOTENCY_KEY = reservationIdempotencyKey(
 const PROVIDER_REJECTED = reservationProviderRejectionReason(
   'provider_rejected',
 );
+const EXTERNAL_REFERENCE = Object.freeze({ apiId: 7_770_001 });
+const CLIENT: ReservationClientSnapshot = Object.freeze({
+  phone: '79000000000',
+  fullName: 'Тест Просто Падел',
+  email: 'test@example.test',
+});
 
 const ORIGINAL_TARGET: ReservationTarget = Object.freeze({
   serviceId: 30_539_679,
@@ -50,9 +71,13 @@ const PROVIDER_BINDING: YclientsReservationBinding = Object.freeze({
   recordHash: '567df655304da9b98487769426d4e76e',
 });
 
-function unbookedReservation() {
+function unbookedReservation(
+  ownerAccountId = OWNER_ACCOUNT_ID,
+  reservationId = RESERVATION_ID,
+): CourtReservation {
   return createCourtReservation({
-    reservationId: RESERVATION_ID,
+    reservationId,
+    ownerAccountId,
     target: ORIGINAL_TARGET,
     now: CREATED_AT,
   });
@@ -61,19 +86,33 @@ function unbookedReservation() {
 function request(
   type: ReservationOperationRequest['type'],
   target: ReservationTarget = ORIGINAL_TARGET,
+  overrides: Partial<{
+    reservationId: typeof RESERVATION_ID;
+    ownerAccountId: typeof OWNER_ACCOUNT_ID;
+    externalReference: YclientsReservationExternalReference;
+    client: ReservationClientSnapshot;
+  }> = {},
 ): ReservationOperationRequest {
+  const binding = {
+    reservationId: RESERVATION_ID,
+    ownerAccountId: OWNER_ACCOUNT_ID,
+    externalReference: EXTERNAL_REFERENCE,
+    client: CLIENT,
+    ...overrides,
+  };
   return type === 'cancel'
-    ? Object.freeze({ type, reservationId: RESERVATION_ID })
-    : Object.freeze({ type, reservationId: RESERVATION_ID, target });
+    ? Object.freeze({ type, ...binding })
+    : Object.freeze({ type, ...binding, target });
 }
 
 function start(
-  reservation: ReturnType<typeof unbookedReservation>,
+  reservation: CourtReservation,
   operationRequest: ReservationOperationRequest = request('create'),
   overrides: Partial<Parameters<typeof startReservationOperation>[1]> = {},
 ) {
   const result = startReservationOperation(reservation, {
     operationId: OPERATION_ID,
+    actorAccountId: reservation.ownerAccountId,
     idempotencyKey: IDEMPOTENCY_KEY,
     request: operationRequest,
     now: STARTED_AT,
@@ -93,6 +132,7 @@ function confirmedReservation() {
     started.operation,
     {
       type: 'confirm',
+      actorAccountId: OWNER_ACCOUNT_ID,
       now: TERMINAL_AT,
       providerBinding: PROVIDER_BINDING,
     },
@@ -111,6 +151,9 @@ describe('reservation request digest', () => {
       Object.freeze({
         target: Object.freeze({ ...ORIGINAL_TARGET }),
         reservationId: RESERVATION_ID,
+        ownerAccountId: OWNER_ACCOUNT_ID,
+        externalReference: Object.freeze({ ...EXTERNAL_REFERENCE }),
+        client: Object.freeze({ ...CLIENT }),
         type: 'create',
       }),
     );
@@ -125,6 +168,43 @@ describe('reservation request digest', () => {
     expect(digestReservationOperationRequest(request('cancel'))).not.toBe(
       first,
     );
+  });
+
+  it.each([
+    ['client snapshot', request('create', ORIGINAL_TARGET, {
+      client: Object.freeze({
+        ...CLIENT,
+        email: 'other@example.test',
+      }),
+    })],
+    ['external reference', request('create', ORIGINAL_TARGET, {
+      externalReference: Object.freeze({
+        apiId: EXTERNAL_REFERENCE.apiId + 1,
+      }),
+    })],
+  ])('covers the immutable %s', (_field, changedRequest) => {
+    expect(digestReservationOperationRequest(changedRequest)).not.toBe(
+      digestReservationOperationRequest(request('create')),
+    );
+  });
+});
+
+describe('reservation target validation', () => {
+  it.each([
+    '2026-02-30T16:30:00+03:00',
+    '2025-02-29T16:30:00+03:00',
+    '2026-04-31T16:30:00+03:00',
+  ])('rejects the impossible calendar datetime %s', (startsAt) => {
+    const target = { ...ORIGINAL_TARGET, startsAt };
+    expect(isReservationTarget(target)).toBe(false);
+    expect(() =>
+      createCourtReservation({
+        reservationId: RESERVATION_ID,
+        ownerAccountId: OWNER_ACCOUNT_ID,
+        target,
+        now: CREATED_AT,
+      }),
+    ).toThrow('Court reservation binding is invalid');
   });
 });
 
@@ -165,6 +245,7 @@ describe('reservation operation state machine', () => {
         operationId: reservationOperationId(
           deterministicUuid('d2-forbidden-cancel-operation'),
         ),
+        actorAccountId: OWNER_ACCOUNT_ID,
         idempotencyKey: reservationIdempotencyKey(
           deterministicUuid('d2-forbidden-cancel-idempotency'),
         ),
@@ -179,7 +260,11 @@ describe('reservation operation state machine', () => {
     const uncertain = transitionReservationOperation(
       started.reservation,
       started.operation,
-      { type: 'mark_unknown', now: TERMINAL_AT },
+      {
+        type: 'mark_unknown',
+        actorAccountId: OWNER_ACCOUNT_ID,
+        now: TERMINAL_AT,
+      },
     );
     expect(uncertain.outcome).toBe('transitioned');
     if (uncertain.outcome !== 'transitioned') {
@@ -192,6 +277,7 @@ describe('reservation operation state machine', () => {
         operationId: reservationOperationId(
           deterministicUuid('must-not-replace-existing-operation'),
         ),
+        actorAccountId: OWNER_ACCOUNT_ID,
         idempotencyKey: IDEMPOTENCY_KEY,
         request: request('create'),
         now: unixEpochSeconds(TERMINAL_AT + 1),
@@ -215,6 +301,7 @@ describe('reservation operation state machine', () => {
         operationId: reservationOperationId(
           deterministicUuid('d2-conflicting-operation'),
         ),
+        actorAccountId: OWNER_ACCOUNT_ID,
         idempotencyKey: IDEMPOTENCY_KEY,
         request: request('create', RESCHEDULED_TARGET),
         now: unixEpochSeconds(STARTED_AT + 1),
@@ -228,12 +315,214 @@ describe('reservation operation state machine', () => {
     });
   });
 
+  it.each([
+    ['client snapshot', request('create', ORIGINAL_TARGET, {
+      client: Object.freeze({
+        ...CLIENT,
+        phone: '79000000001',
+      }),
+    })],
+    ['external reference', request('create', ORIGINAL_TARGET, {
+      externalReference: Object.freeze({
+        apiId: EXTERNAL_REFERENCE.apiId + 1,
+      }),
+    })],
+  ])(
+    'rejects the same key with a different %s',
+    (_field, changedRequest) => {
+      const started = start(unbookedReservation());
+      const retry = startReservationOperation(
+        started.reservation,
+        {
+          operationId: reservationOperationId(
+            deterministicUuid(`d2-conflicting-${_field}`),
+          ),
+          actorAccountId: OWNER_ACCOUNT_ID,
+          idempotencyKey: IDEMPOTENCY_KEY,
+          request: changedRequest,
+          now: unixEpochSeconds(STARTED_AT + 1),
+        },
+        started.operation,
+      );
+
+      expect(retry).toMatchObject({
+        outcome: 'rejected',
+        reason: 'idempotency_key_conflict',
+      });
+    },
+  );
+
+  it('rejects another account before starting or returning an operation', () => {
+    const reservation = unbookedReservation();
+    const result = startReservationOperation(reservation, {
+      operationId: OPERATION_ID,
+      actorAccountId: OTHER_ACCOUNT_ID,
+      idempotencyKey: IDEMPOTENCY_KEY,
+      request: request('create'),
+      now: STARTED_AT,
+    });
+
+    expect(result).toMatchObject({
+      outcome: 'rejected',
+      reason: 'ownership_conflict',
+      reservation,
+    });
+    expect(result).not.toHaveProperty('operation');
+  });
+
+  it('rejects an existing operation returned from another owner scope', () => {
+    const foreignReservation = unbookedReservation(OTHER_ACCOUNT_ID);
+    const foreign = start(
+      foreignReservation,
+      request('create', ORIGINAL_TARGET, {
+        ownerAccountId: OTHER_ACCOUNT_ID,
+      }),
+      { actorAccountId: OTHER_ACCOUNT_ID },
+    );
+    const localReservation = unbookedReservation();
+    const result = startReservationOperation(
+      localReservation,
+      {
+        operationId: OPERATION_ID,
+        actorAccountId: OWNER_ACCOUNT_ID,
+        idempotencyKey: IDEMPOTENCY_KEY,
+        request: request('create'),
+        now: STARTED_AT,
+      },
+      foreign.operation,
+    );
+
+    expect(result).toMatchObject({
+      outcome: 'rejected',
+      reason: 'operation_binding_conflict',
+    });
+    expect(result).not.toHaveProperty('operation');
+  });
+
+  it('rejects an existing operation from another reservation', () => {
+    const otherReservation = unbookedReservation(
+      OWNER_ACCOUNT_ID,
+      OTHER_RESERVATION_ID,
+    );
+    const other = start(
+      otherReservation,
+      request('create', ORIGINAL_TARGET, {
+        reservationId: OTHER_RESERVATION_ID,
+      }),
+    );
+    const result = startReservationOperation(
+      unbookedReservation(),
+      {
+        operationId: OPERATION_ID,
+        actorAccountId: OWNER_ACCOUNT_ID,
+        idempotencyKey: IDEMPOTENCY_KEY,
+        request: request('create'),
+        now: STARTED_AT,
+      },
+      other.operation,
+    );
+
+    expect(result).toMatchObject({
+      outcome: 'rejected',
+      reason: 'operation_binding_conflict',
+    });
+    expect(result).not.toHaveProperty('operation');
+  });
+
+  it('rejects an existing operation with a mismatched operation type', () => {
+    const started = start(unbookedReservation());
+    const mismatched = Object.freeze({
+      ...started.operation,
+      type: 'cancel' as const,
+    });
+    const result = startReservationOperation(
+      started.reservation,
+      {
+        operationId: OPERATION_ID,
+        actorAccountId: OWNER_ACCOUNT_ID,
+        idempotencyKey: IDEMPOTENCY_KEY,
+        request: request('create'),
+        now: unixEpochSeconds(STARTED_AT + 1),
+      },
+      mismatched,
+    );
+
+    expect(result).toMatchObject({
+      outcome: 'rejected',
+      reason: 'operation_binding_conflict',
+    });
+  });
+
+  it('validates the looked-up key and persisted request digest before retry', () => {
+    const started = start(unbookedReservation());
+    const retryInput = {
+      operationId: OPERATION_ID,
+      actorAccountId: OWNER_ACCOUNT_ID,
+      idempotencyKey: IDEMPOTENCY_KEY,
+      request: request('create'),
+      now: unixEpochSeconds(STARTED_AT + 1),
+    } as const;
+
+    expect(
+      startReservationOperation(
+        started.reservation,
+        retryInput,
+        Object.freeze({
+          ...started.operation,
+          idempotencyKey: reservationIdempotencyKey(
+            deterministicUuid('d2-wrong-looked-up-key'),
+          ),
+        }),
+      ),
+    ).toMatchObject({
+      outcome: 'rejected',
+      reason: 'idempotency_lookup_mismatch',
+    });
+    expect(
+      startReservationOperation(
+        started.reservation,
+        retryInput,
+        Object.freeze({
+          ...started.operation,
+          requestDigest: reservationRequestDigest('0'.repeat(64)),
+        }),
+      ),
+    ).toMatchObject({
+      outcome: 'rejected',
+      reason: 'operation_binding_conflict',
+    });
+  });
+
+  it('rejects a transition from another account without changing state', () => {
+    const started = start(unbookedReservation());
+    const result = transitionReservationOperation(
+      started.reservation,
+      started.operation,
+      {
+        type: 'mark_unknown',
+        actorAccountId: OTHER_ACCOUNT_ID,
+        now: TERMINAL_AT,
+      },
+    );
+
+    expect(result).toMatchObject({
+      outcome: 'rejected',
+      reason: 'ownership_conflict',
+    });
+    expect(result.reservation).toBe(started.reservation);
+    expect(result.operation).toBe(started.operation);
+  });
+
   it('moves an uncertain write to unknown and forbids a blind create retry', () => {
     const started = start(unbookedReservation());
     const uncertain = transitionReservationOperation(
       started.reservation,
       started.operation,
-      { type: 'mark_unknown', now: TERMINAL_AT },
+      {
+        type: 'mark_unknown',
+        actorAccountId: OWNER_ACCOUNT_ID,
+        now: TERMINAL_AT,
+      },
     );
     expect(uncertain.outcome).toBe('transitioned');
     if (uncertain.outcome !== 'transitioned') {
@@ -247,6 +536,7 @@ describe('reservation operation state machine', () => {
         operationId: reservationOperationId(
           deterministicUuid('d2-blind-retry-operation'),
         ),
+        actorAccountId: OWNER_ACCOUNT_ID,
         idempotencyKey: reservationIdempotencyKey(
           deterministicUuid('d2-blind-retry-idempotency'),
         ),
@@ -267,7 +557,12 @@ describe('reservation operation state machine', () => {
     const rejected = transitionReservationOperation(
       started.reservation,
       started.operation,
-      { type: 'reject', now: TERMINAL_AT, reason: PROVIDER_REJECTED },
+      {
+        type: 'reject',
+        actorAccountId: OWNER_ACCOUNT_ID,
+        now: TERMINAL_AT,
+        reason: PROVIDER_REJECTED,
+      },
     );
     expect(rejected.outcome).toBe('transitioned');
     if (rejected.outcome !== 'transitioned') {
@@ -291,7 +586,11 @@ describe('reservation operation state machine', () => {
       const uncertain = transitionReservationOperation(
         started.reservation,
         started.operation,
-        { type: 'mark_unknown', now: TERMINAL_AT },
+        {
+          type: 'mark_unknown',
+          actorAccountId: OWNER_ACCOUNT_ID,
+          now: TERMINAL_AT,
+        },
       );
       expect(uncertain.outcome).toBe('transitioned');
       if (uncertain.outcome !== 'transitioned') {
@@ -304,6 +603,7 @@ describe('reservation operation state machine', () => {
         reconciliationOutcome === 'confirmed'
           ? {
               type: 'reconcile',
+              actorAccountId: OWNER_ACCOUNT_ID,
               now: unixEpochSeconds(TERMINAL_AT + 1),
               result: {
                 outcome: 'confirmed',
@@ -312,6 +612,7 @@ describe('reservation operation state machine', () => {
             }
           : {
               type: 'reconcile',
+              actorAccountId: OWNER_ACCOUNT_ID,
               now: unixEpochSeconds(TERMINAL_AT + 1),
               result: {
                 outcome: 'rejected',
@@ -350,7 +651,11 @@ describe('reservation operation state machine', () => {
     const uncertain = transitionReservationOperation(
       cancelling.reservation,
       cancelling.operation,
-      { type: 'mark_unknown', now: unixEpochSeconds(TERMINAL_AT + 2) },
+      {
+        type: 'mark_unknown',
+        actorAccountId: OWNER_ACCOUNT_ID,
+        now: unixEpochSeconds(TERMINAL_AT + 2),
+      },
     );
     expect(uncertain.outcome).toBe('transitioned');
     if (uncertain.outcome !== 'transitioned') {
@@ -367,6 +672,7 @@ describe('reservation operation state machine', () => {
       started.operation,
       {
         type: 'confirm',
+        actorAccountId: OWNER_ACCOUNT_ID,
         now: TERMINAL_AT,
         providerBinding: PROVIDER_BINDING,
       },
@@ -382,9 +688,128 @@ describe('reservation operation state machine', () => {
         confirmed.operation,
         {
           type: 'mark_unknown',
+          actorAccountId: OWNER_ACCOUNT_ID,
           now: unixEpochSeconds(TERMINAL_AT + 1),
         },
       ),
     ).toMatchObject({ outcome: 'rejected', reason: 'forbidden_transition' });
+  });
+});
+
+describe('reservation provider commands', () => {
+  it('builds a complete YCLIENTS-compatible create command', () => {
+    const started = start(unbookedReservation());
+
+    expect(
+      reservationProviderWriteCommand(
+        started.reservation,
+        started.operation,
+      ),
+    ).toEqual({
+      mode: 'write',
+      type: 'create',
+      operationId: OPERATION_ID,
+      reservationId: RESERVATION_ID,
+      ownerAccountId: OWNER_ACCOUNT_ID,
+      requestDigest: started.operation.requestDigest,
+      apiId: EXTERNAL_REFERENCE.apiId,
+      client: CLIENT,
+      serviceId: ORIGINAL_TARGET.serviceId,
+      courtId: ORIGINAL_TARGET.courtId,
+      datetime: ORIGINAL_TARGET.startsAt,
+    });
+    expect(Object.isFrozen(started.operation.request.client)).toBe(true);
+  });
+
+  it('builds complete reschedule and cancel commands with current binding', () => {
+    const confirmed = confirmedReservation();
+    const reschedule = start(
+      confirmed,
+      request('reschedule', RESCHEDULED_TARGET),
+      {
+        operationId: reservationOperationId(
+          deterministicUuid('d2-provider-reschedule-operation'),
+        ),
+        idempotencyKey: reservationIdempotencyKey(
+          deterministicUuid('d2-provider-reschedule-idempotency'),
+        ),
+        now: unixEpochSeconds(TERMINAL_AT + 1),
+      },
+    );
+    expect(
+      reservationProviderWriteCommand(
+        reschedule.reservation,
+        reschedule.operation,
+      ),
+    ).toMatchObject({
+      mode: 'write',
+      type: 'reschedule',
+      ownerAccountId: OWNER_ACCOUNT_ID,
+      apiId: EXTERNAL_REFERENCE.apiId,
+      client: CLIENT,
+      serviceId: RESCHEDULED_TARGET.serviceId,
+      courtId: RESCHEDULED_TARGET.courtId,
+      datetime: RESCHEDULED_TARGET.startsAt,
+      currentProviderBinding: PROVIDER_BINDING,
+    });
+
+    const cancel = start(confirmed, request('cancel'), {
+      operationId: reservationOperationId(
+        deterministicUuid('d2-provider-cancel-operation'),
+      ),
+      idempotencyKey: reservationIdempotencyKey(
+        deterministicUuid('d2-provider-cancel-idempotency'),
+      ),
+      now: unixEpochSeconds(TERMINAL_AT + 1),
+    });
+    expect(
+      reservationProviderWriteCommand(
+        cancel.reservation,
+        cancel.operation,
+      ),
+    ).toMatchObject({
+      mode: 'write',
+      type: 'cancel',
+      ownerAccountId: OWNER_ACCOUNT_ID,
+      apiId: EXTERNAL_REFERENCE.apiId,
+      client: CLIENT,
+      currentProviderBinding: PROVIDER_BINDING,
+    });
+  });
+
+  it('builds reconciliation input without making unknown write-retryable', () => {
+    const started = start(unbookedReservation());
+    const uncertain = transitionReservationOperation(
+      started.reservation,
+      started.operation,
+      {
+        type: 'mark_unknown',
+        actorAccountId: OWNER_ACCOUNT_ID,
+        now: TERMINAL_AT,
+      },
+    );
+    expect(uncertain.outcome).toBe('transitioned');
+    if (
+      uncertain.outcome !== 'transitioned' ||
+      uncertain.operation.status !== 'unknown'
+    ) {
+      throw new Error('Expected an unknown reservation operation');
+    }
+
+    expect(
+      reservationProviderReconciliationCommand(
+        uncertain.reservation,
+        uncertain.operation,
+      ),
+    ).toMatchObject({
+      mode: 'reconciliation',
+      type: 'create',
+      ownerAccountId: OWNER_ACCOUNT_ID,
+      apiId: EXTERNAL_REFERENCE.apiId,
+      client: CLIENT,
+      serviceId: ORIGINAL_TARGET.serviceId,
+      courtId: ORIGINAL_TARGET.courtId,
+      datetime: ORIGINAL_TARGET.startsAt,
+    });
   });
 });

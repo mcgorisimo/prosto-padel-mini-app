@@ -1,3 +1,4 @@
+import { AccountId } from '../accounts/account.types';
 import {
   ReservationOperationTransitionCommand,
   ReservationOperationTransitionResult,
@@ -46,7 +47,7 @@ export class CourtReservationPersistenceError extends Error {
 
 /**
  * Implementations must serialize reservation updates and atomically enforce
- * one immutable request digest per idempotency key.
+ * one immutable request digest per (ownerAccountId, idempotencyKey) scope.
  */
 export interface CourtReservationRepository {
   create(
@@ -56,27 +57,32 @@ export interface CourtReservationRepository {
 
   findById(
     transaction: PostgresTransaction,
+    ownerAccountId: AccountId,
     reservationId: CourtReservationId,
   ): Promise<CourtReservation | null>;
 
   findOperationById(
     transaction: PostgresTransaction,
+    ownerAccountId: AccountId,
     operationId: ReservationOperationId,
   ): Promise<ReservationOperation | null>;
 
   findOperationByIdempotencyKey(
     transaction: PostgresTransaction,
+    ownerAccountId: AccountId,
     idempotencyKey: ReservationIdempotencyKey,
   ): Promise<ReservationOperation | null>;
 
   startOperation(
     transaction: PostgresTransaction,
+    actorAccountId: AccountId,
     reservationId: CourtReservationId,
     input: StartReservationOperationInput,
   ): Promise<StartReservationOperationResult>;
 
   transitionOperation(
     transaction: PostgresTransaction,
+    actorAccountId: AccountId,
     reservationId: CourtReservationId,
     operationId: ReservationOperationId,
     command: ReservationOperationTransitionCommand,
