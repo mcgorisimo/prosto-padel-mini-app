@@ -8,6 +8,7 @@ const LOGIN_ROUTE = '**/api/v1/auth/telegram/login';
 const REFRESH_ROUTE = '**/api/v1/auth/session/refresh';
 const SESSION_ME_ROUTE = '**/api/v1/auth/session/me';
 const PROFILE_ROUTE = '**/api/v1/profile/me';
+const TELEGRAM_SDK_ROUTE = 'https://telegram.org/js/telegram-web-app.js';
 const SYNTHETIC_INIT_DATA =
   'query_id=session-lifecycle&auth_date=1700000000&hash=synthetic';
 const SYNTHETIC_ACCOUNT_ID = '11111111-1111-4111-8111-111111111111';
@@ -39,6 +40,14 @@ async function prepareTelegramWithSecureStorage(
   credential,
   initData = SYNTHETIC_INIT_DATA,
 ) {
+  await page.route(TELEGRAM_SDK_ROUTE, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/javascript',
+      body: '',
+    });
+  });
+
   await page.addInitScript((parameters) => {
     window.sessionStorage.setItem('prosto-padel-splash-shown', 'true');
     let storedCredential = parameters.credential;

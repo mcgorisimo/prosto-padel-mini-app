@@ -1,10 +1,38 @@
 const { spawn, spawnSync } = require('node:child_process');
 const http = require('node:http');
+const net = require('node:net');
 const path = require('node:path');
 
 const host = '127.0.0.1';
 const port = 5173;
 const baseURL = `http://${host}:${port}`;
+
+function assertPortIsFree() {
+  return new Promise((resolve, reject) => {
+    const probe = net.createServer();
+
+    probe.once('error', (error) => {
+      if (error.code === 'EADDRINUSE') {
+        reject(new Error(
+          `Refusing to reuse an existing server at ${baseURL}. ` +
+          'Stop the process that owns port 5173 and run E2E again.',
+        ));
+        return;
+      }
+      reject(error);
+    });
+
+    probe.listen({ host, port, exclusive: true }, () => {
+      probe.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve();
+      });
+    });
+  });
+}
 
 function isServerReady() {
   return new Promise((resolve) => {
@@ -20,10 +48,30 @@ function isServerReady() {
   });
 }
 
-async function waitForServer(timeoutMs = 120000) {
+async function waitForServer(viteProcess, getStartError, timeoutMs = 120000) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
-    if (await isServerReady()) return;
+    const startError = getStartError();
+    if (startError) {
+      throw new Error(`Owned Vite failed to start: ${startError.message}`);
+    }
+    if (viteProcess.exitCode !== null || viteProcess.signalCode !== null) {
+      throw new Error(
+        'Owned Vite exited before becoming ready ' +
+        `(code ${viteProcess.exitCode}, signal ${viteProcess.signalCode}).`,
+      );
+    }
+    if (await isServerReady()) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      if (
+        getStartError() ||
+        viteProcess.exitCode !== null ||
+        viteProcess.signalCode !== null
+      ) {
+        throw new Error('Owned Vite exited during the readiness check.');
+      }
+      return;
+    }
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
   throw new Error(`Vite did not become ready at ${baseURL}`);
@@ -51,10 +99,32 @@ function killProcessTree(pid) {
 async function main() {
   const extraArgs = process.argv.slice(2);
   let viteProcess = null;
-  let ownsServer = false;
+  let viteStartError = null;
+  let playwright = null;
 
-  if (!(await isServerReady())) {
-    ownsServer = true;
+  const cleanup = () => {
+    if (playwright?.exitCode === null) {
+      killProcessTree(playwright.pid);
+    }
+    if (viteProcess?.exitCode === null) {
+      killProcessTree(viteProcess.pid);
+    }
+  };
+
+  const handleSignal = (signal) => {
+    cleanup();
+    process.exit(signal === 'SIGINT' ? 130 : 143);
+  };
+
+  const handleSigint = () => handleSignal('SIGINT');
+  const handleSigterm = () => handleSignal('SIGTERM');
+
+  process.once('SIGINT', handleSigint);
+  process.once('SIGTERM', handleSigterm);
+  process.once('exit', cleanup);
+
+  try {
+    await assertPortIsFree();
     viteProcess = spawn(process.execPath, [
       path.join('node_modules', 'vite', 'bin', 'vite.js'),
       '--host',
@@ -62,39 +132,48 @@ async function main() {
       '--port',
       String(port),
       '--strictPort',
-      '--open=false',
     ], {
       cwd: process.cwd(),
       env: { ...process.env, BROWSER: 'none' },
       stdio: ['ignore', 'inherit', 'inherit'],
       detached: process.platform !== 'win32',
     });
+    viteProcess.once('error', (error) => {
+      viteStartError = error;
+    });
+    console.log(
+      `[e2e] Started owned Vite pid ${viteProcess.pid}; ` +
+      'existing server reuse is disabled.',
+    );
 
-    await waitForServer();
+    await waitForServer(viteProcess, () => viteStartError);
+
+    playwright = spawn(process.execPath, [
+      path.join('node_modules', '@playwright', 'test', 'cli.js'),
+      'test',
+      ...extraArgs,
+    ], {
+      cwd: process.cwd(),
+      stdio: 'inherit',
+    });
+
+    return await new Promise((resolve) => {
+      playwright.on('exit', (code) => resolve(code ?? 1));
+      playwright.on('error', () => resolve(1));
+    });
+  } finally {
+    cleanup();
+    process.removeListener('SIGINT', handleSigint);
+    process.removeListener('SIGTERM', handleSigterm);
+    process.removeListener('exit', cleanup);
   }
-
-  const playwright = spawn(process.execPath, [
-    path.join('node_modules', '@playwright', 'test', 'cli.js'),
-    'test',
-    ...extraArgs,
-  ], {
-    cwd: process.cwd(),
-    stdio: 'inherit',
-  });
-
-  const exitCode = await new Promise((resolve) => {
-    playwright.on('exit', (code) => resolve(code ?? 1));
-    playwright.on('error', () => resolve(1));
-  });
-
-  if (ownsServer && viteProcess) {
-    killProcessTree(viteProcess.pid);
-  }
-
-  process.exit(exitCode);
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
+main()
+  .then((exitCode) => {
+    process.exitCode = exitCode;
+  })
+  .catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });

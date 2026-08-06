@@ -7,6 +7,7 @@ const FEATURE_ENABLED =
 const LOGIN_ROUTE = '**/api/v1/auth/telegram/login';
 const SESSION_ME_ROUTE = '**/api/v1/auth/session/me';
 const PROFILE_ROUTE = '**/api/v1/profile/me';
+const TELEGRAM_SDK_ROUTE = 'https://telegram.org/js/telegram-web-app.js';
 const SYNTHETIC_INIT_DATA =
   'query_id=synthetic-login&auth_date=1700000000&hash=synthetic-hash';
 const SYNTHETIC_CREDENTIAL =
@@ -48,6 +49,14 @@ async function prepareBrowser(page, {
   includeTelegram = true,
   initData = SYNTHETIC_INIT_DATA,
 } = {}) {
+  await page.route(TELEGRAM_SDK_ROUTE, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/javascript',
+      body: '',
+    });
+  });
+
   await page.addInitScript(() => {
     window.sessionStorage.setItem('prosto-padel-splash-shown', 'true');
 

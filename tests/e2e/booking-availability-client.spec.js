@@ -1,5 +1,6 @@
 const { test, expect } = require('@playwright/test');
 
+const TELEGRAM_SDK_ROUTE = 'https://telegram.org/js/telegram-web-app.js';
 const CREDENTIAL = Buffer.alloc(32, 0x71).toString('base64url');
 
 async function isolateComponentHarness(page) {
@@ -13,6 +14,13 @@ async function isolateComponentHarness(page) {
 }
 
 test.beforeEach(async ({ page }) => {
+  await page.route(TELEGRAM_SDK_ROUTE, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/javascript',
+      body: '',
+    });
+  });
   await page.goto('/');
 });
 

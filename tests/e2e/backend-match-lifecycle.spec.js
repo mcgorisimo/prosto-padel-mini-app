@@ -1,5 +1,6 @@
 const { test, expect } = require('@playwright/test');
 
+const TELEGRAM_SDK_ROUTE = 'https://telegram.org/js/telegram-web-app.js';
 const SYNTHETIC_CREDENTIAL = 'A'.repeat(43);
 const ACCOUNT_ID = '11111111-1111-4111-8111-111111111111';
 const OTHER_ACCOUNT_ID = '22222222-2222-4222-8222-222222222222';
@@ -22,6 +23,16 @@ async function isolateComponentHarness(page) {
     }
   });
 }
+
+test.beforeEach(async ({ page }) => {
+  await page.route(TELEGRAM_SDK_ROUTE, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/javascript',
+      body: '',
+    });
+  });
+});
 
 test.describe('backend match credential lifecycle', () => {
   test('legacy data boundary fails before any network request', async ({

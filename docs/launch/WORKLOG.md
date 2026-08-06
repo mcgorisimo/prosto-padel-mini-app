@@ -894,6 +894,83 @@
 - Следующий конкретный шаг: независимый review live-contract correction commit;
   write runner/runtime wiring не начинать без нового отдельного scope.
 
+### 2026-08-06 — D2 / deterministic root E2E harness correction
+
+- Задача/ветка: `codex/week1-d2-reservation-core`; clean base
+  `a68092461025b3f1273dd7c04998b7798257445e`. YCLIENTS read foundation не
+  изменялся.
+- Диагноз исходного gate: 61 passed / 1 skipped / 21 failed. Первые сохранённые
+  auth/session failures: `restores through refresh, replaces SecureStorage and
+  skips Telegram login` (`session_restored` → `outside_telegram`), `removes an
+  invalid stored credential and performs one fresh Telegram login`
+  (`authenticated` → `outside_telegram`), `discards a rotated credential rejected
+  by session me before a fresh Telegram login` (`authenticated` →
+  `outside_telegram`) и `does not hide a temporary refresh failure behind
+  Telegram login` (`temporary_unavailable` → `outside_telegram`).
+- Exact-main comparison: до correction blobs `scripts/e2e.cjs`, Playwright config,
+  auth hook и оба auth/session spec совпадали с `main@3e8739b`; отдельный checkout
+  main не запускался, чтобы не менять его worktree/state.
+- Root cause:
+  - runner принимал любой HTTP server на фиксированном `127.0.0.1:5173`, поэтому
+    не доказывал checkout/config ownership;
+  - Vite argument `--open=false` трактовался как open path `/false`; обычный Chrome
+    на этом URL не является Telegram smoke;
+  - чистый owned Vite с явным
+    `VITE_TELEGRAM_BACKEND_LOGIN_ENABLED=true` воспроизвёл `outside_telegram`:
+    live `telegram-web-app.js` перезаписывал synthetic `window.Telegram` до auth
+    attach.
+- Исправлено только в test harness/specs:
+  - runner отказывается работать при занятом 5173, всегда стартует собственный
+    Vite из текущего checkout, имеет per-request и общий bounded readiness,
+    отслеживает ранний exit и гарантирует cleanup в `finally`/signals;
+  - `--open=false` удалён без замены другим open flag; существующий `BROWSER=none`
+    не даёт `server.open` из dev config открывать системный браузер;
+  - все root E2E specs локально fulfill пустой Telegram SDK script; auth/session
+    helpers делают это до `page.addInitScript`, поэтому WebKit использует только
+    synthetic `window.Telegram`/`SecureStorage` и mocked backend routes без live
+    Telegram request.
+- Изменённые файлы: `scripts/e2e.cjs`, четыре `tests/e2e/*.spec.js` и этот
+  append-only `WORKLOG.md`; application/backend runtime не менялся.
+- Process/evidence: перед focused порт 5173 был свободен; runner зафиксировал owned
+  Vite pid 21288, финальный full suite — pid 7380; после обоих прогонов порт снова
+  свободен.
+  Отдельный occupied-port contract завершился fail-closed до Vite/Playwright.
+  Порождённые диагностикой Vite/esbuild остановлены. Отдельного Chrome process с
+  URL `/false` в command line не было, поэтому пользовательские Chrome окна не
+  завершались.
+- Browser diagnostics focused-run: `pageerror` 0; 11 console errors — восемь
+  локальных resource 404, два rejected invitation-list и один rejected
+  notification-list. Credential/initData/requestKey leakage detector: false;
+  эти сообщения не являлись причиной auth failure.
+- Tests:
+  - focused synthetic WebKit auth: PASS, 1/1;
+  - occupied-port/no-reuse contract: PASS (runner отказался до запуска теста);
+  - root E2E: PASS, 82 passed / 1 skipped / 0 failed;
+  - root build: PASS, 1615 modules; только штатный chunk-size warning;
+  - backend typecheck/unit/E2E/build: not run / not needed — backend source не
+    изменялся.
+- Smoke boundary: localhost проверялся только автоматическим headless WebKit с
+  synthetic Telegram и mocked backend. Обычный localhost Chrome обязан показывать
+  `outside_telegram`; это PASS fail-closed boundary, но не login/business smoke.
+  Реальный ручной login/business smoke будет допустим только внутри Telegram Mini
+  App на Selectel test после отдельного rollout точного commit.
+- Migration: 033 остаётся `applied_verified`; повторно не применялась. DB/provider/
+  YCLIENTS/server calls отсутствовали.
+- Read-only P0/P1 review: auth/runtime/assertions не ослаблены; live SDK/network
+  исключён из всего root E2E harness; foreign server не переиспользуется; owned
+  process cleanup и port release подтверждены. Открытых P0/P1 в diff не найдено.
+- Git integration: локальный checkpoint commit создаётся после этой записи; exact
+  SHA возвращается в handoff. Push/merge не выполняются.
+- Deployment: `not_needed` — изменены только test runner/specs/docs. Общий D2
+  остаётся `in_progress`, integration/test rollout `pending`.
+- Deployed environment/commit: Selectel test runtime без изменений на D1
+  `c04074459948d0bf545e865b885aea7a4e5fec3c`; production не менялся.
+- Containers changed: none.
+- Health/HTTP, manual business smoke, log audit: not run / not needed для этого
+  tests-only checkpoint; future Selectel Telegram smoke не подменяется localhost.
+- Следующий конкретный шаг: интеграционный review этого harness checkpoint вместе
+  с D2 foundation; write runner/runtime wiring не начинать без отдельного scope.
+
 ## Шаблон записи после этапа
 
 ```text
