@@ -34,6 +34,7 @@ export type YclientsReadbackUnknownReason =
   | 'unavailable'
   | 'provider_unknown'
   | 'effect_mismatch'
+  | 'incomplete_candidates'
   | 'no_candidate'
   | 'ambiguous_candidates';
 
@@ -210,6 +211,18 @@ export async function scanBoundedYclientsCandidates(
   }
   if (result.outcome !== 'loaded') {
     return unknownFromReadOutcome(result.outcome);
+  }
+  if (
+    !result.exhaustive ||
+    query.page !== 1 ||
+    result.page !== query.page ||
+    result.count !== query.count ||
+    result.totalCount !== result.records.length
+  ) {
+    return Object.freeze({
+      outcome: 'unknown' as const,
+      reason: 'incomplete_candidates' as const,
+    });
   }
   const referenceMatches = result.records.filter(
     (record) => record.apiId === effect.apiId,

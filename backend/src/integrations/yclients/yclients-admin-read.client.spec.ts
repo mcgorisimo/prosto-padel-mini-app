@@ -54,14 +54,16 @@ function jsonResponse(status: number, body: unknown): Response {
 function client(
   fetch: jest.MockedFunction<typeof globalThis.fetch>,
   apiRuntime: YclientsApiConfiguration = runtime(),
+  limiter: YclientsConservativeRequestLimiter =
+    new YclientsConservativeRequestLimiter({
+      clock: new ImmediateClock(),
+    }),
 ): YclientsAdminReadClient {
   return new YclientsAdminReadClient({
     runtime: apiRuntime,
     requestTimeoutMilliseconds: 5_000,
     fetch,
-    limiter: new YclientsConservativeRequestLimiter({
-      clock: new ImmediateClock(),
-    }),
+    limiter,
   });
 }
 
@@ -95,6 +97,44 @@ const listQuery: YclientsBoundedAdminRecordsQuery = Object.freeze({
 });
 
 describe('YclientsAdminReadClient', () => {
+  it('requires an explicitly shared request limiter', () => {
+    expect(
+      () =>
+        new YclientsAdminReadClient({
+          runtime: runtime(),
+          requestTimeoutMilliseconds: 5_000,
+          fetch: fetchMock(),
+        } as never),
+    ).toThrow('Shared YCLIENTS request limiter is required');
+  });
+
+  it('serializes two client instances through the same limiter', async () => {
+    const clock = new ImmediateClock();
+    const limiter = new YclientsConservativeRequestLimiter({ clock });
+    const starts: number[] = [];
+    const firstFetch = fetchMock().mockImplementation(async () => {
+      starts.push(clock.nowMilliseconds());
+      return jsonResponse(200, { success: true, data: providerRecord() });
+    });
+    const secondFetch = fetchMock().mockImplementation(async () => {
+      starts.push(clock.nowMilliseconds());
+      return jsonResponse(200, { success: true, data: providerRecord() });
+    });
+
+    await expect(
+      Promise.all([
+        client(firstFetch, runtime(), limiter).getRecord(RECORD_ID),
+        client(secondFetch, runtime(), limiter).getRecord(RECORD_ID),
+      ]),
+    ).resolves.toEqual([
+      expect.objectContaining({ outcome: 'found' }),
+      expect.objectContaining({ outcome: 'found' }),
+    ]);
+    expect(starts).toEqual([0, 1_000]);
+    expect(firstFetch).toHaveBeenCalledTimes(1);
+    expect(secondFetch).toHaveBeenCalledTimes(1);
+  });
+
   describe('exact admin record', () => {
     it('is disabled and unreachable without an explicit enabled configuration', async () => {
       const fetch = fetchMock();
@@ -263,6 +303,8 @@ describe('YclientsAdminReadClient', () => {
         outcome: 'loaded',
         page: 1,
         count: 50,
+        totalCount: 1,
+        exhaustive: true,
         records: [
           {
             recordId: RECORD_ID,
@@ -318,7 +360,11 @@ describe('YclientsAdminReadClient', () => {
 
     it('supports a caller-selected capped page without fetching another page', async () => {
       const fetch = fetchMock().mockResolvedValue(
-        jsonResponse(200, { success: true, data: [] }),
+        jsonResponse(200, {
+          success: true,
+          data: [],
+          meta: { page: 10, count: 1, total_count: 0 },
+        }),
       );
 
       await expect(
@@ -327,12 +373,68 @@ describe('YclientsAdminReadClient', () => {
         outcome: 'loaded',
         page: 10,
         count: 1,
+        totalCount: 0,
+        exhaustive: false,
         records: [],
       });
       expect(fetch).toHaveBeenCalledTimes(1);
       expect(new URL(String(fetch.mock.calls[0][0])).searchParams.get('page')).toBe(
         '10',
       );
+    });
+
+    it('marks a valid truncated first page as non-exhaustive', async () => {
+      const fetch = fetchMock().mockResolvedValue(
+        jsonResponse(200, {
+          success: true,
+          data: [providerRecord()],
+          meta: { page: 1, count: 1, total_count: 2 },
+        }),
+      );
+
+      await expect(
+        client(fetch).listRecords({ ...listQuery, count: 1 }),
+      ).resolves.toEqual({
+        outcome: 'loaded',
+        page: 1,
+        count: 1,
+        totalCount: 2,
+        exhaustive: false,
+        records: [
+          {
+            recordId: RECORD_ID,
+            companyId: COMPANY_ID,
+            resourceId: RESOURCE_ID,
+            serviceIds: [SERVICE_ID],
+            datetime: '2026-08-05T16:30:00+03:00',
+            deleted: false,
+            apiId: API_ID,
+            lastChangeDate: '2026-08-05 15:00:00',
+          },
+        ],
+      });
+      expect(fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      undefined,
+      { page: 2, count: 1, total_count: 1 },
+      { page: 1, count: 2, total_count: 1 },
+      { page: 1, count: 1, total_count: 0 },
+      { page: 1, count: 1, total_count: -1 },
+    ])('rejects absent or inconsistent pagination metadata %#', async (meta) => {
+      const fetch = fetchMock().mockResolvedValue(
+        jsonResponse(200, {
+          success: true,
+          data: [providerRecord()],
+          ...(meta === undefined ? {} : { meta }),
+        }),
+      );
+
+      await expect(
+        client(fetch).listRecords({ ...listQuery, count: 1 }),
+      ).resolves.toEqual({ outcome: 'unknown' });
+      expect(fetch).toHaveBeenCalledTimes(1);
     });
 
     it.each([
@@ -380,6 +482,7 @@ describe('YclientsAdminReadClient', () => {
         jsonResponse(200, {
           success: true,
           data: [providerRecord(), providerRecord()],
+          meta: { page: 1, count: 2, total_count: 2 },
         }),
       );
 
@@ -400,6 +503,50 @@ describe('YclientsAdminReadClient', () => {
       await expect(client(fetch).listRecords(listQuery)).resolves.toEqual({
         outcome: 'unknown',
       });
+    });
+
+    it('rejects oversized content-length before acquiring a body reader', async () => {
+      const cancel = jest.fn().mockResolvedValue(undefined);
+      const getReader = jest.fn(() => {
+        throw new Error('body reader must not be acquired');
+      });
+      const fetch = fetchMock().mockResolvedValue({
+        status: 200,
+        headers: new Headers({ 'content-length': '65537' }),
+        body: { cancel, getReader },
+      } as unknown as Response);
+
+      await expect(client(fetch).listRecords(listQuery)).resolves.toEqual({
+        outcome: 'unknown',
+      });
+      expect(cancel).toHaveBeenCalledTimes(1);
+      expect(getReader).not.toHaveBeenCalled();
+    });
+
+    it('cancels a streamed body immediately after it exceeds the byte cap', async () => {
+      const read = jest
+        .fn()
+        .mockResolvedValueOnce({ done: false, value: new Uint8Array(40_000) })
+        .mockResolvedValueOnce({ done: false, value: new Uint8Array(40_000) });
+      const cancel = jest.fn().mockResolvedValue(undefined);
+      const releaseLock = jest.fn();
+      const text = jest.fn().mockRejectedValue(new Error('text must not be used'));
+      const fetch = fetchMock().mockResolvedValue({
+        status: 200,
+        headers: new Headers(),
+        body: {
+          getReader: jest.fn(() => ({ read, cancel, releaseLock })),
+        },
+        text,
+      } as unknown as Response);
+
+      await expect(client(fetch).listRecords(listQuery)).resolves.toEqual({
+        outcome: 'unknown',
+      });
+      expect(read).toHaveBeenCalledTimes(2);
+      expect(cancel).toHaveBeenCalledTimes(1);
+      expect(releaseLock).toHaveBeenCalledTimes(1);
+      expect(text).not.toHaveBeenCalled();
     });
   });
 });

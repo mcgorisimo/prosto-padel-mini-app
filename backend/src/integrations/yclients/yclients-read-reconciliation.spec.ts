@@ -48,6 +48,8 @@ function reader(
       outcome: 'loaded',
       page: 1,
       count: 50,
+      totalCount: 0,
+      exhaustive: true,
       records: [],
     }),
     ...overrides,
@@ -152,6 +154,8 @@ describe('YCLIENTS read-only reconciliation primitives', () => {
         outcome: 'loaded',
         page: 1,
         count: 50,
+        totalCount: 1,
+        exhaustive: true,
         records: [record],
       }),
     });
@@ -162,6 +166,53 @@ describe('YCLIENTS read-only reconciliation primitives', () => {
     expect(provider.listRecords).toHaveBeenCalledTimes(1);
     expect(provider.listRecords).toHaveBeenCalledWith(query);
     expect(provider.getRecord).not.toHaveBeenCalled();
+  });
+
+  it('keeps a candidate on a non-exhaustive page unknown', async () => {
+    const provider = reader({
+      listRecords: jest.fn().mockResolvedValue({
+        outcome: 'loaded',
+        page: 1,
+        count: 1,
+        totalCount: 2,
+        exhaustive: false,
+        records: [record],
+      }),
+    });
+
+    await expect(
+      scanBoundedYclientsCandidates(provider, { ...query, count: 1 }, effect),
+    ).resolves.toEqual({
+      outcome: 'unknown',
+      reason: 'incomplete_candidates',
+    });
+    expect(provider.listRecords).toHaveBeenCalledTimes(1);
+    expect(provider.getRecord).not.toHaveBeenCalled();
+  });
+
+  it('does not trust an inconsistent exhaustive flag from a reader port', async () => {
+    const provider = reader({
+      listRecords: jest.fn().mockResolvedValue({
+        outcome: 'loaded',
+        page: 2,
+        count: 1,
+        totalCount: 1,
+        exhaustive: true,
+        records: [record],
+      }),
+    });
+
+    await expect(
+      scanBoundedYclientsCandidates(
+        provider,
+        { ...query, page: 2, count: 1 },
+        effect,
+      ),
+    ).resolves.toEqual({
+      outcome: 'unknown',
+      reason: 'incomplete_candidates',
+    });
+    expect(provider.listRecords).toHaveBeenCalledTimes(1);
   });
 
   it('keeps zero local candidates unknown without another page', async () => {
@@ -180,6 +231,8 @@ describe('YCLIENTS read-only reconciliation primitives', () => {
         outcome: 'loaded',
         page: 1,
         count: 50,
+        totalCount: 2,
+        exhaustive: true,
         records: [
           record,
           Object.freeze({
@@ -206,6 +259,8 @@ describe('YCLIENTS read-only reconciliation primitives', () => {
         outcome: 'loaded',
         page: 1,
         count: 50,
+        totalCount: 1,
+        exhaustive: true,
         records: [Object.freeze({ ...record, deleted: true })],
       }),
     });

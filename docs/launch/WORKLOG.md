@@ -26,7 +26,7 @@
 | Этап | Статус | Ветка/commit | Проверки | Блокер/следующий шаг |
 |---|---|---|---|---|
 | D1 Backend-only/contracts | done | `main` / deployed `c04074459948d0bf545e865b885aea7a4e5fec3c` | frontend E2E PASS (82/1 skipped); focused fail-closed 2/2 PASS; frontend build PASS; backend all PASS; Selectel test smoke PASS | D1 закрыт; следующий отдельный этап — D2 |
-| D2 YCLIENTS reservation core | in_progress | D2 branch / matrix `46bc35c7b6be5848bb5556b14eaee6fa33a20c2e` / controlled-plan correction `a08de13c95e7cf67ff272942f484d2e3d3ebd988` / read-foundation checkpoint from that exact base | migration 033 applied/verified; backend gates PASS; root build PASS; root E2E 61 passed / 1 skipped / 21 unrelated `outside_telegram` failures | review runtime-disabled read foundation; basic и optional provider tests требуют два отдельных approval; runtime wiring не начат |
+| D2 YCLIENTS reservation core | in_progress | D2 branch / matrix `46bc35c7b6be5848bb5556b14eaee6fa33a20c2e` / controlled-plan correction `a08de13c95e7cf67ff272942f484d2e3d3ebd988` / read foundation `b157851d0ef1c45681a713cc2daa1ee192fba617` + P1 correction from that exact base | migration 033 applied/verified; backend 113/2965 unit, 2/4 E2E, typecheck/build PASS; root build PASS; root E2E 61 passed / 1 skipped / 21 unrelated `outside_telegram` failures | independent review correction checkpoint; basic и optional provider tests требуют два отдельных approval; runtime wiring не начат |
 | D3 Match ↔ reservation lifecycle | pending | — | — | cancel match, owner participant removal, match ↔ reservation binding |
 | D4 Payment Core | pending | — | — | payment provider, pricing/payment snapshot, чеки и возвраты |
 | D5 Settings/moderation/compliance | pending | — | — | standalone phone/email auth и verified backend email; затем schema review |
@@ -45,7 +45,7 @@
 | D2 persistence/privacy proposal | not applicable | docs-only checkpoint | `not_needed` | только Markdown; runtime, schema, containers и конфигурация не менялись |
 | D2 YCLIENTS contract matrix | not applicable | docs-only checkpoint поверх `3e8739b` | `not_needed` | только Markdown; API/DB/server/runtime не вызывались и не менялись |
 | D2 YCLIENTS controlled test plan | not applicable | `040773172a2fa556ffaaf1d12dac540095070976` + docs-only correction from that exact base | `not_needed` | plan only; provider/server/DB/runtime calls и writes не выполнялись |
-| D2 YCLIENTS read foundation | not applicable | checkpoint from `a08de13c95e7cf67ff272942f484d2e3d3ebd988` | `not_needed` | новый code не импортирован Nest modules/controllers/runtime; image, config, server и containers не менялись |
+| D2 YCLIENTS read foundation | not applicable | `b157851d0ef1c45681a713cc2daa1ee192fba617` + P1 correction from that exact base | `not_needed` | code не импортирован Nest modules/controllers/runtime; image, config, server и containers не менялись |
 
 Допустимые deployment-статусы: `not_needed`, `pending`, `test_deployed`,
 `production_deployed`, `deployment_deferred_by_user`.
@@ -774,6 +774,64 @@
 - Следующий конкретный шаг: независимый review read foundation; PUT/DELETE и
   executable controlled write runner не начинать до отдельного решения по
   безопасному provider contract/test gate.
+
+### 2026-08-06 — D2 / YCLIENTS read foundation P1 correction
+
+- Задача/ветка: `codex/week1-d2-reservation-core`; exact reviewed foundation
+  base `b157851d0ef1c45681a713cc2daa1ee192fba617`, исходный worktree clean.
+- Независимый review: P0 не найдено; прежнее утверждение foundation entry об
+  отсутствии P1 superseded тремя findings ниже. History не переписывалась.
+- Исправлено:
+  - list parser строго валидирует provider pagination
+    `meta.page/count/total_count`, согласованность размера страницы и возвращает
+    отдельный completeness proof;
+  - candidate reconciliation принимает только исчерпывающую `page=1` и
+    независимо сверяет query/result page/count, total count и число records;
+    incomplete/несогласованная выдача остаётся `unknown`, следующий page или
+    write не выполняется;
+  - admin read client требует явно переданный shared limiter; private fallback
+    удалён, два client instances сериализуются через один gate;
+  - success body читается bounded stream: oversized/invalid `Content-Length`
+    отклоняется до reader, фактический поток cancel после 64 KiB, invalid UTF-8
+    и JSON fail closed; `response.text()` не используется.
+- Regression tests: missing/inconsistent/truncated pagination, ложный
+  `exhaustive` от reader port, shared limiter для двух clients, ранний
+  content-length reject и stream cancellation. Focused mocked suite: PASS,
+  3 suites / 88 tests.
+- Runtime boundary: PUT/DELETE/create runner, provider write/retry, Nest
+  module/controller wiring и executable controlled runner не добавлялись. Новые
+  external calls, env/secrets, schema/migration и payment fields не затронуты.
+- Tests:
+  - backend typecheck: PASS;
+  - backend unit: PASS, 113 suites / 2965 tests;
+  - backend E2E: PASS, 2 suites / 4 tests;
+  - backend build: PASS;
+  - root build: PASS, 1615 modules; только штатное chunk-size warning;
+  - root E2E: FAIL, 61 passed / 1 skipped / 21 failed; неизменный
+    `outside_telegram` session/login blocker воспроизведён без изменений
+    frontend/auth/runtime source.
+- Read-only P0/P1 correction review: pagination proof нельзя подменить одним
+  флагом; oversized body не загружается через text; private limiter fallback и
+  write/read retry отсутствуют; runtime import boundary сохранён. Открытых P0/P1
+  в correction diff не найдено.
+- Остаточные P2/следующие contracts: privacy-safe in-memory client identity/full
+  payload ещё нужны для controlled plan шагов 6/8; datetime exact-string compare
+  может дать безопасный false-negative `unknown`; multi-replica provider quota
+  требует deployment-level coordination до runtime enablement.
+- Migration: 033 остаётся `applied_verified` на Selectel test; runtime
+  disconnected. DB/PRECHECK/POSTCHECK/rollback не запускались.
+- Git integration: отдельный локальный correction commit; push/merge/deploy не
+  выполняются.
+- Deployment: `not_needed` — изменённый code остаётся недостижимым из runtime;
+  общий D2 остаётся `in_progress` с deployment `pending`.
+- Deployed environment/commit: Selectel test runtime остаётся detached на D1
+  `c04074459948d0bf545e865b885aea7a4e5fec3c`; schema 033 отдельно
+  `applied_verified`, production не менялся.
+- Containers changed: none.
+- Health/HTTP, business smoke, log audit: `not run / not needed` — server,
+  runtime и containers не менялись, внешние provider calls отсутствовали.
+- Следующий конкретный шаг: независимый review correction commit. Write runner,
+  provider writes и runtime wiring не начинать без нового отдельного scope.
 
 ## Шаблон записи после этапа
 

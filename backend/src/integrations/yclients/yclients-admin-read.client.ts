@@ -50,6 +50,8 @@ export type YclientsBoundedAdminRecordsResult =
       outcome: 'loaded';
       page: number;
       count: number;
+      totalCount: number;
+      exhaustive: boolean;
       records: ReadonlyArray<YclientsSafeAdminRecord>;
     }>
   | Readonly<{ outcome: 'unauthorized' }>
@@ -62,7 +64,7 @@ export interface YclientsAdminReadClientConfiguration {
   readonly runtime: YclientsApiConfiguration;
   readonly requestTimeoutMilliseconds: number;
   readonly fetch: typeof globalThis.fetch;
-  readonly limiter?: YclientsConservativeRequestLimiter;
+  readonly limiter: YclientsConservativeRequestLimiter;
 }
 
 type ReadFailure = Exclude<
@@ -78,9 +80,78 @@ function positiveSafeInteger(value: unknown): value is number {
   return Number.isSafeInteger(value) && Number(value) > 0;
 }
 
-function readBody(text: string): Record<string, unknown> | undefined {
-  if (Buffer.byteLength(text, 'utf8') > MAX_RESPONSE_BYTES) return undefined;
+function nonNegativeSafeInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && Number(value) >= 0;
+}
+
+async function cancelBody(
+  body: ReadableStream<Uint8Array> | null,
+): Promise<void> {
+  if (body === null) return;
   try {
+    await body.cancel();
+  } catch {
+    // A failed cancellation must not expose or retry the provider response.
+  }
+}
+
+async function readBody(
+  response: Response,
+): Promise<Record<string, unknown> | undefined> {
+  const contentLengthHeader = response.headers.get('content-length');
+  if (contentLengthHeader !== null) {
+    if (!/^\d+$/u.test(contentLengthHeader)) {
+      await cancelBody(response.body);
+      return undefined;
+    }
+    const contentLength = Number(contentLengthHeader);
+    if (
+      !nonNegativeSafeInteger(contentLength) ||
+      contentLength > MAX_RESPONSE_BYTES
+    ) {
+      await cancelBody(response.body);
+      return undefined;
+    }
+  }
+
+  if (response.body === null) return undefined;
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let bytesRead = 0;
+  try {
+    for (;;) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      bytesRead += chunk.value.byteLength;
+      if (bytesRead > MAX_RESPONSE_BYTES) {
+        try {
+          await reader.cancel();
+        } catch {
+          // The response remains invalid even if stream cancellation fails.
+        }
+        return undefined;
+      }
+      chunks.push(chunk.value);
+    }
+  } catch {
+    try {
+      await reader.cancel();
+    } catch {
+      // The response remains invalid even if stream cancellation fails.
+    }
+    return undefined;
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = new Uint8Array(bytesRead);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
     const parsed: unknown = JSON.parse(text);
     return isRecord(parsed) ? parsed : undefined;
   } catch {
@@ -215,6 +286,35 @@ function readSafeAdminRecord(
   });
 }
 
+function readPagination(
+  value: unknown,
+  expectedPage: number,
+  expectedCount: number,
+  rowCount: number,
+): Readonly<{ totalCount: number; exhaustive: boolean }> | undefined {
+  if (
+    !isRecord(value) ||
+    !positiveSafeInteger(value.page) ||
+    Number(value.page) !== expectedPage ||
+    !positiveSafeInteger(value.count) ||
+    Number(value.count) !== expectedCount ||
+    !nonNegativeSafeInteger(value.total_count)
+  ) {
+    return undefined;
+  }
+  const totalCount = Number(value.total_count);
+  const offset = (expectedPage - 1) * expectedCount;
+  const expectedRows = Math.min(
+    expectedCount,
+    Math.max(totalCount - offset, 0),
+  );
+  if (rowCount !== expectedRows) return undefined;
+  return Object.freeze({
+    totalCount,
+    exhaustive: expectedPage === 1 && totalCount === rowCount,
+  });
+}
+
 function safeBaseUrl(value: string): string | undefined {
   try {
     const parsed = new URL(value);
@@ -285,8 +385,10 @@ export class YclientsAdminReadClient {
   private readonly limiter: YclientsConservativeRequestLimiter;
 
   constructor(private readonly configuration: YclientsAdminReadClientConfiguration) {
-    this.limiter =
-      configuration.limiter ?? new YclientsConservativeRequestLimiter();
+    if (configuration.limiter === undefined) {
+      throw new TypeError('Shared YCLIENTS request limiter is required');
+    }
+    this.limiter = configuration.limiter;
   }
 
   async getRecord(recordId: number): Promise<YclientsExactAdminRecordResult> {
@@ -317,7 +419,7 @@ export class YclientsAdminReadClient {
         const classified = classifyStatus(response.status, true);
         if (classified !== undefined) return classified;
 
-        const body = readBody(await response.text());
+        const body = await readBody(response);
         const record =
           body?.success === true
             ? readSafeAdminRecord(body.data, configured.companyId)
@@ -397,12 +499,21 @@ export class YclientsAdminReadClient {
             : classified;
         }
 
-        const body = readBody(await response.text());
+        const body = await readBody(response);
         if (
           body?.success !== true ||
           !Array.isArray(body.data) ||
           body.data.length > query.count
         ) {
+          return Object.freeze({ outcome: 'unknown' as const });
+        }
+        const pagination = readPagination(
+          body.meta,
+          query.page,
+          query.count,
+          body.data.length,
+        );
+        if (pagination === undefined) {
           return Object.freeze({ outcome: 'unknown' as const });
         }
         const records = body.data.map((value) =>
@@ -419,6 +530,8 @@ export class YclientsAdminReadClient {
           outcome: 'loaded' as const,
           page: query.page,
           count: query.count,
+          totalCount: pagination.totalCount,
+          exhaustive: pagination.exhaustive,
           records: Object.freeze(records as ReadonlyArray<YclientsSafeAdminRecord>),
         });
       } catch {
