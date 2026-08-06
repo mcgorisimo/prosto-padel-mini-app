@@ -73,6 +73,17 @@ Match
 
 ## 4. Definition of Done недели
 
+### Deployment gate для каждого этапа
+
+- Изменение runtime/frontend/backend/infra считается завершённым только после
+  интеграции в `main`, test rollout точного commit и подтверждённых health,
+  бизнес-smoke и проверки логов.
+- Git commit/push/merge и deployment — разные обязательные статусы.
+- Если deployment не требуется, в WORKLOG фиксируется `not_needed` с причиной.
+- Если пользователь явно откладывает rollout, фиксируется
+  `deployment_deferred_by_user`; этап не выдаётся за работающий на сервере.
+- Production deployment всегда требует отдельной прямой команды владельца.
+
 ### Backend-only
 
 - В production bundle нет `@supabase/supabase-js` и `VITE_SUPABASE_*`.
@@ -345,7 +356,7 @@ Store blockers:
 5. Этапы, затрагивающие `App.jsx`, auth, migrations или одни таблицы, идут
    последовательно. Policy/mobile assets и read-only review могут идти параллельно.
 6. Каждый этап работает в `codex/week1-<scope>` и заканчивается тестами,
-   записью в `WORKLOG.md`, commit и handoff.
+   записью в `WORKLOG.md`, commit, test rollout при runtime impact и handoff.
 
 Каждый новый чат получает промт из `NEXT_CHAT_PROMPT.md`. Контекст сообщений
 не считается источником истины: агент обязан перечитать документы и актуальный код.

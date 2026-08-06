@@ -48,12 +48,31 @@
    npm.cmd run test:e2e
    npm.cmd run build
 6. Обновить docs/launch/WORKLOG.md фактическими результатами и следующим шагом.
-7. Дать короткий отчет:
+7. Проверить deployment impact и выполнить обязательный deployment gate ниже.
+8. Дать короткий отчет:
    - файлы изменены
    - что исправлено
    - test:e2e результат
    - build результат
+   - commit/push/merge результат
+   - deployment status и deployed commit
+   - health/smoke/log результат
    - что осталось
+
+## Обязательный deployment gate
+- Перед закрытием каждого этапа определить, меняет ли он runtime, container image,
+  compose/config, зависимости, frontend bundle, backend или инфраструктуру.
+- Если меняет — этап нельзя отмечать `done` и чат нельзя закрывать, пока целевой
+  test-сервер не обновлён до точного commit и не пройдены health, бизнес-smoke и
+  проверка логов.
+- Сначала commit и интеграция в `main`, затем отдельный контролируемый test rollout.
+- Если deployment явно отложен пользователем, записать `deployment_deferred_by_user`
+  в WORKLOG; нельзя молча считать его выполненным.
+- Production deployment выполнять только по отдельной прямой команде пользователя.
+- Для docs-only/test-only изменений deployment может быть `not_needed`, но причина
+  должна быть записана в WORKLOG.
+- Финальный handoff всегда содержит: deployed environment, deployed commit,
+  изменённые containers, health/HTTP, ручной smoke и результат проверки логов.
 
 ## Тесты
 Smoke-тесты Playwright уже настроены.
@@ -74,3 +93,5 @@ npm.cmd run build
 - Не вести параллельные изменения App.jsx, одной migration или одного доменного модуля в разных задачах.
 - Субагенты допустимы для независимого исследования, тестов и review; итоговую интеграцию делает основной агент задачи.
 - Завершённый этап обязан оставить воспроизводимый handoff в WORKLOG.md.
+- Новый чат обязан проверить последний deployment status; Git `done` не означает,
+  что тот же commit уже работает на сервере.

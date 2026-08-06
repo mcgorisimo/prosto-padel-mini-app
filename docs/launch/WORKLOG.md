@@ -25,7 +25,7 @@
 
 | Этап | Статус | Ветка/commit | Проверки | Блокер/следующий шаг |
 |---|---|---|---|---|
-| D1 Backend-only/contracts | done | `codex/week1-backend-only` / `aa5cd86489f4d8a5cc757990212b3c2ced7630d8` | frontend E2E PASS (82/1 skipped); focused fail-closed 2/2 PASS; frontend build PASS; backend all PASS | закрыт; downstream gaps назначены D2–D6/mobile |
+| D1 Backend-only/contracts | in_progress | `main` / `718c7fc8e7386f8092710446309b311077ee2b1b` | frontend E2E PASS (82/1 skipped); focused fail-closed 2/2 PASS; frontend build PASS; backend all PASS | code integrated; Selectel test rollout и smoke pending |
 | D2 YCLIENTS reservation core | pending | — | — | local binding, get/lookup, unknown, idempotency, reschedule/cancel/reconciliation/webhook contract |
 | D3 Match ↔ reservation lifecycle | pending | — | — | cancel match, owner participant removal, match ↔ reservation binding |
 | D4 Payment Core | pending | — | — | payment provider, pricing/payment snapshot, чеки и возвраты |
@@ -35,6 +35,15 @@
 | Mobile/store track | pending | — | — | developer account status и native decision |
 
 Статусы: `pending`, `in_progress`, `blocked`, `done`, `reopened`.
+
+## Deployment status
+
+| Этап | Среда | Целевой commit | Статус | Проверка |
+|---|---|---|---|---|
+| D1 Backend-only/contracts | Selectel test | `718c7fc8e7386f8092710446309b311077ee2b1b` | `pending` | frontend rebuild, health, TMA auth/profile/feed/booking availability smoke и log audit не выполнены |
+
+Допустимые deployment-статусы: `not_needed`, `pending`, `test_deployed`,
+`production_deployed`, `deployment_deferred_by_user`.
 
 ## Активные внешние блокеры
 
@@ -149,7 +158,9 @@
 - Задача/ветка: `codex/week1-backend-only`.
 - Checkpoint: `aa5cd86489f4d8a5cc757990212b3c2ced7630d8`.
 - Статус: D1 `done`. Последующие gaps назначены D2–D6/mobile и не являются
-  незавершённой работой D1.
+  незавершённой кодовой работой D1. После введения обязательного deployment gate
+  операционный статус возвращён в `in_progress` до Selectel test rollout commit
+  `718c7fc8e7386f8092710446309b311077ee2b1b`.
 - Независимый read-only review:
   - auth/session: P0/P1/P2 нет; backend session + backend-owned profile остаются
     единственным production TMA gate, disabled/invalid configuration fail-closed;
@@ -208,4 +219,11 @@
 - Известные риски:
 - Внешний блокер:
 - Следующий конкретный шаг:
+- Git integration: not_started / committed / pushed_branch / merged_main / pushed_main
+- Deployment: not_needed / pending / test_deployed / production_deployed / deployment_deferred_by_user
+- Deployed environment/commit:
+- Containers changed:
+- Health/HTTP:
+- Business smoke:
+- Log audit:
 ```
