@@ -26,7 +26,7 @@
 | Этап | Статус | Ветка/commit | Проверки | Блокер/следующий шаг |
 |---|---|---|---|---|
 | D1 Backend-only/contracts | done | `main` / deployed `c04074459948d0bf545e865b885aea7a4e5fec3c` | frontend E2E PASS (82/1 skipped); focused fail-closed 2/2 PASS; frontend build PASS; backend all PASS; Selectel test smoke PASS | D1 закрыт; следующий отдельный этап — D2 |
-| D2 YCLIENTS reservation core | in_progress | `codex/week1-d2-reservation-core` / `c47c245` + correction + docs proposal checkpoints | backend typecheck, unit 109/2869, E2E 2/4, build PASS; frontend E2E 82/1 skipped, build PASS | persistence/privacy proposal готов к явному решению; migration, wiring/contracts и Selectel test rollout остаются |
+| D2 YCLIENTS reservation core | in_progress | `codex/week1-d2-reservation-core` / `c47c245` + correction + docs proposal checkpoints | backend typecheck, unit 109/2869, E2E 2/4, build PASS; frontend E2E 82/1 skipped, build PASS | privacy access model одобрен; остальные migration-решения, wiring/contracts и Selectel test rollout остаются |
 | D3 Match ↔ reservation lifecycle | pending | — | — | cancel match, owner participant removal, match ↔ reservation binding |
 | D4 Payment Core | pending | — | — | payment provider, pricing/payment snapshot, чеки и возвраты |
 | D5 Settings/moderation/compliance | pending | — | — | standalone phone/email auth и verified backend email; затем schema review |
@@ -70,6 +70,7 @@
 | 2026-08-06 | Один плательщик в первом MVP | снизить риск возвратов и недобора | split payments отложены |
 | 2026-08-06 | Недельная цель — launch candidate, не гарантированная публикация stores | внешнее ревью и Google 14-day rule не контролируются кодом | store track запускается параллельно |
 | 2026-08-06 | Реальный YCLIENTS test rollout подтвердил availability/preflight/create | company `2079564`, server secret-файлы, права, resource mapping, bearer boundary и write guard проверены; бронь появилась в YCLIENTS | create больше не внешний блокер; D2 можно начинать с локального reservation/operation domain, webhook остаётся выключенным |
+| 2026-08-06 | Owner видит собственный полный client snapshot; `club_admin` после backend role/permission check видит полный snapshot без masking/reveal | явное privacy-решение владельца | чужие players доступа не имеют; decrypt только на backend; каждый admin read требует security audit event без PII |
 
 ### 2026-08-06 — D1 / backend-only inventory и production boundary
 
@@ -372,6 +373,34 @@
 - Containers changed: none.
 - Health/HTTP, business smoke, log audit: `not run / not needed` для docs-only
   checkpoint; последний D1 test gate PASS.
+
+### 2026-08-06 — D2 / approved client snapshot access model
+
+- Задача/ветка: `codex/week1-d2-reservation-core`.
+- Commit: отдельный docs-only checkpoint в текущем branch head; push/merge не
+  выполнялись.
+- Изменённые файлы: `docs/launch/D2_RESERVATION_PERSISTENCE_PROPOSAL.md` и
+  `docs/launch/WORKLOG.md`.
+- Одобрено владельцем:
+  - owner видит собственные полные `fullName`, `phone`, `email`;
+  - `club_admin` получает полный decrypted snapshot после backend role/permission
+    check, без masking и отдельного reveal;
+  - другие players не получают чужие client data;
+  - decrypt выполняется только backend; каждый admin read fail-closed создаёт
+    audit event с actor, operation/reservation, timestamp и purpose/endpoint без
+    копии PII; PII/ciphertext/keys исключены из logs/errors/traces.
+- Approval status: закрыт только access-control пункт. Остальной persistence/
+  privacy/migration checklist не считается одобренным.
+- Migration: `proposal_for_explicit_approval`; SQL/migration не создавались,
+  schema/runtime не менялись.
+- Tests: `not run / not needed`, потому что diff docs-only.
+- Ручная проверка: `git diff --check` PASS; изменены только два Markdown-файла.
+- Git integration: docs-only checkpoint `committed`; push/merge не выполнялись.
+- Deployment: `not_needed` для docs-only checkpoint; общий D2 остаётся
+  `in_progress` с deployment status `pending`.
+- Deployed environment/commit: Selectel test остаётся на D1 commit
+  `c04074459948d0bf545e865b885aea7a4e5fec3c`; containers не менялись,
+  health/smoke/log checks для этого docs-only checkpoint не нужны.
 
 ## Шаблон записи после этапа
 

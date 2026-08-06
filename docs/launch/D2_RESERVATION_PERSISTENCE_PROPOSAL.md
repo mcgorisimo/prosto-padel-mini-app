@@ -4,6 +4,9 @@
 schema/runtime, YCLIENTS wiring и реальные provider writes не меняются. D2
 остаётся `in_progress`.
 
+Частично одобрено: access model для чтения client snapshot. Остальные пункты
+approval checklist сохраняют свои текущие статусы.
+
 Вне scope: payment-поля, match binding/lifecycle D3, webhook implementation,
 секреты и реальные ID клиентов.
 
@@ -111,16 +114,25 @@ plain SHA PII. До persistence wiring нужно отдельно одобри�
 components в `request_digest` на `client_snapshot_digest`; конфликтная семантика
 same-key сохраняется, offline enumeration phone/email усложняется.
 
-Чтение decrypted snapshot разрешено только:
+Одобренный access model для decrypted snapshot:
 
 - provider executor при фактическом вызове;
 - reconciliation worker, когда подтверждённый контракт требует client data;
-- явно авторизованному admin flow со step-up и security audit, если владелец это
-  отдельно одобрит. Обычный repository/admin lookup возвращает redacted metadata.
+- authenticated owner получает полные `fullName`, `phone` и `email` только для
+  собственной reservation/operation после backend ownership check;
+- authenticated `club_admin` после backend role/permission check получает полные
+  `fullName`, `phone` и `email` в административном интерфейсе без маскирования и
+  без отдельного ручного reveal шага;
+- player и другие пользователи не получают client snapshot чужого owner.
+
+Decrypt выполняется только backend. Каждый успешный admin read атомарно либо
+надёжно fail-closed пишет security audit event: actor account ID,
+operation/reservation ID, timestamp и purpose/endpoint, без копии PII. Если audit
+event не записан, полный snapshot не возвращается.
 
 Logs/errors/traces не содержат PII, ciphertext, record hash, provider response
-body или ключевые версии вместе с материалом ключа. Correlation использует
-internal operation ID/request digest.
+body, encryption/HMAC keys или ключевые версии вместе с материалом ключа.
+Correlation использует internal operation ID/request digest.
 
 Retention, anonymization и delete-account требуют отдельных решений владельца:
 срок не предлагается. Нужно выбрать, удалять ли snapshot криптографически,
@@ -172,12 +184,17 @@ SQL в рамках этого proposal не создаётся.
 - [ ] canonical datetime: `timestamptz` + exact provider text;
 - [ ] application-layer AEAD, отдельный keyed HMAC, AAD и key rotation/versioning;
 - [ ] замену raw client fields в request digest на keyed client snapshot digest;
-- [ ] кто может decrypt/read и нужен ли audited admin access;
+- [x] access model: owner видит свои данные; `club_admin` после backend
+  role/permission check видит полный snapshot без masking/reveal; чужой player
+  доступа не имеет; каждый admin read создаёт audit event без PII — одобрено
+  владельцем;
 - [ ] retention/anonymization/delete-account policy без предположенного срока;
 - [ ] шифрование YCLIENTS record hash и nullable provider client ID;
 - [ ] external `apiId` generation/uniqueness scope после provider confirmation;
 - [ ] отсутствие backfill либо отдельный verified historical import;
 - [ ] migration/rollback order и отдельное разрешение подготовить SQL.
+
+Отметка одного access-пункта не означает approval всего checklist или migration.
 
 После approval можно сразу подготовить SQL migration на отдельный review,
 repository persistence/encryption contract tests и disabled-by-default adapter.
