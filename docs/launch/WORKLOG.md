@@ -26,7 +26,7 @@
 | Этап | Статус | Ветка/commit | Проверки | Блокер/следующий шаг |
 |---|---|---|---|---|
 | D1 Backend-only/contracts | done | `main` / deployed `c04074459948d0bf545e865b885aea7a4e5fec3c` | frontend E2E PASS (82/1 skipped); focused fail-closed 2/2 PASS; frontend build PASS; backend all PASS; Selectel test smoke PASS | D1 закрыт; следующий отдельный этап — D2 |
-| D2 YCLIENTS reservation core | in_progress | `main` / correction `7c31d29b639d6b29016d2378ccc7006df6129b52` | focused migration contract 8/8 PASS; backend typecheck PASS; PRECHECK PASS; SQL applied; corrected POSTCHECK PASS | persistence schema applied/verified на Selectel test; runtime wiring/provider contracts остаются |
+| D2 YCLIENTS reservation core | in_progress | `main` `3e8739b2e9308976bccfd125883f03917fa22962` / provider matrix checkpoint в D2 branch | migration 033 applied/verified; provider checkpoint docs-only, `git diff --check` перед commit | safe read adapter subset определён; write recovery/provider verification blockers остаются, runtime wiring не начат |
 | D3 Match ↔ reservation lifecycle | pending | — | — | cancel match, owner participant removal, match ↔ reservation binding |
 | D4 Payment Core | pending | — | — | payment provider, pricing/payment snapshot, чеки и возвраты |
 | D5 Settings/moderation/compliance | pending | — | — | standalone phone/email auth и verified backend email; затем schema review |
@@ -43,6 +43,7 @@
 | D1 Backend-only/contracts | Selectel test | `c04074459948d0bf545e865b885aea7a4e5fec3c` | `test_deployed` | frontend healthy; HTTPS root/health и новый asset 200; TMA auth/profile/feed/details/booking availability PASS; bundle/log audit PASS |
 | D2 YCLIENTS reservation core | Selectel test | correction `7c31d29b639d6b29016d2378ccc7006df6129b52` | `pending` | migration 033 `applied_verified`, tables empty и runtime disconnected; runtime/containers остаются на D1 commit |
 | D2 persistence/privacy proposal | not applicable | docs-only checkpoint | `not_needed` | только Markdown; runtime, schema, containers и конфигурация не менялись |
+| D2 YCLIENTS contract matrix | not applicable | docs-only checkpoint поверх `3e8739b` | `not_needed` | только Markdown; API/DB/server/runtime не вызывались и не менялись |
 
 Допустимые deployment-статусы: `not_needed`, `pending`, `test_deployed`,
 `production_deployed`, `deployment_deferred_by_user`.
@@ -51,8 +52,10 @@
 
 Это входы последующих этапов, а не незавершённая работа D1.
 
-1. Для YCLIENTS остаются только get/lookup, reschedule, cancel, provider
-   idempotency, unknown-outcome reconciliation, webhook verification и rate limits.
+1. YCLIENTS official docs подтверждают exact get/list и общий rate ceiling. До
+   write wiring остаются controlled/provider confirmations: `api_id`
+   uniqueness/search/idempotency, cross-resource reschedule full/partial payload,
+   repeat cancel + deleted readback и webhook source verification/event identity.
 2. Не подтверждён платёжный провайдер, sandbox и фискальные настройки.
 3. Не записаны фактические Selectel resources/accesses для staging/production.
 4. Не известны тип и дата создания Google Play developer account.
@@ -72,6 +75,7 @@
 | 2026-08-06 | Реальный YCLIENTS test rollout подтвердил availability/preflight/create | company `2079564`, server secret-файлы, права, resource mapping, bearer boundary и write guard проверены; бронь появилась в YCLIENTS | create больше не внешний блокер; D2 можно начинать с локального reservation/operation domain, webhook остаётся выключенным |
 | 2026-08-06 | Owner видит собственный полный client snapshot; `club_admin` после backend role/permission check видит полный snapshot без masking/reveal | явное privacy-решение владельца | чужие players доступа не имеют; decrypt только на backend; каждый admin read требует security audit event без PII |
 | 2026-08-06 | D2 persistence/privacy contract и весь proposal checklist одобрены; SQL и contract tests разрешены только для review | явное решение владельца продукта | migration 033 можно подготовить, но нельзя применять; runtime wiring и Selectel rollout требуют нового отдельного одобрения |
+| 2026-08-06 | Официальный YCLIENTS contract допускает code-only exact get/bounded list/rate limiter, но не доказывает provider idempotency или webhook authenticity | read-only provider checkpoint | write adapter/runtime остаются gated controlled tests; webhook выключен, unknown write не повторяется вслепую |
 
 ### 2026-08-06 — D1 / backend-only inventory и production boundary
 
@@ -558,6 +562,56 @@
   detached на D1 `c04074459948d0bf545e865b885aea7a4e5fec3c`.
 - Следующий конкретный шаг: отдельный persistence/runtime wiring slice после
   подтверждения оставшихся YCLIENTS contracts; D2 остаётся `in_progress`.
+
+### 2026-08-06 — D2 / YCLIENTS provider contract matrix checkpoint
+
+- Задача/ветка: `codex/week1-d2-reservation-core`; base `main`
+  `3e8739b2e9308976bccfd125883f03917fa22962`, worktree был clean.
+- Изменённые файлы: `docs/launch/D2_YCLIENTS_CONTRACT_MATRIX.md` и
+  `docs/launch/WORKLOG.md`.
+- Read-only inventory: текущий YCLIENTS client/service реализует только
+  availability/preflight/create; provider adapter — заглушка; webhook принимает
+  только untrusted coalesced signal и остаётся выключенным. Секреты и provider
+  resource IDs не читались и не выводились.
+- Official contract evidence:
+  - exact admin get и bounded record list с deleted/change-date fields
+    достаточны для code-only read adapter;
+  - documented rate ceiling — `200/min` или `5/sec` на один IP;
+  - admin/online reschedule и cancel endpoints существуют, но provider
+    idempotency/version, partial-update preservation и post-delete readback не
+    заявлены;
+  - `api_id` — внешний идентификатор, без documented uniqueness/filter/replay;
+  - webhook отправляется один раз, без retry/history/order guarantee; signature,
+    event ID/provider timestamp и source allowlist не документированы.
+- Safety decision: timeout/uncertain write остаётся `unknown`; blind
+  create/update/delete retry запрещён. `cancel_pending/unknown` не освобождают
+  слот. Webhook — только signal после будущей source verification и canonical
+  authenticated GET.
+- Readiness: можно реализовать только runtime-disabled exact get, bounded list,
+  safe parsers, shared limiter и fail-closed reconciliation orchestration. Write
+  adapter/wiring требуют controlled tests/provider confirmation, перечисленных
+  в contract matrix, и нового review.
+- Migration: 033 остаётся `applied_verified` на Selectel test, все пять таблиц
+  пусты и runtime disconnected; SQL/PRECHECK/POSTCHECK/rollback не запускались.
+- Tests: `not run / not needed` — diff docs-only, runtime/test source не менялся.
+  Выполняется только `git diff --check`.
+- Read-only P0/P1 review: P0 gate — webhook нельзя включать без подтверждённой
+  аутентичности источника; P1 gates — не заявлять uniqueness `api_id`, не делать
+  blind write retry, не переносить через incomplete payload и не освобождать слот
+  без canonical cancel proof. Новых runtime изменений нет.
+- Git integration: отдельный docs-only checkpoint commit; push/merge не
+  выполняются.
+- Deployment: `not_needed` для docs-only checkpoint; общий D2 остаётся
+  `in_progress` с deployment `pending`.
+- Deployed environment/commit: Selectel test runtime остаётся detached на D1
+  `c04074459948d0bf545e865b885aea7a4e5fec3c`; migration schema отдельно
+  `applied_verified`, runtime к ней не подключён.
+- Containers changed: none.
+- Health/HTTP, business smoke, log audit: `not run / not needed` — server/runtime
+  не менялись и YCLIENTS calls не выполнялись; последний D1 test gate остаётся
+  PASS.
+- Следующий конкретный шаг: review contract matrix; repository/provider wiring
+  до итогового review не начинать.
 
 ## Шаблон записи после этапа
 
