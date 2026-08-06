@@ -36,9 +36,11 @@ containers не затрагиваются.
 ## 2. Basic lifecycle — maximum 14 requests
 
 Общий limiter: не чаще **1 provider request/second**. Ровно один request может
-быть in flight. Автоматические retries запрещены. Bounded list использует одну
-страницу (`page=1`, `count=50`) и узкие date/staff(resource) filters; расширять окно или
-запрашивать следующую страницу в этом run нельзя.
+быть in flight. Автоматические retries запрещены. Лимит 14 — hard envelope и
+для normal path, и для contingency: каждый номер шага выполняется не более
+одного раза. Bounded list использует одну страницу (`page=1`, `count=50`) и
+узкие date/staff(resource) filters; расширять окно или запрашивать следующую
+страницу в этом run нельзя.
 
 | № | Действие | Обязательное evidence/assertion | Stop condition |
 |---|---|---|---|
@@ -46,24 +48,52 @@ containers не затрагиваются.
 | 2 | Preflight `book_check` для `A` | `bookable`; request projection совпадает с alias `A`. | Любой иной outcome/body. |
 | 3 | Availability read для `B` | `B` присутствует ровно один раз на целевом resource. | Нет/несколько/неожиданный mapping. |
 | 4 | Preflight `book_check` для `B` | `bookable`; request projection совпадает с alias `B`. | Любой иной outcome/body. |
-| 5 | Create ровно одной записи в `A` | `201`; один appointment result; получены positive record ID и opaque hash; callback ID совпал; `api_id` не раскрывается в summary. | Timeout/не-201/невалидный или неоднозначный body. |
+| 5 | Create ровно одной записи в `A` | `201`; один appointment result; получены positive record ID и opaque hash; callback ID совпал; `api_id` не раскрывается в summary. | Timeout/429/5xx/transport/invalid или ambiguous success body → `C5`; documented no-effect rejection → terminal STOP. |
 | 6 | Exact admin `GET record` | Company/record, service/resource, datetime `A`, client identity и `api_id` совпадают in memory; evidence хранит только equality flags; `deleted=false`. | Missing/mismatch/duplicate/invalid body. |
-| 7 | Один bounded `GET records` | Ровно одна строка с созданным record ID и `api_id` в узком окне `A`; pagination не расширяется. | 0 или >1 match, target вне page 1. |
-| 8 | Admin full-payload cross-resource reschedule в `B` | Один `PUT record`, `save_if_busy=false`. Payload строится из canonical GET + approved config и сохраняет client, full service cost/discount, seance length, notifications-off, attendance и тот же `api_id`; меняются только approved resource/datetime. | Нельзя построить полный allowlisted payload или provider вернул не documented success. |
-| 9 | Exact admin `GET record` | Тот же record ID, target service/resource/datetime `B`, client identity и `api_id` совпадают in memory; evidence хранит только equality flags; `deleted=false`; old `A` больше не effect state. | Любое несовпадение или invalid body. |
-| 10 | Admin cancel | Один `DELETE record`; ожидается documented `204`. | Timeout/5xx/429/неожиданный status/body. |
-| 11 | Exact admin `GET record` after cancel | Зафиксировать фактическую семантику: canonical `deleted=true` либо стабильный provider not-found response. Ни один из вариантов сам по себе не освобождает слот: обязателен шаг 12. | Response нельзя однозначно классифицировать. |
+| 7 | Один bounded `GET records` | Normal path: ровно одна строка с созданным record ID и `api_id` в узком окне `A`. `C5`: local candidate match по `api_id` + effect projection без record ID. Pagination не расширяется. | Normal: 0 или >1 match/target вне page 1 → STOP. `C5`: классификация из §2.1. |
+| 8 | Admin full-payload cross-resource reschedule в `B` | Один `PUT record`, `save_if_busy=false`. Payload строится из canonical GET + approved config и сохраняет client, full service cost/discount, seance length, notifications-off, attendance и тот же `api_id`; меняются только approved resource/datetime. | Нельзя построить полный payload → STOP до write; timeout/429/5xx/transport/invalid или ambiguous success body → `C8`; documented no-effect rejection → terminal STOP. |
+| 9 | Exact admin `GET record` | Normal path: тот же record ID, target service/resource/datetime `B`, client identity и `api_id` совпадают in memory; evidence хранит только equality flags; `deleted=false`; old `A` больше не effect state. `C8`: только классификация effect `A/B/ambiguous`. | Normal mismatch → terminal STOP. `C8` всегда завершается после классификации по §2.1. |
+| 10 | Admin cancel | Один `DELETE record`; ожидается documented `204`. | Timeout/429/5xx/transport/invalid или ambiguous response → `C10`; documented no-effect rejection → terminal STOP. |
+| 11 | Exact admin `GET record` after cancel | Зафиксировать фактическую семантику: canonical `deleted=true` либо стабильный provider not-found response. Ни один из вариантов сам по себе не освобождает слот: обязателен шаг 12. | Неклассифицируемый read фиксируется как `unknown`; в `C10` всё равно разрешён только шаг 12. |
 | 12 | Один bounded list с `with_deleted=1` | Ровно одна canonical deleted row для record ID в узком окне `B`. Только после этого cancel proof PASS. | Нет строки, `deleted!=true` или несколько match. |
-| 13 | Отдельный repeat-delete | Один второй `DELETE` того же confirmed-deleted record; сохранить только status/error code class, без body/PII. Это test write, а не retry unknown request. | Timeout/5xx/429/invalid body => repeat semantics `unknown`. |
+| 13 | Отдельный repeat-delete | Только после обычного documented `204` шага 10 и cancel proof шагов 11–12: один второй `DELETE` того же confirmed-deleted record; сохранить только status/error code class, без body/PII. Это test write, а не retry unknown request. | Timeout/429/5xx/transport/invalid или ambiguous response → `C13`. |
 | 14 | Финальный bounded list с `with_deleted=1` | Record остаётся единственной deleted row; никаких новых записей/effects. | Любое расхождение. |
 
-Basic PASS требует шаги 1–12 и 14 PASS, а шаг 13 — однозначно классифицирован.
-Repeat-delete
-может вернуть success либо стабильный not-found/conflict: оба результата
-записываются как observed contract, но не экстраполируются без exact evidence.
-Ручной read-only YCLIENTS UI checkpoint обязателен после шагов 7, 9, 12 и 14:
-соответственно запись видна в `A`, перенесена в `B`, удалена и остаётся удалённой
-после repeat-delete.
+Только normal path без uncertain write может получить Basic PASS: шаги 1–12 и
+14 должны быть PASS, а шаг 13 — однозначно классифицирован. Repeat-delete может
+вернуть success либо стабильный not-found/conflict: оба результата записываются
+как observed contract, но не экстраполируются без exact evidence. Любая ветка
+`C5/C8/C10/C13` завершает normal lifecycle и Basic PASS не выдаётся.
+На normal path ручной read-only YCLIENTS UI checkpoint обязателен после шагов 7,
+9, 12 и 14: соответственно запись видна в `A`, перенесена в `B`, удалена и
+остаётся удалённой после repeat-delete. На contingency path UI фиксирует только
+наблюдаемый результат разрешённого readback и не разрешает новый provider write.
+
+### 2.1. Uncertain-write contingency branches
+
+Uncertain write немедленно запрещает все последующие writes. Разрешены только
+следующие заранее пронумерованные read-only requests в оставшемся hard budget:
+
+- `C5` — шаг 6 пропускается, потому что canonical record ID отсутствует. Один
+  bounded list шага 7 запрашивает узкое окно `A`, затем локально сравнивает
+  `api_id` и effect projection. `0` или `>1` candidates = terminal `unknown`;
+  ровно один = terminal `cleanup_required`. Cancel в этом run запрещён без
+  нового approval. Maximum branch count: 6 requests.
+- `C8` — выполнить только exact GET шага 9 по уже известному record ID и
+  классифицировать effect как `A`, `B` или `ambiguous`. Затем шаги 10–14
+  пропускаются; holds `A+B` сохраняются независимо от readback. Maximum: 9.
+- `C10` — выполнить read-only шаги 11 и 12; шаг 12 выполняется даже при
+  inconclusive шаге 11. Canonical deleted proof даёт
+  `cancelled_confirmed_after_uncertain_response`, иначе результат `unknown`.
+  Шаги 13–14 запрещены: repeat-delete допустим только после обычного documented
+  `204` шага 10. Maximum: 12.
+- `C13` — выполнить только финальный read-only шаг 14. Новых writes нет;
+  неуспешный readback оставляет repeat-delete semantics `unknown`, не отменяя
+  уже полученный до шага 13 canonical cancel proof. Maximum: 14.
+
+Readback может закончиться `unknown` из-за недокументированной consistency. Это
+безопасный terminal result, а не основание расширять page/window, повторять
+read/write или переходить к следующему lifecycle write.
 
 ## 3. OPTIONAL high-risk same-`api_id` experiment
 
@@ -89,20 +119,26 @@ Budget: максимум **12 requests**, не чаще 1 request/second:
 
 Возможные результаты: `provider_idempotent_same_record`,
 `provider_rejected_duplicate`, `provider_created_duplicate` или `unknown`.
-Timeout/invalid response второго create не повторяется. После одного bounded
-lookup 0 или неоднозначные candidates остаются `unknown`; никакой guess-based
-cancel не выполняется. Однозначно найденные IDs можно cancel ровно один раз в
-рамках заранее одобренного cleanup budget. Uncertain cancel не повторяется и
-передаётся владельцу для отдельного manual cleanup decision.
+На normal path однозначно найденные IDs можно cancel ровно один раз в рамках
+заранее одобренного cleanup budget. Если любой optional write uncertain, все
+следующие writes пропускаются: после uncertain create допускается только один
+уже запланированный bounded `C/D` list; после uncertain cleanup cancel — только
+final bounded list, а второй cleanup cancel не выполняется. `0`, `>2` или
+неоднозначные candidates остаются `unknown`; guess-based cancel запрещён, а
+известные non-deleted records передаются в отдельный cleanup approval.
 
 ## 4. Global fail-closed rules
 
-- Любой timeout, `429`, `5xx`, transport error, invalid body, unexpected mapping,
-  candidate count вне ожидаемого contract или исчерпание budget немедленно
-  останавливает test sequence. Для basic допустим ровно один match; optional
-  допускает только 1–2 exact `C/D` matches и не допускает третью запись.
-- Uncertain create/reschedule/cancel записывается как `unknown`; write request не
-  повторяется и не заменяется другим endpoint.
+- Ошибка до write или на ordinary read останавливает normal lifecycle. После
+  uncertain write normal lifecycle и все следующие writes останавливаются, но
+  разрешены exact read-only branches `C5/C8/C10/C13` из §2.1 либо явно
+  перечисленный optional readback из §3. Никаких иных requests.
+- Timeout, `429`, `5xx`, transport error, invalid/ambiguous write response не
+  повторяются и не заменяются другим endpoint. Readback не превращает исходный
+  request в retry и выполняется только один раз в пределах исходного budget.
+- Candidate count вне contract или исчерпание budget даёт terminal `unknown`.
+  Для basic допустим ровно один match; optional допускает только 1–2 exact
+  `C/D` matches и не допускает третью запись.
 - После uncertain reschedule удерживаются `A` и `B`; после
   `cancel_pending/unknown` слот не считается свободным без canonical deleted
   proof.
@@ -140,11 +176,16 @@ Expected artifact layout:
   checksums.sha256
 ```
 
-Successful basic cleanup = шаги 10–12 prove deleted; repeat-delete не заменяет
-это доказательство. Optional cleanup = каждый однозначно найденный record
-cancelled once и final list proves deleted. При unknown/leftover запись и слоты
-маркируются `cleanup_required`, владелец получает aliases + root-only artifact
-path; автоматический или ручной write без нового approval запрещён.
+Successful normal basic cleanup = documented `204` шага 10 и шаги 11–12 prove
+deleted; repeat-delete не заменяет это доказательство. В `C5` единственный
+candidate получает `cleanup_required`; в `C8` удерживаются `A+B`; в `C10` слот
+освобождается только при canonical deleted proof, но repeat-delete всё равно
+запрещён; `C13` не отменяет уже подтверждённую отмену. Optional normal cleanup =
+каждый однозначно найденный record cancelled once и final list proves deleted.
+После любого optional uncertain write cleanup writes прекращаются. При
+unknown/leftover запись и слоты маркируются `cleanup_required`, владелец получает
+aliases + root-only artifact path; автоматический или ручной write без нового
+approval запрещён.
 
 ## 6. Required approvals
 
@@ -153,6 +194,8 @@ path; автоматический или ручной write без нового
 - controlled YCLIENTS test writes create → cross-resource full-payload
   reschedule → cancel → repeat-delete на disposable identity/slots;
 - Selectel test only, exact approved commit, максимум 14 requests и audit path;
+- read-only contingency `C5/C8/C10/C13` внутри тех же 14 requests, запрет
+  последующих writes после uncertain outcome;
 - риск одной leftover записи/двух held slots при unknown и отдельный cleanup gate.
 
 Рекомендуемая формулировка: `Разрешаю выполнить basic D2 YCLIENTS controlled
@@ -161,7 +204,9 @@ runtime/deploy.`
 
 Optional experiment требует **второго независимого решения**, прямо содержащего
 `same-api_id duplicate create`, риск двух записей, отдельные `C/D`, максимум 12
-requests и cleanup известных records. Basic approval его не разрешает.
+requests и cleanup известных records только на normal path. Uncertain optional
+write прекращает cleanup writes и требует нового approval. Basic approval этот
+эксперимент не разрешает.
 
 ## 7. Read-only P0/P1 plan review
 
@@ -170,6 +215,7 @@ requests и cleanup известных records. Basic approval его не ра�
   blind retry or automatic unknown cleanup.
 - P1 controls: exact budgets, 1 req/sec serialization,
   `save_if_busy=false`, full effect-bearing reschedule payload, exact GET plus
-  bounded list evidence, canonical cancel proof before slot release.
+  bounded list evidence, bounded read-only reconciliation after uncertain write,
+  no subsequent writes и canonical cancel proof before slot release.
 - Remaining accepted risk: provider behavior can remain `unknown`; the plan
   stops and preserves evidence instead of forcing a terminal answer.

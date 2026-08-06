@@ -26,7 +26,7 @@
 | Этап | Статус | Ветка/commit | Проверки | Блокер/следующий шаг |
 |---|---|---|---|---|
 | D1 Backend-only/contracts | done | `main` / deployed `c04074459948d0bf545e865b885aea7a4e5fec3c` | frontend E2E PASS (82/1 skipped); focused fail-closed 2/2 PASS; frontend build PASS; backend all PASS; Selectel test smoke PASS | D1 закрыт; следующий отдельный этап — D2 |
-| D2 YCLIENTS reservation core | in_progress | D2 branch / matrix `46bc35c7b6be5848bb5556b14eaee6fa33a20c2e` / controlled-plan checkpoint | migration 033 applied/verified; controlled plan docs-only, `git diff --check` перед commit | basic и optional provider tests требуют два отдельных approval; runtime wiring не начат |
+| D2 YCLIENTS reservation core | in_progress | D2 branch / matrix `46bc35c7b6be5848bb5556b14eaee6fa33a20c2e` / plan `040773172a2fa556ffaaf1d12dac540095070976` / correction from that exact base | migration 033 applied/verified; plan correction docs-only, `git diff --check` перед commit | basic и optional provider tests требуют два отдельных approval; runtime wiring не начат |
 | D3 Match ↔ reservation lifecycle | pending | — | — | cancel match, owner participant removal, match ↔ reservation binding |
 | D4 Payment Core | pending | — | — | payment provider, pricing/payment snapshot, чеки и возвраты |
 | D5 Settings/moderation/compliance | pending | — | — | standalone phone/email auth и verified backend email; затем schema review |
@@ -44,7 +44,7 @@
 | D2 YCLIENTS reservation core | Selectel test | correction `7c31d29b639d6b29016d2378ccc7006df6129b52` | `pending` | migration 033 `applied_verified`, tables empty и runtime disconnected; runtime/containers остаются на D1 commit |
 | D2 persistence/privacy proposal | not applicable | docs-only checkpoint | `not_needed` | только Markdown; runtime, schema, containers и конфигурация не менялись |
 | D2 YCLIENTS contract matrix | not applicable | docs-only checkpoint поверх `3e8739b` | `not_needed` | только Markdown; API/DB/server/runtime не вызывались и не менялись |
-| D2 YCLIENTS controlled test plan | not applicable | docs-only checkpoint поверх `46bc35c` | `not_needed` | plan only; provider/server/DB/runtime calls и writes не выполнялись |
+| D2 YCLIENTS controlled test plan | not applicable | `040773172a2fa556ffaaf1d12dac540095070976` + docs-only correction from that exact base | `not_needed` | plan only; provider/server/DB/runtime calls и writes не выполнялись |
 
 Допустимые deployment-статусы: `not_needed`, `pending`, `test_deployed`,
 `production_deployed`, `deployment_deferred_by_user`.
@@ -660,6 +660,51 @@
 - Следующий конкретный шаг: owner review и отдельное решение по basic lifecycle;
   optional duplicate experiment не разрешается basic approval. До решения
   repository/provider wiring не начинать.
+
+### 2026-08-06 — D2 / controlled test plan unknown-write correction
+
+- Задача/ветка: `codex/week1-d2-reservation-core`; exact reviewed plan base
+  `040773172a2fa556ffaaf1d12dac540095070976`, matrix base
+  `46bc35c7b6be5848bb5556b14eaee6fa33a20c2e`, исходный worktree clean.
+- Correction commit: отдельный commit, содержащий эту запись; его exact SHA
+  фиксируется Git handoff после создания commit (собственный SHA нельзя
+  встроить в содержимое того же commit без дополнительного metadata commit).
+- Изменены только `docs/launch/D2_YCLIENTS_CONTROLLED_TEST_PLAN.md` и
+  `docs/launch/WORKLOG.md`; прежняя checkpoint history не переписывалась.
+- Исправлено:
+  - uncertain create шага 5 запрещает дальнейшие writes и допускает только один
+    bounded read шага 7; без record ID шаг 6 пропускается;
+  - uncertain reschedule шага 8 допускает только exact read шага 9, сохраняет
+    holds `A+B` и запрещает cancel/repeat-delete;
+  - uncertain first cancel шага 10 допускает только read-only шаги 11–12 и
+    запрещает repeat-delete даже при найденном cancel proof;
+  - uncertain repeat-delete шага 13 допускает только финальный read шага 14;
+  - normal и contingency paths остаются внутри hard budget 14, без retries,
+    расширения list window/page или undocumented cleanup writes;
+  - optional duplicate-`api_id` run также прекращает cleanup writes после
+    uncertain write и требует нового approval для cleanup.
+- PASS/cleanup/approval: Basic PASS возможен только на normal path без uncertain
+  write; bounded readback может завершиться безопасным terminal `unknown` из-за
+  undocumented consistency. Отдельные approvals basic и optional сохраняются.
+- Tests: `not run / not needed` — diff docs-only, runtime и test source не
+  менялись. Выполняется `git diff --check`.
+- Read-only P0/P1 review: blind write retry и дальнейшие writes после uncertain
+  outcome запрещены; recovery ограничен заранее перечисленными read-only
+  запросами и исходным hard budget. Открытых P0/P1 в correction diff не найдено.
+- Migration: 033 остаётся `applied_verified`; migration/DB/YCLIENTS/API/server
+  calls, PRECHECK/POSTCHECK/rollback и provider writes не выполнялись.
+- Git integration: отдельный docs-only commit; push/merge не выполняются.
+- Deployment: `not_needed` для docs-only correction; общий D2 остаётся
+  `in_progress` с deployment `pending`.
+- Deployed environment/commit: Selectel test runtime остаётся detached на D1
+  `c04074459948d0bf545e865b885aea7a4e5fec3c`, runtime к migration 033 не
+  подключён; production не менялся.
+- Containers changed: none.
+- Health/HTTP, business smoke, log audit: `not run / not needed` — runtime/server
+  не менялись и внешние calls отсутствовали.
+- Следующий конкретный шаг: независимый review correction commit; только после
+  отдельного approval можно выполнять basic lifecycle. Optional duplicate
+  experiment по-прежнему требует второго независимого approval.
 
 ## Шаблон записи после этапа
 
