@@ -25,7 +25,7 @@
 
 | Этап | Статус | Ветка/commit | Проверки | Блокер/следующий шаг |
 |---|---|---|---|---|
-| D1 Backend-only/contracts | in_progress | `main` / `718c7fc8e7386f8092710446309b311077ee2b1b` | frontend E2E PASS (82/1 skipped); focused fail-closed 2/2 PASS; frontend build PASS; backend all PASS | code integrated; Selectel test rollout и smoke pending |
+| D1 Backend-only/contracts | done | `main` / deployed `c04074459948d0bf545e865b885aea7a4e5fec3c` | frontend E2E PASS (82/1 skipped); focused fail-closed 2/2 PASS; frontend build PASS; backend all PASS; Selectel test smoke PASS | D1 закрыт; следующий отдельный этап — D2 |
 | D2 YCLIENTS reservation core | pending | — | — | local binding, get/lookup, unknown, idempotency, reschedule/cancel/reconciliation/webhook contract |
 | D3 Match ↔ reservation lifecycle | pending | — | — | cancel match, owner participant removal, match ↔ reservation binding |
 | D4 Payment Core | pending | — | — | payment provider, pricing/payment snapshot, чеки и возвраты |
@@ -40,7 +40,7 @@
 
 | Этап | Среда | Целевой commit | Статус | Проверка |
 |---|---|---|---|---|
-| D1 Backend-only/contracts | Selectel test | `718c7fc8e7386f8092710446309b311077ee2b1b` | `pending` | frontend rebuild, health, TMA auth/profile/feed/booking availability smoke и log audit не выполнены |
+| D1 Backend-only/contracts | Selectel test | `c04074459948d0bf545e865b885aea7a4e5fec3c` | `test_deployed` | frontend healthy; HTTPS root/health и новый asset 200; TMA auth/profile/feed/details/booking availability PASS; bundle/log audit PASS |
 
 Допустимые deployment-статусы: `not_needed`, `pending`, `test_deployed`,
 `production_deployed`, `deployment_deferred_by_user`.
@@ -158,9 +158,8 @@
 - Задача/ветка: `codex/week1-backend-only`.
 - Checkpoint: `aa5cd86489f4d8a5cc757990212b3c2ced7630d8`.
 - Статус: D1 `done`. Последующие gaps назначены D2–D6/mobile и не являются
-  незавершённой кодовой работой D1. После введения обязательного deployment gate
-  операционный статус возвращён в `in_progress` до Selectel test rollout commit
-  `718c7fc8e7386f8092710446309b311077ee2b1b`.
+  незавершённой кодовой работой D1. Обязательный deployment gate выполнен на
+  Selectel test для commit `c04074459948d0bf545e865b885aea7a4e5fec3c`.
 - Независимый read-only review:
   - auth/session: P0/P1/P2 нет; backend session + backend-owned profile остаются
     единственным production TMA gate, disabled/invalid configuration fail-closed;
@@ -195,8 +194,32 @@
   `VITE_SUPABASE_*`, `supabase.co`, `/rest/v1` и `/auth/v1`.
 - Проверки не читали и не выводили значения секретов. Webhook не включался,
   внешние writes не выполнялись. Payment-поля и schema не менялись.
-- Следующий конкретный шаг: интегрировать closure commit; затем запускать только
-  отдельно утверждённый этап из D2–D6/mobile.
+- Следующий конкретный шаг: запускать отдельный этап D2 YCLIENTS reservation core.
+
+### 2026-08-06 — D1 / Selectel test rollout
+
+- Задача/ветка: финальный deployment gate D1 на `main`.
+- Deployed commit: `c04074459948d0bf545e865b885aea7a4e5fec3c`, detached HEAD.
+- Git integration: `merged_main` / `pushed_main`.
+- Deployment: `test_deployed`; production не менялся.
+- Containers changed: пересобран и пересоздан только frontend:
+  - old container `7ac08cdaa1f4…`, old image `sha256:e461d25f4015…`;
+  - new container `efee81b73ca4…`, new image `sha256:45044ab7b891…`,
+    состояние `running/healthy`;
+  - backend, nginx и PostgreSQL сохранили прежние container/image IDs и не
+    пересоздавались; restart count всех контейнеров — 0.
+- Health/HTTP: HTTPS root 200, HTTPS health 200, новый asset
+  `/assets/index-D3-4N8r0.js` 200 (`578212` bytes).
+- Bundle/config audit: отсутствуют Supabase SDK, `VITE_SUPABASE_*` и Supabase
+  network URL; backend auth enabled; YCLIENTS API/write enabled без изменений;
+  webhook disabled.
+- Business smoke: Mini App открытие, backend login, профиль, лента, детали матча
+  и booking availability — PASS. Реальная бронь в этом smoke не создавалась.
+- Log audit: новых `5xx`, `error`, `fatal` и `unhandled` нет.
+- Migration/config: schema, `.env.test`, database/payment configuration не
+  менялись. Этот последующий WORKLOG update является docs-only и имеет
+  deployment status `not_needed`.
+- Статус: D1 `done`; следующий отдельный этап — D2.
 
 ## Шаблон записи после этапа
 
