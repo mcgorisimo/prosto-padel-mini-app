@@ -26,7 +26,7 @@
 | Этап | Статус | Ветка/commit | Проверки | Блокер/следующий шаг |
 |---|---|---|---|---|
 | D1 Backend-only/contracts | done | `main` / deployed `c04074459948d0bf545e865b885aea7a4e5fec3c` | frontend E2E PASS (82/1 skipped); focused fail-closed 2/2 PASS; frontend build PASS; backend all PASS; Selectel test smoke PASS | D1 закрыт; следующий отдельный этап — D2 |
-| D2 YCLIENTS reservation core | in_progress | `codex/week1-d2-reservation-core` / `c47c245` + correction + docs proposal checkpoints | backend typecheck, unit 109/2869, E2E 2/4, build PASS; frontend E2E 82/1 skipped, build PASS | privacy access model одобрен; остальные migration-решения, wiring/contracts и Selectel test rollout остаются |
+| D2 YCLIENTS reservation core | in_progress | `codex/week1-d2-reservation-core` / `c47c245` + correction + review checkpoints | focused migration contract 7/7 PASS; backend typecheck PASS; предыдущий full gate PASS | persistence/privacy contract одобрен; migration 033 `prepared_for_review`, `not_applied`; wiring/contracts и Selectel test rollout остаются |
 | D3 Match ↔ reservation lifecycle | pending | — | — | cancel match, owner participant removal, match ↔ reservation binding |
 | D4 Payment Core | pending | — | — | payment provider, pricing/payment snapshot, чеки и возвраты |
 | D5 Settings/moderation/compliance | pending | — | — | standalone phone/email auth и verified backend email; затем schema review |
@@ -71,6 +71,7 @@
 | 2026-08-06 | Недельная цель — launch candidate, не гарантированная публикация stores | внешнее ревью и Google 14-day rule не контролируются кодом | store track запускается параллельно |
 | 2026-08-06 | Реальный YCLIENTS test rollout подтвердил availability/preflight/create | company `2079564`, server secret-файлы, права, resource mapping, bearer boundary и write guard проверены; бронь появилась в YCLIENTS | create больше не внешний блокер; D2 можно начинать с локального reservation/operation domain, webhook остаётся выключенным |
 | 2026-08-06 | Owner видит собственный полный client snapshot; `club_admin` после backend role/permission check видит полный snapshot без masking/reveal | явное privacy-решение владельца | чужие players доступа не имеют; decrypt только на backend; каждый admin read требует security audit event без PII |
+| 2026-08-06 | D2 persistence/privacy contract и весь proposal checklist одобрены; SQL и contract tests разрешены только для review | явное решение владельца продукта | migration 033 можно подготовить, но нельзя применять; runtime wiring и Selectel rollout требуют нового отдельного одобрения |
 
 ### 2026-08-06 — D1 / backend-only inventory и production boundary
 
@@ -401,6 +402,58 @@
 - Deployed environment/commit: Selectel test остаётся на D1 commit
   `c04074459948d0bf545e865b885aea7a4e5fec3c`; containers не менялись,
   health/smoke/log checks для этого docs-only checkpoint не нужны.
+
+### 2026-08-06 — D2 / approved persistence migration prepared for review
+
+- Задача/ветка: `codex/week1-d2-reservation-core`.
+- Предыдущий docs-only checkpoint admin-access decision: `b1e33b1`; текущий
+  checkpoint — отдельный branch head после этой записи. Push/merge не
+  выполнялись.
+- Изменённые файлы:
+  - migration 033 SQL, PRECHECK, POSTCHECK, guarded ROLLBACK и README;
+  - `backend/src/database/backend-reservation-persistence-migration.spec.ts`;
+  - `docs/launch/D2_RESERVATION_PERSISTENCE_PROPOSAL.md`;
+  - `docs/launch/WORKLOG.md`.
+- Contract: `approved`. SQL: `prepared_for_review`, `not_applied`.
+- Подготовлено:
+  - новый isolated `backend_reservation` schema с reservations, operations и
+    AEAD-encrypted client snapshots;
+  - ownership/idempotency, one-active-operation, slot-hold, optimistic version,
+    reconciliation и bounded provider lookup constraints/indexes;
+  - отдельный append-only admin-read audit ledger с actor,
+    reservation/operation, time, purpose/endpoint и UUID correlation metadata,
+    без PII/ciphertext/keys;
+  - существующий auth audit ledger не переиспользован: его event/FK allowlist
+    auth-specific, а его изменение запрещено границей этапа;
+  - `external_api_id` server-derived contract отражён non-unique lookup index;
+    uniqueness для `external_api_id`/appointment до подтверждения не заявлена.
+- Migration apply: НЕ выполнялся ни локально, ни на Selectel. Schema/database
+  state не менялись; backfill и реальные YCLIENTS writes не выполнялись.
+- Tests:
+  - focused migration contract: PASS, 1 suite / 7 tests;
+  - backend typecheck: PASS;
+  - backend build: `not run / not needed` — runtime source/modules не менялись,
+    новый test file полностью проверен typecheck и focused Jest;
+  - backend full unit/E2E и root E2E/build: `not run / not required` для
+    unapplied migration artifacts + static contract test; предыдущий D2 full
+    gate остаётся PASS.
+- Ручная проверка: `git diff --check` PASS; scope guard подтверждает отсутствие
+  изменений existing tables/endpoints/modules/controllers/runtime wiring,
+  payment/match/webhook/env/App.jsx.
+- Read-only P0/P1 security/concurrency/privacy review: рассинхронизация snapshot
+  digest key version устранена composite FK; произвольные audit purpose/endpoint
+  заменены фиксированными non-PII codes; новых P0/P1 не найдено.
+- Rollback boundary: только все четыре пустые relation под ACCESS EXCLUSIVE lock;
+  после первой записи rollback fail-closed, `CASCADE` отсутствует.
+- Следующий конкретный шаг: review точного checkpoint. Применение migration,
+  persistence/RBAC/audit runtime wiring и Selectel rollout — только после новых
+  отдельных явных одобрений.
+- Deployment: `pending`; D2 остаётся `in_progress`.
+- Deployed environment/commit: Selectel test остаётся на D1 commit
+  `c04074459948d0bf545e865b885aea7a4e5fec3c`.
+- Containers changed: none.
+- Health/HTTP, business smoke, log audit: не запускались, потому что migration не
+  применялась и runtime/server не менялись; последний D1 test gate PASS.
 
 ## Шаблон записи после этапа
 

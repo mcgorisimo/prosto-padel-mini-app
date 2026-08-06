@@ -1,11 +1,9 @@
 # D2 — proposal хранения reservation и operation
 
-Статус: `proposal_for_explicit_approval`. Это review-only документ: SQL,
-schema/runtime, YCLIENTS wiring и реальные provider writes не меняются. D2
+Статус: `contract_approved`; migration 033 — `prepared_for_review`, `not_applied`.
+Runtime, YCLIENTS wiring и реальные provider writes не меняются. Применение SQL,
+runtime wiring и Selectel rollout требуют отдельного явного одобрения. D2
 остаётся `in_progress`.
-
-Частично одобрено: access model для чтения client snapshot. Остальные пункты
-approval checklist сохраняют свои текущие статусы.
 
 Вне scope: payment-поля, match binding/lifecycle D3, webhook implementation,
 секреты и реальные ID клиентов.
@@ -23,7 +21,7 @@ approval checklist сохраняют свои текущие статусы.
 | `target_datetime`, `target_datetime_text` | `timestamptz` для запросов + проверенная canonical ISO строка для точного provider request/digest |
 | `yclients_company_id` | positive bigint; tenant scope binding, без hardcode значения |
 | `yclients_appointment_id`, `yclients_record_id` | nullable до подтверждения create/reconciliation |
-| `yclients_record_hash_ciphertext`, `yclients_record_hash_encryption_key_version`, `yclients_record_hash_digest`, `yclients_record_hash_digest_key_version` | nullable encrypted opaque binding + keyed lookup digest; raw hash не индексировать и не логировать |
+| `yclients_record_hash_ciphertext`, nonce/tag/algorithm, encryption key version, `yclients_record_hash_digest`, digest key version | nullable AEAD binding + keyed lookup digest; raw hash не индексировать и не логировать |
 | `yclients_client_id` | nullable до подтверждения provider client contract |
 | `version` | positive bigint для optimistic concurrency |
 | `created_at`, `updated_at`, `status_changed_at`, `terminal_at` | UTC timestamps; `terminal_at` nullable |
@@ -40,16 +38,16 @@ approval checklist сохраняют свои текущие статусы.
 | `operation_type` | `create`, `reschedule`, `cancel` |
 | `status` | `pending`, `unknown`, `confirmed`, `rejected`, `reconciled` |
 | `idempotency_key` | UUID NOT NULL; уникален только внутри owner scope |
-| `request_digest`, `request_digest_version` | lowercase SHA-256 canonical request representation; после privacy approval PII-компонентом служит keyed client snapshot digest |
+| `request_digest`, `request_digest_version` | lowercase SHA-256 canonical request representation; PII-компонентом служит keyed client snapshot digest |
 | `yclients_company_id`, `external_api_id` | positive integers, только server-derived; не принимать из client body |
 | `target_service_id`, `target_resource_id`, `target_datetime`, `target_datetime_text` | immutable operation snapshot; nullable только для cancel |
-| `provider_appointment_id`, `provider_record_id`, `provider_record_hash_ciphertext`, `provider_record_hash_encryption_key_version`, `provider_record_hash_digest`, `provider_record_hash_digest_key_version` | immutable binding snapshot для reschedule/cancel/reconciliation; nullable для create до provider result |
+| `provider_appointment_id`, `provider_record_id`, provider record-hash ciphertext/nonce/tag/algorithm/key versions/digest | immutable binding snapshot для reschedule/cancel/reconciliation; nullable для create до provider result |
 | `client_snapshot_digest` | keyed canonical digest отдельного encrypted snapshot; raw PII здесь нет |
 | `previous_reservation_status` | состояние до start для безопасного reject/reconcile |
 | `provider_attempt_started_at`, `provider_attempt_finished_at` | различают timeout до/после начала внешнего write |
 | `unknown_at`, `terminal_at`, `reconciled_at` | nullable UTC timestamps |
 | `reconciliation_outcome`, `rejection_reason`, `reconciliation_attempts`, `last_reconciliation_at` | безопасные коды/счётчики, без provider body и PII |
-| `created_at`, `updated_at` | UTC timestamps |
+| `version`, `created_at`, `updated_at` | optimistic version + UTC timestamps |
 
 Произвольный `request JSON` не хранить: поля внешнего эффекта фиксируются явно.
 Canonical request digest покрывает owner/reservation/type, company/apiId, target,
@@ -61,12 +59,24 @@ One-to-one snapshot на operation:
 
 - `operation_id` UUID PK/FK к operation;
 - `owner_account_id` для account-scoped доступа;
-- `ciphertext`, `nonce`, `encryption_key_version`, `digest_key_version`,
-  `algorithm_version`, `aad_version`;
+- `ciphertext`, `nonce`, `auth_tag`, `algorithm`, `encryption_key_version`,
+  `digest_key_version`, `aad_version`;
 - `created_at`, nullable `crypto_destroyed_at`.
 
 Raw phone/fullName/email не хранить в operation JSON, обычных колонках или
-логах. Exact persistence format требует privacy approval ниже.
+логах.
+
+### `reservation_admin_read_audit_events`
+
+Отдельный append-only ledger, потому что существующий auth audit привязан к
+auth-specific event types/FK и не может быть расширен без изменения existing
+table:
+
+- event ID/order/type, `actor_account_id`, фиксированная роль `club_admin`;
+- reservation+operation FK, timestamp, fixed non-PII purpose/endpoint codes;
+- request/correlation UUID metadata без JSON, PII, ciphertext и ключей;
+- application role имеет только INSERT по allowlist колонок; update/delete/
+  truncate запрещены ACL и immutable triggers.
 
 ## 2. Constraints и indexes
 
@@ -87,8 +97,9 @@ Raw phone/fullName/email не хранить в operation JSON, обычных �
   окончательный create rejection; это проверяется transition service и
   allocation query, не UI.
 - Partial UNIQUE provider binding: `(yclients_company_id, yclients_record_id)` и
-  `(yclients_company_id, yclients_record_hash_digest)`; appointment ID добавлять
-  после подтверждения его scope. Raw record hash не индексировать.
+  `(yclients_company_id, digest_key_version, yclients_record_hash_digest)`;
+  appointment ID добавлять после подтверждения его scope. Raw record hash не
+  индексировать.
 - Admin lookup indexes: PK internal IDs, `(owner_account_id, reservation_id)`,
   `(yclients_company_id, yclients_record_id)`, record hash digest, appointment ID
   и nullable provider client ID, а также `(yclients_company_id, external_api_id)`.
@@ -110,9 +121,9 @@ Raw phone/fullName/email не хранить в operation JSON, обычных �
    request digest.
 
 Для equality/audit использовать отдельный keyed HMAC canonical snapshot, а не
-plain SHA PII. До persistence wiring нужно отдельно одобрить замену raw client
-components в `request_digest` на `client_snapshot_digest`; конфликтная семантика
-same-key сохраняется, offline enumeration phone/email усложняется.
+plain SHA PII. Одобренный persistence contract заменяет raw client components в
+`request_digest` на `client_snapshot_digest`; конфликтная семантика same-key
+сохраняется, offline enumeration phone/email усложняется.
 
 Одобренный access model для decrypted snapshot:
 
@@ -157,11 +168,11 @@ Retention, anonymization и delete-account требуют отдельных р�
    conflict после внешнего успеха остаётся `unknown` для ручного reconcile, а не
    превращается в локальный rejection.
 
-### Zero-downtime migration order после approval
+### Zero-downtime migration order
 
 1. Зафиксировать approved поля, privacy/key contract и YCLIENTS assumptions.
-2. Подготовить отдельный SQL diff на review; до второго явного approval не
-   применять его.
+2. Подготовить отдельный SQL diff и contract tests на review; migration 033
+   подготовлена. До отдельного явного apply approval не применять её.
 3. Expand-only: создать новые таблицы/constraints/indexes без изменения текущих
    tables/endpoints. Existing runtime продолжает работать как раньше.
 4. Backfill по умолчанию не нужен: локальной reservation persistence ещё нет.
@@ -173,31 +184,32 @@ Retention, anonymization и delete-account требуют отдельных р�
    отдельной approved migration. После первых writes: rollback только app; данные
    и keys сохраняются, destructive down migration в тот же rollout запрещена.
 
-SQL в рамках этого proposal не создаётся.
+Migration 033 и её contract tests подготовлены только для review; SQL нигде не
+применялся.
 
 ## 5. Approval checklist
 
-Владелец должен явно одобрить:
+Владелец явно одобрил:
 
-- [ ] три сущности, поля/statuses и composite owner scope;
-- [ ] one-active-operation и slot-hold status set;
-- [ ] canonical datetime: `timestamptz` + exact provider text;
-- [ ] application-layer AEAD, отдельный keyed HMAC, AAD и key rotation/versioning;
-- [ ] замену raw client fields в request digest на keyed client snapshot digest;
+- [x] четыре сущности, поля/statuses и composite owner scope;
+- [x] one-active-operation и slot-hold status set;
+- [x] canonical datetime: `timestamptz` + exact provider text;
+- [x] application-layer AEAD, отдельный keyed HMAC, AAD и key rotation/versioning;
+- [x] замену raw client fields в request digest на keyed client snapshot digest;
 - [x] access model: owner видит свои данные; `club_admin` после backend
   role/permission check видит полный snapshot без masking/reveal; чужой player
   доступа не имеет; каждый admin read создаёт audit event без PII — одобрено
   владельцем;
-- [ ] retention/anonymization/delete-account policy без предположенного срока;
-- [ ] шифрование YCLIENTS record hash и nullable provider client ID;
-- [ ] external `apiId` generation/uniqueness scope после provider confirmation;
-- [ ] отсутствие backfill либо отдельный verified historical import;
-- [ ] migration/rollback order и отдельное разрешение подготовить SQL.
+- [x] не кодировать retention/anonymization/delete-account срок до отдельного
+  продуктового решения;
+- [x] шифрование YCLIENTS record hash и nullable provider client ID;
+- [x] external `apiId` только server-derived; uniqueness — только после provider
+  confirmation;
+- [x] отсутствие backfill либо отдельный verified historical import;
+- [x] migration/rollback order и разрешение подготовить SQL только для review.
 
-Отметка одного access-пункта не означает approval всего checklist или migration.
-
-После approval можно сразу подготовить SQL migration на отдельный review,
-repository persistence/encryption contract tests и disabled-by-default adapter.
+Checklist одобрен полностью как persistence/privacy contract. Это не является
+разрешением применить migration, подключить runtime или обновить сервер.
 
 Всё ещё блокируются внешним контрактом YCLIENTS: get/lookup, reschedule, cancel,
 provider idempotency/search, timeout reconciliation, webhook verification/dedupe/
