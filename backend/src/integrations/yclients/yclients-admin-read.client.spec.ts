@@ -7,6 +7,7 @@ import {
   YclientsConservativeRequestLimiter,
   YclientsRequestLimiterClock,
 } from './yclients-request-limiter';
+import { scanBoundedYclientsCandidates } from './yclients-read-reconciliation';
 
 const COMPANY_ID = 2_079_564;
 const RECORD_ID = 2_820_023;
@@ -241,6 +242,7 @@ describe('YclientsAdminReadClient', () => {
       { success: true, data: providerRecord({ id: RECORD_ID + 1 }) },
       { success: true, data: providerRecord({ deleted: 0 }) },
       { success: true, data: providerRecord({ api_id: 'not-a-number' }) },
+      { success: true, data: providerRecord({ api_id: String(API_ID) }) },
       { success: true, data: providerRecord({ datetime: '2026-02-30T16:30:00+03:00' }) },
       { success: true, data: providerRecord({ services: [] }) },
       {
@@ -285,6 +287,23 @@ describe('YclientsAdminReadClient', () => {
         false,
       );
     });
+
+    it('cancels a classified 401 body without reading it or changing the outcome', async () => {
+      const cancel = jest.fn().mockRejectedValue(new Error('opaque cancel failure'));
+      const getReader = jest.fn();
+      const fetch = fetchMock().mockResolvedValue({
+        status: 401,
+        headers: new Headers(),
+        body: { cancel, getReader },
+      } as unknown as Response);
+
+      await expect(client(fetch).getRecord(RECORD_ID)).resolves.toEqual({
+        outcome: 'unauthorized',
+      });
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(cancel).toHaveBeenCalledTimes(1);
+      expect(getReader).not.toHaveBeenCalled();
+    });
   });
 
   describe('bounded admin records page', () => {
@@ -293,7 +312,7 @@ describe('YclientsAdminReadClient', () => {
         jsonResponse(200, {
           success: true,
           data: [providerRecord()],
-          meta: { page: 1, count: 50, total_count: 1 },
+          meta: { page: 1, total_count: 1 },
         }),
       );
 
@@ -335,6 +354,43 @@ describe('YclientsAdminReadClient', () => {
       const headers = init?.headers as Record<string, string>;
       expect(headers.authorization.startsWith('Bearer ')).toBe(true);
       expect(headers.authorization.includes(', User ')).toBe(true);
+    });
+
+    it('loads the official meta shape and ignores an empty neighbor api_id during candidate scan', async () => {
+      const fetch = fetchMock().mockResolvedValue(
+        jsonResponse(200, {
+          success: true,
+          data: [
+            providerRecord({ id: RECORD_ID + 1, api_id: '   ' }),
+            providerRecord(),
+          ],
+          meta: { page: 1, total_count: 2 },
+        }),
+      );
+      const reader = client(fetch);
+
+      await expect(
+        scanBoundedYclientsCandidates(reader, listQuery, {
+          apiId: API_ID,
+          resourceId: RESOURCE_ID,
+          serviceIds: [SERVICE_ID],
+          datetime: '2026-08-05T16:30:00+03:00',
+          deleted: false,
+        }),
+      ).resolves.toEqual({
+        outcome: 'candidate',
+        record: {
+          recordId: RECORD_ID,
+          companyId: COMPANY_ID,
+          resourceId: RESOURCE_ID,
+          serviceIds: [SERVICE_ID],
+          datetime: '2026-08-05T16:30:00+03:00',
+          deleted: false,
+          apiId: API_ID,
+          lastChangeDate: '2026-08-05 15:00:00',
+        },
+      });
+      expect(fetch).toHaveBeenCalledTimes(1);
     });
 
     it('accepts only explicit bounded pagination and date ranges', async () => {
@@ -458,6 +514,31 @@ describe('YclientsAdminReadClient', () => {
     });
 
     it.each([
+      [429, 'rate_limited'],
+      [500, 'unavailable'],
+    ] as const)(
+      'cancels a classified list status %s body without retry or read',
+      async (status, outcome) => {
+        const cancel = jest
+          .fn()
+          .mockRejectedValue(new Error('opaque cancel failure'));
+        const getReader = jest.fn();
+        const fetch = fetchMock().mockResolvedValue({
+          status,
+          headers: new Headers(),
+          body: { cancel, getReader },
+        } as unknown as Response);
+
+        await expect(client(fetch).listRecords(listQuery)).resolves.toEqual({
+          outcome,
+        });
+        expect(fetch).toHaveBeenCalledTimes(1);
+        expect(cancel).toHaveBeenCalledTimes(1);
+        expect(getReader).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([
       { success: false, data: [] },
       { success: true, data: {} },
       {
@@ -495,7 +576,11 @@ describe('YclientsAdminReadClient', () => {
     it('rejects a success body above the response cap', async () => {
       const fetch = fetchMock().mockResolvedValue(
         new Response(
-          JSON.stringify({ success: true, data: [], padding: 'x'.repeat(70_000) }),
+          JSON.stringify({
+            success: true,
+            data: [],
+            padding: 'x'.repeat(1_100_000),
+          }),
           { status: 200 },
         ),
       );
@@ -505,6 +590,33 @@ describe('YclientsAdminReadClient', () => {
       });
     });
 
+    it('accepts a bounded full 50-record page below the 1 MiB cap', async () => {
+      const data = Array.from({ length: 50 }, (_, index) =>
+        providerRecord({
+          id: RECORD_ID + index,
+          api_id: index === 0 ? API_ID : '',
+          ignored_full_record_shape: 'x'.repeat(12_000),
+        }),
+      );
+      const fetch = fetchMock().mockResolvedValue(
+        jsonResponse(200, {
+          success: true,
+          data,
+          meta: { page: 1, total_count: 50 },
+        }),
+      );
+
+      const result = await client(fetch).listRecords(listQuery);
+
+      expect(result.outcome).toBe('loaded');
+      if (result.outcome === 'loaded') {
+        expect(result.exhaustive).toBe(true);
+        expect(result.totalCount).toBe(50);
+        expect(result.records).toHaveLength(50);
+      }
+      expect(fetch).toHaveBeenCalledTimes(1);
+    });
+
     it('rejects oversized content-length before acquiring a body reader', async () => {
       const cancel = jest.fn().mockResolvedValue(undefined);
       const getReader = jest.fn(() => {
@@ -512,7 +624,7 @@ describe('YclientsAdminReadClient', () => {
       });
       const fetch = fetchMock().mockResolvedValue({
         status: 200,
-        headers: new Headers({ 'content-length': '65537' }),
+        headers: new Headers({ 'content-length': '1048577' }),
         body: { cancel, getReader },
       } as unknown as Response);
 
@@ -526,8 +638,8 @@ describe('YclientsAdminReadClient', () => {
     it('cancels a streamed body immediately after it exceeds the byte cap', async () => {
       const read = jest
         .fn()
-        .mockResolvedValueOnce({ done: false, value: new Uint8Array(40_000) })
-        .mockResolvedValueOnce({ done: false, value: new Uint8Array(40_000) });
+        .mockResolvedValueOnce({ done: false, value: new Uint8Array(600_000) })
+        .mockResolvedValueOnce({ done: false, value: new Uint8Array(600_000) });
       const cancel = jest.fn().mockResolvedValue(undefined);
       const releaseLock = jest.fn();
       const text = jest.fn().mockRejectedValue(new Error('text must not be used'));

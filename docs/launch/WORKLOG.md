@@ -26,7 +26,7 @@
 | Этап | Статус | Ветка/commit | Проверки | Блокер/следующий шаг |
 |---|---|---|---|---|
 | D1 Backend-only/contracts | done | `main` / deployed `c04074459948d0bf545e865b885aea7a4e5fec3c` | frontend E2E PASS (82/1 skipped); focused fail-closed 2/2 PASS; frontend build PASS; backend all PASS; Selectel test smoke PASS | D1 закрыт; следующий отдельный этап — D2 |
-| D2 YCLIENTS reservation core | in_progress | D2 branch / matrix `46bc35c7b6be5848bb5556b14eaee6fa33a20c2e` / controlled-plan correction `a08de13c95e7cf67ff272942f484d2e3d3ebd988` / read foundation `b157851d0ef1c45681a713cc2daa1ee192fba617` + P1 correction from that exact base | migration 033 applied/verified; backend 113/2965 unit, 2/4 E2E, typecheck/build PASS; root build PASS; root E2E 61 passed / 1 skipped / 21 unrelated `outside_telegram` failures | independent review correction checkpoint; basic и optional provider tests требуют два отдельных approval; runtime wiring не начат |
+| D2 YCLIENTS reservation core | in_progress | D2 branch / matrix `46bc35c7b6be5848bb5556b14eaee6fa33a20c2e` / controlled-plan correction `a08de13c95e7cf67ff272942f484d2e3d3ebd988` / read foundation correction `7fedddd5daf2e817aa977509ab120879915a8f26` + live-contract correction from that exact base | migration 033 applied/verified; backend 113/2971 unit, 2/4 E2E, typecheck/build PASS; root build PASS; root E2E 61 passed / 1 skipped / 21 unrelated `outside_telegram` failures | review live-contract correction checkpoint; basic и optional provider tests требуют два отдельных approval; runtime wiring не начат |
 | D3 Match ↔ reservation lifecycle | pending | — | — | cancel match, owner participant removal, match ↔ reservation binding |
 | D4 Payment Core | pending | — | — | payment provider, pricing/payment snapshot, чеки и возвраты |
 | D5 Settings/moderation/compliance | pending | — | — | standalone phone/email auth и verified backend email; затем schema review |
@@ -45,7 +45,7 @@
 | D2 persistence/privacy proposal | not applicable | docs-only checkpoint | `not_needed` | только Markdown; runtime, schema, containers и конфигурация не менялись |
 | D2 YCLIENTS contract matrix | not applicable | docs-only checkpoint поверх `3e8739b` | `not_needed` | только Markdown; API/DB/server/runtime не вызывались и не менялись |
 | D2 YCLIENTS controlled test plan | not applicable | `040773172a2fa556ffaaf1d12dac540095070976` + docs-only correction from that exact base | `not_needed` | plan only; provider/server/DB/runtime calls и writes не выполнялись |
-| D2 YCLIENTS read foundation | not applicable | `b157851d0ef1c45681a713cc2daa1ee192fba617` + P1 correction from that exact base | `not_needed` | code не импортирован Nest modules/controllers/runtime; image, config, server и containers не менялись |
+| D2 YCLIENTS read foundation | not applicable | correction `7fedddd5daf2e817aa977509ab120879915a8f26` + live-contract correction from that exact base | `not_needed` | code не импортирован Nest modules/controllers/runtime; image, config, server и containers не менялись |
 
 Допустимые deployment-статусы: `not_needed`, `pending`, `test_deployed`,
 `production_deployed`, `deployment_deferred_by_user`.
@@ -832,6 +832,67 @@
   runtime и containers не менялись, внешние provider calls отсутствовали.
 - Следующий конкретный шаг: независимый review correction commit. Write runner,
   provider writes и runtime wiring не начинать без нового отдельного scope.
+
+### 2026-08-06 — D2 / YCLIENTS read live-contract correction
+
+- Задача/ветка: `codex/week1-d2-reservation-core`; exact reviewed correction
+  base `7fedddd5daf2e817aa977509ab120879915a8f26`, исходный worktree clean.
+- Live-contract review: текущий официальный sample `GET /api/v1/records` имеет
+  pagination `meta.page/total_count` без `meta.count`, а обычная соседняя запись
+  может возвращать `api_id: ""`. Предыдущая запись о безусловно обязательном
+  `meta.count` superseded этой append-only correction; history не переписывалась.
+- Исправлено:
+  - `meta.page` и nonnegative `meta.total_count` обязательны; optional
+    `meta.count`, если присутствует, обязан быть positive и совпадать с request;
+    completeness `page=1` доказывается только `total_count === rowCount`, а
+    `rowCount > requested count` отклоняется;
+  - `api_id` undefined/null/trimmed empty string означает отсутствие external
+    ID; positive safe integer number принимается, остальные значения, включая
+    numeric strings, fail closed;
+  - любой classified non-200 response body явно cancel без чтения/логирования;
+    ошибка cancel не меняет outcome, retry/fallback отсутствуют;
+  - bounded streaming сохранён: exact response cap 256 KiB, list page cap 1 MiB
+    при максимум 50 records и одном serialized in-flight request.
+- Size residual: YCLIENTS не публикует maximum full-record response size.
+  1 MiB даёт около 20 KiB на строку при count 50 и подтверждён mocked страницей
+  полного размера; overflow остаётся безопасным `unknown`. До runtime enablement
+  controlled read shape должен подтвердить достаточность cap либо потребовать
+  отдельного review cap/count, но unbounded body запрещён.
+- Regression tests: официальный meta shape без count, optional inconsistent
+  count, empty neighboring `api_id` + numeric target candidate, numeric-string
+  rejection, exact 401 и list 429/500 body cancellation с failed cancel,
+  50-record page below cap и stream/content-length overflow. Focused mocked
+  suite: PASS, 3 suites / 94 tests.
+- Official sample compatibility: numeric record/company/staff/service IDs и ISO
+  datetime с offset продолжают приниматься; raw body, Authorization, token, PII
+  и record hash не возвращаются и не логируются.
+- Runtime boundary: новые imports в Nest modules/controllers/runtime отсутствуют;
+  write runner, PUT/DELETE/create, retries, provider calls и wiring не добавлены.
+- Tests:
+  - backend typecheck: PASS;
+  - backend unit: PASS, 113 suites / 2971 tests;
+  - backend E2E: PASS, 2 suites / 4 tests;
+  - backend build: PASS;
+  - root build: PASS, 1615 modules; только штатное chunk-size warning;
+  - root E2E: FAIL, 61 passed / 1 skipped / 21 failed; тот же
+    `outside_telegram` session/login blocker воспроизведён без frontend/auth diff.
+- Read-only P0/P1 correction review: optional count не ослабляет exact page/total
+  checks; empty external ID не становится numeric; non-200 bodies закрываются;
+  оба success body paths остаются bounded; открытых P0/P1 не найдено.
+- External state: YCLIENTS/API/DB/server calls, provider writes, чтение
+  secrets/env, migration/PRECHECK/POSTCHECK/rollback не выполнялись.
+- Git integration: отдельный локальный correction commit; push/merge/deploy не
+  выполняются.
+- Deployment: `not_needed` — code остаётся недостижимым из runtime; общий D2
+  остаётся `in_progress` с deployment `pending`.
+- Deployed environment/commit: Selectel test runtime остаётся detached на D1
+  `c04074459948d0bf545e865b885aea7a4e5fec3c`; migration 033 отдельно
+  `applied_verified`, production не менялся.
+- Containers changed: none.
+- Health/HTTP, business smoke, log audit: `not run / not needed` — server,
+  runtime и containers не менялись, внешние provider calls отсутствовали.
+- Следующий конкретный шаг: независимый review live-contract correction commit;
+  write runner/runtime wiring не начинать без нового отдельного scope.
 
 ## Шаблон записи после этапа
 

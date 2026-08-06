@@ -1,7 +1,10 @@
 import type { YclientsApiConfiguration } from '../../config/yclients-api.config';
 import { YclientsConservativeRequestLimiter } from './yclients-request-limiter';
 
-const MAX_RESPONSE_BYTES = 65_536;
+const MAX_EXACT_RESPONSE_BYTES = 262_144;
+// YCLIENTS does not publish a maximum full-record size. One serialized page is
+// capped at 1 MiB, leaving about 20 KiB per requested row at count=50.
+const MAX_LIST_RESPONSE_BYTES = 1_048_576;
 const MAX_RECORDS_PER_PAGE = 50;
 const MAX_RECORD_PAGE = 10;
 const MAX_RECORD_RANGE_DAYS = 7;
@@ -97,6 +100,7 @@ async function cancelBody(
 
 async function readBody(
   response: Response,
+  maximumBytes: number,
 ): Promise<Record<string, unknown> | undefined> {
   const contentLengthHeader = response.headers.get('content-length');
   if (contentLengthHeader !== null) {
@@ -107,7 +111,7 @@ async function readBody(
     const contentLength = Number(contentLengthHeader);
     if (
       !nonNegativeSafeInteger(contentLength) ||
-      contentLength > MAX_RESPONSE_BYTES
+      contentLength > maximumBytes
     ) {
       await cancelBody(response.body);
       return undefined;
@@ -123,7 +127,7 @@ async function readBody(
       const chunk = await reader.read();
       if (chunk.done) break;
       bytesRead += chunk.value.byteLength;
-      if (bytesRead > MAX_RESPONSE_BYTES) {
+      if (bytesRead > maximumBytes) {
         try {
           await reader.cancel();
         } catch {
@@ -249,11 +253,14 @@ function readSafeAdminRecord(
   const resourceId = readConsistentId(value, 'staff_id', 'staff');
   const serviceIds = readServiceIds(value.services);
   const datetime = readIsoDatetime(value.datetime);
+  const rawApiId = value.api_id;
   const apiId =
-    value.api_id === undefined || value.api_id === null
+    rawApiId === undefined ||
+    rawApiId === null ||
+    (typeof rawApiId === 'string' && rawApiId.trim().length === 0)
       ? undefined
-      : positiveSafeInteger(value.api_id)
-        ? Number(value.api_id)
+      : positiveSafeInteger(rawApiId)
+        ? Number(rawApiId)
         : Number.NaN;
   const lastChangeDate =
     value.last_change_date === undefined || value.last_change_date === null
@@ -296,13 +303,15 @@ function readPagination(
     !isRecord(value) ||
     !positiveSafeInteger(value.page) ||
     Number(value.page) !== expectedPage ||
-    !positiveSafeInteger(value.count) ||
-    Number(value.count) !== expectedCount ||
+    (value.count !== undefined &&
+      (!positiveSafeInteger(value.count) ||
+        Number(value.count) !== expectedCount)) ||
     !nonNegativeSafeInteger(value.total_count)
   ) {
     return undefined;
   }
   const totalCount = Number(value.total_count);
+  if (rowCount > expectedCount) return undefined;
   const offset = (expectedPage - 1) * expectedCount;
   const expectedRows = Math.min(
     expectedCount,
@@ -417,9 +426,12 @@ export class YclientsAdminReadClient {
           ),
         });
         const classified = classifyStatus(response.status, true);
-        if (classified !== undefined) return classified;
+        if (classified !== undefined) {
+          await cancelBody(response.body);
+          return classified;
+        }
 
-        const body = await readBody(response);
+        const body = await readBody(response, MAX_EXACT_RESPONSE_BYTES);
         const record =
           body?.success === true
             ? readSafeAdminRecord(body.data, configured.companyId)
@@ -494,12 +506,13 @@ export class YclientsAdminReadClient {
         });
         const classified = classifyStatus(response.status, false);
         if (classified !== undefined) {
+          await cancelBody(response.body);
           return classified.outcome === 'not_found'
             ? Object.freeze({ outcome: 'rejected' as const })
             : classified;
         }
 
-        const body = await readBody(response);
+        const body = await readBody(response, MAX_LIST_RESPONSE_BYTES);
         if (
           body?.success !== true ||
           !Array.isArray(body.data) ||
