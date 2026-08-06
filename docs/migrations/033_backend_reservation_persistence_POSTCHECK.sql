@@ -406,7 +406,9 @@ begin
          'backend_reservation.guard_slot_hold_transition()'::pg_catalog.regprocedure
        ))
      or (
-       select pg_catalog.array_agg(trigger_row.tgname order by trigger_row.tgname)
+       select pg_catalog.array_agg(
+         trigger_row.tgname::text order by trigger_row.tgname::text
+       )
        from pg_catalog.pg_trigger trigger_row
        where trigger_row.tgrelid =
          'backend_reservation.reservation_slot_holds'::pg_catalog.regclass
@@ -428,7 +430,9 @@ begin
          'backend_reservation.guard_client_snapshot_transition()'::pg_catalog.regprocedure
        ))
      or (
-       select pg_catalog.array_agg(trigger_row.tgname order by trigger_row.tgname)
+       select pg_catalog.array_agg(
+         trigger_row.tgname::text order by trigger_row.tgname::text
+       )
        from pg_catalog.pg_trigger trigger_row
        where trigger_row.tgrelid =
          'backend_reservation.reservation_operation_client_snapshots'::pg_catalog.regclass
@@ -450,7 +454,9 @@ begin
          'backend_reservation.reject_admin_read_audit_mutation()'::pg_catalog.regprocedure
        ))
      or (
-       select pg_catalog.array_agg(trigger_row.tgname order by trigger_row.tgname)
+       select pg_catalog.array_agg(
+         trigger_row.tgname::text order by trigger_row.tgname::text
+       )
        from pg_catalog.pg_trigger trigger_row
        where trigger_row.tgrelid =
          'backend_reservation.reservation_admin_read_audit_events'::pg_catalog.regclass

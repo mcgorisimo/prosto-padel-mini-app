@@ -246,6 +246,14 @@ describe('migration 033 backend reservation persistence contract', () => {
     expect(postcheck).toContain(
       "array[ 'gist_uuid_ops', 'gist_int8_ops', 'gist_int8_ops', 'range_ops' ]::text[]",
     );
+    expect(
+      postcheck.match(
+        /array_agg\( trigger_row\.tgname::text order by trigger_row\.tgname::text \)/gu,
+      ),
+    ).toHaveLength(3);
+    expect(postcheck).not.toContain(
+      'array_agg(trigger_row.tgname order by trigger_row.tgname)',
+    );
     expect(postcheck).toContain('snapshot erase guard differs');
     expect(postcheck).toContain('migration 033 target must start empty');
     expect(rollback).toContain('lock table');

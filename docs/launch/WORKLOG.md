@@ -26,7 +26,7 @@
 | Этап | Статус | Ветка/commit | Проверки | Блокер/следующий шаг |
 |---|---|---|---|---|
 | D1 Backend-only/contracts | done | `main` / deployed `c04074459948d0bf545e865b885aea7a4e5fec3c` | frontend E2E PASS (82/1 skipped); focused fail-closed 2/2 PASS; frontend build PASS; backend all PASS; Selectel test smoke PASS | D1 закрыт; следующий отдельный этап — D2 |
-| D2 YCLIENTS reservation core | in_progress | `main` / `4451dddc3cf229419a9de574d9ed98a7aa6f78c9` | focused migration contract 8/8 PASS; backend typecheck PASS; PRECHECK PASS; SQL applied; POSTCHECK blocked by checker type bug | исправить только POSTCHECK `name[]`/`text[]`, review и повторить read-only POSTCHECK; runtime wiring остаётся |
+| D2 YCLIENTS reservation core | in_progress | `main` / `4451dddc3cf229419a9de574d9ed98a7aa6f78c9` + POSTCHECK correction checkpoint | focused migration contract 8/8 PASS; backend typecheck PASS; PRECHECK PASS; SQL applied; corrected POSTCHECK rerun pending | интегрировать correction и повторить только read-only POSTCHECK; runtime wiring остаётся |
 | D3 Match ↔ reservation lifecycle | pending | — | — | cancel match, owner participant removal, match ↔ reservation binding |
 | D4 Payment Core | pending | — | — | payment provider, pricing/payment snapshot, чеки и возвраты |
 | D5 Settings/moderation/compliance | pending | — | — | standalone phone/email auth и verified backend email; затем schema review |
@@ -41,7 +41,7 @@
 | Этап | Среда | Целевой commit | Статус | Проверка |
 |---|---|---|---|---|
 | D1 Backend-only/contracts | Selectel test | `c04074459948d0bf545e865b885aea7a4e5fec3c` | `test_deployed` | frontend healthy; HTTPS root/health и новый asset 200; TMA auth/profile/feed/details/booking availability PASS; bundle/log audit PASS |
-| D2 YCLIENTS reservation core | Selectel test | `4451dddc3cf229419a9de574d9ed98a7aa6f78c9` | `pending` | migration 033 applied, но не verified: POSTCHECK остановился на `name[] = text[]`; runtime/containers остаются на D1 commit |
+| D2 YCLIENTS reservation core | Selectel test | `4451dddc3cf229419a9de574d9ed98a7aa6f78c9` + POSTCHECK correction pending | `pending` | migration 033 applied, но не verified; разрешён только повтор corrected read-only POSTCHECK, runtime/containers остаются на D1 commit |
 | D2 persistence/privacy proposal | not applicable | docs-only checkpoint | `not_needed` | только Markdown; runtime, schema, containers и конфигурация не менялись |
 
 Допустимые deployment-статусы: `not_needed`, `pending`, `test_deployed`,
@@ -527,6 +527,26 @@
 - Следующий конкретный шаг: отдельным одобрением исправить только POSTCHECK
   casts/contract test, провести read-only review, затем повторить POSTCHECK.
   SQL migration повторно не применять и rollback не выполнять.
+
+### 2026-08-06 — D2 / migration 033 POSTCHECK correction checkpoint
+
+- Base handoff: `218e7676925fd7105fb1737b625a9d7044d7caa4`.
+- Scope: изменены только POSTCHECK, migration contract spec и `WORKLOG.md`;
+  migration/precheck/rollback/runtime/config не менялись.
+- Correction: во всех трёх trigger checks `pg_trigger.tgname` приводится к
+  `text` и детерминированно сортируется по тому же `tgname::text`, поэтому
+  сравнение выполняется как `text[]` к `text[]`.
+- Regression: static contract требует ровно три corrected aggregation и
+  запрещает прежнюю `name[]` форму.
+- Checks: focused migration contract PASS, 1 suite / 8 tests; backend typecheck
+  PASS; `git diff --check` и финальный read-only scope review выполняются перед
+  checkpoint commit.
+- Migration status: `applied`, verification `pending`. Migration 033 повторно
+  не применять; backup/PRECHECK/rollback и другие DB writes не выполнять.
+- Deployment: `pending`; runtime/container/env/production не меняются.
+- Следующий конкретный шаг: только после fast-forward integration exact
+  correction commit повторить read-only POSTCHECK и сохранить output; при новом
+  расхождении остановиться.
 
 ## Шаблон записи после этапа
 
