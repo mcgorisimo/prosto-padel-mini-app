@@ -13,7 +13,61 @@ const WAITLIST_ENTRY_ID = '99999999-9999-4999-8999-999999999999';
 const RESULT_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const NOTIFICATION_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 
+async function isolateComponentHarness(page) {
+  await page.evaluate(() => {
+    const applicationRoot = document.getElementById('root');
+    if (applicationRoot) {
+      applicationRoot.style.display = 'none';
+      applicationRoot.setAttribute('aria-hidden', 'true');
+    }
+  });
+}
+
 test.describe('backend match credential lifecycle', () => {
+  test('legacy data boundary fails before any network request', async ({
+    page,
+  }) => {
+    await page.goto('/');
+
+    const summary = await page.evaluate(async () => {
+      const { supabase } = await import('/src/lib/supabaseClient.js');
+      const operations = [
+        () => supabase.from('matches'),
+        () => supabase.rpc('join_match'),
+        () => supabase.channel('public:matches'),
+        () => supabase.removeChannel({}),
+        () => supabase.auth.getSession(),
+        () => supabase.auth.onAuthStateChange(() => {}),
+        () => supabase.auth.signInWithPassword({}),
+        () => supabase.auth.signOut(),
+        () => supabase.auth.signUp({}),
+      ];
+      const errors = operations.map((operation) => {
+        try {
+          operation();
+          return null;
+        } catch (error) {
+          return error instanceof Error ? error.message : String(error);
+        }
+      });
+
+      return {
+        errors,
+        hasNetworkConfiguration:
+          Object.prototype.hasOwnProperty.call(supabase, 'supabaseUrl') ||
+          Object.prototype.hasOwnProperty.call(supabase, 'url') ||
+          Object.prototype.hasOwnProperty.call(supabase, 'fetch'),
+      };
+    });
+
+    expect(summary.hasNetworkConfiguration).toBe(false);
+    expect(summary.errors).toHaveLength(9);
+    expect(summary.errors.every((message) =>
+      message ===
+        'Legacy data runtime is unavailable; use the bearer-protected backend API',
+    )).toBe(true);
+  });
+
   test('uses exact no-store contracts for public/account feeds, detail, create, join and leave', async ({
     page,
   }) => {
@@ -382,6 +436,80 @@ test.describe('backend match credential lifecycle', () => {
         exactCreateBody: true,
       },
     ]);
+  });
+
+  test('maps bearer join eligibility rejections without a legacy fallback', async ({
+    page,
+  }) => {
+    await page.goto('/');
+
+    const summary = await page.evaluate(async (parameters) => {
+      const { createBackendSessionClient } = await import(
+        '/src/lib/backendSessionClient.js'
+      );
+      const responses = [
+        { status: 403, code: 'match_rating_verification_required' },
+        { status: 409, code: 'match_rating_out_of_range' },
+        { status: 409, code: 'match_not_joinable' },
+      ];
+      const requestKeys = [...parameters.requestKeys];
+      const calls = [];
+      const client = createBackendSessionClient({
+        cryptoImpl: { randomUUID: () => requestKeys.shift() },
+        fetchImpl: async (url, options) => {
+          calls.push({
+            url,
+            method: options.method,
+            authorization: options.headers.Authorization,
+            body: JSON.parse(options.body),
+          });
+          const response = responses.shift();
+          return new Response(JSON.stringify({ code: response.code }), {
+            status: response.status,
+          });
+        },
+      });
+
+      const results = [];
+      for (let index = 0; index < 3; index += 1) {
+        results.push(await client.joinMatch(
+          parameters.credential,
+          parameters.matchId,
+        ));
+      }
+
+      return {
+        reasons: results.map((result) => result.reason),
+        outcomes: results.map((result) => result.outcome),
+        exactBackendBoundary: calls.every((call, index) =>
+          call.url === `/api/v1/matches/${parameters.matchId}/join` &&
+          call.method === 'POST' &&
+          call.authorization === `Bearer ${parameters.credential}` &&
+          Object.keys(call.body).length === 1 &&
+          call.body.requestKey === parameters.requestKeys[index]),
+        legacyRequestObserved: calls.some((call) =>
+          /\/auth\/v1|\/rest\/v1|supabase/iu.test(call.url)),
+      };
+    }, {
+      credential: SYNTHETIC_CREDENTIAL,
+      matchId: MATCH_ID,
+      requestKeys: [
+        REQUEST_KEY,
+        '44444444-4444-4444-8444-444444444445',
+        '44444444-4444-4444-8444-444444444446',
+      ],
+    });
+
+    expect(summary).toEqual({
+      reasons: [
+        'rating_verification_required',
+        'rating_out_of_range',
+        'match_not_joinable',
+      ],
+      outcomes: ['rejected', 'rejected', 'rejected'],
+      exactBackendBoundary: true,
+      legacyRequestObserved: false,
+    });
   });
 
   test('uses exact private contracts for comment update and legacy text moderation', async ({
@@ -2130,6 +2258,7 @@ test.describe('backend match credential lifecycle', () => {
       });
     });
     await page.goto('/');
+    await isolateComponentHarness(page);
 
     await page.evaluate(async (parameters) => {
       const reactModule = await import('/@id/react');
@@ -2255,17 +2384,6 @@ test.describe('backend match credential lifecycle', () => {
           };
         },
       };
-      const session = {
-        user: {
-          id: parameters.accountId,
-          email: 'invited-player@prostopadel.test',
-          user_metadata: {
-            first_name: invitedPlayer.firstName,
-            last_name: invitedPlayer.lastName,
-            username: invitedPlayer.username,
-          },
-        },
-      };
       const backendProfile = {
         accountId: parameters.accountId,
         role: 'player',
@@ -2281,7 +2399,6 @@ test.describe('backend match credential lifecycle', () => {
       };
       const root = createRoot(container);
       root.render(React.createElement(App, {
-        session,
         backendProfile,
         backendMatchRequired: true,
         backendMatchLifecycleStatus: 'authenticated',
@@ -2583,6 +2700,7 @@ test.describe('backend match credential lifecycle', () => {
     page,
   }) => {
     await page.goto('/');
+    await isolateComponentHarness(page);
 
     await page.evaluate(async (parameters) => {
       const reactModule = await import('/@id/react');
@@ -2820,6 +2938,7 @@ test.describe('backend match credential lifecycle', () => {
       });
     });
     await page.goto('/');
+    await isolateComponentHarness(page);
 
     await page.evaluate(async (parameters) => {
       const reactModule = await import('/@id/react');
@@ -3092,6 +3211,7 @@ test.describe('backend match credential lifecycle', () => {
       });
     });
     await page.goto('/');
+    await isolateComponentHarness(page);
 
     await page.evaluate(async (parameters) => {
       const reactModule = await import('/@id/react');
@@ -3389,10 +3509,11 @@ test.describe('backend match credential lifecycle', () => {
     await page.evaluate(() => window.__backendLineupUiUnmount());
   });
 
-  test('renders account-scoped Home matches and preserves legacy private bookings', async ({
+  test('renders account-scoped Home matches without reading legacy Supabase matches', async ({
     page,
   }) => {
     await page.goto('/');
+    await isolateComponentHarness(page);
 
     await page.evaluate(async (parameters) => {
       const reactModule = await import('/@id/react');
@@ -3460,7 +3581,11 @@ test.describe('backend match credential lifecycle', () => {
           });
         },
       };
-      supabase.from = () => query;
+      window.__legacyMatchReads = 0;
+      supabase.from = () => {
+        window.__legacyMatchReads += 1;
+        return query;
+      };
       window.__legacyProfileCalls = 0;
       supabase.rpc = async (name) => {
         if (name === 'get_my_profile') {
@@ -3597,12 +3722,6 @@ test.describe('backend match credential lifecycle', () => {
       document.body.append(container);
       const root = createRoot(container);
       root.render(React.createElement(App, {
-        session: {
-          user: {
-            id: legacyUserId,
-            user_metadata: {},
-          },
-        },
         backendProfile: {
           accountId: parameters.accountId,
           firstName: 'Backend',
@@ -3652,9 +3771,10 @@ test.describe('backend match credential lifecycle', () => {
       harness.getByText('Participant account match comment').first(),
     ).toBeVisible();
     await expect(
-      harness.getByText('Legacy private booking comment').first(),
-    ).toBeVisible();
+      harness.getByText('Legacy private booking comment'),
+    ).toHaveCount(0);
     expect(await page.evaluate(() => window.__legacyProfileCalls)).toBe(0);
+    expect(await page.evaluate(() => window.__legacyMatchReads)).toBe(0);
     await expect(
       harness.getByText('Public-only unrelated match comment'),
     ).toHaveCount(0);
@@ -4380,6 +4500,7 @@ test.describe('backend match credential lifecycle', () => {
     page,
   }) => {
     await page.goto('/');
+    await isolateComponentHarness(page);
 
     await page.evaluate(async (parameters) => {
       const reactModule = await import('/@id/react');
@@ -4519,12 +4640,14 @@ test.describe('backend match credential lifecycle', () => {
   test('submits, resolves and polls a backend result with the locked lineup', async ({
     page,
   }) => {
+    test.slow();
     let legacyRpcCalls = 0;
     await page.route(/\/rest\/v1\/rpc\//iu, async (route) => {
       legacyRpcCalls += 1;
       await route.fulfill({ status: 500, body: '{}' });
     });
     await page.goto('/');
+    await isolateComponentHarness(page);
 
     await page.evaluate(async (parameters) => {
       const reactModule = await import('/@id/react');
@@ -4850,6 +4973,7 @@ test.describe('backend match credential lifecycle', () => {
     const pageErrors = [];
     page.on('pageerror', (error) => pageErrors.push(error.message));
     await page.goto('/');
+    await isolateComponentHarness(page);
 
     await page.evaluate(async (parameters) => {
       const reactModule = await import('/@id/react');
@@ -5001,23 +5125,11 @@ test.describe('backend match credential lifecycle', () => {
         isVerified: currentPlayer.isVerified,
         capabilities: [],
       };
-      const session = {
-        user: {
-          id: parameters.accountId,
-          email: 'current-player@prostopadel.test',
-          user_metadata: {
-            first_name: currentPlayer.firstName,
-            last_name: currentPlayer.lastName,
-            username: currentPlayer.username,
-          },
-        },
-      };
       const container = document.createElement('div');
       container.dataset.testid = 'backend-notification-app-root';
       document.body.append(container);
       const root = createRoot(container);
       root.render(React.createElement(App, {
-        session,
         backendProfile,
         backendMatchRequired: true,
         backendMatchLifecycleStatus: 'authenticated',

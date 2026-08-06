@@ -2,6 +2,16 @@ const { test, expect } = require('@playwright/test');
 
 const CREDENTIAL = Buffer.alloc(32, 0x71).toString('base64url');
 
+async function isolateComponentHarness(page) {
+  await page.evaluate(() => {
+    const applicationRoot = document.getElementById('root');
+    if (applicationRoot) {
+      applicationRoot.style.display = 'none';
+      applicationRoot.setAttribute('aria-hidden', 'true');
+    }
+  });
+}
+
 test.beforeEach(async ({ page }) => {
   await page.goto('/');
 });
@@ -469,6 +479,7 @@ test('keeps the credential private while lifecycle reads booking availability', 
 
 test('creates a backend booking from the availability confirmation', async ({ page }) => {
   await page.clock.install({ time: new Date('2026-08-05T06:00:00.000Z') });
+  await isolateComponentHarness(page);
 
   const factorySummary = await page.evaluate(async () => {
     const reactModule = await import('/@id/react');
@@ -661,6 +672,7 @@ test('preserves a future date across duration changes and only falls forward', a
   page,
 }) => {
   await page.clock.install({ time: new Date('2026-08-05T06:00:00.000Z') });
+  await isolateComponentHarness(page);
 
   await page.evaluate(async () => {
     const reactModule = await import('/@id/react');

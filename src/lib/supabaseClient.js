@@ -1,16 +1,23 @@
-import { createClient } from '@supabase/supabase-js';
+const LEGACY_RUNTIME_REMOVED =
+  'Legacy data runtime is unavailable; use the bearer-protected backend API';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-
-if (import.meta.env.DEV && (!supabaseUrl || !supabaseAnonKey)) {
-  console.warn(
-    'Supabase env is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in your local env.'
-  );
+function removedLegacyOperation() {
+  throw new Error(LEGACY_RUNTIME_REMOVED);
 }
 
-if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error('Missing Supabase env configuration.');
-}
-
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+// Temporary fail-closed boundary while the remaining unreachable legacy
+// branches are deleted in small domain patches. This module intentionally has
+// no database SDK, environment variables or network configuration.
+export const supabase = {
+  auth: {
+    getSession: removedLegacyOperation,
+    onAuthStateChange: removedLegacyOperation,
+    signInWithPassword: removedLegacyOperation,
+    signOut: removedLegacyOperation,
+    signUp: removedLegacyOperation,
+  },
+  channel: removedLegacyOperation,
+  from: removedLegacyOperation,
+  removeChannel: removedLegacyOperation,
+  rpc: removedLegacyOperation,
+};

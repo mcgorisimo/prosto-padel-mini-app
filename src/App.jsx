@@ -321,7 +321,6 @@ export function mergeProfileSources(profile, backendProfile, metadata = {}) {
 // ─── App ──────────────────────────────────────────────────────────────────────
 
 export default function App({
-  session,
   backendProfile = null,
   backendMatchRequired = false,
   backendMatchLifecycleStatus = 'disabled',
@@ -337,7 +336,7 @@ export default function App({
   const { user, tg } = useTelegram();
   
   // --- 1. СТЕЙТЫ ---
-  const ME_ID = session?.user?.id;
+  const ME_ID = backendProfile?.accountId ?? null;
   const backendMatchMode = resolveBackendMatchMode({
     backendRequired: backendMatchRequired,
     hasBackendActions: backendMatchActions !== null,
@@ -415,6 +414,13 @@ export default function App({
   }, [ME_ID, usesBackendMatches]);
 
   const loadMatches = useCallback(async () => {
+    if (usesBackendMatches) {
+      setAllMatches([]);
+      setMatchesLoadError('');
+      setMatchesLoading(false);
+      return [];
+    }
+
     setMatchesLoading(true);
     setMatchesLoadError('');
 
@@ -435,7 +441,7 @@ export default function App({
     } finally {
       setMatchesLoading(false);
     }
-  }, []);
+  }, [usesBackendMatches]);
 
   const loadBackendMatchFeed = useCallback(async () => {
     const requestId = backendFeedRequestRef.current + 1;
@@ -756,27 +762,29 @@ export default function App({
   useEffect(() => {
     fetchData();
 
-    const matchesSubscription = supabase.channel('public:matches')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'matches' }, payload => {
-        const nextMatch = normalizeMatch(payload.new);
-        if (!nextMatch?.id) {
-          fetchData();
-          return;
-        }
+    const matchesSubscription = usesBackendMatches
+      ? null
+      : supabase.channel('public:matches')
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'matches' }, payload => {
+            const nextMatch = normalizeMatch(payload.new);
+            if (!nextMatch?.id) {
+              fetchData();
+              return;
+            }
 
-        setAllMatches(prev => {
-          if (payload.eventType === 'DELETE') {
-            return prev.filter(m => m.id !== payload.old?.id);
-          }
+            setAllMatches(prev => {
+              if (payload.eventType === 'DELETE') {
+                return prev.filter(m => m.id !== payload.old?.id);
+              }
 
-          const exists = prev.some(m => m.id === nextMatch.id);
-          if (exists) {
-            return prev.map(m => m.id === nextMatch.id ? nextMatch : m);
-          }
-          return [nextMatch, ...prev];
-        });
-      })
-      .subscribe();
+              const exists = prev.some(m => m.id === nextMatch.id);
+              if (exists) {
+                return prev.map(m => m.id === nextMatch.id ? nextMatch : m);
+              }
+              return [nextMatch, ...prev];
+            });
+          })
+          .subscribe();
 
     const invitationsSubscription = usesBackendMatches
       ? null
@@ -796,7 +804,9 @@ export default function App({
           .subscribe();
 
     return () => {
-      supabase.removeChannel(matchesSubscription);
+      if (matchesSubscription) {
+        supabase.removeChannel(matchesSubscription);
+      }
       if (invitationsSubscription) {
         supabase.removeChannel(invitationsSubscription);
       }
@@ -804,7 +814,7 @@ export default function App({
         supabase.removeChannel(notificationsSubscription);
       }
     };
-  }, [fetchData]);
+  }, [fetchData, usesBackendMatches]);
 
   useEffect(() => {
     if (!backendMatchesReady) return undefined;
@@ -937,15 +947,12 @@ export default function App({
 
   // --- 3. ПОЛЬЗОВАТЕЛЬ ---
   const currentUser = useMemo(() => {
-    // 1. Достаем метаданные из сессии (там точно лежат имя и фамилия из формы регистрации)
-    const meta = session?.user?.user_metadata || {};
-    
-    // 2. Backend owns the complete profile in backend mode. Supabase profile
-    // data is used only by the explicitly retained legacy flow.
+    // Backend owns the complete production profile. The legacy profile branch
+    // remains unreachable until it can be removed with its missing contracts.
     const p = mergeProfileSources(
       usesBackendMatches ? null : profile,
       backendProfile,
-      usesBackendMatches ? {} : meta,
+      {},
     );
     
     const numericRating = Number.isFinite(p.rating) ? p.rating : 3.0;
@@ -954,7 +961,7 @@ export default function App({
     const ratingIdxFor  = (n) => Math.max(0, RATINGS_ORDER.indexOf(levelLabel));
 
     return {
-      id: ME_ID, // тут должен быть session?.user?.id (если ты еще не заменил ME_ID везде)
+      id: ME_ID,
       rating: numericRating,
       numericRating,
       ratingIdx: ratingIdxFor(numericRating),
@@ -967,14 +974,14 @@ export default function App({
       side_preference: p.side_preference || 'Both',
       username: usesBackendMatches
         ? p.username
-        : (p.username || user?.username || meta.username || ''),
+        : (p.username || user?.username || ''),
       photo_url: p.photo_url || '',
       full_photo_url: p.full_photo_url || '',
       accountId: backendProfile?.accountId ?? null,
       role: p.role,
       isAdmin: p.is_admin === true,
     };
-  }, [backendProfile, profile, session, user?.username, usesBackendMatches]); // <-- добавили session в зависимости
+  }, [backendProfile, profile, user?.username, usesBackendMatches]);
 
   const backendMatchCurrentUser = useMemo(() => ({
     ...currentUser,
@@ -2945,7 +2952,7 @@ const handleBookSlot = async (booking) => {
                 .filter(Boolean)
                 .join(' '),
               phone: currentUser.phone,
-              email: session?.user?.email ?? '',
+              email: '',
             }}
             onBookSlot={handleBookSlot}
             showToast={showToast}

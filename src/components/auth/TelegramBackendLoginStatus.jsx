@@ -1,6 +1,8 @@
 import React from 'react';
 
 const STATUS_MESSAGES = Object.freeze({
+  disabled:
+    'Вход через backend не настроен. Обратитесь к администратору клуба.',
   checking: 'Проверяем вход через Telegram…',
   temporary_unavailable:
     'Вход через Telegram временно недоступен. Попробуйте снова позже.',
@@ -27,7 +29,7 @@ export default function TelegramBackendLoginStatus({
   status,
   accountKind,
 }) {
-  if (status === 'disabled' || status === 'idle') return null;
+  if (status === 'idle') return null;
 
   let message = status === 'profile_unavailable'
     ? PROFILE_UNAVAILABLE_MESSAGE

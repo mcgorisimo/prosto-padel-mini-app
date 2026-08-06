@@ -1,7 +1,9 @@
 const { test, expect } = require('@playwright/test');
 
+const FEATURE_SETTING =
+  process.env.VITE_TELEGRAM_BACKEND_LOGIN_ENABLED;
 const FEATURE_ENABLED =
-  process.env.VITE_TELEGRAM_BACKEND_LOGIN_ENABLED === 'true';
+  FEATURE_SETTING === undefined || FEATURE_SETTING === 'true';
 const LOGIN_ROUTE = '**/api/v1/auth/telegram/login';
 const SESSION_ME_ROUTE = '**/api/v1/auth/session/me';
 const PROFILE_ROUTE = '**/api/v1/profile/me';
@@ -89,66 +91,17 @@ async function fulfillJson(route, status, body) {
   });
 }
 
-async function establishSyntheticSupabaseSession(page) {
-  const user = {
-    id: '11111111-1111-4111-8111-111111111111',
-    aud: 'authenticated',
-    role: 'authenticated',
-    email: 'telegram-lifecycle@prostopadel.test',
-    app_metadata: {
-      provider: 'email',
-      providers: ['email'],
-    },
-    user_metadata: {},
-    identities: [],
-    created_at: '2026-01-01T00:00:00.000Z',
-  };
-
-  await page.route('**/auth/v1/user', async (route) => {
-    await fulfillJson(route, 200, user);
-  });
-
-  return page.evaluate(async (syntheticUser) => {
-    const encode = (value) => btoa(JSON.stringify(value))
-      .replaceAll('+', '-')
-      .replaceAll('/', '_')
-      .replaceAll('=', '');
-    const expiresAt = Math.floor(Date.now() / 1_000) + 3_600;
-    const accessToken = [
-      encode({ alg: 'HS256', typ: 'JWT' }),
-      encode({
-        aud: syntheticUser.aud,
-        exp: expiresAt,
-        sub: syntheticUser.id,
-        email: syntheticUser.email,
-        role: syntheticUser.role,
-      }),
-      'synthetic-signature',
-    ].join('.');
-    const { supabase } = await import('/src/lib/supabaseClient.js');
-    const { data, error } = await supabase.auth.setSession({
-      access_token: accessToken,
-      refresh_token: 'synthetic-refresh-token',
-    });
-
-    return {
-      hasSession: data.session !== null,
-      hasError: error !== null,
-    };
-  }, user);
-}
-
-async function expectExistingSupabaseWelcome(page) {
-  await expect(page.locator('button')).toHaveCount(2);
+async function expectBackendApp(page) {
+  await expect(page.locator('.bottom-nav')).toBeVisible();
 }
 
 test.describe('Telegram backend login feature disabled', () => {
   test.skip(
     FEATURE_ENABLED,
-    'This regression requires the default-off Vite build.',
+    'This regression requires an explicitly disabled backend-login build.',
   );
 
-  test('keeps the existing Supabase UX and makes no backend request', async ({
+  test('fails closed without the mandatory backend login feature', async ({
     page,
   }) => {
     let loginCalls = 0;
@@ -183,7 +136,7 @@ test.describe('Telegram backend login feature disabled', () => {
     });
 
     await page.goto('/');
-    await expectExistingSupabaseWelcome(page);
+    await expect(page.locator('.bottom-nav')).toHaveCount(0);
     await page.waitForTimeout(300);
 
     expect({ loginCalls, sessionCalls, profileCalls }).toEqual({
@@ -193,7 +146,7 @@ test.describe('Telegram backend login feature disabled', () => {
     });
     await expect(
       page.getByTestId('telegram-backend-login-status'),
-    ).toHaveCount(0);
+    ).toHaveAttribute('data-status', 'disabled');
   });
 });
 
@@ -272,7 +225,7 @@ test.describe('Telegram backend login feature enabled', () => {
     const status = page.getByTestId('telegram-backend-login-status');
     await expect(status).toHaveAttribute('data-status', 'authenticated');
     await expect(status).toContainText('новый аккаунт создан');
-    await expectExistingSupabaseWelcome(page);
+    await expectBackendApp(page);
 
     expect(requestCount).toBe(1);
     expect(requestContract).toEqual({
@@ -370,47 +323,32 @@ test.describe('Telegram backend login feature enabled', () => {
     await expect(status).toHaveCount(0);
   });
 
-  for (const action of [
-    { name: 'Создать профиль' },
-    { name: 'У меня есть аккаунт' },
-  ]) {
-    test(`hides a success status when the user selects "${action.name}"`, async ({
-      page,
-    }) => {
-      await prepareBrowser(page);
-      await page.route(LOGIN_ROUTE, async (route) => {
-        await fulfillJson(route, 200, successBody('new'));
-      });
-
-      await page.goto('/');
-      const status = page.getByTestId('telegram-backend-login-status');
-      await expect(status).toHaveAttribute('data-status', 'authenticated');
-
-      await page.getByRole('button', { name: action.name, exact: true }).click();
-
-      await expect(status).toHaveCount(0);
-    });
-  }
-
-  test('hides a success status when the primary Supabase session appears', async ({
+  test('opens the application from the backend session alone', async ({
     page,
   }) => {
+    let legacyProviderRequests = 0;
     await prepareBrowser(page);
     await page.route(LOGIN_ROUTE, async (route) => {
       await fulfillJson(route, 200, successBody('existing'));
+    });
+    await page.route('**/auth/v1/**', async (route) => {
+      legacyProviderRequests += 1;
+      await route.abort();
+    });
+    await page.route('**/rest/v1/**', async (route) => {
+      legacyProviderRequests += 1;
+      await route.abort();
+    });
+    await page.route('https://*.supabase.co/**', async (route) => {
+      legacyProviderRequests += 1;
+      await route.abort();
     });
 
     await page.goto('/');
     const status = page.getByTestId('telegram-backend-login-status');
     await expect(status).toHaveAttribute('data-status', 'authenticated');
-
-    const sessionResult = await establishSyntheticSupabaseSession(page);
-
-    expect(sessionResult).toEqual({
-      hasSession: true,
-      hasError: false,
-    });
-    await expect(status).toHaveCount(0);
+    await expectBackendApp(page);
+    expect(legacyProviderRequests).toBe(0);
   });
 
   test('does not expose the legacy profile when the Telegram backend profile is unavailable', async ({
@@ -430,12 +368,6 @@ test.describe('Telegram backend login feature enabled', () => {
     });
 
     await page.goto('/');
-    const sessionResult = await establishSyntheticSupabaseSession(page);
-
-    expect(sessionResult).toEqual({
-      hasSession: true,
-      hasError: false,
-    });
     await expect(
       page.getByTestId('backend-own-profile-gate'),
     ).toHaveAttribute('data-state', 'error');
@@ -455,7 +387,7 @@ test.describe('Telegram backend login feature enabled', () => {
   }) => {
     let profileGets = 0;
     let profilePatches = 0;
-    let supabaseProfileUpdates = 0;
+    let legacyProfileUpdates = 0;
     let patchContract = null;
 
     await prepareBrowser(page);
@@ -525,14 +457,14 @@ test.describe('Telegram backend login feature enabled', () => {
     await page.route('**/rest/v1/**', async (route) => {
       const url = route.request().url();
       if (url.includes('/rpc/update_my_profile')) {
-        supabaseProfileUpdates += 1;
+        legacyProfileUpdates += 1;
       }
       if (url.includes('/rpc/get_my_profile')) {
         await fulfillJson(route, 200, {
           id: SYNTHETIC_ACCOUNT_ID,
-          first_name: 'Supabase',
+          first_name: 'Legacy',
           last_name: 'Fallback',
-          username: 'supabase_profile',
+          username: 'legacy_profile',
           phone: '+79990000000',
           side_preference: 'Both',
           rating: 3.4,
@@ -550,11 +482,6 @@ test.describe('Telegram backend login feature enabled', () => {
 
     await page.goto('/');
     await expect.poll(() => profileGets).toBe(1);
-    const sessionResult = await establishSyntheticSupabaseSession(page);
-    expect(sessionResult).toEqual({
-      hasSession: true,
-      hasError: false,
-    });
 
     const navigation = page.locator('.bottom-nav');
     await expect(navigation).toBeVisible();
@@ -598,7 +525,7 @@ test.describe('Telegram backend login feature enabled', () => {
       bearerIsCanonical: true,
       noCookie: true,
     });
-    expect(supabaseProfileUpdates).toBe(0);
+    expect(legacyProfileUpdates).toBe(0);
     await expect(
       page.getByText('Профиль сохранен', { exact: true }),
     ).toBeVisible();
@@ -1098,7 +1025,7 @@ test.describe('Telegram backend login feature enabled', () => {
       await page.goto('/');
       const status = page.getByTestId('telegram-backend-login-status');
       await expect(status).toHaveAttribute('data-status', 'outside_telegram');
-      await expectExistingSupabaseWelcome(page);
+      await expect(page.locator('.bottom-nav')).toHaveCount(0);
       expect(calls).toBe(0);
     });
   }
@@ -1650,74 +1577,4 @@ test.describe('Telegram backend login feature enabled', () => {
     });
   });
 
-  test('SIGNED_OUT aborts an active request and ignores its late success', async ({
-    page,
-  }) => {
-    let calls = 0;
-    let releaseResponse;
-    await prepareBrowser(page);
-    await page.route(LOGIN_ROUTE, async (route) => {
-      calls += 1;
-      await new Promise((resolve) => {
-        releaseResponse = resolve;
-      });
-      try {
-        await fulfillJson(route, 200, successBody());
-      } catch {
-        // The browser is expected to have aborted this intercepted request.
-      }
-    });
-
-    await page.goto('/');
-    await expect(
-      page.getByTestId('telegram-backend-login-status'),
-    ).toHaveAttribute('data-status', 'checking');
-    await expect.poll(() => calls).toBe(1);
-
-    const signOutSucceeded = await page.evaluate(async () => {
-      const { supabase } = await import('/src/lib/supabaseClient.js');
-      const { error } = await supabase.auth.signOut({ scope: 'local' });
-      return error === null;
-    });
-    expect(signOutSucceeded).toBe(true);
-    await expect(
-      page.getByTestId('telegram-backend-login-status'),
-    ).toHaveCount(0);
-
-    releaseResponse();
-    await page.waitForTimeout(200);
-    expect(calls).toBe(1);
-    await expect(
-      page.getByTestId('telegram-backend-login-status'),
-    ).toHaveCount(0);
-  });
-
-  test('clears the private boundary on Supabase SIGNED_OUT', async ({
-    page,
-  }) => {
-    let calls = 0;
-    await prepareBrowser(page);
-    await page.route(LOGIN_ROUTE, async (route) => {
-      calls += 1;
-      await fulfillJson(route, 200, successBody());
-    });
-
-    await page.goto('/');
-    await expect(
-      page.getByTestId('telegram-backend-login-status'),
-    ).toHaveAttribute('data-status', 'authenticated');
-
-    const signOutError = await page.evaluate(async () => {
-      const { supabase } = await import('/src/lib/supabaseClient.js');
-      const { error } = await supabase.auth.signOut({ scope: 'local' });
-      return error?.message ?? null;
-    });
-
-    expect(signOutError).toBeNull();
-    await expect(
-      page.getByTestId('telegram-backend-login-status'),
-    ).toHaveCount(0);
-    await page.waitForTimeout(100);
-    expect(calls).toBe(1);
-  });
 });

@@ -8,8 +8,10 @@ import { bookingAvailabilityClient } from '../lib/bookingAvailabilityClient';
 import { telegramBackendLoginClient } from '../lib/telegramBackendLogin';
 import { telegramSecureCredentialStorage } from '../lib/telegramSecureCredentialStorage';
 
+const FEATURE_SETTING =
+  import.meta.env.VITE_TELEGRAM_BACKEND_LOGIN_ENABLED;
 const FEATURE_ENABLED =
-  import.meta.env.VITE_TELEGRAM_BACKEND_LOGIN_ENABLED === 'true';
+  FEATURE_SETTING === undefined || FEATURE_SETTING === 'true';
 const MAX_TIMER_DELAY_MS = 2_147_000_000;
 const SUCCESS_MESSAGE_DURATION_MS = 3_000;
 

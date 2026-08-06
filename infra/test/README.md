@@ -44,20 +44,19 @@ startup, or an npm script. Every database operation below is a separate manual
 ## Frontend Telegram backend login build flag
 
 `VITE_TELEGRAM_BACKEND_LOGIN_ENABLED` is a public build-time Vite setting, not
-a runtime setting or a secret. Its Dockerfile and Compose default is `false`.
-With that value the frontend does not call the Telegram backend login endpoint,
-even if the backend endpoint remains enabled. Supabase remains the current
-session and data plane in both flag states.
+a runtime setting or a secret. Its Dockerfile and Compose default is `true`.
+The Telegram backend login endpoint and bearer-protected backend API are the
+only supported session and data plane. Setting the flag to `false` is a
+fail-closed diagnostic mode: the application stays behind the backend profile
+gate and does not fall back to a legacy provider.
 
 Changing the value requires rebuilding and recreating only `frontend`; changing
 an environment variable on an already-built container has no effect. For a
-separately approved Selectel rollout, set
+separately approved Selectel rollout, keep
 `VITE_TELEGRAM_BACKEND_LOGIN_ENABLED=true` in the server's non-secret
 environment file, then rebuild and recreate only `frontend` with the base
-Compose file followed by `compose.runtime-backend.yaml`. Roll back by restoring
-the value to `false` and rebuilding and recreating only `frontend` in the same
-way. Do not perform either deployment while preparing or reviewing this
-repository change.
+Compose file followed by `compose.runtime-backend.yaml`. Do not perform a
+deployment while preparing or reviewing this repository change.
 
 ## Guard model
 

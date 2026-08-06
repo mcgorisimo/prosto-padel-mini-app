@@ -1,7 +1,9 @@
 const { test, expect } = require('@playwright/test');
 
+const FEATURE_SETTING =
+  process.env.VITE_TELEGRAM_BACKEND_LOGIN_ENABLED;
 const FEATURE_ENABLED =
-  process.env.VITE_TELEGRAM_BACKEND_LOGIN_ENABLED === 'true';
+  FEATURE_SETTING === undefined || FEATURE_SETTING === 'true';
 const LOGIN_ROUTE = '**/api/v1/auth/telegram/login';
 const REFRESH_ROUTE = '**/api/v1/auth/session/refresh';
 const SESSION_ME_ROUTE = '**/api/v1/auth/session/me';
