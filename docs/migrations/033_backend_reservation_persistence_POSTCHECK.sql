@@ -41,7 +41,8 @@ begin
         array[
           'reservation_id', 'owner_account_id', 'status',
           'target_service_id', 'target_resource_id', 'target_datetime',
-          'target_datetime_text', 'yclients_company_id',
+          'target_datetime_text', 'target_end_datetime',
+          'target_end_datetime_text', 'yclients_company_id',
           'yclients_appointment_id', 'yclients_record_id',
           'yclients_record_hash_ciphertext', 'yclients_record_hash_nonce',
           'yclients_record_hash_auth_tag', 'yclients_record_hash_algorithm',
@@ -67,8 +68,7 @@ begin
           'court_reservations_client_lookup_idx',
           'court_reservations_owner_time_idx',
           'court_reservations_record_binding_uq',
-          'court_reservations_record_hash_binding_uq',
-          'court_reservations_slot_hold_uq'
+          'court_reservations_record_hash_binding_uq'
         ]::text[]
       ),
       (
@@ -78,7 +78,8 @@ begin
           'actor_account_id', 'operation_type', 'status', 'idempotency_key',
           'request_digest', 'request_digest_version', 'yclients_company_id',
           'external_api_id', 'target_service_id', 'target_resource_id',
-          'target_datetime', 'target_datetime_text', 'provider_appointment_id',
+          'target_datetime', 'target_datetime_text', 'target_end_datetime',
+          'target_end_datetime_text', 'provider_appointment_id',
           'provider_record_id', 'provider_record_hash_ciphertext',
           'provider_record_hash_nonce', 'provider_record_hash_auth_tag',
           'provider_record_hash_algorithm',
@@ -98,6 +99,7 @@ begin
           'reservation_operations_external_reference_check',
           'reservation_operations_operation_owner_key',
           'reservation_operations_operation_reservation_key',
+          'reservation_operations_operation_reservation_owner_key',
           'reservation_operations_operation_snapshot_key',
           'reservation_operations_owner_idempotency_key',
           'reservation_operations_pkey',
@@ -105,6 +107,7 @@ begin
           'reservation_operations_provider_binding_shape_check',
           'reservation_operations_reconciliation_check',
           'reservation_operations_reservation_owner_fkey',
+          'reservation_operations_slot_hold_binding_key',
           'reservation_operations_status_check',
           'reservation_operations_target_shape_check',
           'reservation_operations_terminal_shape_check',
@@ -121,11 +124,37 @@ begin
         ]::text[]
       ),
       (
+        'reservation_slot_holds',
+        array[
+          'hold_id', 'reservation_id', 'owner_account_id', 'operation_id',
+          'operation_type', 'hold_kind', 'yclients_company_id',
+          'target_service_id', 'target_resource_id', 'starts_at', 'ends_at',
+          'version', 'created_at', 'updated_at', 'released_at'
+        ]::text[],
+        array[
+          'reservation_slot_holds_kind_check',
+          'reservation_slot_holds_no_overlap',
+          'reservation_slot_holds_operation_fkey',
+          'reservation_slot_holds_pkey',
+          'reservation_slot_holds_reservation_owner_fkey',
+          'reservation_slot_holds_target_check',
+          'reservation_slot_holds_time_check',
+          'reservation_slot_holds_version_check'
+        ]::text[],
+        array[
+          'reservation_slot_holds_current_reservation_uq',
+          'reservation_slot_holds_owner_time_idx',
+          'reservation_slot_holds_reschedule_operation_uq'
+        ]::text[]
+      ),
+      (
         'reservation_operation_client_snapshots',
         array[
           'operation_id', 'owner_account_id', 'ciphertext', 'nonce', 'auth_tag',
-          'algorithm', 'encryption_key_version', 'digest_key_version',
-          'aad_version', 'created_at', 'crypto_destroyed_at'
+          'algorithm', 'wrapped_data_key_ciphertext', 'wrapped_data_key_nonce',
+          'wrapped_data_key_auth_tag', 'wrapping_algorithm',
+          'wrapping_key_version', 'digest_key_version', 'aad_version', 'version',
+          'created_at', 'updated_at', 'crypto_destroyed_at'
         ]::text[],
         array[
           'reservation_operation_client_snapshots_crypto_check',
@@ -219,11 +248,107 @@ begin
     end if;
   end loop;
 
+  if not exists (
+       select 1
+       from pg_catalog.pg_extension extension_row
+       join pg_catalog.pg_namespace namespace
+         on namespace.oid = extension_row.extnamespace
+       join pg_catalog.pg_opclass opclass
+         on opclass.opcnamespace = namespace.oid
+        and opclass.opcname = 'gist_int8_ops'
+        and opclass.opcintype = 'pg_catalog.int8'::pg_catalog.regtype
+       join pg_catalog.pg_am access_method
+         on access_method.oid = opclass.opcmethod
+        and access_method.amname = 'gist'
+       where extension_row.extname = 'btree_gist'
+         and namespace.nspname = 'public'
+     )
+     or not exists (
+       select 1
+       from pg_catalog.pg_extension extension_row
+       join pg_catalog.pg_namespace namespace
+         on namespace.oid = extension_row.extnamespace
+       join pg_catalog.pg_opclass opclass
+         on opclass.opcnamespace = namespace.oid
+        and opclass.opcname = 'gist_uuid_ops'
+        and opclass.opcintype = 'pg_catalog.uuid'::pg_catalog.regtype
+       join pg_catalog.pg_am access_method
+         on access_method.oid = opclass.opcmethod
+        and access_method.amname = 'gist'
+       where extension_row.extname = 'btree_gist'
+         and namespace.nspname = 'public'
+     )
+     or not exists (
+       select 1
+       from pg_catalog.pg_constraint constraint_row
+       join pg_catalog.pg_index index_row
+         on index_row.indexrelid = constraint_row.conindid
+       join pg_catalog.pg_class index_relation
+         on index_relation.oid = index_row.indexrelid
+       join pg_catalog.pg_am access_method
+         on access_method.oid = index_relation.relam
+       where constraint_row.conrelid =
+           'backend_reservation.reservation_slot_holds'::pg_catalog.regclass
+         and constraint_row.conname = 'reservation_slot_holds_no_overlap'
+         and constraint_row.contype = 'x'
+         and access_method.amname = 'gist'
+         and (
+           select pg_catalog.array_agg(operator.oprname::text order by item.position)
+           from pg_catalog.unnest(constraint_row.conexclop)
+             with ordinality item(operator_oid, position)
+           join pg_catalog.pg_operator operator
+             on operator.oid = item.operator_oid
+         ) = array['<>', '=', '=', '&&']::text[]
+         and (
+           select pg_catalog.array_agg(opclass.opcname::text order by item.position)
+           from pg_catalog.unnest(index_row.indclass)
+             with ordinality item(opclass_oid, position)
+           join pg_catalog.pg_opclass opclass
+             on opclass.oid = item.opclass_oid
+         ) = array[
+           'gist_uuid_ops', 'gist_int8_ops', 'gist_int8_ops', 'range_ops'
+         ]::text[]
+         and (
+           select pg_catalog.array_agg(namespace.nspname::text order by item.position)
+           from pg_catalog.unnest(index_row.indclass)
+             with ordinality item(opclass_oid, position)
+           join pg_catalog.pg_opclass opclass
+             on opclass.oid = item.opclass_oid
+           join pg_catalog.pg_namespace namespace
+             on namespace.oid = opclass.opcnamespace
+         ) = array['public', 'public', 'public', 'pg_catalog']::text[]
+         and pg_catalog.btrim(pg_catalog.regexp_replace(
+           pg_catalog.lower(pg_catalog.pg_get_expr(
+             index_row.indexprs,
+             index_row.indrelid,
+             true
+           )),
+           '[[:space:]]+',
+           ' ',
+           'g'
+         )) = 'tstzrange(starts_at, ends_at, ''[)''::text)'
+         and pg_catalog.btrim(pg_catalog.regexp_replace(
+           pg_catalog.lower(pg_catalog.pg_get_expr(
+             index_row.indpred,
+             index_row.indrelid,
+             true
+           )),
+           '[[:space:]]+',
+           ' ',
+           'g'
+         )) in ('released_at is null', '(released_at is null)')
+     ) then
+    raise exception 'POSTCHECK_FAILED: interval overlap exclusion differs';
+  end if;
+
   if not pg_catalog.has_table_privilege(
        'backend_auth_app', 'backend_reservation.court_reservations', 'SELECT'
      )
      or not pg_catalog.has_table_privilege(
        'backend_auth_app', 'backend_reservation.reservation_operations', 'SELECT'
+     )
+     or not pg_catalog.has_table_privilege(
+       'backend_auth_app', 'backend_reservation.reservation_slot_holds', 'SELECT'
      )
      or not pg_catalog.has_table_privilege(
        'backend_auth_app',
@@ -271,6 +396,50 @@ begin
   end if;
 
   if pg_catalog.to_regprocedure(
+       'backend_reservation.guard_slot_hold_transition()'
+     ) is null
+     or pg_catalog.obj_description(
+       'backend_reservation.guard_slot_hold_transition()'::pg_catalog.regprocedure,
+       'pg_proc'
+     ) <> '033_backend_reservation_persistence:'
+       || pg_catalog.md5(pg_catalog.pg_get_functiondef(
+         'backend_reservation.guard_slot_hold_transition()'::pg_catalog.regprocedure
+       ))
+     or (
+       select pg_catalog.array_agg(trigger_row.tgname order by trigger_row.tgname)
+       from pg_catalog.pg_trigger trigger_row
+       where trigger_row.tgrelid =
+         'backend_reservation.reservation_slot_holds'::pg_catalog.regclass
+         and not trigger_row.tgisinternal
+     ) is distinct from array[
+       'reservation_slot_holds_transition_guard'
+     ]::text[] then
+    raise exception 'POSTCHECK_FAILED: slot hold transition guard differs';
+  end if;
+
+  if pg_catalog.to_regprocedure(
+       'backend_reservation.guard_client_snapshot_transition()'
+     ) is null
+     or pg_catalog.obj_description(
+       'backend_reservation.guard_client_snapshot_transition()'::pg_catalog.regprocedure,
+       'pg_proc'
+     ) <> '033_backend_reservation_persistence:'
+       || pg_catalog.md5(pg_catalog.pg_get_functiondef(
+         'backend_reservation.guard_client_snapshot_transition()'::pg_catalog.regprocedure
+       ))
+     or (
+       select pg_catalog.array_agg(trigger_row.tgname order by trigger_row.tgname)
+       from pg_catalog.pg_trigger trigger_row
+       where trigger_row.tgrelid =
+         'backend_reservation.reservation_operation_client_snapshots'::pg_catalog.regclass
+         and not trigger_row.tgisinternal
+     ) is distinct from array[
+       'reservation_operation_client_snapshots_transition_guard'
+     ]::text[] then
+    raise exception 'POSTCHECK_FAILED: snapshot erase guard differs';
+  end if;
+
+  if pg_catalog.to_regprocedure(
        'backend_reservation.reject_admin_read_audit_mutation()'
      ) is null
      or pg_catalog.obj_description(
@@ -295,6 +464,7 @@ begin
 
   if exists (select 1 from backend_reservation.court_reservations)
      or exists (select 1 from backend_reservation.reservation_operations)
+     or exists (select 1 from backend_reservation.reservation_slot_holds)
      or exists (
        select 1
        from backend_reservation.reservation_operation_client_snapshots
@@ -321,6 +491,10 @@ select pg_catalog.jsonb_build_object(
       select pg_catalog.count(*)
       from backend_reservation.reservation_operations
     ),
+    'reservation_slot_holds', (
+      select pg_catalog.count(*)
+      from backend_reservation.reservation_slot_holds
+    ),
     'reservation_operation_client_snapshots', (
       select pg_catalog.count(*)
       from backend_reservation.reservation_operation_client_snapshots
@@ -336,6 +510,9 @@ select pg_catalog.jsonb_build_object(
     ),
     'reservation_operations', backend_auth.relation_fingerprint(
       'backend_reservation.reservation_operations'::pg_catalog.regclass
+    ),
+    'reservation_slot_holds', backend_auth.relation_fingerprint(
+      'backend_reservation.reservation_slot_holds'::pg_catalog.regclass
     ),
     'reservation_operation_client_snapshots', backend_auth.relation_fingerprint(
       'backend_reservation.reservation_operation_client_snapshots'::pg_catalog.regclass

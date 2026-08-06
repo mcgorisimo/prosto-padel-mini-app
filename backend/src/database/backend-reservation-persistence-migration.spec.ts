@@ -35,10 +35,11 @@ describe('migration 033 backend reservation persistence contract', () => {
     expect(sql).toContain(
       'create schema backend_reservation authorization backend_auth_owner',
     );
-    expect(sql.match(/create table backend_reservation\./gu)).toHaveLength(4);
+    expect(sql.match(/create table backend_reservation\./gu)).toHaveLength(5);
     for (const table of [
       'court_reservations',
       'reservation_operations',
+      'reservation_slot_holds',
       'reservation_operation_client_snapshots',
       'reservation_admin_read_audit_events',
     ]) {
@@ -53,7 +54,7 @@ describe('migration 033 backend reservation persistence contract', () => {
     );
   });
 
-  it('encodes ownership, idempotency, active-operation, and slot-hold invariants', () => {
+  it('encodes ownership, idempotency, active-operation, and interval-hold invariants', () => {
     const sql = compact(MIGRATION);
 
     expect(sql).toContain(
@@ -71,15 +72,52 @@ describe('migration 033 backend reservation persistence contract', () => {
     expect(sql).toContain(
       "create unique index reservation_operations_active_reservation_uq on backend_reservation.reservation_operations (reservation_id) where status = any (array['pending', 'unknown']::text[])",
     );
-    expect(sql).toContain('create unique index court_reservations_slot_hold_uq');
     expect(sql).toContain(
-      "'pending_confirmation', 'confirmed', 'reschedule_pending', 'cancel_pending', 'unknown'",
+      'create table backend_reservation.reservation_slot_holds',
     );
+    expect(sql).toContain(
+      'constraint reservation_slot_holds_no_overlap exclude using gist',
+    );
+    expect(sql).toContain('reservation_id public.gist_uuid_ops with <>');
+    expect(sql).toContain(
+      "pg_catalog.tstzrange(starts_at, ends_at, '[)'::text) with &&",
+    );
+    expect(sql).toContain(
+      "hold_kind = 'reschedule_target' and operation_id is not null and operation_type = 'reschedule'",
+    );
+    expect(sql).toContain(
+      'foreign key ( operation_id, reservation_id, owner_account_id, operation_type ) references backend_reservation.reservation_operations',
+    );
+    expect(sql).toContain(
+      'create unique index reservation_slot_holds_current_reservation_uq',
+    );
+    expect(sql).toContain(
+      'create unique index reservation_slot_holds_reschedule_operation_uq',
+    );
+    expect(sql).toContain('guard_slot_hold_transition');
+    expect(sql).toContain('backend_reservation_current_hold_target_mismatch');
+    expect(sql).toContain('backend_reservation_reschedule_hold_target_mismatch');
+    expect(sql).toContain('backend_reservation_slot_hold_already_released');
     expect(sql).toContain('version bigint not null');
     expect(sql.match(
       /target_datetime = target_datetime_text::pg_catalog\.timestamptz/gu,
     )).toHaveLength(2);
+    expect(sql.match(
+      /target_end_datetime =\s*target_end_datetime_text::pg_catalog\.timestamptz/gu,
+    )).toHaveLength(2);
+    expect(sql.match(/target_end_datetime > target_datetime/gu)).toHaveLength(2);
     expect(sql).toContain('reservation_operations_unknown_reconciliation_idx');
+  });
+
+  it('binds every operation type to its only legal previous reservation state', () => {
+    const sql = compact(MIGRATION);
+
+    expect(sql).toContain(
+      "operation_type = 'create' and previous_reservation_status = any ( array['unbooked', 'rejected']::text[] )",
+    );
+    expect(sql).toContain(
+      "operation_type = any (array['reschedule', 'cancel']::text[]) and previous_reservation_status = 'confirmed'",
+    );
   });
 
   it('keeps provider lookup claims bounded to confirmed contracts', () => {
@@ -116,9 +154,19 @@ describe('migration 033 backend reservation persistence contract', () => {
     expect(snapshot).toContain('nonce bytea not null');
     expect(snapshot).toContain('auth_tag bytea not null');
     expect(snapshot).toContain('algorithm text not null');
-    expect(snapshot).toContain('encryption_key_version integer not null');
+    expect(snapshot).toContain('wrapped_data_key_ciphertext bytea');
+    expect(snapshot).toContain('wrapped_data_key_nonce bytea');
+    expect(snapshot).toContain('wrapped_data_key_auth_tag bytea');
+    expect(snapshot).toContain('wrapping_algorithm text');
+    expect(snapshot).toContain('wrapping_key_version integer');
     expect(snapshot).toContain('digest_key_version integer not null');
     expect(snapshot).toContain('aad_version integer not null');
+    expect(snapshot).toContain(
+      'crypto_destroyed_at is not null and pg_catalog.num_nonnulls( wrapped_data_key_ciphertext, wrapped_data_key_nonce, wrapped_data_key_auth_tag, wrapping_algorithm, wrapping_key_version ) = 0',
+    );
+    expect(sql).toContain('guard_client_snapshot_transition');
+    expect(sql).toContain('backend_reservation_client_snapshot_erased');
+    expect(sql).toContain('backend_reservation_client_snapshot_erase_scope_invalid');
     expect(snapshot).not.toMatch(/\b(full_name|fullname|phone|email)\s+/u);
     expect(sql).not.toMatch(/\b(full_name|fullname|phone|email)\s+(text|bytea)/u);
     expect(sql).not.toMatch(/\brecord_hash\s+(text|bytea)/u);
@@ -182,6 +230,8 @@ describe('migration 033 backend reservation persistence contract', () => {
 
     expect(precheck).toContain('begin read only');
     expect(precheck).toContain('migration 033 target already exists');
+    expect(precheck).toContain('gist_int8_ops');
+    expect(precheck).toContain('gist_uuid_ops');
     expect(postcheck).toContain('begin read only');
     expect(postcheck).toContain(
       'v_actual_columns is distinct from v_expected.columns',
@@ -192,6 +242,11 @@ describe('migration 033 backend reservation persistence contract', () => {
     expect(postcheck).toContain(
       'v_actual_indexes is distinct from v_expected.indexes',
     );
+    expect(postcheck).toContain("array['<>', '=', '=', '&&']::text[]");
+    expect(postcheck).toContain(
+      "array[ 'gist_uuid_ops', 'gist_int8_ops', 'gist_int8_ops', 'range_ops' ]::text[]",
+    );
+    expect(postcheck).toContain('snapshot erase guard differs');
     expect(postcheck).toContain('migration 033 target must start empty');
     expect(rollback).toContain('lock table');
     expect(rollback).toContain(
@@ -211,6 +266,9 @@ describe('migration 033 backend reservation persistence contract', () => {
     expect(runbook).toContain('backup');
     expect(runbook).toContain('backend rbac');
     expect(runbook).toContain('fail-closed insertion');
+    expect(runbook).toContain('per-snapshot crypto erase');
+    expect(runbook).toContain('reschedule_target');
+    expect(runbook).toContain('every overlapping');
     expect(runbook).toContain('no `cascade`');
     expect(runbook).toContain('runtime remains disconnected');
   });

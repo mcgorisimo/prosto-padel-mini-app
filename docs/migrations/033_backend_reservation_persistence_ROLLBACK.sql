@@ -1,5 +1,5 @@
 -- Fail-closed rollback for an unused migration 033.
--- Once any reservation, operation, encrypted snapshot, or audit event exists,
+-- Once any reservation, operation, slot hold, encrypted snapshot, or audit event exists,
 -- preserve the schema and use a reviewed forward migration.
 
 begin;
@@ -23,6 +23,7 @@ begin
   foreach v_name in array array[
     'court_reservations',
     'reservation_operations',
+    'reservation_slot_holds',
     'reservation_operation_client_snapshots',
     'reservation_admin_read_audit_events'
   ]
@@ -36,6 +37,32 @@ begin
         v_name;
     end if;
   end loop;
+
+  if pg_catalog.to_regprocedure(
+       'backend_reservation.guard_slot_hold_transition()'
+     ) is null
+     or pg_catalog.obj_description(
+       'backend_reservation.guard_slot_hold_transition()'::pg_catalog.regprocedure,
+       'pg_proc'
+     ) <> '033_backend_reservation_persistence:'
+       || pg_catalog.md5(pg_catalog.pg_get_functiondef(
+         'backend_reservation.guard_slot_hold_transition()'::pg_catalog.regprocedure
+       )) then
+    raise exception 'ROLLBACK_PRECONDITION_FAILED: migration 033 slot hold guard differs';
+  end if;
+
+  if pg_catalog.to_regprocedure(
+       'backend_reservation.guard_client_snapshot_transition()'
+     ) is null
+     or pg_catalog.obj_description(
+       'backend_reservation.guard_client_snapshot_transition()'::pg_catalog.regprocedure,
+       'pg_proc'
+     ) <> '033_backend_reservation_persistence:'
+       || pg_catalog.md5(pg_catalog.pg_get_functiondef(
+         'backend_reservation.guard_client_snapshot_transition()'::pg_catalog.regprocedure
+       )) then
+    raise exception 'ROLLBACK_PRECONDITION_FAILED: migration 033 snapshot guard differs';
+  end if;
 
   if pg_catalog.to_regprocedure(
        'backend_reservation.reject_admin_read_audit_mutation()'
@@ -57,6 +84,7 @@ set local role backend_auth_owner;
 lock table
   backend_reservation.reservation_admin_read_audit_events,
   backend_reservation.reservation_operation_client_snapshots,
+  backend_reservation.reservation_slot_holds,
   backend_reservation.reservation_operations,
   backend_reservation.court_reservations
 in access exclusive mode;
@@ -65,6 +93,7 @@ do $empty_guard$
 begin
   if exists (select 1 from backend_reservation.court_reservations)
      or exists (select 1 from backend_reservation.reservation_operations)
+     or exists (select 1 from backend_reservation.reservation_slot_holds)
      or exists (
        select 1
        from backend_reservation.reservation_operation_client_snapshots
@@ -80,8 +109,11 @@ $empty_guard$;
 
 drop table backend_reservation.reservation_admin_read_audit_events;
 drop table backend_reservation.reservation_operation_client_snapshots;
+drop table backend_reservation.reservation_slot_holds;
 drop table backend_reservation.reservation_operations;
 drop table backend_reservation.court_reservations;
+drop function backend_reservation.guard_slot_hold_transition();
+drop function backend_reservation.guard_client_snapshot_transition();
 drop function backend_reservation.reject_admin_read_audit_mutation();
 drop schema backend_reservation;
 

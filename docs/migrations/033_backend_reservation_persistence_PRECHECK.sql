@@ -55,6 +55,42 @@ begin
     raise exception 'PRECHECK_FAILED: backend auth foundation is missing';
   end if;
 
+  if not exists (
+       select 1
+       from pg_catalog.pg_extension extension_row
+       join pg_catalog.pg_namespace namespace
+         on namespace.oid = extension_row.extnamespace
+       join pg_catalog.pg_opclass opclass
+         on opclass.opcnamespace = namespace.oid
+        and opclass.opcname = 'gist_int8_ops'
+        and opclass.opcintype = 'pg_catalog.int8'::pg_catalog.regtype
+       join pg_catalog.pg_am access_method
+         on access_method.oid = opclass.opcmethod
+        and access_method.amname = 'gist'
+       where extension_row.extname = 'btree_gist'
+         and namespace.nspname = 'public'
+     )
+     or not exists (
+       select 1
+       from pg_catalog.pg_extension extension_row
+       join pg_catalog.pg_namespace namespace
+         on namespace.oid = extension_row.extnamespace
+       join pg_catalog.pg_opclass opclass
+         on opclass.opcnamespace = namespace.oid
+        and opclass.opcname = 'gist_uuid_ops'
+        and opclass.opcintype = 'pg_catalog.uuid'::pg_catalog.regtype
+       join pg_catalog.pg_am access_method
+         on access_method.oid = opclass.opcmethod
+        and access_method.amname = 'gist'
+       where extension_row.extname = 'btree_gist'
+         and namespace.nspname = 'public'
+     )
+     or not pg_catalog.has_schema_privilege(
+       'backend_auth_owner', 'public', 'USAGE'
+     ) then
+    raise exception 'PRECHECK_FAILED: canonical btree_gist is missing';
+  end if;
+
   if pg_catalog.obj_description(
        'backend_auth.accounts'::pg_catalog.regclass,
        'pg_class'
@@ -83,6 +119,12 @@ select pg_catalog.jsonb_build_object(
   'migration', '033_backend_reservation_persistence',
   'target_schema_absent',
     pg_catalog.to_regnamespace('backend_reservation') is null,
+  'btree_gist', pg_catalog.jsonb_build_object(
+    'installed', true,
+    'schema', 'public',
+    'int8_opclass', 'gist_int8_ops',
+    'uuid_opclass', 'gist_uuid_ops'
+  ),
   'row_counts', pg_catalog.jsonb_build_object(
     'accounts', (select pg_catalog.count(*) from backend_auth.accounts),
     'existing_security_audit_events', (

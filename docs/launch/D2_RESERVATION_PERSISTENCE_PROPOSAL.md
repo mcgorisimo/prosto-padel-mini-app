@@ -18,7 +18,7 @@ runtime wiring и Selectel rollout требуют отдельного явно�
 | `owner_account_id` | UUID NOT NULL, FK account; часть ownership binding |
 | `status` | `unbooked`, `pending_confirmation`, `confirmed`, `reschedule_pending`, `cancel_pending`, `cancelled`, `rejected`, `unknown` |
 | `target_service_id`, `target_resource_id` | positive bigint, YCLIENTS service/resource snapshot |
-| `target_datetime`, `target_datetime_text` | `timestamptz` для запросов + проверенная canonical ISO строка для точного provider request/digest |
+| start/end datetime + canonical ISO text | ненулевой `[start, end)` interval; typed values совпадают с provider/digest text |
 | `yclients_company_id` | positive bigint; tenant scope binding, без hardcode значения |
 | `yclients_appointment_id`, `yclients_record_id` | nullable до подтверждения create/reconciliation |
 | `yclients_record_hash_ciphertext`, nonce/tag/algorithm, encryption key version, `yclients_record_hash_digest`, digest key version | nullable AEAD binding + keyed lookup digest; raw hash не индексировать и не логировать |
@@ -40,7 +40,7 @@ runtime wiring и Selectel rollout требуют отдельного явно�
 | `idempotency_key` | UUID NOT NULL; уникален только внутри owner scope |
 | `request_digest`, `request_digest_version` | lowercase SHA-256 canonical request representation; PII-компонентом служит keyed client snapshot digest |
 | `yclients_company_id`, `external_api_id` | positive integers, только server-derived; не принимать из client body |
-| `target_service_id`, `target_resource_id`, `target_datetime`, `target_datetime_text` | immutable operation snapshot; nullable только для cancel |
+| target service/resource + start/end datetime/text | immutable operation interval snapshot; nullable только для cancel |
 | `provider_appointment_id`, `provider_record_id`, provider record-hash ciphertext/nonce/tag/algorithm/key versions/digest | immutable binding snapshot для reschedule/cancel/reconciliation; nullable для create до provider result |
 | `client_snapshot_digest` | keyed canonical digest отдельного encrypted snapshot; raw PII здесь нет |
 | `previous_reservation_status` | состояние до start для безопасного reject/reconcile |
@@ -53,15 +53,40 @@ runtime wiring и Selectel rollout требуют отдельного явно�
 Canonical request digest покрывает owner/reservation/type, company/apiId, target,
 client snapshot digest и provider binding для reschedule/cancel.
 
+`previous_reservation_status` дополнительно связан DB CHECK с type: create —
+только `unbooked`/`rejected`, reschedule/cancel — только `confirmed`.
+
+### `reservation_slot_holds`
+
+Единая allocation relation для interval concurrency:
+
+- current reservation hold или `reschedule_target`, связанный FK с конкретной
+  reschedule operation;
+- company/service/resource и `[starts_at, ends_at)`;
+- release/version/timestamps без физического DELETE;
+- GiST exclusion запрещает пересечение active intervals разных reservations
+  одного company/resource, но разрешает current+target одной reservation.
+- INSERT guard сверяет current interval с reservation, target interval — с
+  immutable reschedule operation; binding/interval после вставки неизменяемы.
+
+При reschedule старый current hold и новый target hold существуют одновременно.
+`unknown`, `cancel_pending` и `reschedule_pending` не освобождают current hold;
+unknown reschedule не освобождает также target hold.
+
 ### `reservation_operation_client_snapshots`
 
 One-to-one snapshot на operation:
 
 - `operation_id` UUID PK/FK к operation;
 - `owner_account_id` для account-scoped доступа;
-- `ciphertext`, `nonce`, `auth_tag`, `algorithm`, `encryption_key_version`,
-  `digest_key_version`, `aad_version`;
-- `created_at`, nullable `crypto_destroyed_at`.
+- content `ciphertext`/nonce/tag/algorithm, keyed-digest/AAD versions;
+- отдельный random DEK на snapshot; в БД только wrapped-DEK
+  ciphertext/nonce/tag/algorithm/wrapping-key version;
+- optimistic version/timestamps и nullable `crypto_destroyed_at`.
+
+Per-snapshot crypto erase удаляет только wrapped DEK и ставит
+`crypto_destroyed_at`; trigger запрещает восстановление erased snapshot. Plain
+DEK и wrapping key в БД не хранятся.
 
 Raw phone/fullName/email не хранить в operation JSON, обычных колонках или
 логах.
@@ -88,14 +113,16 @@ table:
   другой digest или binding даёт conflict без provider call.
 - Partial UNIQUE на `reservation_id` для active operation statuses
   `pending`/`unknown`.
+- `reservation_slot_holds` имеет one-current-per-reservation,
+  one-target-per-reschedule-operation и GiST interval-overlap exclusion.
 - State/type CHECK constraints; positive service/resource/api/version; digest
-  format/version; target snapshot обязателен для create/reschedule.
+  format/version; ненулевой target interval обязателен для create/reschedule;
+  previous status ограничен operation type.
 - Все state changes: row lock reservation + version compare/increment. Потерянное
   обновление отклоняется как transaction conflict.
 - `unknown`, `cancel_pending`, `reschedule_pending`, `pending_confirmation` и
-  `confirmed` считаются удерживающими слот. Освобождение — только `cancelled` или
-  окончательный create rejection; это проверяется transition service и
-  allocation query, не UI.
+  `confirmed` считаются удерживающими слот. Освобождение — только допустимой
+  terminal transaction; allocation query работает только через active holds.
 - Partial UNIQUE provider binding: `(yclients_company_id, yclients_record_id)` и
   `(yclients_company_id, digest_key_version, yclients_record_hash_digest)`;
   appointment ID добавлять после подтверждения его scope. Raw record hash не
@@ -115,10 +142,9 @@ table:
 2. DB-side encryption — допустимо, но повышает риск совместного хранения ключа и
    ciphertext и связывает runtime с DB extension/config.
 3. **Рекомендуется для Selectel:** application-layer AEAD encrypted snapshot.
-   Random nonce на snapshot; auth tag хранится с ciphertext; `key_version` и
-   algorithm version — в БД. Ключи encryption/HMAC находятся вне PostgreSQL в
-   server-side secret storage. AAD связывает owner/reservation/operation и
-   request digest.
+   Random DEK/nonce на snapshot; auth tag и wrapped-DEK ciphertext хранятся в БД.
+   Plain DEK, wrapping key и HMAC key находятся вне PostgreSQL в server-side
+   secret storage. AAD связывает owner/reservation/operation и request digest.
 
 Для equality/audit использовать отдельный keyed HMAC canonical snapshot, а не
 plain SHA PII. Одобренный persistence contract заменяет raw client components в
@@ -156,9 +182,9 @@ Retention, anonymization и delete-account требуют отдельных р�
 
 1. Start: проверить actor/owner, lock reservation row, lookup operation по
    `(owner, key)`, сравнить binding/digest, проверить отсутствие active operation.
-2. В одной transaction вставить operation+encrypted snapshot и изменить
-   reservation status/version. Provider call выполняется только после commit,
-   без удержания DB lock.
+2. В одной transaction вставить operation+encrypted snapshot, создать current
+   либо reschedule-target hold и изменить reservation status/version. Provider
+   call выполняется только после commit, без удержания DB lock.
 3. Provider result: отдельная transaction locks reservation+operation. Confirmed
    сохраняет уникальный binding; rejected завершает operation; uncertain write
    атомарно переводит обе записи в `unknown`.
@@ -167,6 +193,9 @@ Retention, anonymization и delete-account требуют отдельных р�
 5. Cancel не освобождает слот до confirmed provider cancellation. Unique/binding
    conflict после внешнего успеха остаётся `unknown` для ручного reconcile, а не
    превращается в локальный rejection.
+6. Reschedule start сохраняет current hold и добавляет target hold. Confirmed
+   transaction заменяет оба на новый current hold; rejected освобождает только
+   target; unknown сохраняет оба.
 
 ### Zero-downtime migration order
 
@@ -191,7 +220,7 @@ Migration 033 и её contract tests подготовлены только дл�
 
 Владелец явно одобрил:
 
-- [x] четыре сущности, поля/statuses и composite owner scope;
+- [x] пять сущностей, поля/statuses и composite owner scope;
 - [x] one-active-operation и slot-hold status set;
 - [x] canonical datetime: `timestamptz` + exact provider text;
 - [x] application-layer AEAD, отдельный keyed HMAC, AAD и key rotation/versioning;

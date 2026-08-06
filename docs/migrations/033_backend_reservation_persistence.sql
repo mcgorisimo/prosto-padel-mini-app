@@ -59,6 +59,42 @@ begin
     raise exception 'MIGRATION_PRECONDITION_FAILED: backend auth foundation is missing';
   end if;
 
+  if not exists (
+       select 1
+       from pg_catalog.pg_extension extension_row
+       join pg_catalog.pg_namespace namespace
+         on namespace.oid = extension_row.extnamespace
+       join pg_catalog.pg_opclass opclass
+         on opclass.opcnamespace = namespace.oid
+        and opclass.opcname = 'gist_int8_ops'
+        and opclass.opcintype = 'pg_catalog.int8'::pg_catalog.regtype
+       join pg_catalog.pg_am access_method
+         on access_method.oid = opclass.opcmethod
+        and access_method.amname = 'gist'
+       where extension_row.extname = 'btree_gist'
+         and namespace.nspname = 'public'
+     )
+     or not exists (
+       select 1
+       from pg_catalog.pg_extension extension_row
+       join pg_catalog.pg_namespace namespace
+         on namespace.oid = extension_row.extnamespace
+       join pg_catalog.pg_opclass opclass
+         on opclass.opcnamespace = namespace.oid
+        and opclass.opcname = 'gist_uuid_ops'
+        and opclass.opcintype = 'pg_catalog.uuid'::pg_catalog.regtype
+       join pg_catalog.pg_am access_method
+         on access_method.oid = opclass.opcmethod
+        and access_method.amname = 'gist'
+       where extension_row.extname = 'btree_gist'
+         and namespace.nspname = 'public'
+     )
+     or not pg_catalog.has_schema_privilege(
+       'backend_auth_owner', 'public', 'USAGE'
+     ) then
+    raise exception 'MIGRATION_PRECONDITION_FAILED: canonical btree_gist is missing';
+  end if;
+
   if pg_catalog.obj_description(
        'backend_auth.accounts'::pg_catalog.regclass,
        'pg_class'
@@ -96,6 +132,8 @@ create table backend_reservation.court_reservations (
   target_resource_id bigint not null,
   target_datetime timestamp with time zone not null,
   target_datetime_text text not null,
+  target_end_datetime timestamp with time zone not null,
+  target_end_datetime_text text not null,
   yclients_company_id bigint not null,
   yclients_appointment_id bigint,
   yclients_record_id bigint,
@@ -131,6 +169,11 @@ create table backend_reservation.court_reservations (
     and target_datetime_text ~
       '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,3})?(Z|[+-][0-9]{2}:[0-9]{2})$'
     and target_datetime = target_datetime_text::pg_catalog.timestamptz
+    and pg_catalog.length(target_end_datetime_text) between 20 and 35
+    and target_end_datetime_text ~
+      '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,3})?(Z|[+-][0-9]{2}:[0-9]{2})$'
+    and target_end_datetime = target_end_datetime_text::pg_catalog.timestamptz
+    and target_end_datetime > target_datetime
   ),
   constraint court_reservations_provider_id_check check (
     yclients_company_id between 1 and 9007199254740991
@@ -196,17 +239,6 @@ create table backend_reservation.court_reservations (
   )
 );
 
-create unique index court_reservations_slot_hold_uq
-  on backend_reservation.court_reservations (
-    yclients_company_id,
-    target_resource_id,
-    target_datetime
-  )
-  where status = any (array[
-    'pending_confirmation', 'confirmed', 'reschedule_pending',
-    'cancel_pending', 'unknown'
-  ]::text[]);
-
 create unique index court_reservations_record_binding_uq
   on backend_reservation.court_reservations (
     yclients_company_id,
@@ -259,6 +291,8 @@ create table backend_reservation.reservation_operations (
   target_resource_id bigint,
   target_datetime timestamp with time zone,
   target_datetime_text text,
+  target_end_datetime timestamp with time zone,
+  target_end_datetime_text text,
   provider_appointment_id bigint,
   provider_record_id bigint,
   provider_record_hash_ciphertext bytea,
@@ -296,6 +330,15 @@ create table backend_reservation.reservation_operations (
     ),
   constraint reservation_operations_operation_reservation_key
     unique (operation_id, reservation_id),
+  constraint reservation_operations_operation_reservation_owner_key
+    unique (operation_id, reservation_id, owner_account_id),
+  constraint reservation_operations_slot_hold_binding_key
+    unique (
+      operation_id,
+      reservation_id,
+      owner_account_id,
+      operation_type
+    ),
   constraint reservation_operations_reservation_owner_fkey
     foreign key (reservation_id, owner_account_id)
     references backend_reservation.court_reservations (
@@ -331,7 +374,9 @@ create table backend_reservation.reservation_operations (
         target_service_id,
         target_resource_id,
         target_datetime,
-        target_datetime_text
+        target_datetime_text,
+        target_end_datetime,
+        target_end_datetime_text
       ) = 0
     )
     or
@@ -341,14 +386,22 @@ create table backend_reservation.reservation_operations (
         target_service_id,
         target_resource_id,
         target_datetime,
-        target_datetime_text
-      ) = 4
+        target_datetime_text,
+        target_end_datetime,
+        target_end_datetime_text
+      ) = 6
       and target_service_id between 1 and 9007199254740991
       and target_resource_id between 1 and 9007199254740991
       and pg_catalog.length(target_datetime_text) between 20 and 35
       and target_datetime_text ~
         '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,3})?(Z|[+-][0-9]{2}:[0-9]{2})$'
       and target_datetime = target_datetime_text::pg_catalog.timestamptz
+      and pg_catalog.length(target_end_datetime_text) between 20 and 35
+      and target_end_datetime_text ~
+        '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,3})?(Z|[+-][0-9]{2}:[0-9]{2})$'
+      and target_end_datetime =
+        target_end_datetime_text::pg_catalog.timestamptz
+      and target_end_datetime > target_datetime
     )
   ),
   constraint reservation_operations_provider_binding_shape_check check (
@@ -392,10 +445,17 @@ create table backend_reservation.reservation_operations (
     )
   ),
   constraint reservation_operations_previous_status_check check (
-    previous_reservation_status = any (array[
-      'unbooked', 'pending_confirmation', 'confirmed', 'reschedule_pending',
-      'cancel_pending', 'cancelled', 'rejected', 'unknown'
-    ]::text[])
+    (
+      operation_type = 'create'
+      and previous_reservation_status = any (
+        array['unbooked', 'rejected']::text[]
+      )
+    )
+    or
+    (
+      operation_type = any (array['reschedule', 'cancel']::text[])
+      and previous_reservation_status = 'confirmed'
+    )
   ),
   constraint reservation_operations_terminal_shape_check check (
     (
@@ -526,6 +586,100 @@ create index reservation_operations_unknown_reconciliation_idx
   )
   where status = 'unknown';
 
+create table backend_reservation.reservation_slot_holds (
+  hold_id uuid not null,
+  reservation_id uuid not null,
+  owner_account_id uuid not null,
+  operation_id uuid,
+  operation_type text,
+  hold_kind text not null,
+  yclients_company_id bigint not null,
+  target_service_id bigint not null,
+  target_resource_id bigint not null,
+  starts_at timestamp with time zone not null,
+  ends_at timestamp with time zone not null,
+  version bigint not null,
+  created_at bigint not null,
+  updated_at bigint not null,
+  released_at bigint,
+  constraint reservation_slot_holds_pkey primary key (hold_id),
+  constraint reservation_slot_holds_reservation_owner_fkey
+    foreign key (reservation_id, owner_account_id)
+    references backend_reservation.court_reservations (
+      reservation_id,
+      owner_account_id
+    )
+    on update no action on delete no action not deferrable,
+  constraint reservation_slot_holds_operation_fkey
+    foreign key (
+      operation_id,
+      reservation_id,
+      owner_account_id,
+      operation_type
+    )
+    references backend_reservation.reservation_operations (
+      operation_id,
+      reservation_id,
+      owner_account_id,
+      operation_type
+    )
+    on update no action on delete no action not deferrable,
+  constraint reservation_slot_holds_kind_check check (
+    (
+      hold_kind = 'reservation'
+      and operation_id is null
+      and operation_type is null
+    )
+    or
+    (
+      hold_kind = 'reschedule_target'
+      and operation_id is not null
+      and operation_type = 'reschedule'
+    )
+  ),
+  constraint reservation_slot_holds_target_check check (
+    yclients_company_id between 1 and 9007199254740991
+    and target_service_id between 1 and 9007199254740991
+    and target_resource_id between 1 and 9007199254740991
+    and ends_at > starts_at
+  ),
+  constraint reservation_slot_holds_version_check check (
+    version between 1 and 9007199254740991
+  ),
+  constraint reservation_slot_holds_time_check check (
+    created_at between 0 and 9007199254740991
+    and updated_at between created_at and 9007199254740991
+    and (
+      released_at is null
+      or released_at between created_at and updated_at
+    )
+  ),
+  constraint reservation_slot_holds_no_overlap
+    exclude using gist (
+      reservation_id public.gist_uuid_ops with <>,
+      yclients_company_id public.gist_int8_ops with =,
+      target_resource_id public.gist_int8_ops with =,
+      pg_catalog.tstzrange(starts_at, ends_at, '[)'::text) with &&
+    )
+    where (released_at is null)
+);
+
+create unique index reservation_slot_holds_current_reservation_uq
+  on backend_reservation.reservation_slot_holds (reservation_id)
+  where hold_kind = 'reservation' and released_at is null;
+
+create unique index reservation_slot_holds_reschedule_operation_uq
+  on backend_reservation.reservation_slot_holds (operation_id)
+  where hold_kind = 'reschedule_target' and released_at is null;
+
+create index reservation_slot_holds_owner_time_idx
+  on backend_reservation.reservation_slot_holds (
+    owner_account_id,
+    starts_at,
+    hold_id
+  )
+  where released_at is null;
+
 create table backend_reservation.reservation_operation_client_snapshots (
   operation_id uuid not null,
   owner_account_id uuid not null,
@@ -533,10 +687,16 @@ create table backend_reservation.reservation_operation_client_snapshots (
   nonce bytea not null,
   auth_tag bytea not null,
   algorithm text not null,
-  encryption_key_version integer not null,
+  wrapped_data_key_ciphertext bytea,
+  wrapped_data_key_nonce bytea,
+  wrapped_data_key_auth_tag bytea,
+  wrapping_algorithm text,
+  wrapping_key_version integer,
   digest_key_version integer not null,
   aad_version integer not null,
+  version bigint not null,
   created_at bigint not null,
+  updated_at bigint not null,
   crypto_destroyed_at bigint,
   constraint reservation_operation_client_snapshots_pkey
     primary key (operation_id),
@@ -553,15 +713,44 @@ create table backend_reservation.reservation_operation_client_snapshots (
     and pg_catalog.octet_length(nonce) between 12 and 32
     and pg_catalog.octet_length(auth_tag) between 16 and 32
     and algorithm ~ '^[a-z][a-z0-9_]{0,63}$'
-    and encryption_key_version between 1 and 2147483647
     and digest_key_version between 1 and 2147483647
     and aad_version between 1 and 2147483647
+    and version between 1 and 9007199254740991
+    and (
+      (
+        crypto_destroyed_at is null
+        and pg_catalog.num_nonnulls(
+          wrapped_data_key_ciphertext,
+          wrapped_data_key_nonce,
+          wrapped_data_key_auth_tag,
+          wrapping_algorithm,
+          wrapping_key_version
+        ) = 5
+        and pg_catalog.octet_length(wrapped_data_key_ciphertext) between 1 and 4096
+        and pg_catalog.octet_length(wrapped_data_key_nonce) between 12 and 32
+        and pg_catalog.octet_length(wrapped_data_key_auth_tag) between 16 and 32
+        and wrapping_algorithm ~ '^[a-z][a-z0-9_]{0,63}$'
+        and wrapping_key_version between 1 and 2147483647
+      )
+      or
+      (
+        crypto_destroyed_at is not null
+        and pg_catalog.num_nonnulls(
+          wrapped_data_key_ciphertext,
+          wrapped_data_key_nonce,
+          wrapped_data_key_auth_tag,
+          wrapping_algorithm,
+          wrapping_key_version
+        ) = 0
+      )
+    )
   ),
   constraint reservation_operation_client_snapshots_time_check check (
     created_at between 0 and 9007199254740991
+    and updated_at between created_at and 9007199254740991
     and (
       crypto_destroyed_at is null
-      or crypto_destroyed_at between created_at and 9007199254740991
+      or crypto_destroyed_at between created_at and updated_at
     )
   )
 );
@@ -628,6 +817,140 @@ create index reservation_admin_read_audit_events_operation_time_idx
     event_order desc
   );
 
+create function backend_reservation.guard_slot_hold_transition()
+returns trigger
+language plpgsql
+volatile
+security invoker
+set search_path = pg_catalog, pg_temp
+as $function$
+begin
+  if tg_op = 'INSERT' then
+    if new.hold_kind = 'reservation' then
+      if not exists (
+        select 1
+        from backend_reservation.court_reservations reservation_row
+        where reservation_row.reservation_id = new.reservation_id
+          and reservation_row.owner_account_id = new.owner_account_id
+          and reservation_row.yclients_company_id = new.yclients_company_id
+          and reservation_row.target_service_id = new.target_service_id
+          and reservation_row.target_resource_id = new.target_resource_id
+          and reservation_row.target_datetime = new.starts_at
+          and reservation_row.target_end_datetime = new.ends_at
+      ) then
+        raise exception using
+          errcode = '23514',
+          message = 'BACKEND_RESERVATION_CURRENT_HOLD_TARGET_MISMATCH';
+      end if;
+    elsif not exists (
+      select 1
+      from backend_reservation.reservation_operations operation_row
+      where operation_row.operation_id = new.operation_id
+        and operation_row.reservation_id = new.reservation_id
+        and operation_row.owner_account_id = new.owner_account_id
+        and operation_row.operation_type = 'reschedule'
+        and operation_row.yclients_company_id = new.yclients_company_id
+        and operation_row.target_service_id = new.target_service_id
+        and operation_row.target_resource_id = new.target_resource_id
+        and operation_row.target_datetime = new.starts_at
+        and operation_row.target_end_datetime = new.ends_at
+    ) then
+      raise exception using
+        errcode = '23514',
+        message = 'BACKEND_RESERVATION_RESCHEDULE_HOLD_TARGET_MISMATCH';
+    end if;
+    return new;
+  end if;
+
+  if new.hold_id is distinct from old.hold_id
+     or new.reservation_id is distinct from old.reservation_id
+     or new.owner_account_id is distinct from old.owner_account_id
+     or new.operation_id is distinct from old.operation_id
+     or new.operation_type is distinct from old.operation_type
+     or new.hold_kind is distinct from old.hold_kind
+     or new.yclients_company_id is distinct from old.yclients_company_id
+     or new.target_service_id is distinct from old.target_service_id
+     or new.target_resource_id is distinct from old.target_resource_id
+     or new.starts_at is distinct from old.starts_at
+     or new.ends_at is distinct from old.ends_at
+     or new.created_at is distinct from old.created_at then
+    raise exception using
+      errcode = '55000',
+      message = 'BACKEND_RESERVATION_SLOT_HOLD_BINDING_IMMUTABLE';
+  end if;
+
+  if old.released_at is not null then
+    raise exception using
+      errcode = '55000',
+      message = 'BACKEND_RESERVATION_SLOT_HOLD_ALREADY_RELEASED';
+  end if;
+
+  if new.version <> old.version + 1
+     or new.updated_at < old.updated_at then
+    raise exception using
+      errcode = '40001',
+      message = 'BACKEND_RESERVATION_SLOT_HOLD_VERSION_CONFLICT';
+  end if;
+
+  return new;
+end;
+$function$;
+
+create trigger reservation_slot_holds_transition_guard
+before insert or update on backend_reservation.reservation_slot_holds
+for each row execute function backend_reservation.guard_slot_hold_transition();
+
+create function backend_reservation.guard_client_snapshot_transition()
+returns trigger
+language plpgsql
+volatile
+security invoker
+set search_path = pg_catalog, pg_temp
+as $function$
+begin
+  if new.operation_id is distinct from old.operation_id
+     or new.owner_account_id is distinct from old.owner_account_id
+     or new.digest_key_version is distinct from old.digest_key_version
+     or new.created_at is distinct from old.created_at then
+    raise exception using
+      errcode = '55000',
+      message = 'BACKEND_RESERVATION_CLIENT_SNAPSHOT_BINDING_IMMUTABLE';
+  end if;
+
+  if old.crypto_destroyed_at is not null then
+    raise exception using
+      errcode = '55000',
+      message = 'BACKEND_RESERVATION_CLIENT_SNAPSHOT_ERASED';
+  end if;
+
+  if new.version <> old.version + 1
+     or new.updated_at < old.updated_at then
+    raise exception using
+      errcode = '40001',
+      message = 'BACKEND_RESERVATION_CLIENT_SNAPSHOT_VERSION_CONFLICT';
+  end if;
+
+  if new.crypto_destroyed_at is not null
+     and (
+       new.ciphertext is distinct from old.ciphertext
+       or new.nonce is distinct from old.nonce
+       or new.auth_tag is distinct from old.auth_tag
+       or new.algorithm is distinct from old.algorithm
+       or new.aad_version is distinct from old.aad_version
+     ) then
+    raise exception using
+      errcode = '55000',
+      message = 'BACKEND_RESERVATION_CLIENT_SNAPSHOT_ERASE_SCOPE_INVALID';
+  end if;
+
+  return new;
+end;
+$function$;
+
+create trigger reservation_operation_client_snapshots_transition_guard
+before update on backend_reservation.reservation_operation_client_snapshots
+for each row execute function backend_reservation.guard_client_snapshot_transition();
+
 create function backend_reservation.reject_admin_read_audit_mutation()
 returns trigger
 language plpgsql
@@ -656,6 +979,10 @@ revoke all on all sequences in schema backend_reservation
   from public, backend_auth_app;
 revoke all on function backend_reservation.reject_admin_read_audit_mutation()
   from public, backend_auth_app;
+revoke all on function backend_reservation.guard_client_snapshot_transition()
+  from public, backend_auth_app;
+revoke all on function backend_reservation.guard_slot_hold_transition()
+  from public, backend_auth_app;
 
 grant select on table backend_reservation.court_reservations
   to backend_auth_app;
@@ -667,6 +994,8 @@ grant insert (
   target_resource_id,
   target_datetime,
   target_datetime_text,
+  target_end_datetime,
+  target_end_datetime_text,
   yclients_company_id,
   yclients_appointment_id,
   yclients_record_id,
@@ -690,6 +1019,8 @@ grant update (
   target_resource_id,
   target_datetime,
   target_datetime_text,
+  target_end_datetime,
+  target_end_datetime_text,
   yclients_appointment_id,
   yclients_record_id,
   yclients_record_hash_ciphertext,
@@ -724,6 +1055,8 @@ grant insert (
   target_resource_id,
   target_datetime,
   target_datetime_text,
+  target_end_datetime,
+  target_end_datetime_text,
   provider_appointment_id,
   provider_record_id,
   provider_record_hash_ciphertext,
@@ -773,6 +1106,31 @@ grant update (
   updated_at
 ) on backend_reservation.reservation_operations to backend_auth_app;
 
+grant select on table backend_reservation.reservation_slot_holds
+  to backend_auth_app;
+grant insert (
+  hold_id,
+  reservation_id,
+  owner_account_id,
+  operation_id,
+  operation_type,
+  hold_kind,
+  yclients_company_id,
+  target_service_id,
+  target_resource_id,
+  starts_at,
+  ends_at,
+  version,
+  created_at,
+  updated_at,
+  released_at
+) on backend_reservation.reservation_slot_holds to backend_auth_app;
+grant update (
+  version,
+  updated_at,
+  released_at
+) on backend_reservation.reservation_slot_holds to backend_auth_app;
+
 grant select on table
   backend_reservation.reservation_operation_client_snapshots
   to backend_auth_app;
@@ -783,10 +1141,16 @@ grant insert (
   nonce,
   auth_tag,
   algorithm,
-  encryption_key_version,
+  wrapped_data_key_ciphertext,
+  wrapped_data_key_nonce,
+  wrapped_data_key_auth_tag,
+  wrapping_algorithm,
+  wrapping_key_version,
   digest_key_version,
   aad_version,
+  version,
   created_at,
+  updated_at,
   crypto_destroyed_at
 ) on backend_reservation.reservation_operation_client_snapshots
   to backend_auth_app;
@@ -795,8 +1159,14 @@ grant update (
   nonce,
   auth_tag,
   algorithm,
-  encryption_key_version,
+  wrapped_data_key_ciphertext,
+  wrapped_data_key_nonce,
+  wrapped_data_key_auth_tag,
+  wrapping_algorithm,
+  wrapping_key_version,
   aad_version,
+  version,
+  updated_at,
   crypto_destroyed_at
 ) on backend_reservation.reservation_operation_client_snapshots
   to backend_auth_app;
@@ -826,6 +1196,7 @@ begin
   foreach v_name in array array[
     'court_reservations',
     'reservation_operations',
+    'reservation_slot_holds',
     'reservation_operation_client_snapshots',
     'reservation_admin_read_audit_events'
   ]
@@ -839,6 +1210,22 @@ begin
         )
     );
   end loop;
+
+  execute pg_catalog.format(
+    'comment on function backend_reservation.guard_slot_hold_transition() is %L',
+    '033_backend_reservation_persistence:'
+      || pg_catalog.md5(pg_catalog.pg_get_functiondef(
+        'backend_reservation.guard_slot_hold_transition()'::pg_catalog.regprocedure
+      ))
+  );
+
+  execute pg_catalog.format(
+    'comment on function backend_reservation.guard_client_snapshot_transition() is %L',
+    '033_backend_reservation_persistence:'
+      || pg_catalog.md5(pg_catalog.pg_get_functiondef(
+        'backend_reservation.guard_client_snapshot_transition()'::pg_catalog.regprocedure
+      ))
+  );
 
   execute pg_catalog.format(
     'comment on function backend_reservation.reject_admin_read_audit_mutation() is %L',
@@ -872,6 +1259,7 @@ begin
   foreach v_name in array array[
     'court_reservations',
     'reservation_operations',
+    'reservation_slot_holds',
     'reservation_operation_client_snapshots',
     'reservation_admin_read_audit_events'
   ]
@@ -900,6 +1288,32 @@ begin
     end if;
   end loop;
 
+  if pg_catalog.to_regprocedure(
+       'backend_reservation.guard_slot_hold_transition()'
+     ) is null
+     or pg_catalog.obj_description(
+       'backend_reservation.guard_slot_hold_transition()'::pg_catalog.regprocedure,
+       'pg_proc'
+     ) <> '033_backend_reservation_persistence:'
+       || pg_catalog.md5(pg_catalog.pg_get_functiondef(
+         'backend_reservation.guard_slot_hold_transition()'::pg_catalog.regprocedure
+       )) then
+    raise exception 'MIGRATION_ASSERTION_FAILED: slot hold guard differs';
+  end if;
+
+  if pg_catalog.to_regprocedure(
+       'backend_reservation.guard_client_snapshot_transition()'
+     ) is null
+     or pg_catalog.obj_description(
+       'backend_reservation.guard_client_snapshot_transition()'::pg_catalog.regprocedure,
+       'pg_proc'
+     ) <> '033_backend_reservation_persistence:'
+       || pg_catalog.md5(pg_catalog.pg_get_functiondef(
+         'backend_reservation.guard_client_snapshot_transition()'::pg_catalog.regprocedure
+       )) then
+    raise exception 'MIGRATION_ASSERTION_FAILED: snapshot guard differs';
+  end if;
+
   if pg_catalog.has_table_privilege(
        'backend_auth_app',
        'backend_reservation.reservation_admin_read_audit_events',
@@ -907,6 +1321,7 @@ begin
      )
      or exists (select 1 from backend_reservation.court_reservations)
      or exists (select 1 from backend_reservation.reservation_operations)
+     or exists (select 1 from backend_reservation.reservation_slot_holds)
      or exists (
        select 1
        from backend_reservation.reservation_operation_client_snapshots
