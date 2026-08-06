@@ -26,7 +26,7 @@
 | Этап | Статус | Ветка/commit | Проверки | Блокер/следующий шаг |
 |---|---|---|---|---|
 | D1 Backend-only/contracts | done | `main` / deployed `c04074459948d0bf545e865b885aea7a4e5fec3c` | frontend E2E PASS (82/1 skipped); focused fail-closed 2/2 PASS; frontend build PASS; backend all PASS; Selectel test smoke PASS | D1 закрыт; следующий отдельный этап — D2 |
-| D2 YCLIENTS reservation core | in_progress | `main` / `4451dddc3cf229419a9de574d9ed98a7aa6f78c9` + POSTCHECK correction checkpoint | focused migration contract 8/8 PASS; backend typecheck PASS; PRECHECK PASS; SQL applied; corrected POSTCHECK rerun pending | интегрировать correction и повторить только read-only POSTCHECK; runtime wiring остаётся |
+| D2 YCLIENTS reservation core | in_progress | `main` / correction `7c31d29b639d6b29016d2378ccc7006df6129b52` | focused migration contract 8/8 PASS; backend typecheck PASS; PRECHECK PASS; SQL applied; corrected POSTCHECK PASS | persistence schema applied/verified на Selectel test; runtime wiring/provider contracts остаются |
 | D3 Match ↔ reservation lifecycle | pending | — | — | cancel match, owner participant removal, match ↔ reservation binding |
 | D4 Payment Core | pending | — | — | payment provider, pricing/payment snapshot, чеки и возвраты |
 | D5 Settings/moderation/compliance | pending | — | — | standalone phone/email auth и verified backend email; затем schema review |
@@ -41,7 +41,7 @@
 | Этап | Среда | Целевой commit | Статус | Проверка |
 |---|---|---|---|---|
 | D1 Backend-only/contracts | Selectel test | `c04074459948d0bf545e865b885aea7a4e5fec3c` | `test_deployed` | frontend healthy; HTTPS root/health и новый asset 200; TMA auth/profile/feed/details/booking availability PASS; bundle/log audit PASS |
-| D2 YCLIENTS reservation core | Selectel test | `4451dddc3cf229419a9de574d9ed98a7aa6f78c9` + POSTCHECK correction pending | `pending` | migration 033 applied, но не verified; разрешён только повтор corrected read-only POSTCHECK, runtime/containers остаются на D1 commit |
+| D2 YCLIENTS reservation core | Selectel test | correction `7c31d29b639d6b29016d2378ccc7006df6129b52` | `pending` | migration 033 `applied_verified`, tables empty и runtime disconnected; runtime/containers остаются на D1 commit |
 | D2 persistence/privacy proposal | not applicable | docs-only checkpoint | `not_needed` | только Markdown; runtime, schema, containers и конфигурация не менялись |
 
 Допустимые deployment-статусы: `not_needed`, `pending`, `test_deployed`,
@@ -541,12 +541,23 @@
 - Checks: focused migration contract PASS, 1 suite / 8 tests; backend typecheck
   PASS; `git diff --check` и финальный read-only scope review выполняются перед
   checkpoint commit.
-- Migration status: `applied`, verification `pending`. Migration 033 повторно
-  не применять; backup/PRECHECK/rollback и другие DB writes не выполнять.
+- Migration status: `applied_verified` на Selectel test. Corrected read-only
+  POSTCHECK вернул `ready=true`, все пять row counts `0`, exact relation
+  fingerprints и `runtime_connected=false`; transaction завершилась `ROLLBACK`.
+  Migration 033 повторно не применять; backup/PRECHECK/rollback и другие DB
+  writes не выполнять.
 - Deployment: `pending`; runtime/container/env/production не меняются.
-- Следующий конкретный шаг: только после fast-forward integration exact
-  correction commit повторить read-only POSTCHECK и сохранить output; при новом
-  расхождении остановиться.
+- Git integration: correction
+  `7c31d29b639d6b29016d2378ccc7006df6129b52` fast-forward integrated и pushed
+  в `main` после exact three-file scope check.
+- Selectel audit: server fetched exact correction commit без checkout; corrected
+  POSTCHECK SHA-256 совпал с Git artifact, output сохранён root-only как
+  `POSTCHECK.corrected-7c31d29.output.txt` (mode `600`).
+- Containers changed: none; frontend/backend/nginx/PostgreSQL сохранили прежние
+  IDs, `running/healthy`, restart count `0`. Server runtime checkout остаётся
+  detached на D1 `c04074459948d0bf545e865b885aea7a4e5fec3c`.
+- Следующий конкретный шаг: отдельный persistence/runtime wiring slice после
+  подтверждения оставшихся YCLIENTS contracts; D2 остаётся `in_progress`.
 
 ## Шаблон записи после этапа
 
