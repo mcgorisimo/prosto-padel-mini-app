@@ -1545,3 +1545,49 @@
   slot A stays held. Next gate is independent P0/P1 review of this code
   checkpoint. Isolated delivery/dry-run and execution each require later,
   separate owner approvals.
+
+### 2026-08-07 — D2 / record-specific cleanup Gate 1 delivery and dry-run
+
+- Owner authorized only Gate 1 delivery and an isolated network-disabled
+  dry-run of reviewed cleanup checkpoint
+  `fce01e96a8a48f67292a17939ff50b6add34036c`. The exact commit was pushed to
+  `codex/week1-d2-reservation-core`; `main` was not merged or changed.
+- Selectel test baseline PASS before setup: application checkout was clean at
+  D1 runtime `c04074459948d0bf545e865b885aea7a4e5fec3c`; frontend, backend,
+  nginx and PostgreSQL were running and healthy with restart count `0`.
+- Created only the isolated root-owned `0700` layout
+  `/root/prosto-padel-d2-cleanup-1891713981`, with a clean detached checkout at
+  exact `fce01e96...` and an empty root-owned `0700` artifacts directory.
+  Existing identity/token/source-binding files were used only from their
+  fixed root-owned `0600` paths; their contents were not printed or copied.
+- The first container command had a shell-quoting error and stopped at npm
+  usage before install/build. Its `--rm` container was removed, exact SHA,
+  clean worktree and empty artifacts were revalidated, and no provider work
+  occurred. The corrected isolated sequence then completed: `npm ci` PASS
+  (existing engine/audit warnings recorded, no dependency fix attempted) and
+  backend `npm run build` PASS in temporary `node:20.11.0-bookworm-slim`
+  containers. The build container ran with `--network none`.
+- Compiled cleanup launcher dry-run PASS in a separate `--rm --network none`
+  container: outcome `dry_run_ready`, cleanup plan digest
+  `83a904bd7b04ba8f5565cf7ce01a41e365c49ed9466f84cc109341ee225b4532`,
+  opaque approval digest
+  `be24705618391825d5b3d83cb5ca0b301c0c2d475e42a9ceb60ca50e2af107a9`,
+  and `providerRequestCount=0`.
+- Postcheck PASS: cleanup `approval`, `consumed` and `provider-binding`
+  artifacts are absent and the temporary container is absent. Application
+  checkout remains clean at `c040744...`; the original four container IDs,
+  restart counts (`0`) and healthy/running states are unchanged. Frontend and
+  `/api/v1/health` both returned HTTP `200`.
+- No approval file was created, no execute mode was used, and network-disabled
+  dry-run plus request count `0` confirms no YCLIENTS/API/provider call or
+  create/PUT/DELETE. Record `1891713981` was not changed and slot A remains
+  held. Application runtime, containers, compose/env, DB/schema/migrations and
+  production were not changed.
+- Verification for this factual handoff is docs-only: project tests were not
+  rerun/not needed because the delivered source is the already reviewed exact
+  checkpoint and the only local change is this append-only evidence entry.
+  Deployment `not_needed`: the isolated cleanup harness is not connected to
+  application runtime.
+- Gate 1 `PASS`; D2 remains `in_progress`. Gate 2 execution is not authorized
+  and requires a separate exact one-time approval bound to the checkpoint,
+  cleanup plan digest and approval digest above.
