@@ -4,6 +4,12 @@ import {
   YclientsControlledFullRecordSnapshot,
   YclientsControlledRescheduleTarget,
 } from './yclients-controlled-record';
+import {
+  isValidYclientsControlledCleanupExpectation,
+  readYclientsControlledCleanupRecord,
+  YclientsControlledCleanupRecordExpectation,
+} from './yclients-controlled-cleanup-record';
+import type { YclientsSafeAdminRecord } from './yclients-admin-read.client';
 import { YclientsConservativeRequestLimiter } from './yclients-request-limiter';
 
 const MAX_CONTROLLED_RESPONSE_BYTES = 262_144;
@@ -28,6 +34,18 @@ export type YclientsControlledFullRecordResult =
       outcome: 'found';
       snapshot: YclientsControlledFullRecordSnapshot;
     }>
+  | Readonly<{ outcome: 'unauthorized' }>
+  | Readonly<{ outcome: 'not_found' }>
+  | Readonly<{ outcome: 'rejected' }>
+  | Readonly<{ outcome: 'rate_limited' }>
+  | Readonly<{ outcome: 'unavailable' }>
+  | Readonly<{ outcome: 'unknown' }>;
+
+export type YclientsControlledCleanupExactResult =
+  | Readonly<{ outcome: 'disabled' }>
+  | Readonly<{ outcome: 'invalid_request' }>
+  | Readonly<{ outcome: 'matched'; record: YclientsSafeAdminRecord }>
+  | Readonly<{ outcome: 'mismatch' }>
   | Readonly<{ outcome: 'unauthorized' }>
   | Readonly<{ outcome: 'not_found' }>
   | Readonly<{ outcome: 'rejected' }>
@@ -189,9 +207,17 @@ function controlledUrl(
   );
 }
 
+type YclientsControlledReadFailure =
+  | Readonly<{ outcome: 'unauthorized' }>
+  | Readonly<{ outcome: 'not_found' }>
+  | Readonly<{ outcome: 'rejected' }>
+  | Readonly<{ outcome: 'rate_limited' }>
+  | Readonly<{ outcome: 'unavailable' }>
+  | Readonly<{ outcome: 'unknown' }>;
+
 function readStatusFailure(
   status: number,
-): Exclude<YclientsControlledFullRecordResult, { outcome: 'found' }> | undefined {
+): YclientsControlledReadFailure | undefined {
   if (status === 401 || status === 403) {
     return Object.freeze({ outcome: 'unauthorized' as const });
   }
@@ -210,6 +236,67 @@ function readStatusFailure(
   return status === 200
     ? undefined
     : Object.freeze({ outcome: 'unknown' as const });
+}
+
+export class YclientsControlledCleanupRecordReader {
+  constructor(
+    private readonly configuration: YclientsControlledAdminClientConfiguration,
+  ) {
+    if (configuration.limiter === undefined) {
+      throw new TypeError('Shared YCLIENTS request limiter is required');
+    }
+  }
+
+  async verifyRecord(
+    expectation: YclientsControlledCleanupRecordExpectation,
+  ): Promise<YclientsControlledCleanupExactResult> {
+    if (!this.configuration.enabled) {
+      return Object.freeze({ outcome: 'disabled' as const });
+    }
+    const configured = configuredValues(this.configuration);
+    if (
+      configured === undefined ||
+      expectation?.companyId !== configured.companyId ||
+      !isValidYclientsControlledCleanupExpectation(expectation)
+    ) {
+      return Object.freeze({ outcome: 'invalid_request' as const });
+    }
+    return this.configuration.limiter.run(async () => {
+      try {
+        const response = await this.configuration.fetch(
+          controlledUrl(configured, expectation.recordId),
+          {
+            method: 'GET',
+            headers: {
+              accept: YCLIENTS_ACCEPT,
+              authorization: configured.authorization,
+            },
+            signal: AbortSignal.timeout(
+              this.configuration.requestTimeoutMilliseconds,
+            ),
+          },
+        );
+        const failure = readStatusFailure(response.status);
+        if (failure !== undefined) {
+          await cancelBody(response.body);
+          return failure;
+        }
+        const body = await readBoundedJson(response);
+        if (body?.success !== true) {
+          return Object.freeze({ outcome: 'unknown' as const });
+        }
+        const record = readYclientsControlledCleanupRecord(
+          body.data,
+          expectation,
+        );
+        return record === undefined
+          ? Object.freeze({ outcome: 'mismatch' as const })
+          : Object.freeze({ outcome: 'matched' as const, record });
+      } catch {
+        return Object.freeze({ outcome: 'unavailable' as const });
+      }
+    });
+  }
 }
 
 function writeStatusFailure(

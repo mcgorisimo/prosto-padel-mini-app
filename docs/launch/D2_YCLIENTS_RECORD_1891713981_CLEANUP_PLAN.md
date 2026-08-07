@@ -1,9 +1,9 @@
 # D2 YCLIENTS record 1891713981 cleanup plan
 
-Status: `review_only`; not executable and not approved for provider access.
-Preparing this document performs no YCLIENTS, database or server call and no
-write. The original controlled-lifecycle approval is consumed and cannot be
-reused.
+Status: `code_checkpoint_prepared_for_review`; the isolated launcher exists in
+source and passes local build/tests, but has not been delivered to or built/run
+on Selectel. Provider access and execution are not approved. The original
+controlled-lifecycle approval is consumed and cannot be reused.
 
 ## Fixed incident binding
 
@@ -122,3 +122,46 @@ new owner decision; do not silently perform manual cleanup.
 
 No gate in this document authorizes API access, a provider write, server
 change, deployment or manual cancellation.
+
+## Prepared implementation contract
+
+The runtime-disabled implementation is compiled from
+`yclients-controlled-cleanup-launcher.ts`. It has no Nest/module/controller
+import and defaults to dry-run. The exact non-PII plan digest is:
+
+```text
+83a904bd7b04ba8f5565cf7ce01a41e365c49ed9466f84cc109341ee225b4532
+```
+
+It reuses the existing root-only identity/token files and the original durable
+binding at:
+
+```text
+/root/prosto-padel-d2-controlled/secrets/identity.json
+/root/prosto-padel-d2-controlled/secrets/yclients-partner-token
+/root/prosto-padel-d2-controlled/secrets/yclients-user-token
+/root/prosto-padel-d2-controlled/artifacts/provider-binding.json
+```
+
+Fresh cleanup approval artifacts are isolated under:
+
+```text
+/root/prosto-padel-d2-cleanup-1891713981/          0700
+  artifacts/                                      0700
+    approval.sha256                               0600; absent for dry-run
+    approval.sha256.consumed                      created atomically by execute
+```
+
+The compiled dry-run command, for a later separately approved isolated
+checkout/build gate only, is:
+
+```text
+node dist/integrations/yclients/yclients-controlled-cleanup-launcher.js --api-base-url https://api.yclients.com --identity-file /root/prosto-padel-d2-controlled/secrets/identity.json --source-binding-file /root/prosto-padel-d2-controlled/artifacts/provider-binding.json --artifact-dir /root/prosto-padel-d2-cleanup-1891713981/artifacts --partner-token-file /root/prosto-padel-d2-controlled/secrets/yclients-partner-token --user-token-file /root/prosto-padel-d2-controlled/secrets/yclients-user-token
+```
+
+Dry-run PASS requires `providerRequestCount=0`, the exact plan digest above,
+one opaque identity/token-bound approval digest, the exact source binding and
+no cleanup approval/consumed artifact. Execute additionally requires a fresh
+owner approval naming the reviewed checkpoint and both digests, plus the
+club-admin no-change window. None of those later gates is authorized by the
+implementation checkpoint.

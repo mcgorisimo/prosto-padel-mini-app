@@ -1503,3 +1503,45 @@
   performed. Tests not run/not needed; deployment remains `not_needed`.
 - D2 remains `in_progress`. Cleanup runner implementation and any execution
   each require later, separate approvals.
+
+### 2026-08-07 — D2 / record-specific cleanup runner code checkpoint
+
+- Owner authorized only code/test implementation of the runtime-disabled
+  cleanup runner for record `1891713981` under reviewed plan checkpoint
+  `cca07e9e3ce5a98d3f3bc910a215c240fdc7a850`. Runner execution, API/DB/server
+  calls, provider writes, delivery, push, merge and deployment were excluded.
+- Added a cleanup-specific strict exact parser/reader. It compares
+  record/company/service/resource/datetime/external reference, `deleted` and
+  the full disposable identity only in memory; its result/evidence contains no
+  PII, record hash, token or raw body. The reschedule full parser was not
+  weakened.
+- Added a pure four-request lifecycle: exact active binding GET, exactly one
+  DELETE, exact deleted GET and one exhaustive bounded `with_deleted=true`
+  list. There is no create, PUT/reschedule, repeat-delete, fallback or blind
+  retry. Uncertain DELETE permits only the two planned readbacks; exact+list
+  deleted proof is required to release slot A.
+- Added a separate dry-run-default owner-only launcher and assembly with exact
+  endpoint/record/effect/source-binding/paths, shared one-request-per-second
+  limiter, new isolated approval/consumed artifacts and deterministic cleanup
+  plan digest
+  `83a904bd7b04ba8f5565cf7ce01a41e365c49ed9466f84cc109341ee225b4532`.
+  The approval digest remains opaque and identity/token-bound; the consumed
+  basic-lifecycle approval cannot be reused.
+- Mocked/temp-only focused gate: 5 suites / 62 tests PASS. No test contacted
+  YCLIENTS.
+- Backend verification: typecheck PASS; unit 126 suites / 3164 tests PASS; E2E
+  2 suites / 4 tests PASS; build PASS.
+- Root verification: the first sandboxed attempt stopped before Vite readiness
+  because esbuild could not read the worktree parent (`Access denied`). The
+  same commands were rerun outside that filesystem restriction: E2E 82 passed
+  / 1 skipped, build PASS. Owned Vite was used; no foreign server was reused.
+- Runtime/import boundary: no Nest module/controller/main imports the cleanup
+  files; no package script or application wiring was added. No YCLIENTS/API/DB/
+  Selectel call, provider write, server access, manual cleanup, migration,
+  container/config/runtime change or deployment occurred. Deployment
+  `not_needed`; Selectel application runtime remains
+  `c04074459948d0bf545e865b885aea7a4e5fec3c` and was not contacted.
+- D2 remains `in_progress`; record `1891713981` stays `cleanup_required` and
+  slot A stays held. Next gate is independent P0/P1 review of this code
+  checkpoint. Isolated delivery/dry-run and execution each require later,
+  separate owner approvals.
