@@ -1591,3 +1591,49 @@
 - Gate 1 `PASS`; D2 remains `in_progress`. Gate 2 execution is not authorized
   and requires a separate exact one-time approval bound to the checkpoint,
   cleanup plan digest and approval digest above.
+
+### 2026-08-07 — D2 / record-specific cleanup Gate 2 stopped before DELETE
+
+- Owner confirmed the club-admin UI binding and exclusive no-change window,
+  then authorized exactly one cleanup execute for checkpoint
+  `fce01e96a8a48f67292a17939ff50b6add34036c`, cleanup plan digest
+  `83a904bd7b04ba8f5565cf7ce01a41e365c49ed9466f84cc109341ee225b4532`
+  and opaque approval digest
+  `be24705618391825d5b3d83cb5ca0b301c0c2d475e42a9ceb60ca50e2af107a9`.
+- Fail-closed precheck PASS before approval creation: isolated checkout and
+  compiled launcher were exact `fce01e96...`; cleanup artifacts were empty;
+  root-only ownership/modes and source binding metadata matched. Application
+  checkout remained D1 runtime `c04074459948d0bf545e865b885aea7a4e5fec3c`;
+  the four application container IDs, restart counts (`0`), running/healthy
+  states and both HTTP `200` checks matched the Gate 1 baseline.
+- Created one root-owned `0600` `approval.sha256`. The exact launcher consumed
+  it atomically into root-owned `0600` `approval.sha256.consumed` before the
+  first provider request. Execute ran exactly once in an isolated `--rm`
+  container; the consumed approval was not and cannot be reused.
+- PII-safe result: request `1` was the cleanup pre-delete exact GET. It was
+  classified `unknown`; lifecycle stopped immediately with outcome
+  `cleanup_required`, reason `pre_delete_unverified`, request count `1` and
+  hold `A`. DELETE was not sent. Post-delete exact GET and bounded
+  `with_deleted=true` list were not called, so no canonical cancel proof
+  exists and slot A remains held.
+- Root-only audit is
+  `/root/prosto-padel-d2-cleanup-1891713981/audit/execute-fce01e96.jsonl`
+  (`0600`), with empty `0600` stderr and recorded launcher exit `2`. Audit
+  contains only allowlisted evidence/outcome; no PII, token, record hash or raw
+  provider body was recorded.
+- Postcheck PASS: execute container is absent; application and isolated
+  checkout SHAs are unchanged. The original frontend/backend/nginx/PostgreSQL
+  container IDs, restart counts (`0`) and healthy/running states are unchanged;
+  frontend and `/api/v1/health` remain HTTP `200`. Error/fatal marker counts in
+  all four application container logs since precheck were `0/0/0/0`; runner
+  stderr was empty. Runtime, containers, compose/env, DB/schema/migrations and
+  production were not changed.
+- This append-only factual handoff is docs-only. Project tests were not
+  rerun/not needed because no source/runtime/schema/test code changed.
+  Deployment `not_needed`; the cleanup harness remains isolated from
+  application runtime. No new branch push, main merge or deployment occurred.
+- D2 remains `in_progress`; cleanup remains `cleanup_required`. Any further
+  provider read or cleanup attempt needs a new review-only diagnosis of the
+  exact-read `unknown`, a separately reviewed correction/plan if required and
+  fresh delivery/dry-run/execution approvals. The consumed Gate 2 approval
+  does not authorize another request.
