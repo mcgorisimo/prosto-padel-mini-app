@@ -1455,3 +1455,29 @@
   No further provider call is allowed under the consumed approval. A new exact
   record-specific owner approval is required before any readback/cancel cleanup;
   until canonical cancel proof, slot A must be treated as held.
+
+### 2026-08-07 — D2 / record 1891713981 cleanup plan prepared for review
+
+- Owner authorized only a review-ready record-specific cleanup plan for
+  YCLIENTS record `1891713981`; API/provider/DB/server calls and writes were not
+  authorized.
+- Added `D2_YCLIENTS_RECORD_1891713981_CLEANUP_PLAN.md`. It pins the durable
+  record/appointment/slot A binding, requires manual club-admin equality
+  verification, a separate runtime-disabled cleanup implementation and fresh
+  identity-bound approval artifacts. The consumed lifecycle approval cannot be
+  reused.
+- Proposed future lifecycle is fail-closed and capped at four serialized
+  requests: one bounded pre-delete projection, exactly one DELETE, exact GET
+  readback and one bounded `with_deleted=true` readback. There is no create,
+  reschedule, repeat-delete, fallback or blind retry. Any mismatch or uncertain
+  outcome keeps slot A held until canonical cancel proof.
+- This checkpoint performed no YCLIENTS/API/DB/Selectel call, provider write,
+  manual cleanup, runtime/container/config change or deployment. Record
+  `1891713981` therefore remains `cleanup_required` and slot A remains held.
+- Verification: docs-only; project tests not run/not needed because no runtime,
+  source, schema or test code changed. Deployment `not_needed`; application
+  runtime remains `c04074459948d0bf545e865b885aea7a4e5fec3c` and was not
+  contacted.
+- D2 remains `in_progress`. Next gate is independent review followed by a
+  separate owner decision on code-only cleanup implementation; execution is
+  not approved.
