@@ -26,7 +26,7 @@
 | Этап | Статус | Ветка/commit | Проверки | Блокер/следующий шаг |
 |---|---|---|---|---|
 | D1 Backend-only/contracts | done | `main` / deployed `c04074459948d0bf545e865b885aea7a4e5fec3c` | frontend E2E PASS (82/1 skipped); focused fail-closed 2/2 PASS; frontend build PASS; backend all PASS; Selectel test smoke PASS | D1 закрыт; следующий отдельный этап — D2 |
-| D2 YCLIENTS reservation core | in_progress | D2 branch / vertical checkpoint `4c7a4e4c7b75141c20beb48524aba9fb4891c653`, independently reviewed | migration 033 applied/verified; backend 131/3271 unit, 2/4 E2E, typecheck/build PASS; root build PASS; root E2E 84/1 skipped | app PUT/DELETE absent; before rollout approve unknown-create operator lookup, integration and Selectel rollout; support contact deferred to D5 by owner |
+| D2 YCLIENTS reservation core | in_progress | `main` / Selectel test `b006263fe1f34d374791368cb3691fab89116a39` | migration 033 applied/verified; local gates PASS; Selectel build/health/log audit PASS; operator lookup 0 rows | manual read-only Telegram Mini App smoke remains before D2 deployment gate can close; support contact deferred to D5 by owner |
 | D3 Match ↔ reservation lifecycle | pending | — | — | reflect admin cancellation without provider DELETE, owner participant removal, match ↔ reservation binding |
 | D4 Payment Core | pending | — | — | payment provider, pricing/payment snapshot, чеки и возвраты |
 | D5 Settings/moderation/compliance | pending | — | — | standalone phone/email auth, verified backend email, approved club support/contact source and clickable action; затем schema review |
@@ -41,7 +41,7 @@
 | Этап | Среда | Целевой commit | Статус | Проверка |
 |---|---|---|---|---|
 | D1 Backend-only/contracts | Selectel test | `c04074459948d0bf545e865b885aea7a4e5fec3c` | `test_deployed` | frontend healthy; HTTPS root/health и новый asset 200; TMA auth/profile/feed/details/booking availability PASS; bundle/log audit PASS |
-| D2 YCLIENTS reservation core | Selectel test | local vertical checkpoint pending integration | `pending` | migration 033 `applied_verified`; runtime/config/frontend changed locally, but Selectel application/containers remain on D1 `c04074459948d0bf545e865b885aea7a4e5fec3c` |
+| D2 YCLIENTS reservation core | Selectel test | `b006263fe1f34d374791368cb3691fab89116a39` | `pending` | rollout applied; backend/frontend healthy, HTTPS root/health 200, log audit clean; manual read-only Telegram Mini App smoke pending |
 | D2 persistence/privacy proposal | not applicable | docs-only checkpoint | `not_needed` | только Markdown; runtime, schema, containers и конфигурация не менялись |
 | D2 YCLIENTS contract matrix | not applicable | docs-only checkpoint поверх `3e8739b` | `not_needed` | только Markdown; API/DB/server/runtime не вызывались и не менялись |
 | D2 YCLIENTS controlled test plan | not applicable | `040773172a2fa556ffaaf1d12dac540095070976` + docs-only correction from that exact base | `not_needed` | plan only; provider/server/DB/runtime calls и writes не выполнялись |
@@ -1970,3 +1970,42 @@
   YCLIENTS/API/SSH/Selectel/DB call, provider write, secret access, push, merge
   or deployment occurred. Selectel test remains on
   `c04074459948d0bf545e865b885aea7a4e5fec3c`; production is unchanged.
+
+### 2026-08-07 — D2 / Selectel test rollout applied, TMA smoke pending
+
+- Git integration PASS: exact D2 branch checkpoint
+  `b006263fe1f34d374791368cb3691fab89116a39` was pushed, `main` was
+  fast-forwarded from `3e8739b2e9308976bccfd125883f03917fa22962` to that exact commit and
+  pushed. The Selectel application checkout is clean and detached at the same
+  exact SHA.
+- A new 32-byte canonical base64 reservation-snapshot master key was generated
+  on Selectel test outside Git. Only its non-secret host path and key version
+  were added to the server `.env.test`; the key file is a regular non-symlink
+  owned by `prostopadel:prostopadel` with mode `0600`. Host and backend runtime
+  UID/GID match at `1000:1000`, and the runtime user can open all nine mounted
+  secret files without their contents being printed.
+- The approved migration-033 operator lookup ran inside a read-only transaction
+  with `statement_timeout=5000ms` and `LIMIT 50`; result: `0 rows`. It selected
+  no client snapshot, ciphertext, provider hash, contact data or token. No SQL
+  write or migration was executed; migration 033 remains `applied_verified`.
+- Compose quiet validation PASS. Exact backend/frontend images built PASS.
+  Rollout recreated only backend and frontend:
+  - backend: `8df1bf6b1947...` -> `29283ca28f29...`;
+  - frontend: `efee81b73ca4...` -> `8af545a18ff4...`;
+  - PostgreSQL stayed `5e36d4dc1a5c...`; nginx stayed `e5b98b53a385...`.
+  All four containers are `running/healthy` with restart count `0`.
+- Health/HTTP PASS: internal backend health returned the canonical `status=ok`
+  response; HTTPS root `200`, HTTPS `/api/v1/health` `200`; unauthenticated
+  `GET /api/v1/bookings` returned the expected fail-closed `401`.
+- Log audit since rollout: backend `error/fatal/unhandled=0`, frontend
+  `error=0`, nginx `error=0`. No provider create/PUT/DELETE call or other real
+  YCLIENTS write was invoked during rollout/smoke; webhook remains disabled.
+- Required real TMA smoke is not yet evidence-complete. Windows Telegram
+  automation was unavailable and the isolated Telegram Web surface had no
+  authenticated session. It was closed without login; no synthetic initData,
+  account/session creation, booking create or provider call was attempted. An
+  ordinary browser is not accepted as a Telegram smoke substitute.
+- Deployment status remains `pending`, not `test_deployed`, until the owner
+  opens the exact Selectel Mini App inside Telegram and confirms the read-only
+  login/profile/reservation list/detail/refresh flow without submitting a
+  booking. Production is unchanged.
