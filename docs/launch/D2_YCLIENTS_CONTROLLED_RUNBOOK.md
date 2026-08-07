@@ -3,6 +3,11 @@
 Status: `prepared_for_independent_review`; real YCLIENTS create/reschedule/cancel
 writes are **not approved**. This runbook is Selectel test only.
 
+Operational note: checkpoint `481c578e418cb6302cf072bb04524c488637f823`
+is superseded for real writes pending the concrete launcher checkpoint. Delivery,
+isolated build and dry-run now follow `D2_YCLIENTS_OPERATIONAL_RUNBOOK.md` and
+require their own approval before the separate one-time write approval below.
+
 ## Exact non-PII plan
 
 - plan ID: `d2-controlled-basic-20260817`;
@@ -36,12 +41,14 @@ bookable.
 ## Runner gate
 
 `YclientsControlledTestRunner.run()` is dry-run by default and performs zero
-provider requests. It returns only the plan digest after strict plan and
-root-only identity-binding verification. Execution requires all of:
+provider requests. The concrete launcher returns the plan digest plus an
+opaque, root-secret-keyed `approvalDigest`; neither value exposes PII.
+Execution requires all of:
 
 1. mode `execute`;
 2. the exact digest above supplied separately;
-3. a root-only approval file containing exactly that digest and an atomic
+3. a root-only approval file containing the separately owner-approved
+   `approvalDigest` for the same identity/token snapshot and an atomic
    cross-process consumed marker claimed before lifecycle construction;
 4. a fresh lifecycle instance using the existing guarded create client, shared
    conservative limiter, exact/bounded readers and controlled PUT/DELETE client.
@@ -55,7 +62,7 @@ status/effect aliases, request count and UTC timestamp.
 
 The approved operational layout is a new owner-only (`0700`) directory outside
 the repository and application container mounts. For this plan its files are
-`approval.sha256` (`0600`, exact digest plus optional final LF),
+`approval.sha256` (`0600`, exact opaque approval digest plus optional final LF),
 `approval.sha256.consumed` (`0600`, created with exclusive-create semantics),
 and `provider-binding.json` (`0600`, also exclusive-create). The executable
 assembly accepts only a cross-process approval gate and a root-only exclusive
@@ -115,6 +122,11 @@ the checkpoint placeholder with the reviewed commit SHA:
 > A/B должны точно совпасть с runbook; SMS/email полностью off. Любой uncertain
 > write запрещает дальнейшие writes. Duplicate api_id experiment, blind retries,
 > runtime/Nest wiring, DB/schema/migration, deploy и production не разрешаю.
+
+The final Gate 2 wording must additionally include the exact
+`<APPROVAL_DIGEST>` captured from the accepted Gate 1 dry-run. The public plan
+digest alone is insufficient and must never be copied into
+`approval.sha256`.
 
 Any manual cleanup after an unknown/cleanup-required result is deliberately not
 covered by that approval and needs a new exact record-ID cleanup decision.

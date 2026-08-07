@@ -234,11 +234,26 @@ export class YclientsControlledApprovalFileGate
       approvalPath: string;
       consumedPath: string;
       store: YclientsControlledRootOnlyFileStore;
+      expectedApprovalDigest?: string | (() => string | undefined);
     }>,
   ) {}
 
   async consume(planDigest: string): Promise<YclientsControlledApprovalOutcome> {
     if (!DIGEST_PATTERN.test(planDigest)) return 'mismatch';
+    const configuredApprovalDigest =
+      typeof this.configuration.expectedApprovalDigest === 'function'
+        ? this.configuration.expectedApprovalDigest()
+        : this.configuration.expectedApprovalDigest;
+    const expectedApprovalDigest =
+      this.configuration.expectedApprovalDigest === undefined
+        ? planDigest
+        : configuredApprovalDigest;
+    if (
+      typeof expectedApprovalDigest !== 'string' ||
+      !DIGEST_PATTERN.test(expectedApprovalDigest)
+    ) {
+      return 'mismatch';
+    }
     try {
       const consumed = await this.configuration.store.read(
         this.configuration.consumedPath,
@@ -251,10 +266,12 @@ export class YclientsControlledApprovalFileGate
       );
       if (approved === undefined) return 'missing';
       if (!DIGEST_FILE_PATTERN.test(approved)) return 'mismatch';
-      if (approved.replace(/\n$/u, '') !== planDigest) return 'mismatch';
+      if (approved.replace(/\n$/u, '') !== expectedApprovalDigest) {
+        return 'mismatch';
+      }
       return (await this.configuration.store.claim(
         this.configuration.consumedPath,
-        `${planDigest}\n`,
+        `${expectedApprovalDigest}\n`,
       )) === 'claimed'
         ? 'approved'
         : 'consumed';

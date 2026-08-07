@@ -86,6 +86,26 @@ describe('controlled root-only artifacts', () => {
     expect(store.files.has('/approval.consumed')).toBe(false);
   });
 
+  it('consumes only the configured identity-bound approval digest', async () => {
+    const store = new MemoryExclusiveStore();
+    const boundDigest = 'b'.repeat(64);
+    let expected: string | undefined;
+    const gate = new YclientsControlledApprovalFileGate({
+      approvalPath: '/approval',
+      consumedPath: '/approval.consumed',
+      store,
+      expectedApprovalDigest: () => expected,
+    });
+    store.files.set('/approval', `${DIGEST}\n`);
+
+    await expect(gate.consume(DIGEST)).resolves.toBe('mismatch');
+    expected = boundDigest;
+    await expect(gate.consume(DIGEST)).resolves.toBe('mismatch');
+    store.files.set('/approval', `${boundDigest}\n`);
+    await expect(gate.consume(DIGEST)).resolves.toBe('approved');
+    expect(store.files.get('/approval.consumed')).toBe(`${boundDigest}\n`);
+  });
+
   it('writes one exclusive allowlisted provider binding without PII or record hash', async () => {
     const store = new MemoryExclusiveStore();
     const sink = new YclientsControlledBindingArtifactFileSink({

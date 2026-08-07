@@ -129,4 +129,41 @@ describe('createYclientsControlledExecutableRunner', () => {
     expect(consume).not.toHaveBeenCalled();
     expect(fetch).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ['approval', { persistence: 'process_only', consume: () => 'approved' }],
+    ['bindings', { persistence: 'memory', record: () => undefined }],
+  ])('rejects a non-persistent %s gate before identity or fetch', (key, invalidGate) => {
+    const fetch = jest.fn() as jest.MockedFunction<typeof globalThis.fetch>;
+    const verify = jest.fn();
+    const configuration = {
+      baseUrl: 'https://api.yclients.com',
+      companyId: 2_079_564,
+      partnerToken: 'partner-test-credential',
+      userToken: 'user-test-credential',
+      requestTimeoutMilliseconds: 5_000,
+      fetch,
+      clock: {
+        nowMilliseconds: () => 0,
+        sleep: async () => undefined,
+      },
+      evidence: { record: () => undefined },
+      bindings: {
+        persistence: 'root_only_exclusive',
+        record: () => undefined,
+      },
+      identity: { verify },
+      approval: {
+        persistence: 'cross_process',
+        consume: () => 'missing',
+      },
+      [key]: invalidGate,
+    };
+
+    expect(() =>
+      createYclientsControlledExecutableRunner(configuration as never),
+    ).toThrow('Invalid controlled persistent gates');
+    expect(verify).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
 });

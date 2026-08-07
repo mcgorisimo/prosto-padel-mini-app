@@ -1277,3 +1277,59 @@
   approval-before-provider ordering, binding-before-evidence ordering,
   C5/C8/C10/C13, PII/hash/token exclusions, hard budget 14 and zero Nest/runtime
   imports were rechecked on the complete diff.
+
+### 2026-08-07 — D2 / controlled runner operationalization correction
+
+- Base/branch: clean local checkpoint
+  `481c578e418cb6302cf072bb04524c488637f823` on
+  `codex/week1-d2-reservation-core`. That checkpoint is superseded for real
+  writes: no operational execution is approved.
+- Independent review findings being corrected:
+  - runtime execution objects must match exact dry-run/execute shapes; unknown,
+    null or extra mode/keys return `invalid_execution` before identity,
+    approval or lifecycle work;
+  - a compiled owner-only entrypoint, concrete root-owned identity/token loader,
+    exact plan builder and concrete file gates replace any need for ad-hoc
+    Selectel JavaScript/TypeScript glue.
+- Operational boundary:
+  - launcher defaults to dry-run, requires effective UID 0, canonical API URL,
+    the exact reviewed identity/token/artifact paths and exact CLI flags;
+  - disposable PII exists only in a canonical root-owned `0600` identity file
+    under a `0700` directory, is validated in memory and omitted from digest,
+    argv, stdout/errors and evidence;
+  - follow-up independent review found that the first operational draft bound
+    only a static identity version and accepted alternate absolute paths. A
+    public-signature correction was rejected because it enabled offline PII
+    guesses. The final correction uses a domain-separated HMAC keyed by the two
+    existing root-only token files and combines it with the public plan digest
+    into an opaque execution `approvalDigest`; changed identity/token contents
+    or paths cannot reuse the prior approval, and Git contains no public PII
+    verifier, ordinary PII digest, token or raw PII;
+  - exact company/service/A/B/list/external-reference plan reproduces digest
+    `5ab6f618addc65d2fb669d8adfa288e601fd9ac89ffa45529ec00c59e2fc916d`;
+  - launcher itself constructs the concrete cross-process approval and
+    root-only exclusive binding gates before identity/provider work;
+  - no Nest module/controller/frontend/package-runtime import was added.
+- Delivery plan: `D2_YCLIENTS_OPERATIONAL_RUNBOOK.md` separates (1) future
+  approval for D2 branch push + isolated root-only Selectel checkout/build/
+  zero-provider dry-run from (2) a later exact one-time provider-write approval.
+  Neither gate is approved or executed in this checkpoint.
+- Tests/status:
+  - focused controlled suites: 7 suites / 104 tests PASS;
+  - backend typecheck PASS; unit 121 suites / 3102 tests PASS; E2E 2 suites /
+    4 tests PASS; build PASS;
+  - compiled launcher fail-closed smoke with no arguments: exact
+    `invalid_arguments`, exit 2, zero external calls;
+  - root Playwright: 82 passed / 1 skipped; root build PASS;
+  - `git diff --check` PASS before checkpoint;
+  - final independent read-only P0/P1 review: no actionable P0/P1. It verified
+    the keyed privacy binding, double approval check plus atomic claim,
+    identity/token/path TOCTOU behavior, PII-safe output and zero Nest/runtime
+    imports.
+- External YCLIENTS/API/DB/server calls, provider writes, migration, server
+  access, actual secrets/env reads, push/merge/deploy and application
+  runtime/container changes: none.
+- Deployment: `not_needed` for this local code-only checkpoint; D2 remains
+  `in_progress`, integration/test rollout `pending`. Selectel test application
+  runtime remains D1 `c04074459948d0bf545e865b885aea7a4e5fec3c`, containers
+  unchanged, production untouched.

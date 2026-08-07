@@ -66,6 +66,7 @@ export type YclientsControlledRunnerResult =
       outcome: 'blocked';
       reason:
         | 'invalid_plan'
+        | 'invalid_execution'
         | 'identity_unverified'
         | 'digest_mismatch'
         | 'approval_missing'
@@ -234,6 +235,39 @@ export class YclientsControlledTestRunner {
         providerRequestCount: 0 as const,
       });
     }
+    if (
+      typeof execution !== 'object' ||
+      execution === null ||
+      Array.isArray(execution)
+    ) {
+      return Object.freeze({
+        outcome: 'blocked' as const,
+        reason: 'invalid_execution' as const,
+        providerRequestCount: 0 as const,
+        planDigest,
+      });
+    }
+    const executionRecord = execution as unknown as Record<string, unknown>;
+    const mode = executionRecord.mode;
+    const executionKeys = Object.keys(executionRecord).sort();
+    const validDryRun =
+      (mode === undefined && executionKeys.length === 0) ||
+      (mode === 'dry_run' &&
+        executionKeys.length === 1 &&
+        executionKeys[0] === 'mode');
+    const validExecute =
+      mode === 'execute' &&
+      executionKeys.length === 2 &&
+      executionKeys[0] === 'mode' &&
+      executionKeys[1] === 'planDigest';
+    if (!validDryRun && !validExecute) {
+      return Object.freeze({
+        outcome: 'blocked' as const,
+        reason: 'invalid_execution' as const,
+        providerRequestCount: 0 as const,
+        planDigest,
+      });
+    }
     let identityVerified = false;
     try {
       identityVerified =
@@ -252,7 +286,7 @@ export class YclientsControlledTestRunner {
         planDigest,
       });
     }
-    if (execution.mode === undefined || execution.mode === 'dry_run') {
+    if (validDryRun) {
       return Object.freeze({
         outcome: 'dry_run_ready' as const,
         planDigest,
@@ -260,9 +294,9 @@ export class YclientsControlledTestRunner {
       });
     }
     if (
-      !('planDigest' in execution) ||
-      !SHA256_PATTERN.test(execution.planDigest) ||
-      execution.planDigest !== planDigest
+      typeof executionRecord.planDigest !== 'string' ||
+      !SHA256_PATTERN.test(executionRecord.planDigest) ||
+      executionRecord.planDigest !== planDigest
     ) {
       return Object.freeze({
         outcome: 'blocked' as const,

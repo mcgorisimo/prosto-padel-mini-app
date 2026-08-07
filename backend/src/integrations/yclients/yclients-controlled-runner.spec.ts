@@ -209,6 +209,36 @@ describe('YclientsControlledTestRunner', () => {
     expect(setup.run).not.toHaveBeenCalled();
   });
 
+  it.each([
+    { mode: 'unexpected', planDigest: 'a'.repeat(64) },
+    { mode: null, planDigest: 'a'.repeat(64) },
+    { mode: 'execute', planDigest: 'a'.repeat(64), extra: true },
+    null,
+    'execute',
+  ])('rejects an invalid runtime execution shape before identity or approval', async (execution) => {
+    const digest = createYclientsControlledPlanDigest(plan())!;
+    const setup = dependencies(digest);
+    const runtimeExecution =
+      execution !== null && typeof execution === 'object'
+        ? { ...execution, planDigest: digest }
+        : execution;
+
+    await expect(
+      new YclientsControlledTestRunner(setup.value).run(
+        plan(),
+        runtimeExecution as never,
+      ),
+    ).resolves.toEqual({
+      outcome: 'blocked',
+      reason: 'invalid_execution',
+      providerRequestCount: 0,
+      planDigest: digest,
+    });
+    expect(setup.verify).not.toHaveBeenCalled();
+    expect(setup.consume).not.toHaveBeenCalled();
+    expect(setup.run).not.toHaveBeenCalled();
+  });
+
   it('requires an approval instead of treating execute as an implicit grant', async () => {
     const digest = createYclientsControlledPlanDigest(plan())!;
     const setup = dependencies();

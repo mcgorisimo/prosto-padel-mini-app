@@ -50,6 +50,12 @@ export type YclientsControlledExecutableConfiguration = Readonly<{
 export function createYclientsControlledExecutableRunner(
   configuration: YclientsControlledExecutableConfiguration,
 ): YclientsControlledTestRunner {
+  if (
+    configuration.approval?.persistence !== 'cross_process' ||
+    configuration.bindings?.persistence !== 'root_only_exclusive'
+  ) {
+    throw new TypeError('Invalid controlled persistent gates');
+  }
   const baseUrl = normalizeYclientsHttpsBaseUrl(configuration.baseUrl);
   if (baseUrl !== YCLIENTS_API_DEFAULT_BASE_URL) {
     throw new TypeError('Invalid controlled YCLIENTS endpoint');
