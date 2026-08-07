@@ -1365,3 +1365,51 @@
 - Status: Gate 1 `stopped_before_dry_run`; D2 remains `in_progress`. A new exact
   owner approval is required for one isolated build method before provisioning
   inputs or retrying dry-run. Gate 2 remains prohibited.
+
+### 2026-08-07 — D2 / Gate 1 isolated dry-run PASS
+
+- Owner separately authorized continuation of Gate 1 for exact checkpoint
+  `e7ceeb49052f25b91aa4d20845cd41c4666d44e8` using temporary
+  `node:20.11.0-bookworm-slim` containers only. Gate 2 and every YCLIENTS
+  provider call/write remained prohibited.
+- Isolated build:
+  - the Node image was pulled into host image cache; all Gate 1 build containers
+    used `--rm` and were removed;
+  - the first shell-composed invocation performed no install/build because its
+    inner npm command was lost by SSH quoting. It was replaced by two exact
+    sequential `--rm` invocations: `npm ci`, then `npm run build`;
+  - `npm ci` installed 587 packages and backend build PASS. Existing npm audit
+    output reported 5 high vulnerabilities and the pinned Node `20.11.0` image
+    emitted dependency engine warnings requiring `20.11.1`; no dependency,
+    lockfile or image change was made in this gate;
+  - compiled launcher exists and isolated checkout stayed detached/clean at
+    exact `e7ceeb49052f25b91aa4d20845cd41c4666d44e8`.
+- Inputs: existing approved YCLIENTS token files were copied server-side into
+  the fixed root-owned `0600` paths without printing their contents or changing
+  application env. The owner entered the disposable identity directly over
+  SSH; its final file is root-owned `0600`. Raw PII/tokens were not recorded in
+  output, artifacts or this evidence.
+- Fail-closed preparation: the first network-disabled dry-run stopped on an
+  invalid identity shape before any provider work; artifacts remained empty.
+  After the owner corrected the two invalid fields, the exact compiled launcher
+  was run once more in a separate `--network none --rm` container.
+- Final dry-run result: `PASS`, exactly one safe JSON object:
+  - outcome `dry_run_ready`;
+  - plan digest
+    `5ab6f618addc65d2fb669d8adfa288e601fd9ac89ffa45529ec00c59e2fc916d`;
+  - provider request count `0`;
+  - opaque approval digest
+    `fd7c94c0606fb3929d212b397b907754beaf05f205fe2ce2d42bf47bb2f03aab`.
+- Postcheck: artifacts count `0`; `approval.sha256`, consumed marker and
+  `provider-binding.json` are absent. No Gate 1 temporary container remains.
+  Application checkout remains D1 `c04074459948d0bf545e865b885aea7a4e5fec3c`;
+  the original frontend/backend/nginx/PostgreSQL container IDs and images are
+  unchanged, all running with restart count 0. Compose/env/PostgreSQL/runtime/
+  production were not changed. Network-disabled dry-run plus zero request count
+  confirms no YCLIENTS API call and no booking create/PUT/DELETE.
+- Verification: evidence-only WORKLOG append; project tests not rerun/not needed.
+  `git diff --check` PASS before the local docs checkpoint.
+- Status: Gate 1 `PASS` and stopped after approval digest. D2 remains
+  `in_progress`; isolated code is not application runtime/deployment. Gate 2 is
+  not authorized and must not start without a new exact one-time owner approval
+  binding checkpoint, plan digest and approval digest above.
