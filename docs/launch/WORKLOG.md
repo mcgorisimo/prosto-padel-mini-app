@@ -26,7 +26,7 @@
 | Этап | Статус | Ветка/commit | Проверки | Блокер/следующий шаг |
 |---|---|---|---|---|
 | D1 Backend-only/contracts | done | `main` / deployed `c04074459948d0bf545e865b885aea7a4e5fec3c` | frontend E2E PASS (82/1 skipped); focused fail-closed 2/2 PASS; frontend build PASS; backend all PASS; Selectel test smoke PASS | D1 закрыт; следующий отдельный этап — D2 |
-| D2 YCLIENTS reservation core | in_progress | `main` / Selectel test `d7812d3ef28eda7100bca6bdc5d56afa0be29703` | migration 033 applied/verified; frontend-only rollout build/health/asset/auth-boundary/log checks PASS; manual TMA Home booking-card smoke pending | reopen the Mini App and verify the persisted booking appears with customer-facing court label; Court 1 YCLIENTS schedule still needs 00:00 correction; support contact deferred to D5 |
+| D2 YCLIENTS reservation core | in_progress | `main` / Selectel test `d7812d3ef28eda7100bca6bdc5d56afa0be29703` | migration 033 applied/verified; frontend-only rollout build/health/asset/auth-boundary/log checks and owner TMA Home booking-card smoke PASS | resolve the existing external-create/local-pending binding without repeat create; Court 1 YCLIENTS schedule still needs 00:00 correction; support contact deferred to D5 |
 | D3 Match ↔ reservation lifecycle | pending | — | — | reflect admin cancellation without provider DELETE, owner participant removal, match ↔ reservation binding |
 | D4 Payment Core | pending | — | — | payment provider, pricing/payment snapshot, чеки и возвраты |
 | D5 Settings/moderation/compliance | pending | — | — | standalone phone/email auth, verified backend email, approved club support/contact source and clickable action; затем schema review |
@@ -41,7 +41,7 @@
 | Этап | Среда | Целевой commit | Статус | Проверка |
 |---|---|---|---|---|
 | D1 Backend-only/contracts | Selectel test | `c04074459948d0bf545e865b885aea7a4e5fec3c` | `test_deployed` | frontend healthy; HTTPS root/health и новый asset 200; TMA auth/profile/feed/details/booking availability PASS; bundle/log audit PASS |
-| D2 YCLIENTS reservation core | Selectel test | `d7812d3ef28eda7100bca6bdc5d56afa0be29703` | `pending` | frontend-only rollout applied; all containers healthy/restart 0, HTTPS root/health/new asset 200, unauth bookings 401 and fresh log audit clean; owner TMA Home booking-card smoke pending |
+| D2 YCLIENTS reservation core | Selectel test | `d7812d3ef28eda7100bca6bdc5d56afa0be29703` | `test_deployed` | frontend-only rollout applied; all containers healthy/restart 0, HTTPS root/health/new asset 200, unauth bookings 401, fresh log audit clean and owner TMA Home booking-card smoke PASS |
 | D2 persistence/privacy proposal | not applicable | docs-only checkpoint | `not_needed` | только Markdown; runtime, schema, containers и конфигурация не менялись |
 | D2 YCLIENTS contract matrix | not applicable | docs-only checkpoint поверх `3e8739b` | `not_needed` | только Markdown; API/DB/server/runtime не вызывались и не менялись |
 | D2 YCLIENTS controlled test plan | not applicable | `040773172a2fa556ffaaf1d12dac540095070976` + docs-only correction from that exact base | `not_needed` | plan only; provider/server/DB/runtime calls и writes не выполнялись |
@@ -2197,3 +2197,9 @@
   exact Telegram Mini App and confirm the existing persisted booking is visible
   on Home with the correct `Корт №…` label and truthful status; ordinary browser
   smoke is not a Telegram authentication substitute.
+- Owner subsequently reopened the exact Telegram Mini App and confirmed the
+  persisted booking appears in `Главная → Брони`. The required real TMA Home
+  booking-card smoke is PASS, so exact runtime `d7812d3...` is
+  `test_deployed`. This confirms visibility only: the retained
+  `pending_confirmation` state still requires a separate safe binding recovery
+  and must not trigger another create or be treated as payment state.
