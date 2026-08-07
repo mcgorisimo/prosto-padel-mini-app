@@ -1,6 +1,7 @@
 import type { YclientsBoundedAdminRecordsQuery } from './yclients-admin-read.client';
 import type {
   YclientsAdminWriteClient,
+  YclientsControlledCleanupExactDiagnostic,
   YclientsControlledCleanupExactResult,
   YclientsControlledCleanupRecordReader,
 } from './yclients-controlled-admin.client';
@@ -48,7 +49,10 @@ export type YclientsControlledCleanupEvidenceEvent = Readonly<{
     | 'rejected'
     | 'unavailable'
     | 'invalid'
+    | 'not_found'
+    | 'mismatch'
     | 'unknown';
+  diagnostic?: YclientsControlledCleanupExactDiagnostic;
   effect?: Readonly<{
     recordId: number;
     slot: 'A';
@@ -197,6 +201,8 @@ function statusOf(value: { outcome: string }) {
   }
   if (value.outcome === 'unauthorized') return 'unauthorized' as const;
   if (value.outcome === 'rejected') return 'rejected' as const;
+  if (value.outcome === 'not_found') return 'not_found' as const;
+  if (value.outcome === 'mismatch') return 'mismatch' as const;
   if (value.outcome === 'rate_limited' || value.outcome === 'unavailable') {
     return 'unavailable' as const;
   }
@@ -214,7 +220,12 @@ export class YclientsControlledCleanupLifecycle {
     private readonly dependencies: YclientsControlledCleanupLifecycleDependencies,
   ) {}
 
-  private async request<T extends { outcome: string }>(
+  private async request<
+    T extends {
+      outcome: string;
+      diagnostic?: YclientsControlledCleanupExactDiagnostic;
+    },
+  >(
     step: 1 | 2 | 3 | 4,
     action: YclientsControlledCleanupEvidenceEvent['action'],
     operation: () => Promise<T>,
@@ -245,6 +256,9 @@ export class YclientsControlledCleanupLifecycle {
         occurredAt: new Date(now).toISOString(),
         action,
         status: statusOf(operationResult),
+        ...(operationResult.diagnostic === undefined
+          ? {}
+          : { diagnostic: operationResult.diagnostic }),
         ...(safeEffect === undefined ? {} : { effect: safeEffect }),
       }),
     );

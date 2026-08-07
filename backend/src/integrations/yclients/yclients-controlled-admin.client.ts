@@ -5,8 +5,9 @@ import {
   YclientsControlledRescheduleTarget,
 } from './yclients-controlled-record';
 import {
+  inspectYclientsControlledCleanupRecord,
   isValidYclientsControlledCleanupExpectation,
-  readYclientsControlledCleanupRecord,
+  YclientsControlledCleanupBindingChecks,
   YclientsControlledCleanupRecordExpectation,
 } from './yclients-controlled-cleanup-record';
 import type { YclientsSafeAdminRecord } from './yclients-admin-read.client';
@@ -41,17 +42,60 @@ export type YclientsControlledFullRecordResult =
   | Readonly<{ outcome: 'unavailable' }>
   | Readonly<{ outcome: 'unknown' }>;
 
+export type YclientsControlledCleanupBodyFailure =
+  | 'invalid_content_length'
+  | 'body_limit_exceeded'
+  | 'body_missing'
+  | 'body_stream_error'
+  | 'invalid_utf8'
+  | 'invalid_json'
+  | 'body_not_object';
+
+export type YclientsControlledCleanupReadDiagnostic =
+  | Readonly<{ kind: 'unexpected_http_status'; httpStatus: number }>
+  | Readonly<{
+      kind: 'body_invalid';
+      reason: YclientsControlledCleanupBodyFailure;
+    }>
+  | Readonly<{
+      kind: 'envelope_invalid';
+      reason: 'success_not_true' | 'data_not_object';
+    }>;
+
+export type YclientsControlledCleanupExactDiagnostic =
+  | YclientsControlledCleanupReadDiagnostic
+  | Readonly<{ kind: 'http_not_found'; httpStatus: 404 }>
+  | Readonly<{
+      kind: 'binding_mismatch';
+      checks: YclientsControlledCleanupBindingChecks;
+    }>;
+
 export type YclientsControlledCleanupExactResult =
   | Readonly<{ outcome: 'disabled' }>
   | Readonly<{ outcome: 'invalid_request' }>
   | Readonly<{ outcome: 'matched'; record: YclientsSafeAdminRecord }>
-  | Readonly<{ outcome: 'mismatch' }>
+  | Readonly<{
+      outcome: 'mismatch';
+      diagnostic: Extract<
+        YclientsControlledCleanupExactDiagnostic,
+        Readonly<{ kind: 'binding_mismatch' }>
+      >;
+    }>
   | Readonly<{ outcome: 'unauthorized' }>
-  | Readonly<{ outcome: 'not_found' }>
+  | Readonly<{
+      outcome: 'not_found';
+      diagnostic: Extract<
+        YclientsControlledCleanupExactDiagnostic,
+        Readonly<{ kind: 'http_not_found' }>
+      >;
+    }>
   | Readonly<{ outcome: 'rejected' }>
   | Readonly<{ outcome: 'rate_limited' }>
   | Readonly<{ outcome: 'unavailable' }>
-  | Readonly<{ outcome: 'unknown' }>;
+  | Readonly<{
+      outcome: 'unknown';
+      diagnostic: YclientsControlledCleanupReadDiagnostic;
+    }>;
 
 export type YclientsControlledWriteUnknownReason =
   | 'timeout_or_transport'
@@ -140,19 +184,40 @@ async function cancelBody(
   }
 }
 
-async function readBoundedJson(
+type BoundedJsonResult =
+  | Readonly<{ outcome: 'parsed'; value: Record<string, unknown> }>
+  | Readonly<{
+      outcome: 'invalid';
+      reason: YclientsControlledCleanupBodyFailure;
+    }>;
+
+async function readBoundedJsonWithDiagnostic(
   response: Response,
-): Promise<Record<string, unknown> | undefined> {
+): Promise<BoundedJsonResult> {
   const contentLength = response.headers.get('content-length');
+  if (contentLength !== null && !/^\d+$/u.test(contentLength)) {
+    await cancelBody(response.body);
+    return Object.freeze({
+      outcome: 'invalid' as const,
+      reason: 'invalid_content_length' as const,
+    });
+  }
   if (
     contentLength !== null &&
-    (!/^\d+$/u.test(contentLength) ||
-      Number(contentLength) > MAX_CONTROLLED_RESPONSE_BYTES)
+    Number(contentLength) > MAX_CONTROLLED_RESPONSE_BYTES
   ) {
     await cancelBody(response.body);
-    return undefined;
+    return Object.freeze({
+      outcome: 'invalid' as const,
+      reason: 'body_limit_exceeded' as const,
+    });
   }
-  if (response.body === null) return undefined;
+  if (response.body === null) {
+    return Object.freeze({
+      outcome: 'invalid' as const,
+      reason: 'body_missing' as const,
+    });
+  }
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let bytesRead = 0;
@@ -167,7 +232,10 @@ async function readBoundedJson(
         } catch {
           // The response remains invalid.
         }
-        return undefined;
+        return Object.freeze({
+          outcome: 'invalid' as const,
+          reason: 'body_limit_exceeded' as const,
+        });
       }
       chunks.push(chunk.value);
     }
@@ -177,7 +245,10 @@ async function readBoundedJson(
     } catch {
       // The response remains invalid.
     }
-    return undefined;
+    return Object.freeze({
+      outcome: 'invalid' as const,
+      reason: 'body_stream_error' as const,
+    });
   } finally {
     reader.releaseLock();
   }
@@ -188,13 +259,37 @@ async function readBoundedJson(
     bytes.set(chunk, offset);
     offset += chunk.byteLength;
   }
+  let decoded: string;
   try {
-    const decoded = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-    const parsed: unknown = JSON.parse(decoded);
-    return isRecord(parsed) ? parsed : undefined;
+    decoded = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
   } catch {
-    return undefined;
+    return Object.freeze({
+      outcome: 'invalid' as const,
+      reason: 'invalid_utf8' as const,
+    });
   }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(decoded);
+  } catch {
+    return Object.freeze({
+      outcome: 'invalid' as const,
+      reason: 'invalid_json' as const,
+    });
+  }
+  return isRecord(parsed)
+    ? Object.freeze({ outcome: 'parsed' as const, value: parsed })
+    : Object.freeze({
+        outcome: 'invalid' as const,
+        reason: 'body_not_object' as const,
+      });
+}
+
+async function readBoundedJson(
+  response: Response,
+): Promise<Record<string, unknown> | undefined> {
+  const result = await readBoundedJsonWithDiagnostic(response);
+  return result.outcome === 'parsed' ? result.value : undefined;
 }
 
 function controlledUrl(
@@ -279,19 +374,81 @@ export class YclientsControlledCleanupRecordReader {
         const failure = readStatusFailure(response.status);
         if (failure !== undefined) {
           await cancelBody(response.body);
+          if (failure.outcome === 'not_found') {
+            return Object.freeze({
+              outcome: 'not_found' as const,
+              diagnostic: Object.freeze({
+                kind: 'http_not_found' as const,
+                httpStatus: 404 as const,
+              }),
+            });
+          }
+          if (failure.outcome === 'unknown') {
+            return Object.freeze({
+              outcome: 'unknown' as const,
+              diagnostic: Object.freeze({
+                kind: 'unexpected_http_status' as const,
+                httpStatus: response.status,
+              }),
+            });
+          }
           return failure;
         }
-        const body = await readBoundedJson(response);
-        if (body?.success !== true) {
-          return Object.freeze({ outcome: 'unknown' as const });
+        const bodyResult = await readBoundedJsonWithDiagnostic(response);
+        if (bodyResult.outcome === 'invalid') {
+          return Object.freeze({
+            outcome: 'unknown' as const,
+            diagnostic: Object.freeze({
+              kind: 'body_invalid' as const,
+              reason: bodyResult.reason,
+            }),
+          });
         }
-        const record = readYclientsControlledCleanupRecord(
+        const body = bodyResult.value;
+        if (body.success !== true) {
+          return Object.freeze({
+            outcome: 'unknown' as const,
+            diagnostic: Object.freeze({
+              kind: 'envelope_invalid' as const,
+              reason: 'success_not_true' as const,
+            }),
+          });
+        }
+        if (!isRecord(body.data)) {
+          return Object.freeze({
+            outcome: 'unknown' as const,
+            diagnostic: Object.freeze({
+              kind: 'envelope_invalid' as const,
+              reason: 'data_not_object' as const,
+            }),
+          });
+        }
+        const inspection = inspectYclientsControlledCleanupRecord(
           body.data,
           expectation,
         );
-        return record === undefined
-          ? Object.freeze({ outcome: 'mismatch' as const })
-          : Object.freeze({ outcome: 'matched' as const, record });
+        if (inspection?.record === undefined) {
+          if (inspection === undefined) {
+            return Object.freeze({
+              outcome: 'unknown' as const,
+              diagnostic: Object.freeze({
+                kind: 'envelope_invalid' as const,
+                reason: 'data_not_object' as const,
+              }),
+            });
+          }
+          return Object.freeze({
+            outcome: 'mismatch' as const,
+            diagnostic: Object.freeze({
+              kind: 'binding_mismatch' as const,
+              checks: inspection.checks,
+            }),
+          });
+        }
+        return Object.freeze({
+          outcome: 'matched' as const,
+          record: inspection.record,
+        });
       } catch {
         return Object.freeze({ outcome: 'unavailable' as const });
       }

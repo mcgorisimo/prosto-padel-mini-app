@@ -1637,3 +1637,54 @@
   exact-read `unknown`, a separately reviewed correction/plan if required and
   fresh delivery/dry-run/execution approvals. The consumed Gate 2 approval
   does not authorize another request.
+
+### 2026-08-07 — D2 / cleanup exact-read diagnostic correction
+
+- Owner authorized only a code-only, runtime-disabled diagnostic correction
+  for cleanup record `1891713981`. YCLIENTS/API/SSH/server calls, runner
+  delivery/dry-run/execute, approval artifacts, provider writes, runtime
+  wiring, DB/schema/migrations, push/merge/deploy and hold-A changes were
+  excluded. Base evidence checkpoint was
+  `66439687fa3e6f154ae5bab6811aa7c88f28e7e3`; worktree was clean.
+- Root-cause review proved that retained `status=unknown` could not distinguish
+  HTTP `404`, an unexpected HTTP status, bounded-body/stream/UTF-8/JSON failure,
+  invalid success/data envelope or a strict binding mismatch. The correction
+  does not claim which live branch occurred and does not relax the provider
+  parser.
+- Added allowlisted exact-read diagnostics only: numeric HTTP status for
+  not-found/unexpected status, fixed body/envelope reason enums, and ten
+  `{present,typeValid,equal}` field triples for record/company/resource/
+  service/datetime/deleted/api_id and client phone/fullName/email. Diagnostics
+  carry no provider values, PII, tokens, record hash, response size or raw
+  request/response body.
+- Strict `matched` acceptance remains the same exact company/record/effect/
+  external-reference/client comparison. Lifecycle evidence now preserves
+  `not_found` and `mismatch` instead of collapsing them into `unknown`. DELETE
+  remains reachable only after `preDelete.outcome === matched`; no request,
+  retry, fallback, budget or limiter behavior changed.
+- Mocked focused verification: 3 suites / 63 tests PASS. Regressions cover all
+  seven bounded-body reasons, `404`, unexpected status, envelope failures,
+  every binding equality, missing/type-invalid flags, lifecycle no-DELETE and
+  launcher serialization without PII/token/hash/body. No test contacted
+  YCLIENTS.
+- Backend verification: typecheck PASS; unit 126 suites / 3178 tests PASS; E2E
+  2 suites / 4 tests PASS; build PASS.
+- Root verification: synthetic Playwright E2E 82 passed / 1 skipped. The first
+  sandboxed root build stopped before compilation because esbuild could not
+  read the worktree parent (`Access denied`); the identical local command was
+  rerun outside that filesystem restriction and PASSed (1615 modules, only the
+  existing chunk-size/CJS warnings).
+- Independent read-only review of the complete diff: actionable P0/P1 none.
+  It confirmed unchanged strict acceptance/DELETE gate, boolean-only binding
+  evidence, fail-closed bounded streaming/body cancellation, no extra request
+  or retry and no Nest/module/controller/runtime import.
+- No external call, provider operation, secret/env read, server access,
+  approval artifact, runtime/container/config/database change or deployment
+  occurred. Deployment `not_needed`: the correction is unreachable from the
+  application runtime. Selectel test application remains D1 `c040744...` and
+  was not contacted; production was not changed.
+- D2 remains `in_progress`; record `1891713981` remains `cleanup_required` and
+  slot A remains held. The consumed cleanup approval cannot be reused. A future
+  one-request diagnostic read requires separately approved branch delivery,
+  isolated dry-run and a fresh exact read-only approval; DELETE remains outside
+  that diagnostic gate.

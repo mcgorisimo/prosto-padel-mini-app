@@ -18,12 +18,52 @@ export type YclientsControlledCleanupRecordExpectation = Readonly<{
   client: YclientsCreateBookingCommand['client'];
 }>;
 
+export type YclientsControlledCleanupFieldCheck = Readonly<{
+  present: boolean;
+  typeValid: boolean;
+  equal: boolean;
+}>;
+
+export type YclientsControlledCleanupBindingChecks = Readonly<{
+  recordId: YclientsControlledCleanupFieldCheck;
+  companyId: YclientsControlledCleanupFieldCheck;
+  resourceId: YclientsControlledCleanupFieldCheck;
+  services: YclientsControlledCleanupFieldCheck;
+  datetime: YclientsControlledCleanupFieldCheck;
+  deleted: YclientsControlledCleanupFieldCheck;
+  apiId: YclientsControlledCleanupFieldCheck;
+  clientPhone: YclientsControlledCleanupFieldCheck;
+  clientFullName: YclientsControlledCleanupFieldCheck;
+  clientEmail: YclientsControlledCleanupFieldCheck;
+}>;
+
+export type YclientsControlledCleanupBindingInspection = Readonly<{
+  record?: YclientsSafeAdminRecord;
+  checks: YclientsControlledCleanupBindingChecks;
+}>;
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function positiveSafeInteger(value: unknown): value is number {
   return Number.isSafeInteger(value) && Number(value) > 0;
+}
+
+function present(value: unknown): boolean {
+  return value !== undefined && value !== null;
+}
+
+function fieldCheck(
+  isPresent: boolean,
+  typeValid: boolean,
+  equal: boolean,
+): YclientsControlledCleanupFieldCheck {
+  return Object.freeze({
+    present: isPresent,
+    typeValid,
+    equal: typeValid && equal,
+  });
 }
 
 function validIsoDatetime(value: unknown): value is string {
@@ -160,6 +200,147 @@ export function isValidYclientsControlledCleanupExpectation(
 }
 
 /**
+ * Inspects the isolated cleanup binding without returning provider values.
+ * Diagnostics contain presence/type/equality booleans only; PII stays in
+ * local variables long enough to perform the exact comparison.
+ */
+export function inspectYclientsControlledCleanupRecord(
+  value: unknown,
+  expected: YclientsControlledCleanupRecordExpectation,
+): YclientsControlledCleanupBindingInspection | undefined {
+  if (!isValidYclientsControlledCleanupExpectation(expected) || !isRecord(value)) {
+    return undefined;
+  }
+
+  const companyId = consistentId(value, 'company_id', 'company');
+  const resourceId = consistentId(value, 'staff_id', 'staff');
+  const services = serviceIds(value.services);
+  const apiId = normalizeYclientsSystemApiId(value.api_id);
+  const clientValue = isRecord(value.client) ? value.client : undefined;
+  const client = canonicalClient(value.client);
+
+  const phone =
+    clientValue === undefined ? undefined : canonicalText(clientValue.phone, 32);
+  const phoneTypeValid = phone !== undefined && /^\d{10,15}$/u.test(phone);
+
+  const name =
+    clientValue === undefined ? undefined : canonicalText(clientValue.name, 256);
+  const surname =
+    clientValue === undefined
+      ? undefined
+      : canonicalText(clientValue.surname, 256, true);
+  const patronymic =
+    clientValue === undefined
+      ? undefined
+      : canonicalText(clientValue.patronymic, 256, true);
+  const fullNameTypeValid =
+    name !== undefined && surname !== undefined && patronymic !== undefined;
+  const fullName = fullNameTypeValid
+    ? [name, surname, patronymic]
+        .filter((part) => part.length > 0)
+        .join(' ')
+    : undefined;
+
+  const email =
+    clientValue === undefined ? undefined : canonicalText(clientValue.email, 320);
+  const emailTypeValid =
+    email !== undefined && /^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(email);
+
+  const recordIdTypeValid = positiveSafeInteger(value.id);
+  const datetimeTypeValid = validIsoDatetime(value.datetime);
+  const deletedTypeValid = typeof value.deleted === 'boolean';
+  const checks: YclientsControlledCleanupBindingChecks = Object.freeze({
+    recordId: fieldCheck(
+      present(value.id),
+      recordIdTypeValid,
+      value.id === expected.recordId,
+    ),
+    companyId: fieldCheck(
+      present(value.company_id) || present(value.company),
+      companyId !== undefined,
+      companyId === expected.companyId,
+    ),
+    resourceId: fieldCheck(
+      present(value.staff_id) || present(value.staff),
+      resourceId !== undefined,
+      resourceId === expected.resourceId,
+    ),
+    services: fieldCheck(
+      present(value.services),
+      services !== undefined,
+      services?.length === 1 && services[0] === expected.serviceId,
+    ),
+    datetime: fieldCheck(
+      present(value.datetime),
+      datetimeTypeValid,
+      value.datetime === expected.datetime,
+    ),
+    deleted: fieldCheck(
+      present(value.deleted),
+      deletedTypeValid,
+      value.deleted === expected.deleted,
+    ),
+    apiId: fieldCheck(
+      apiId.outcome !== 'missing',
+      apiId.outcome === 'present',
+      apiId.outcome === 'present' && apiId.value === expected.apiId,
+    ),
+    clientPhone: fieldCheck(
+      clientValue !== undefined && present(clientValue.phone),
+      phoneTypeValid,
+      phone === expected.client.phone,
+    ),
+    clientFullName: fieldCheck(
+      clientValue !== undefined &&
+        present(clientValue.name) &&
+        present(clientValue.surname) &&
+        present(clientValue.patronymic),
+      fullNameTypeValid,
+      fullName === expected.client.fullName,
+    ),
+    clientEmail: fieldCheck(
+      clientValue !== undefined && present(clientValue.email),
+      emailTypeValid,
+      email === expected.client.email,
+    ),
+  });
+
+  const matched =
+    recordIdTypeValid &&
+    value.id === expected.recordId &&
+    companyId === expected.companyId &&
+    resourceId === expected.resourceId &&
+    services?.length === 1 &&
+    services[0] === expected.serviceId &&
+    value.datetime === expected.datetime &&
+    datetimeTypeValid &&
+    value.deleted === expected.deleted &&
+    deletedTypeValid &&
+    apiId.outcome === 'present' &&
+    apiId.value === expected.apiId &&
+    client?.phone === expected.client.phone &&
+    client?.fullName === expected.client.fullName &&
+    client?.email === expected.client.email;
+
+  return Object.freeze({
+    ...(matched
+      ? {
+          record: Object.freeze({
+            recordId: expected.recordId,
+            companyId,
+            resourceId,
+            serviceIds: services,
+            datetime: expected.datetime,
+            deleted: expected.deleted,
+            apiId: expected.apiId,
+          }),
+        }
+      : {}),
+    checks,
+  });
+}
+
+/**
  * Strict PII-bearing comparison for the isolated cleanup harness. The returned
  * projection contains no client data, record hash or raw provider fields.
  */
@@ -167,41 +348,5 @@ export function readYclientsControlledCleanupRecord(
   value: unknown,
   expected: YclientsControlledCleanupRecordExpectation,
 ): YclientsSafeAdminRecord | undefined {
-  if (
-    !isValidYclientsControlledCleanupExpectation(expected) ||
-    !isRecord(value) ||
-    value.id !== expected.recordId
-  ) {
-    return undefined;
-  }
-  const companyId = consistentId(value, 'company_id', 'company');
-  const resourceId = consistentId(value, 'staff_id', 'staff');
-  const services = serviceIds(value.services);
-  const apiId = normalizeYclientsSystemApiId(value.api_id);
-  const client = canonicalClient(value.client);
-  if (
-    companyId !== expected.companyId ||
-    resourceId !== expected.resourceId ||
-    services?.length !== 1 ||
-    services[0] !== expected.serviceId ||
-    value.datetime !== expected.datetime ||
-    !validIsoDatetime(value.datetime) ||
-    value.deleted !== expected.deleted ||
-    apiId.outcome !== 'present' ||
-    apiId.value !== expected.apiId ||
-    client?.phone !== expected.client.phone ||
-    client?.fullName !== expected.client.fullName ||
-    client?.email !== expected.client.email
-  ) {
-    return undefined;
-  }
-  return Object.freeze({
-    recordId: expected.recordId,
-    companyId,
-    resourceId,
-    serviceIds: services,
-    datetime: expected.datetime,
-    deleted: expected.deleted,
-    apiId: expected.apiId,
-  });
+  return inspectYclientsControlledCleanupRecord(value, expected)?.record;
 }

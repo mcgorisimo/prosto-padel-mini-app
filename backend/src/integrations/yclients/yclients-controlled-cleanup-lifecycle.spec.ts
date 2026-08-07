@@ -7,7 +7,10 @@ import type {
   YclientsControlledCancelResult,
   YclientsControlledCleanupExactResult,
 } from './yclients-controlled-admin.client';
-import type { YclientsControlledCleanupRecordExpectation } from './yclients-controlled-cleanup-record';
+import type {
+  YclientsControlledCleanupBindingChecks,
+  YclientsControlledCleanupRecordExpectation,
+} from './yclients-controlled-cleanup-record';
 import {
   YclientsControlledCleanupEvidenceEvent,
   YclientsControlledCleanupInput,
@@ -23,6 +26,48 @@ const DATETIME = '2026-08-17T12:00:00+03:00';
 const PRIVATE_PHONE = '79990000000';
 const PRIVATE_NAME = 'Disposable Test';
 const PRIVATE_EMAIL = 'disposable@example.test';
+
+function bindingChecks(): YclientsControlledCleanupBindingChecks {
+  const matched = Object.freeze({ present: true, typeValid: true, equal: true });
+  return Object.freeze({
+    recordId: matched,
+    companyId: matched,
+    resourceId: matched,
+    services: matched,
+    datetime: matched,
+    deleted: matched,
+    apiId: matched,
+    clientPhone: matched,
+    clientFullName: matched,
+    clientEmail: Object.freeze({
+      present: true,
+      typeValid: true,
+      equal: false,
+    }),
+  });
+}
+
+const MISMATCH = Object.freeze({
+  outcome: 'mismatch' as const,
+  diagnostic: Object.freeze({
+    kind: 'binding_mismatch' as const,
+    checks: bindingChecks(),
+  }),
+});
+const NOT_FOUND = Object.freeze({
+  outcome: 'not_found' as const,
+  diagnostic: Object.freeze({
+    kind: 'http_not_found' as const,
+    httpStatus: 404 as const,
+  }),
+});
+const UNKNOWN = Object.freeze({
+  outcome: 'unknown' as const,
+  diagnostic: Object.freeze({
+    kind: 'body_invalid' as const,
+    reason: 'invalid_json' as const,
+  }),
+});
 
 function input(): YclientsControlledCleanupInput {
   return Object.freeze({
@@ -93,7 +138,7 @@ function harness(overrides: {
   const verifyRecord = jest.fn(async (
     _expectation: YclientsControlledCleanupRecordExpectation,
   ) =>
-    exactQueue.shift() ?? ({ outcome: 'unknown' as const }),
+    exactQueue.shift() ?? UNKNOWN,
   );
   const cancel = jest.fn(async () =>
     overrides.cancel ?? ({ outcome: 'deleted' as const }),
@@ -159,11 +204,11 @@ describe('record-specific controlled cleanup lifecycle', () => {
   });
 
   it.each([
-    { outcome: 'mismatch' as const },
-    { outcome: 'not_found' as const },
-    { outcome: 'unauthorized' as const },
-    { outcome: 'unknown' as const },
-  ])('blocks DELETE when pre-delete binding is $outcome', async (preDelete) => {
+    [MISMATCH, 'mismatch'],
+    [NOT_FOUND, 'not_found'],
+    [{ outcome: 'unauthorized' as const }, 'unauthorized'],
+    [UNKNOWN, 'unknown'],
+  ] as const)('blocks DELETE for %s and preserves safe status', async (preDelete, status) => {
     const setup = harness({ exact: [preDelete] });
 
     await expect(setup.lifecycle.run(input())).resolves.toEqual({
@@ -174,6 +219,20 @@ describe('record-specific controlled cleanup lifecycle', () => {
     });
     expect(setup.cancel).not.toHaveBeenCalled();
     expect(setup.listRecords).not.toHaveBeenCalled();
+    expect(setup.events).toHaveLength(1);
+    expect(setup.events[0]).toMatchObject({
+      action: 'pre_delete_exact',
+      status,
+      ...(preDelete.outcome === 'mismatch' ||
+      preDelete.outcome === 'not_found' ||
+      preDelete.outcome === 'unknown'
+        ? { diagnostic: preDelete.diagnostic }
+        : {}),
+    });
+    const serialized = JSON.stringify(setup.events);
+    for (const forbidden of [PRIVATE_PHONE, PRIVATE_NAME, PRIVATE_EMAIL]) {
+      expect(serialized).not.toContain(forbidden);
+    }
   });
 
   it('permits only the two planned readbacks after an uncertain DELETE', async () => {
@@ -196,7 +255,7 @@ describe('record-specific controlled cleanup lifecycle', () => {
     const setup = harness({
       exact: [
         { outcome: 'matched', record: safeRecord(false) },
-        { outcome: 'not_found' },
+        NOT_FOUND,
       ],
       cancel: { outcome: 'unknown', reason: 'provider_unavailable' },
     });

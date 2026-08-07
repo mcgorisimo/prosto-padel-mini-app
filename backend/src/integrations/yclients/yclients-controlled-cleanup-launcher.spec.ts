@@ -95,9 +95,12 @@ function dependencies(overrides: {
   effectiveUid?: number | undefined;
   store?: YclientsControlledRootOnlyFileStore;
   loadIdentity?: YclientsControlledCleanupLauncherDependencies['loadIdentity'];
+  fetch?: jest.MockedFunction<typeof globalThis.fetch>;
 } = {}) {
   const store = overrides.store ?? new MemoryStore();
-  const fetch = jest.fn() as jest.MockedFunction<typeof globalThis.fetch>;
+  const fetch =
+    overrides.fetch ??
+    (jest.fn() as jest.MockedFunction<typeof globalThis.fetch>);
   const outputs: string[] = [];
   const createStore = jest.fn(() => store);
   const value: YclientsControlledCleanupLauncherDependencies = {
@@ -319,5 +322,97 @@ describe('record-specific cleanup launcher', () => {
     );
     expect(output).not.toContain('Replacement Identity');
     expect(output).not.toContain('78880000000');
+  });
+
+  it('emits only allowlisted binding diagnostics and never reaches DELETE', async () => {
+    const store = new MemoryStore();
+    store.files.set(
+      YCLIENTS_CONTROLLED_CLEANUP_APPROVAL_FILE,
+      `${approvalDigest()}\n`,
+    );
+    const fetch = jest.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          success: true,
+          data: {
+            id: 1_891_713_981,
+            company_id: 2_079_564,
+            staff_id: 5_730_531,
+            services: [{ id: 30_539_679 }],
+            datetime: '2026-08-17T12:00:00+03:00',
+            deleted: false,
+            api_id: '184993463877968',
+            client: {
+              phone: PRIVATE_PHONE,
+              name: 'Unexpected',
+              surname: 'Person',
+              patronymic: '',
+              email: PRIVATE_EMAIL,
+            },
+            record_hash: 'private-record-hash',
+          },
+        }),
+        { status: 200 },
+      ),
+    ) as jest.MockedFunction<typeof globalThis.fetch>;
+    const setup = dependencies({ store, fetch });
+
+    await expect(
+      runYclientsControlledCleanupLauncher(
+        argv([
+          '--mode',
+          'execute',
+          '--plan-digest',
+          YCLIENTS_CONTROLLED_CLEANUP_PLAN_DIGEST,
+        ]),
+        setup.value,
+      ),
+    ).resolves.toBe(2);
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][1]?.method).toBe('GET');
+    expect(store.files.get(YCLIENTS_CONTROLLED_CLEANUP_CONSUMED_FILE)).toBe(
+      `${approvalDigest()}\n`,
+    );
+    const events = setup.outputs.map((line) => JSON.parse(line) as unknown);
+    expect(events[0]).toMatchObject({
+      kind: 'cleanup_provider_evidence',
+      event: {
+        step: 1,
+        action: 'pre_delete_exact',
+        status: 'mismatch',
+        diagnostic: {
+          kind: 'binding_mismatch',
+          checks: {
+            clientFullName: {
+              present: true,
+              typeValid: true,
+              equal: false,
+            },
+          },
+        },
+      },
+    });
+    expect(events[1]).toMatchObject({
+      outcome: 'executed',
+      lifecycle: {
+        outcome: 'cleanup_required',
+        reason: 'pre_delete_unverified',
+        requestCount: 1,
+        holds: ['A'],
+      },
+    });
+    const output = setup.outputs.join('');
+    for (const forbidden of [
+      PRIVATE_PHONE,
+      PRIVATE_NAME,
+      PRIVATE_EMAIL,
+      'Unexpected',
+      'private-record-hash',
+      'partner-secret',
+      'user-secret',
+    ]) {
+      expect(output).not.toContain(forbidden);
+    }
   });
 });
