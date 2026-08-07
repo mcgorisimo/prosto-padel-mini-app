@@ -4,6 +4,7 @@ import PadelButton from './ui/PadelButton';
 import PadelCard from './ui/PadelCard';
 import TrainingModal from './TrainingModal';
 import { CLUB } from '../lib/clubConfig';
+import { getBackendBookingStatusPresentation } from '../lib/backendBookingHomeAdapter';
 
 const getDisplayDate = (dateISO) => {
   if (!dateISO || typeof dateISO !== 'string') return 'Дата не указана';
@@ -128,6 +129,9 @@ function UpcomingRow({ match, onClick }) {
   const isMatch = match.type === 'match';
   const isTraining = match.isTraining;
   const isTrainingPending = isTraining && match.trainingStatus === 'pending_coach';
+  const backendBookingStatus = match.isBackendReservation
+    ? getBackendBookingStatusPresentation(match.reservationStatus)
+    : null;
   const coachName = match.trainingDetails?.coachName;
   const courtLabel = match.courtName || (match.courtType === 'panoramic' ? 'Ультрапанорама' : 'Корт');
   const label = isMatch ? 'Матч' : isTraining ? 'Тренировка' : 'Бронь';
@@ -169,11 +173,13 @@ function UpcomingRow({ match, onClick }) {
           )}
         </div>
         <span className={`shrink-0 rounded-full border px-2 py-1 text-[10px] font-bold uppercase tracking-wide ${
-          isTrainingPending
+          backendBookingStatus?.tone === 'cancelled'
+            ? 'border-[#FF6B5E]/20 bg-[#FF6B5E]/[0.07] text-[#FF8A80]/90'
+            : isTrainingPending || backendBookingStatus?.tone === 'pending'
             ? 'border-[#FBDC8A]/20 bg-[#FBDC8A]/[0.07] text-[#FBDC8A]/80'
             : 'border-accent-light/[0.18] bg-accent-light/[0.07] text-accent-light/80'
         }`}>
-          {isTrainingPending ? 'Ожидает' : 'Подтверждено'}
+          {backendBookingStatus?.label ?? (isTrainingPending ? 'Ожидает' : 'Подтверждено')}
         </span>
       </div>
     </PadelCard>
@@ -183,6 +189,7 @@ function UpcomingRow({ match, onClick }) {
 export default function Home({
   upcomingMatches = [],
   onBookCourt,
+  onOpenBooking,
   onViewDetails,
   onConvertToPublic,
   onSetupTraining,
@@ -226,6 +233,11 @@ export default function Home({
   };
 
   const handleUpcomingClick = (match) => {
+    if (match.isBackendReservation) {
+      onOpenBooking?.(match.reservationId);
+      return;
+    }
+
     if (match.type === 'match') {
       onViewDetails(match);
       return;
@@ -261,7 +273,7 @@ export default function Home({
           </div>
           <div className="text-right">
             <div className="text-sm font-semibold text-warm-white">{upcomingMatches.length}</div>
-            <div className="text-xs text-warm-white/50">активных событий</div>
+            <div className="text-xs text-warm-white/50">событий</div>
           </div>
         </div>
       </PadelCard>

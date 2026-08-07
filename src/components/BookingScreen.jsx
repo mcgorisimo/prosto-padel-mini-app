@@ -160,6 +160,7 @@ export default function BookingScreen({
   allMatches = [],
   availabilityActions = null,
   bookingClient = null,
+  initialReservationId = null,
   onBookSlot,
   showToast,
 }) {
@@ -201,9 +202,25 @@ export default function BookingScreen({
   });
 
   useEffect(() => {
-    if (typeof availabilityActions?.listBookings !== 'function') return undefined;
+    const canReadExact =
+      typeof initialReservationId === 'string' &&
+      typeof availabilityActions?.readBooking === 'function';
+    if (
+      !canReadExact &&
+      typeof availabilityActions?.listBookings !== 'function'
+    ) return undefined;
     let active = true;
     void (async () => {
+      if (canReadExact) {
+        const refreshed = await availabilityActions.readBooking(initialReservationId);
+        if (!active) return;
+        setLatestReservation(
+          refreshed?.outcome === 'booking_loaded'
+            ? refreshed.reservation
+            : null,
+        );
+        return;
+      }
       const listed = await availabilityActions.listBookings();
       const latest = listed?.outcome === 'bookings_loaded'
         ? listed.reservations?.[0]
@@ -220,7 +237,7 @@ export default function BookingScreen({
       );
     })();
     return () => { active = false; };
-  }, [availabilityActions]);
+  }, [availabilityActions, initialReservationId]);
   const isSavingRef = useRef(false);
 
   useEffect(() => {

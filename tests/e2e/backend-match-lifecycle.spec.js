@@ -3520,7 +3520,7 @@ test.describe('backend match credential lifecycle', () => {
     await page.evaluate(() => window.__backendLineupUiUnmount());
   });
 
-  test('renders account-scoped Home matches without reading legacy Supabase matches', async ({
+  test('renders account-scoped Home matches and persisted bookings without reading legacy Supabase matches', async ({
     page,
   }) => {
     await page.goto('/');
@@ -3697,6 +3697,16 @@ test.describe('backend match credential lifecycle', () => {
         title: 'Public-only unrelated match',
         startsAt: now + 7_200,
       });
+      const bookingStartsAt = new Date((now + 5_400) * 1_000).toISOString();
+      const persistedBooking = Object.freeze({
+        reservationId: parameters.reservationId,
+        status: 'pending_confirmation',
+        serviceId: 30539748,
+        courtId: 5730531,
+        startsAt: bookingStartsAt,
+        endsAt: new Date(Date.parse(bookingStartsAt) + 5_400_000).toISOString(),
+        stale: true,
+      });
 
       window.__accountMatchGeneration = 0;
       window.__accountMatchCalls = 0;
@@ -3728,6 +3738,35 @@ test.describe('backend match credential lifecycle', () => {
           };
         },
       });
+      window.__backendBookingCalls = {
+        list: 0,
+        read: 0,
+        write: 0,
+        lastReadReservationId: null,
+      };
+      const backendBookingAvailabilityActions = Object.freeze({
+        async listBookings() {
+          window.__backendBookingCalls.list += 1;
+          return {
+            outcome: 'bookings_loaded',
+            reservations: [persistedBooking],
+          };
+        },
+        async readBooking(reservationId) {
+          window.__backendBookingCalls.read += 1;
+          window.__backendBookingCalls.lastReadReservationId = reservationId;
+          return reservationId === persistedBooking.reservationId
+            ? { outcome: 'booking_loaded', reservation: persistedBooking }
+            : { outcome: 'rejected', reason: 'not_found' };
+        },
+        async listServices() {
+          return { outcome: 'rejected', reason: 'unavailable' };
+        },
+        async createBooking() {
+          window.__backendBookingCalls.write += 1;
+          return { outcome: 'rejected', reason: 'internal_error' };
+        },
+      });
       const container = document.createElement('div');
       container.dataset.testid = 'backend-home-test-root';
       document.body.append(container);
@@ -3749,6 +3788,7 @@ test.describe('backend match credential lifecycle', () => {
         backendMatchLifecycleStatus: 'authenticated',
         backendProfileStatus: 'ready',
         backendMatchActions,
+        backendBookingAvailabilityActions,
         showToast() {},
         onLogout() {},
       }));
@@ -3772,6 +3812,7 @@ test.describe('backend match credential lifecycle', () => {
       accountId: ACCOUNT_ID,
       otherAccountId: OTHER_ACCOUNT_ID,
       matchId: MATCH_ID,
+      reservationId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
     });
 
     const harness = page.getByTestId('backend-home-test-root');
@@ -3789,6 +3830,27 @@ test.describe('backend match credential lifecycle', () => {
     await expect(
       harness.getByText('Public-only unrelated match comment'),
     ).toHaveCount(0);
+    await expect(harness.getByText('Корт 5730531').first()).toBeVisible();
+    await expect(harness.getByText('Ожидает').first()).toBeVisible();
+    await expect.poll(() => page.evaluate(
+      () => window.__backendBookingCalls.list,
+    )).toBeGreaterThanOrEqual(1);
+
+    await harness.locator('button').filter({ hasText: 'Корт 5730531' }).first().click();
+    const reservationCard = harness.getByTestId('booking-reservation-card');
+    await expect(reservationCard).toContainText('Статус: pending_confirmation');
+    await expect.poll(() => page.evaluate(
+      () => window.__backendBookingCalls.read,
+    )).toBe(1);
+    expect(await page.evaluate(
+      () => window.__backendBookingCalls.write,
+    )).toBe(0);
+    expect(await page.evaluate(
+      () => window.__backendBookingCalls.lastReadReservationId,
+    )).toBe('dddddddd-dddd-4ddd-8ddd-dddddddddddd');
+
+    await harness.getByRole('button', { name: 'Главная' }).click();
+    await expect(harness.getByText('Корт 5730531').first()).toBeVisible();
 
     await page.evaluate(() => window.__refreshAccountMatches());
     await expect(

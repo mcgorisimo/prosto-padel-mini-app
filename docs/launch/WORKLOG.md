@@ -2103,3 +2103,40 @@
   until the owner submits one fresh booking in the Telegram Mini App and
   confirms the reservation appears in YCLIENTS; the operator must not submit a
   synthetic provider write as a substitute.
+
+### 2026-08-07 — D2 / persisted reservation visible on Home
+
+- Owner confirmed the fresh booking appeared in YCLIENTS. Read-only evidence
+  shows its local reservation is retained as `pending_confirmation` with one
+  started provider attempt and no terminal provider binding. The external
+  create therefore must not be repeated. The exact reason the successful live
+  result was not persisted as terminal is not provable from retained safe
+  metadata and remains a separate fail-closed recovery concern.
+- Root cause of the missing Home card was frontend-only: `Home` received the
+  account match collection, while the owner-scoped persisted `GET /bookings`
+  collection was consumed only inside `BookingScreen`. No persisted court
+  reservation could reach the Home `Брони` tab.
+- Added a narrow adapter and Home feed connection for future persisted owner
+  reservations. `pending_confirmation`, `unknown`, `confirmed` and
+  administrator-reflected `cancelled` use truthful labels; rejected or elapsed
+  rows are not shown. Selecting a persisted reservation opens the booking
+  screen/read-only detail path and cannot enter the legacy convert-to-match
+  modal. No create retry, PUT, DELETE, cancel or reschedule action was added.
+- Focused Playwright regressions PASS `2/2`: owner persisted booking mapping,
+  Home rendering, pending label, read-only detail transition and zero booking
+  writes. Full root E2E PASS `85 passed / 1 skipped`; root build PASS (`1616`
+  modules, existing chunk/CJS warnings only). The first sandboxed build was
+  blocked by managed-worktree filesystem traversal; the approved identical
+  build outside that restriction passed. Backend tests were not run because no
+  backend source, contract, dependency or runtime image changed.
+- `git diff --check` PASS. Migration 033 remains `applied_verified`; schema,
+  DB, YCLIENTS/provider and payment fields were not touched. Deployment is
+  `pending`: this checkpoint changes the frontend bundle and requires a new
+  exact integration/Selectel test rollout approval before it is visible in the
+  Mini App. Selectel test still runs exact `92c7af19...`; production is
+  unchanged.
+- Read-only P0/P1 review found no actionable issue: the list is reachable only
+  through the authenticated owner action, stale responses cannot overwrite a
+  newer list request, the selected reservation ID is preserved for exact
+  readback, and persisted bookings cannot enter legacy conversion or any
+  provider-write surface.

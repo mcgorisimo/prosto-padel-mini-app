@@ -24,6 +24,63 @@ test.beforeEach(async ({ page }) => {
   await page.goto('/');
 });
 
+test('maps persisted owner bookings to truthful Home events', async ({ page }) => {
+  const summary = await page.evaluate(async () => {
+    const {
+      getBackendBookingStatusPresentation,
+      selectBackendReservationsForHome,
+    } = await import('/src/lib/backendBookingHomeAdapter.js');
+    const reservation = {
+      reservationId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+      status: 'pending_confirmation',
+      serviceId: 30539748,
+      courtId: 5730531,
+      startsAt: '2035-08-12T20:30:00+03:00',
+      endsAt: '2035-08-12T22:00:00+03:00',
+      stale: true,
+    };
+    const visible = selectBackendReservationsForHome(
+      [
+        reservation,
+        { ...reservation, reservationId: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', status: 'rejected' },
+        {
+          ...reservation,
+          reservationId: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
+          startsAt: '2020-08-12T20:30:00+03:00',
+          endsAt: '2020-08-12T22:00:00+03:00',
+        },
+      ],
+      Date.parse('2035-08-12T19:00:00+03:00'),
+    );
+    return {
+      visible,
+      pending: getBackendBookingStatusPresentation('pending_confirmation'),
+      unknown: getBackendBookingStatusPresentation('unknown'),
+      confirmed: getBackendBookingStatusPresentation('confirmed'),
+      cancelled: getBackendBookingStatusPresentation('cancelled'),
+    };
+  });
+
+  expect(summary.visible).toHaveLength(1);
+  expect(summary.visible[0]).toMatchObject({
+    id: 'reservation:dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+    reservationId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+    type: 'private',
+    isBackendReservation: true,
+    reservationStatus: 'pending_confirmation',
+    stale: true,
+    dateISO: '2035-08-12',
+    time: '20:30',
+    duration: 1.5,
+    courtId: 5730531,
+    courtName: 'Корт 5730531',
+  });
+  expect(summary.pending).toEqual({ label: 'Ожидает', tone: 'pending' });
+  expect(summary.unknown).toEqual({ label: 'Уточняется', tone: 'pending' });
+  expect(summary.confirmed).toEqual({ label: 'Подтверждено', tone: 'confirmed' });
+  expect(summary.cancelled).toEqual({ label: 'Отменено', tone: 'cancelled' });
+});
+
 test('reads services, courts, dates and times using only authenticated GET requests', async ({
   page,
 }) => {

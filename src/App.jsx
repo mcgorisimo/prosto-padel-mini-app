@@ -32,6 +32,7 @@ import {
   shouldApplyBackendMatchDetail,
   shouldApplyBackendMatchFeedResponse,
 } from './lib/backendMatchAdapter';
+import { selectBackendReservationsForHome } from './lib/backendBookingHomeAdapter';
 import { getMyProfile, getPublicPlayerProfiles } from './lib/profileApi';
 import {
   acceptMatchInvitation,
@@ -356,6 +357,7 @@ export default function App({
   const [backendFeedLoading, setBackendFeedLoading] = useState(false);
   const [backendFeedError, setBackendFeedError] = useState('');
   const [backendAccountMatches, setBackendAccountMatches] = useState([]);
+  const [backendReservations, setBackendReservations] = useState([]);
   const [backendMatchNow, setBackendMatchNow] = useState(
     () => Math.floor(Date.now() / 1_000),
   );
@@ -369,10 +371,12 @@ export default function App({
   const [activeTab, setActiveTab]    = useState('home');
   const [toast, setToast]            = useState(null);
   const [selectedMatch, setSelected] = useState(null);
+  const [selectedBookingReservationId, setSelectedBookingReservationId] = useState(null);
   const [screen, setScreen] = useState(null);
   const backendDetailRequestRef = useRef(0);
   const backendFeedRequestRef = useRef(0);
   const backendAccountRequestRef = useRef(0);
+  const backendReservationRequestRef = useRef(0);
   const backendInvitationRequestRef = useRef(0);
   const backendChatRequestRef = useRef(0);
   const backendNotificationRequestRef = useRef(0);
@@ -541,6 +545,30 @@ export default function App({
     backendProfile,
     usesBackendMatches,
   ]);
+
+  const loadBackendReservations = useCallback(async () => {
+    const requestId = backendReservationRequestRef.current + 1;
+    backendReservationRequestRef.current = requestId;
+    if (
+      typeof backendBookingAvailabilityActions?.listBookings !== 'function'
+    ) {
+      setBackendReservations([]);
+      return null;
+    }
+
+    try {
+      const result = await backendBookingAvailabilityActions.listBookings();
+      if (backendReservationRequestRef.current !== requestId) return null;
+      if (result?.outcome !== 'bookings_loaded') return null;
+      const reservations = Array.isArray(result.reservations)
+        ? result.reservations
+        : [];
+      setBackendReservations(reservations);
+      return reservations;
+    } catch {
+      return null;
+    }
+  }, [backendBookingAvailabilityActions]);
 
   const loadMessages = useCallback(async (match = null) => {
     if (!shouldUseLegacyMatchMessages(match, usesBackendMatches)) {
@@ -879,6 +907,12 @@ export default function App({
   ]);
 
   useEffect(() => {
+    if (activeTab === 'home') {
+      void loadBackendReservations();
+    }
+  }, [activeTab, loadBackendReservations]);
+
+  useEffect(() => {
     const refreshVisibleAccountData = () => {
       if (document.visibilityState === 'visible') {
         fetchProfile();
@@ -886,6 +920,7 @@ export default function App({
           setBackendMatchNow(Math.floor(Date.now() / 1_000));
           void loadBackendMatchFeed();
           void loadBackendAccountMatches();
+          void loadBackendReservations();
           void loadInvitations();
         }
       }
@@ -908,6 +943,7 @@ export default function App({
     fetchProfile,
     loadBackendAccountMatches,
     loadBackendMatchFeed,
+    loadBackendReservations,
     loadInvitations,
     usesBackendMatches,
   ]);
@@ -2604,6 +2640,17 @@ const handleBookSlot = async (booking) => {
         backendMatchNow,
       )
     : legacyUpcomingMatches;
+  const backendBookingEvents = useMemo(
+    () => selectBackendReservationsForHome(
+      backendReservations,
+      Date.now(),
+    ),
+    [backendReservations],
+  );
+  const homeUpcomingEvents = useMemo(
+    () => [...upcomingMatches, ...backendBookingEvents],
+    [backendBookingEvents, upcomingMatches],
+  );
   const completedMatches = getUserMatchHistory(allMatches, ME_ID);
   // Public feed shows only non-private open matches.
   const legacyOpenMatches = allMatches.filter(m => {
@@ -2852,10 +2899,17 @@ const handleBookSlot = async (booking) => {
       <main className="content">
         {activeTab === 'home' && (
           <Home
-            upcomingMatches={upcomingMatches}
+            upcomingMatches={homeUpcomingEvents}
             completedMatches={completedMatches}
             onViewDetails={openMatchDetails}
-            onBookCourt={() => setActiveTab('booking')}
+            onBookCourt={() => {
+              setSelectedBookingReservationId(null);
+              setActiveTab('booking');
+            }}
+            onOpenBooking={(reservationId) => {
+              setSelectedBookingReservationId(reservationId);
+              setActiveTab('booking');
+            }}
             onSetupTraining={handleSetupTraining}
             onConvertToPublic={handleConvertToPublic} // This needs showToast
             user={currentUser}
@@ -2883,7 +2937,10 @@ const handleBookSlot = async (booking) => {
             onAcceptInvitation={handleAcceptInvitation}
             onDeclineInvitation={handleDeclineInvitation}
             onCreateMatch={openCreateMatch}
-            onBookCourt={() => setActiveTab('booking')}
+            onBookCourt={() => {
+              setSelectedBookingReservationId(null);
+              setActiveTab('booking');
+            }}
             onLogout={handleLogout}
             onOpenSettings={() => setScreen('edit-profile')} // This needs showToast
             onOpenAdmin={() => {
@@ -2947,6 +3004,7 @@ const handleBookSlot = async (booking) => {
           <BookingScreen
             allMatches={allMatches}
             availabilityActions={backendBookingAvailabilityActions}
+            initialReservationId={selectedBookingReservationId}
             bookingClient={{
               fullName: [currentUser.firstName, currentUser.lastName]
                 .filter(Boolean)
@@ -2962,7 +3020,10 @@ const handleBookSlot = async (booking) => {
 
       <BottomNav
         active={activeTab}
-        setActive={setActiveTab}
+        setActive={(nextTab) => {
+          if (nextTab === 'booking') setSelectedBookingReservationId(null);
+          setActiveTab(nextTab);
+        }}
         isAdmin={isAdmin}
         profileBadgeCount={
           notificationCenter.unreadCount +
