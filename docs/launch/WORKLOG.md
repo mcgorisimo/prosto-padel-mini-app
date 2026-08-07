@@ -1481,3 +1481,25 @@
 - D2 remains `in_progress`. Next gate is independent review followed by a
   separate owner decision on code-only cleanup implementation; execution is
   not approved.
+
+### 2026-08-07 — D2 / cleanup-plan independent review correction
+
+- Independent read-only review of docs checkpoint
+  `5b78af6b36e3ddc356209878675f2aca83f25f80` found no P0 and three plan-level
+  P1 gaps: no machine proof of active state before DELETE, client ownership
+  depended only on an earlier UI check, and canonical cancel proof was
+  underspecified. That checkpoint is superseded for cleanup implementation.
+- Corrected the review-only plan without adding runtime code. The four-request
+  proposal now starts with a cleanup-specific exact binding GET that must prove
+  record/company/effect/external-reference, `deleted=false` and the full
+  disposable identity in memory. A club-admin no-change window is mandatory
+  because conditional DELETE/ETag semantics are not documented.
+- Canonical cancel proof now requires both exact GET of the same projection with
+  `deleted=true` and one exhaustive bounded `with_deleted=true` page containing
+  exactly one matching deleted row. DELETE `204`, exact `404/not_found` or any
+  incomplete/conflicting readback remains `unknown`; slot A stays held.
+- Review/correction is docs-only. No YCLIENTS/API/DB/Selectel call, provider
+  write, manual cleanup, runtime/container/config change or deployment was
+  performed. Tests not run/not needed; deployment remains `not_needed`.
+- D2 remains `in_progress`. Cleanup runner implementation and any execution
+  each require later, separate approvals.

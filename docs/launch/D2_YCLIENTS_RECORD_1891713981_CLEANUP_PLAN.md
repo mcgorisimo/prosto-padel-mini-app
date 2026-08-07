@@ -20,8 +20,11 @@ reused.
 Before any future provider request, an authenticated `club_admin` must verify
 in the YCLIENTS UI that record `1891713981` is the disposable record at the
 fixed effect above, is still active, and belongs to the approved disposable
-identity. Evidence records only equality flags, not PII, screenshots containing
-PII, tokens, record hash or raw provider data. A mismatch stops cleanup.
+identity. The club must prohibit all administrative edits/cancellation of this
+record from that verification until the cleanup runner stops; if this short
+exclusive window cannot be guaranteed, cleanup must not start. Evidence records
+only equality flags, not PII, screenshots containing PII, tokens, record hash
+or raw provider data. A mismatch stops cleanup.
 
 ## Required code-only checkpoint
 
@@ -32,6 +35,8 @@ ad-hoc scripts/curl. It must:
 - pin the exact record, appointment, slot A effect and isolated root-only paths;
 - use a new plan digest and opaque identity-bound approval digest;
 - reuse the existing admin read/write clients and shared conservative limiter;
+- add a cleanup-specific strict exact-record binding parser that compares the
+  full disposable client snapshot only in memory and returns equality flags;
 - retain one in-flight request, at most one request per second and a hard
   provider budget of four requests;
 - expose only allowlisted status/equality/effect evidence;
@@ -39,32 +44,42 @@ ad-hoc scripts/curl. It must:
 - remain unreachable from Nest/application runtime and preserve the original
   audit and binding artifacts.
 
-Do not weaken the canonical full-record parser to make cleanup pass. The
-cleanup-specific pre-delete proof may use the durable binding, the recorded
-manual UI verification and a bounded safe-list projection. If extra parser
-diagnostics are needed, they may emit field-presence/equality flags only.
+Do not weaken the canonical full-record parser to make cleanup pass. The new
+cleanup-specific exact binding read is narrower than a reschedule snapshot but
+must strictly prove record/company, service/resource/datetime, original
+external reference, `deleted=false` and exact disposable fullName/phone/email.
+Client values remain in memory only and are never returned to ordinary safe
+read results. Parser diagnostics may emit field-presence/equality flags only.
 
 ## Proposed one-time lifecycle
 
 The future reviewed runner may perform exactly this sequence:
 
-1. One bounded records page for resource `5730531` and `2026-08-17`, with
-   `with_deleted=true`. Continue only when the page is exhaustive and exactly
-   one row matches record `1891713981`, the fixed slot A effect and the original
-   external-reference equality. Zero, multiple or mismatched candidates stop
-   with `cleanup_required`; no DELETE is sent.
+1. One exact admin GET for record `1891713981`. Continue only when the strict
+   cleanup parser proves the same company, fixed slot A effect, original
+   external reference, `deleted=false` and exact disposable identity in memory.
+   Missing/malformed fields or any mismatch stop with `cleanup_required`; no
+   DELETE is sent. The administrative no-change window remains in force because
+   YCLIENTS provides no documented conditional DELETE/ETag contract.
 2. Send exactly one admin DELETE for record `1891713981`. No automatic retry,
    repeat-delete or alternate endpoint is allowed.
 3. Perform one exact admin GET readback for the same record.
 4. Perform one bounded exhaustive page readback with `with_deleted=true` and
-   the same fixed projection.
+   the same resource/date and fixed projection.
 
-Canonical cancel proof requires a unique matching record and consistent
-deleted/cancelled evidence from the permitted readbacks. Only then may D2 mark
-the provider cancellation confirmed and release slot A. An undocumented or
-incomplete exact GET, stale list visibility, zero/multiple candidates, or
-conflicting evidence is the safe terminal result `unknown`; it is not a reason
-to widen the date/page window or send another write.
+Canonical cancel proof requires both of these results:
+
+- step 3 returns the same record/company/effect/external-reference projection
+  with `deleted=true`;
+- step 4 is exhaustive and contains exactly one row for record `1891713981`
+  with the same projection and `deleted=true`.
+
+Only then may D2 mark provider cancellation confirmed and release slot A. A
+documented DELETE `204`, exact GET `404/not_found`, stale/missing row,
+`deleted=false`, incomplete data, zero/multiple matches or conflicting evidence
+does not prove cancellation by itself and is the safe terminal result
+`unknown`. It is not a reason to widen the date/page window or send another
+write.
 
 If DELETE has a transport timeout, HTTP 408/425/429/5xx, an invalid body or an
 ambiguous success, classify the write as `unknown` and run only steps 3-4
@@ -72,9 +87,10 @@ within the same four-request budget. Never send a second DELETE. A documented
 rejection also stops without retry. Slot A remains held for every result except
 canonical cancel proof.
 
-If a club administrator manually cancels the record before this lifecycle,
-the write plan becomes invalid. A separately reviewed read-only proof plan and
-new digest are then required; the cleanup runner must not issue DELETE.
+If a club administrator manually edits or cancels the record before or during
+this lifecycle, the write plan becomes invalid. A separately reviewed read-only
+proof plan and new digest are then required; the cleanup runner must not issue
+DELETE.
 
 ## Evidence and recovery
 
