@@ -2,12 +2,15 @@ const CANONICAL_DECIMAL_PATTERN = /^(?:0|-?[1-9][0-9]*)$/u;
 const LOWERCASE_DIGEST_HEX_PATTERN = /^[0-9a-f]{64}$/u;
 const MIN_SAFE_BIGINT = BigInt(Number.MIN_SAFE_INTEGER);
 const MAX_SAFE_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
+const MAX_POSTGRES_INTEGER = 2_147_483_647;
 const POSTGRES_DIGEST_BYTE_LENGTH = 32;
 
 export type PostgresCodecFailure =
   | 'bigint_format'
   | 'bigint_range'
   | 'bigint_negative'
+  | 'integer_type'
+  | 'integer_range'
   | 'bytea_digest_buffer'
   | 'bytea_digest_hex';
 
@@ -20,6 +23,10 @@ const POSTGRES_CODEC_ERROR_MESSAGES: Readonly<
     'Invalid persisted PostgreSQL bigint: outside the safe integer range',
   bigint_negative:
     'Invalid persisted PostgreSQL bigint: expected a non-negative value',
+  integer_type:
+    'Invalid persisted PostgreSQL integer: expected a runtime integer number',
+  integer_range:
+    'Invalid persisted PostgreSQL integer: expected a positive int4 value',
   bytea_digest_buffer:
     'Invalid persisted PostgreSQL bytea digest: expected a 32-byte Buffer',
   bytea_digest_hex:
@@ -57,6 +64,16 @@ export function decodePostgresNonNegativeBigint(value: unknown): number {
   }
 
   return decoded;
+}
+
+export function decodePostgresPositiveInteger(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isInteger(value)) {
+    throw new PostgresCodecError('integer_type');
+  }
+  if (value < 1 || value > MAX_POSTGRES_INTEGER) {
+    throw new PostgresCodecError('integer_range');
+  }
+  return value;
 }
 
 export function decodePostgresByteaDigest(value: unknown): string {

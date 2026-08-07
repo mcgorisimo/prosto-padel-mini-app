@@ -2,9 +2,11 @@ import { deterministicUuid } from '../../test/deterministic-uuid';
 import { AccountId } from '../accounts/account.types';
 import { unixEpochSeconds } from '../auth/auth.types';
 import { ReservationSnapshotCrypto } from '../reservations/reservation-snapshot.crypto';
+import { digestReservationOperationRequest } from '../reservations/reservation-request-digest';
 import {
   CourtReservation,
   ReservationIdempotencyKey,
+  ReservationOperationRequest,
   ReservationOperationId,
 } from '../reservations/reservation.types';
 import { PostgresCourtReservationRepository } from './postgres-court-reservation.repository';
@@ -78,6 +80,142 @@ describe('PostgresCourtReservationRepository SQL contract', () => {
     expect(query.mock.invocationCallOrder[0]).toBeLessThan(
       query.mock.invocationCallOrder[1],
     );
+  });
+
+  it('hydrates pg int4 crypto metadata without weakening bigint decoding', async () => {
+    const crypto = new ReservationSnapshotCrypto(Buffer.alloc(32, 7), 1);
+    const client = Object.freeze({
+      phone: '+79800000000',
+      fullName: 'Test Player',
+      email: 'private.owner@example.test',
+    });
+    const request: ReservationOperationRequest = Object.freeze({
+      type: 'create',
+      reservationId: RESERVATION_ID,
+      ownerAccountId: OWNER,
+      externalReference: Object.freeze({ apiId: 77 }),
+      client,
+      target: Object.freeze({
+        serviceId: 11,
+        courtId: 22,
+        startsAt: '2027-01-15T10:00:00+03:00',
+        endsAt: '2027-01-15T11:00:00+03:00',
+      }),
+    });
+    const encrypted = crypto.encryptClientSnapshot(
+      OPERATION_ID,
+      OWNER,
+      JSON.stringify(client),
+    );
+    const row = {
+      operation_id: OPERATION_ID,
+      reservation_id: RESERVATION_ID,
+      owner_account_id: OWNER,
+      actor_account_id: OWNER,
+      operation_type: 'create',
+      status: 'pending',
+      idempotency_key: REQUEST_KEY,
+      request_digest: digestReservationOperationRequest(request),
+      external_api_id: '77',
+      target_service_id: '11',
+      target_resource_id: '22',
+      target_datetime_text: request.target.startsAt,
+      target_end_datetime_text: request.target.endsAt,
+      provider_appointment_id: null,
+      provider_record_id: null,
+      provider_record_hash_ciphertext: null,
+      provider_record_hash_nonce: null,
+      provider_record_hash_auth_tag: null,
+      provider_record_hash_algorithm: null,
+      provider_record_hash_encryption_key_version: null,
+      provider_record_hash_digest: null,
+      provider_record_hash_digest_key_version: null,
+      previous_reservation_status: 'unbooked',
+      provider_attempt_started_at: '1800000001',
+      provider_attempt_finished_at: null,
+      unknown_at: null,
+      terminal_at: null,
+      reconciled_at: null,
+      reconciliation_outcome: null,
+      rejection_reason: null,
+      created_at: '1800000000',
+      ciphertext: encrypted.ciphertext,
+      nonce: encrypted.nonce,
+      auth_tag: encrypted.authTag,
+      algorithm: encrypted.algorithm,
+      wrapped_data_key_ciphertext: encrypted.wrappedDataKeyCiphertext,
+      wrapped_data_key_nonce: encrypted.wrappedDataKeyNonce,
+      wrapped_data_key_auth_tag: encrypted.wrappedDataKeyAuthTag,
+      wrapping_algorithm: encrypted.wrappingAlgorithm,
+      wrapping_key_version: encrypted.wrappingKeyVersion,
+      client_snapshot_digest: encrypted.digest,
+      client_snapshot_digest_key_version: encrypted.digestKeyVersion,
+      aad_version: encrypted.aadVersion,
+    };
+    const query = jest.fn().mockResolvedValue(result([row]));
+    const repository = new PostgresCourtReservationRepository(
+      crypto,
+      2_079_564,
+    );
+
+    await expect(
+      repository.findOperationById(
+        { query } as never,
+        OWNER,
+        OPERATION_ID,
+      ),
+    ).resolves.toMatchObject({
+      status: 'pending',
+      requestDigest: row.request_digest,
+      request: {
+        externalReference: { apiId: 77 },
+        target: request.target,
+      },
+    });
+  });
+
+  it('hydrates pg int4 provider-hash key versions for a confirmed reservation', async () => {
+    const crypto = new ReservationSnapshotCrypto(Buffer.alloc(32, 9), 1);
+    const encrypted = crypto.encryptRecordHash(
+      '0123456789abcdef0123456789abcdef',
+    );
+    const row = {
+      reservation_id: RESERVATION_ID,
+      owner_account_id: OWNER,
+      status: 'confirmed',
+      target_service_id: '11',
+      target_resource_id: '22',
+      target_datetime_text: '2027-01-15T10:00:00+03:00',
+      target_end_datetime_text: '2027-01-15T11:00:00+03:00',
+      yclients_appointment_id: '1',
+      yclients_record_id: '44',
+      yclients_record_hash_ciphertext: encrypted.ciphertext,
+      yclients_record_hash_nonce: encrypted.nonce,
+      yclients_record_hash_auth_tag: encrypted.authTag,
+      yclients_record_hash_algorithm: encrypted.algorithm,
+      yclients_record_hash_encryption_key_version: encrypted.keyVersion,
+      yclients_record_hash_digest: encrypted.digest,
+      yclients_record_hash_digest_key_version: encrypted.digestKeyVersion,
+      version: '3',
+      created_at: '1800000000',
+      updated_at: '1800000002',
+    };
+    const query = jest.fn().mockResolvedValue(result([row]));
+    const repository = new PostgresCourtReservationRepository(
+      crypto,
+      2_079_564,
+    );
+
+    await expect(
+      repository.findById({ query } as never, OWNER, RESERVATION_ID),
+    ).resolves.toMatchObject({
+      status: 'confirmed',
+      providerBinding: {
+        appointmentId: 1,
+        recordId: 44,
+        recordHash: '0123456789abcdef0123456789abcdef',
+      },
+    });
   });
 
   it('persists the exact interval/company binding without contact plaintext', async () => {

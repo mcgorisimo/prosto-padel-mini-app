@@ -2,6 +2,7 @@ import {
   decodePostgresBigint,
   decodePostgresByteaDigest,
   decodePostgresNonNegativeBigint,
+  decodePostgresPositiveInteger,
   encodePostgresByteaDigest,
   PostgresCodecError,
 } from './postgres-codecs';
@@ -47,6 +48,28 @@ describe('PostgreSQL bigint codecs', () => {
   it('rejects a negative bigint where a non-negative value is required', () => {
     expect(() => decodePostgresNonNegativeBigint('-1')).toThrow(
       new PostgresCodecError('bigint_negative'),
+    );
+  });
+});
+
+describe('PostgreSQL integer codecs', () => {
+  it.each([
+    [1, 1],
+    [2_147_483_647, 2_147_483_647],
+  ])('decodes positive int4 %s', (persisted, expected) => {
+    expect(decodePostgresPositiveInteger(persisted)).toBe(expected);
+  });
+
+  it.each([
+    ['driver bigint string', '1'],
+    ['zero', 0],
+    ['negative', -1],
+    ['fraction', 1.5],
+    ['above int4 range', 2_147_483_648],
+    ['runtime null', null],
+  ])('rejects %s', (_case, persisted) => {
+    expect(() => decodePostgresPositiveInteger(persisted)).toThrow(
+      PostgresCodecError,
     );
   });
 });

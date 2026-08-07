@@ -38,7 +38,10 @@ import {
   CourtReservationRepository,
   CreateCourtReservationPersistenceResult,
 } from './court-reservation.repository';
-import { decodePostgresBigint } from './postgres-codecs';
+import {
+  decodePostgresBigint,
+  decodePostgresPositiveInteger,
+} from './postgres-codecs';
 import { PostgresTransaction } from './postgres-transaction';
 
 export type ReservationProviderAttempt = Readonly<{
@@ -222,9 +225,13 @@ function recordBinding(row: ReservationRow | OperationRow, crypto: ReservationSn
         nonce: readBuffer(operation.provider_record_hash_nonce),
         authTag: readBuffer(operation.provider_record_hash_auth_tag),
         algorithm: readAlgorithm(operation.provider_record_hash_algorithm),
-        keyVersion: readPositive(operation.provider_record_hash_encryption_key_version),
+        keyVersion: decodePostgresPositiveInteger(
+          operation.provider_record_hash_encryption_key_version,
+        ),
         digest: readBuffer(operation.provider_record_hash_digest),
-        digestKeyVersion: readPositive(operation.provider_record_hash_digest_key_version),
+        digestKeyVersion: decodePostgresPositiveInteger(
+          operation.provider_record_hash_digest_key_version,
+        ),
       }),
     });
     if (!isYclientsReservationBinding(binding)) throw new Error('invalid persisted provider binding');
@@ -241,9 +248,13 @@ function recordBinding(row: ReservationRow | OperationRow, crypto: ReservationSn
       nonce: readBuffer(reservation.yclients_record_hash_nonce),
       authTag: readBuffer(reservation.yclients_record_hash_auth_tag),
       algorithm: readAlgorithm(reservation.yclients_record_hash_algorithm),
-      keyVersion: readPositive(reservation.yclients_record_hash_encryption_key_version),
+      keyVersion: decodePostgresPositiveInteger(
+        reservation.yclients_record_hash_encryption_key_version,
+      ),
       digest: readBuffer(reservation.yclients_record_hash_digest),
-      digestKeyVersion: readPositive(reservation.yclients_record_hash_digest_key_version),
+      digestKeyVersion: decodePostgresPositiveInteger(
+        reservation.yclients_record_hash_digest_key_version,
+      ),
     }),
   });
   if (!isYclientsReservationBinding(binding)) throw new Error('invalid persisted provider binding');
@@ -285,10 +296,14 @@ function hydrateOperation(row: OperationRow, crypto: ReservationSnapshotCrypto):
     wrappedDataKeyNonce: readBuffer(row.wrapped_data_key_nonce),
     wrappedDataKeyAuthTag: readBuffer(row.wrapped_data_key_auth_tag),
     wrappingAlgorithm: readAlgorithm(row.wrapping_algorithm),
-    wrappingKeyVersion: readPositive(row.wrapping_key_version),
+    wrappingKeyVersion: decodePostgresPositiveInteger(
+      row.wrapping_key_version,
+    ),
     digest: readBuffer(row.client_snapshot_digest),
-    digestKeyVersion: readPositive(row.client_snapshot_digest_key_version),
-    aadVersion: readPositive(row.aad_version) as 1,
+    digestKeyVersion: decodePostgresPositiveInteger(
+      row.client_snapshot_digest_key_version,
+    ),
+    aadVersion: decodePostgresPositiveInteger(row.aad_version) as 1,
   });
   const client: unknown = JSON.parse(snapshotJson);
   if (!isReservationClientSnapshot(client)) throw new Error('invalid persisted client snapshot');

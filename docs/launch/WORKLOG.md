@@ -26,7 +26,7 @@
 | Этап | Статус | Ветка/commit | Проверки | Блокер/следующий шаг |
 |---|---|---|---|---|
 | D1 Backend-only/contracts | done | `main` / deployed `c04074459948d0bf545e865b885aea7a4e5fec3c` | frontend E2E PASS (82/1 skipped); focused fail-closed 2/2 PASS; frontend build PASS; backend all PASS; Selectel test smoke PASS | D1 закрыт; следующий отдельный этап — D2 |
-| D2 YCLIENTS reservation core | in_progress | `main` / Selectel test `d7812d3ef28eda7100bca6bdc5d56afa0be29703` | migration 033 applied/verified; frontend-only rollout build/health/asset/auth-boundary/log checks and owner TMA Home booking-card smoke PASS | resolve the existing external-create/local-pending binding without repeat create; Court 1 YCLIENTS schedule still needs 00:00 correction; support contact deferred to D5 |
+| D2 YCLIENTS reservation core | in_progress | local hydration correction over `908b295ef911ae290946442d50cbcd9ecc4e02e1`; Selectel test `d7812d3ef28eda7100bca6bdc5d56afa0be29703` | migration 033 applied/verified; pending-operation hydration root cause proved; local backend/root gates PASS; owner TMA Home booking-card smoke PASS on deployed runtime | integrate/roll out the int4 decoder correction, then verify a fresh create reaches confirmed; existing lost-response records remain held without repeat create; Court 1 YCLIENTS schedule still needs 00:00 correction |
 | D3 Match ↔ reservation lifecycle | pending | — | — | reflect admin cancellation without provider DELETE, owner participant removal, match ↔ reservation binding |
 | D4 Payment Core | pending | — | — | payment provider, pricing/payment snapshot, чеки и возвраты |
 | D5 Settings/moderation/compliance | pending | — | — | standalone phone/email auth, verified backend email, approved club support/contact source and clickable action; затем schema review |
@@ -2203,3 +2203,44 @@
   `test_deployed`. This confirms visibility only: the retained
   `pending_confirmation` state still requires a separate safe binding recovery
   and must not trigger another create or be treated as payment state.
+
+### 2026-08-08 — D2 / PostgreSQL int4 reservation hydration correction
+
+- A PII-safe, read-only Selectel diagnosis was run against exact deployed
+  runtime `d7812d3ef28eda7100bca6bdc5d56afa0be29703`. The three latest create
+  operations all had a started provider attempt, no finished marker, no local
+  provider binding and one active hold. No database row was changed and no
+  YCLIENTS/provider request was made.
+- The encrypted client snapshots themselves decrypted successfully and passed
+  the strict client shape and request-digest checks. Direct execution of the
+  compiled repository hydration proved the exact failure: PostgreSQL `integer`
+  crypto-version columns are returned by `pg` as runtime numbers, but the
+  repository passed them to the canonical-decimal-string `bigint` decoder.
+  Reservation hydration succeeded while operation hydration failed closed, so
+  neither a successful terminal binding nor a stale `unknown` transition could
+  be persisted.
+- Added a separate strict positive PostgreSQL `int4` decoder and used it only
+  for encryption/digest/AAD version columns. The existing strict `bigint`
+  decoder remains unchanged. Regressions cover the real pg-driver number shape,
+  reject strings/zero/negative/fraction/out-of-range values, hydrate a pending
+  encrypted operation and hydrate a confirmed encrypted provider binding.
+- This correction prevents the same failure for future create responses. After
+  rollout, an old attempted pending operation can be classified safely as
+  `unknown/held` and perform only the existing once-bounded readback. It is not
+  promoted to `confirmed` without the complete persisted provider binding, and
+  create is never repeated. Terminal recovery of an already lost response
+  remains governed by `D2_UNKNOWN_CREATE_RECONCILIATION_PROPOSAL.md`.
+- Verification PASS: focused unit `2 suites / 61 tests`; backend typecheck;
+  backend unit `131 suites / 3282 tests`; backend E2E `2 suites / 4 tests`;
+  backend build; root E2E `85 passed / 1 skipped`; root build (`1616` modules,
+  existing CJS/chunk warnings only); `git diff --check`. The first sandboxed
+  root build hit only the known managed-worktree esbuild `Access is denied`
+  boundary; the approved identical build outside that boundary passed.
+- Read-only P0/P1 review found no actionable issue: each schema `integer`
+  crypto-version field now has the number-only int4 decoder, bigint IDs/times
+  retain canonical string decoding, snapshot/hash plaintext is not logged, and
+  no retry, provider, route, UI, payment or schema behavior was added.
+- Deployment impact is `pending`: backend runtime changes. Selectel test remains
+  exact `d7812d3...`; backend/frontend/nginx/PostgreSQL containers were not
+  changed by diagnosis or local verification. Migration 033 remains
+  `applied_verified`; production is unchanged.
