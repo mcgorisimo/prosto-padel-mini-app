@@ -1413,3 +1413,45 @@
   `in_progress`; isolated code is not application runtime/deployment. Gate 2 is
   not authorized and must not start without a new exact one-time owner approval
   binding checkpoint, plan digest and approval digest above.
+
+### 2026-08-07 — D2 / controlled Gate 2 stopped at snapshot readback
+
+- Owner approved exactly one Selectel test controlled lifecycle for checkpoint
+  `e7ceeb49052f25b91aa4d20845cd41c4666d44e8`, plan digest
+  `5ab6f618addc65d2fb669d8adfa288e601fd9ac89ffa45529ec00c59e2fc916d`
+  and Gate 1 approval digest
+  `fd7c94c0606fb3929d212b397b907754beaf05f205fe2ce2d42bf47bb2f03aab`.
+  Hard budget was 14 requests; blind retries, duplicate experiment and any
+  separate cleanup were expressly excluded.
+- Precheck PASS: application runtime remained D1 `c040744...`; isolated
+  checkout was clean/detached at exact `e7ceeb4...`; root-only input/artifact
+  ownership and modes matched; artifacts were empty; all four application
+  containers had their original IDs/images, running state and restart count 0.
+- One `approval.sha256` was created as root-owned `0600`. The exact launcher
+  atomically created the root-owned consumed marker before provider work. The
+  execute container was `--rm`; no retry or second execute occurred.
+- PII-safe provider evidence:
+  - requests 1–4: availability/preflight A and B all `pass`;
+  - request 5: create A `pass`; durable allowlisted binding was written before
+    readback: appointment ID `1`, record ID `1891713981`, slot `A`;
+  - request 6: exact GET A classified `unknown`, effect `ambiguous`;
+  - terminal result: `cleanup_required`, reason `snapshot_incomplete`, request
+    count `6`, hold `A`.
+- Steps 7–14 were not executed. In particular, no list expansion, reschedule,
+  cancel or repeat-delete occurred. The created YCLIENTS test record therefore
+  remains held in slot A; no automatic/manual cleanup was authorized.
+- Root-only audit:
+  `/root/prosto-padel-yclients-audit/basic-20260807T085254Z-e7ceeb4/runner.jsonl`
+  (`0600`); stderr is empty. Approval, consumed and provider-binding artifacts
+  remain root-owned `0600`. Raw response bodies, record hash, tokens and PII
+  were not recorded.
+- Postcheck: Gate 2 temporary container count `0`. Application checkout remains
+  `c040744...`; original frontend/backend/nginx/PostgreSQL container IDs/images
+  remain running with restart count 0. Application runtime/compose/env/DB/
+  production were not changed.
+- Verification: evidence-only WORKLOG append; project tests not rerun/not
+  needed. `git diff --check` PASS before the local docs checkpoint.
+- Status: controlled lifecycle `cleanup_required`; D2 remains `in_progress`.
+  No further provider call is allowed under the consumed approval. A new exact
+  record-specific owner approval is required before any readback/cancel cleanup;
+  until canonical cancel proof, slot A must be treated as held.
