@@ -1333,3 +1333,35 @@
   `in_progress`, integration/test rollout `pending`. Selectel test application
   runtime remains D1 `c04074459948d0bf545e865b885aea7a4e5fec3c`, containers
   unchanged, production untouched.
+
+### 2026-08-07 — D2 / Gate 1 delivery stopped before dry-run
+
+- Owner authorized only push of exact operational checkpoint
+  `e7ceeb49052f25b91aa4d20845cd41c4666d44e8` and isolated root-only Selectel
+  test setup/build/dry-run. The branch `codex/week1-d2-reservation-core` was
+  pushed at that exact SHA; `main` was not merged or changed.
+- Selectel baseline before setup: application checkout remained D1
+  `c04074459948d0bf545e865b885aea7a4e5fec3c`; frontend/backend/nginx/PostgreSQL
+  container IDs were recorded, all were healthy/running with restart count 0.
+- Isolated layout `/root/prosto-padel-d2-controlled` was absent before Gate 1.
+  It was created root-owned with mode `0700` for root, checkout, secrets and
+  artifacts. The isolated checkout is detached at exact
+  `e7ceeb49052f25b91aa4d20845cd41c4666d44e8` and remained clean.
+- Build gate: `STOP`. Host-side `npm ci` could not start because `npm` is not
+  installed on the Selectel host (`npm: command not found`). No alternate build
+  mechanism was attempted because installing Node/npm or starting an ephemeral
+  build container was outside the exact approval.
+- Fail-closed consequences: disposable identity and existing token files were
+  not provisioned; secrets directory count is 0. The compiled launcher was not
+  run, so there is no `approvalDigest`. Artifacts directory count is 0:
+  `approval.sha256`, consumed marker and provider binding are absent.
+- Post-stop invariants: application checkout still equals D1 `c040744...`; all
+  four original container IDs, images, running state and restart count 0 are
+  unchanged. Application runtime/compose/env/containers/DB/production were not
+  changed. No YCLIENTS API/provider call or booking create/PUT/DELETE occurred.
+- Verification: `git diff --check` PASS. Project tests were not rerun because
+  the only local change is this evidence-only WORKLOG entry; the authorized
+  isolated backend build did not start due to the missing host npm executable.
+- Status: Gate 1 `stopped_before_dry_run`; D2 remains `in_progress`. A new exact
+  owner approval is required for one isolated build method before provisioning
+  inputs or retrying dry-run. Gate 2 remains prohibited.
