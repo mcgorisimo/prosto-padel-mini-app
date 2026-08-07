@@ -28,7 +28,12 @@ Codex. Текущий фактический статус хранится в `W
 - Целевая инфраструктура: только Selectel.
 - Целевая БД: PostgreSQL в Selectel; frontend не обращается к БД напрямую.
 - Supabase: legacy, подлежит удалению из runtime, auth, E2E и зависимостей.
-- YCLIENTS: источник истины для availability/create/get/reschedule/cancel.
+- YCLIENTS: источник истины для availability/create/get и bounded read-only
+  reconciliation после ручных изменений администратора.
+- Приложение не выполняет reschedule/PUT или cancel/DELETE: перенос и отмену
+  делает живой администратор в YCLIENTS. Приложение только отражает новые
+  дату/время/корт или deleted/cancelled после bounded read-only refresh. Webhook
+  остаётся выключенным.
 - Один матч не равен одной брони. Матч может временно существовать без корта.
 - `scenario`, `paymentStatus`, `ownerPaid`, `holdAmount`, `prepay` не являются
   источником истины о реальной брони или платеже.
@@ -61,6 +66,9 @@ Match
   `reschedule_pending`, `cancel_pending`, `cancelled`, `rejected`, `unknown`.
 - Payment: `pending`, `authorized`, `paid`, `cancel_pending`, `cancelled`,
   `refund_pending`, `refunded`, `failed`, `unknown`.
+
+Reservation `reschedule_pending` / `cancel_pending` remain internal recovery
+states only and do not authorize user-facing PUT/DELETE commands.
 
 Обязательные связи операции:
 
@@ -97,7 +105,8 @@ Match
 - `social` не считается забронированным без подтверждённой reservation.
 - Незабронированный матч явно маркирован и может безопасно получить бронь.
 - Есть каноническое соответствие app court ↔ YCLIENTS resource/staff/service.
-- Реализованы create/get/reschedule/cancel/reconcile и локальный CRM binding.
+- Реализованы create/get/reconcile, read-only sync ручного переноса/отмены и
+  локальный CRM binding; app-originated reschedule/cancel отсутствуют.
 - Повтор команды с тем же ключом не создаёт вторую бронь.
 - Timeout после внешнего write приводит в `unknown`, а не к слепому retry.
 - Отмена матча не удаляет данные физически и уведомляет участников.
@@ -158,9 +167,11 @@ Acceptance:
 
 - Ввести канонический каталог услуг и кортов с YCLIENTS IDs.
 - Добавить reservation repository, state machine и operation ledger.
-- Реализовать create/get и reconciliation worker.
+- Реализовать create/get и bounded exact reconciliation только при открытии или
+  явном refresh; background polling требует отдельного решения.
 - Закрыть unknown outcome и повтор запроса с тем же ключом.
-- Подключить webhook как сигнал, а не как единственный источник доставки.
+- Синхронизировать ручной перенос или отмену bounded exact GET при
+  открытии/refresh; webhook оставить выключенным.
 - Добавить admin lookup по собственному и YCLIENTS ID.
 
 Acceptance:
@@ -169,22 +180,25 @@ Acceptance:
 - timeout тестируется отдельно до и после отправки провайдеру;
 - подтверждённая бронь всегда имеет локальный binding.
 
-### День 3 — матчи, корт, перенос и отмена
+### День 3 — матчи и подтверждённый корт
 
 Результат дня: продукт больше не показывает ложную гарантию корта.
 
 - Удалить вывод `scenario = booked`.
 - Реализовать `searching/unbooked` и действие «забронировать корт».
 - После подтверждения YCLIENTS связать match с reservation.
-- Добавить reschedule/cancel match/reservation с правами owner/admin.
-- Не освобождать слот при `cancel_pending/unknown`.
+- Для переноса или отмены показывать единое действие связи с клубом только
+  после выбора точного approved support/contact source без hardcode;
+  app/backend PUT и DELETE endpoints отсутствуют.
+- Отражать provider `deleted/cancelled` только после канонического read-only
+  подтверждения; при `unknown` слот не освобождать.
 - Уведомлять участников об окончательном корте, времени, цене и отмене.
 
 Acceptance:
 
 - unbooked-матч никогда не выглядит оплаченным/забронированным;
 - booked-матч невозможно получить без CRM confirmation;
-- отмена и перенос идемпотентны.
+- ручные перенос/отмена отражаются read-only без app-originated provider write.
 
 ### День 4 — Payment Core
 

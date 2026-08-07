@@ -26,8 +26,8 @@
 | Этап | Статус | Ветка/commit | Проверки | Блокер/следующий шаг |
 |---|---|---|---|---|
 | D1 Backend-only/contracts | done | `main` / deployed `c04074459948d0bf545e865b885aea7a4e5fec3c` | frontend E2E PASS (82/1 skipped); focused fail-closed 2/2 PASS; frontend build PASS; backend all PASS; Selectel test smoke PASS | D1 закрыт; следующий отдельный этап — D2 |
-| D2 YCLIENTS reservation core | in_progress | D2 branch / matrix `46bc35c7b6be5848bb5556b14eaee6fa33a20c2e` / controlled-plan correction `a08de13c95e7cf67ff272942f484d2e3d3ebd988` / read foundation correction `7fedddd5daf2e817aa977509ab120879915a8f26` + live-contract correction from that exact base | migration 033 applied/verified; backend 113/2971 unit, 2/4 E2E, typecheck/build PASS; root build PASS; root E2E 61 passed / 1 skipped / 21 unrelated `outside_telegram` failures | review live-contract correction checkpoint; basic и optional provider tests требуют два отдельных approval; runtime wiring не начат |
-| D3 Match ↔ reservation lifecycle | pending | — | — | cancel match, owner participant removal, match ↔ reservation binding |
+| D2 YCLIENTS reservation core | in_progress | D2 branch / base `b5856b6384e9e3ed5a1bf621ce0a60ee24e820d3` / verified-contact blocker docs | migration 033 applied/verified; latest code gates: backend 128/3229 unit, 2/4 E2E, typecheck/build PASS; root build PASS; root E2E 82/1 skipped | app PUT/DELETE superseded; runtime wiring blocked on approved verified phone/email source and exact support/contact source |
+| D3 Match ↔ reservation lifecycle | pending | — | — | reflect admin cancellation without provider DELETE, owner participant removal, match ↔ reservation binding |
 | D4 Payment Core | pending | — | — | payment provider, pricing/payment snapshot, чеки и возвраты |
 | D5 Settings/moderation/compliance | pending | — | — | standalone phone/email auth и verified backend email; затем schema review |
 | D6 Selectel readiness/load | pending | — | — | backend staging fixture, live concurrency и Selectel production readiness |
@@ -54,12 +54,11 @@
 
 Это входы последующих этапов, а не незавершённая работа D1.
 
-1. YCLIENTS official docs подтверждают exact get/list и общий rate ceiling. До
-   write wiring остаются controlled/provider confirmations: `api_id`
-   uniqueness/search/idempotency, cross-resource reschedule full/partial payload,
-   repeat cancel + deleted readback и webhook source verification/event identity.
-   Basic lifecycle и optional duplicate-`api_id` experiment требуют отдельных
-   явных approvals; ни один пока не разрешён.
+1. YCLIENTS availability/preflight/create и exact/bounded read contracts уже
+   подтверждены. App-originated reschedule/cancel и controlled write lifecycle
+   больше не входят в D2; webhook остаётся disabled. Перед create runtime wiring
+   нужен approved backend-owned verified phone/email source; provider `api_id`
+   uniqueness/idempotency не предполагаются и recovery остаётся bounded/read-only.
 2. Не подтверждён платёжный провайдер, sandbox и фискальные настройки.
 3. Не записаны фактические Selectel resources/accesses для staging/production.
 4. Не известны тип и дата создания Google Play developer account.
@@ -1816,3 +1815,70 @@
 - D2 remains `in_progress`. Production repository/controller/runtime wiring
   requires a separate later approval; app-originated reschedule remains
   forbidden.
+
+### 2026-08-07 — D2 / simplified scope and verified-contact blocker
+
+- Started from clean branch checkpoint
+  `b5856b6384e9e3ed5a1bf621ce0a60ee24e820d3`. The approved product scope now
+  excludes every app-originated reschedule/PUT and cancel/DELETE surface: a
+  live administrator performs both actions in YCLIENTS, while the application
+  may only perform a bounded read-only refresh of the same immutable record
+  binding and reflect new court/time or canonical deleted/cancelled state.
+  Webhook stays disabled, and the abandoned cleanup of test record `1891713981`
+  is not part of D2.
+- Rechecked applied migration 033 against the requested repository and recovery
+  contract. It already contains owner-scoped reservations/operations, encrypted
+  client snapshots, idempotency and active-operation constraints, optimistic
+  versioning/locking support, provider attempt timestamps, unknown outcome and
+  reconciliation fields, slot holds/overlap protection and the required
+  indexes/grants. Those fields are sufficient for the simplified D2
+  create/read/read-only-reconciliation scope; there is no app cancellation
+  command whose reason must be persisted. No change to migration 033 and no new
+  reservation migration is justified by this review.
+- The existing cancel-only state-machine/service/adapter checkpoint remains
+  runtime-disabled historical foundation and is superseded for D2 production
+  wiring. It must not be imported by a Nest module, controller, application
+  main, frontend client or route. The future UI may expose one club-contact
+  action for both manual transfer and cancellation only after its exact safe
+  source is approved; it has no cancel or reschedule command.
+- A focused import/route inventory confirmed the current boundary: no Nest
+  module/controller/application main imports the cancellation adapter/service,
+  the booking controller publishes no PUT/DELETE route, and the frontend has no
+  booking cancel/reschedule command. Controlled write/cleanup runner sources
+  remain isolated historical test tooling and are not runtime imports.
+- A targeted search did not locate a dedicated booking-safe support/contact
+  contract to power the future single admin-contact action. Its exact existing
+  backend/config source must be identified before UI wiring; no private contact
+  or hardcoded link may be introduced as a substitute.
+- A separate blocking gap was proved before runtime implementation.
+  `YclientsBookingService` requires non-empty valid `fullName`, `phone` and
+  `email` for create, but the backend profile schema has only first/last name
+  and an owner-editable phone. It has no email and no phone/email verification
+  state; the existing player `isVerified` flag describes rating verification,
+  not contact ownership. The current browser booking request supplies the
+  client snapshot and currently has no profile email, so it cannot be used as
+  the approved server-owned verified source.
+- Continuing the vertical slice would therefore require trusting
+  client-controlled PII, inventing an email, or treating an editable phone as
+  verified. All are fail-open and contradict the approved contract. Per the
+  explicit stop rule, repository/controller/runtime/frontend implementation
+  stopped before code changes. A minimal review-only proposal is recorded in
+  `D2_VERIFIED_BOOKING_CONTACT_MIGRATION_PROPOSAL.md`; it requests a separate
+  expand-only verified-contact source and the product decisions needed before
+  any SQL is prepared.
+- Scope of this checkpoint is documentation only: `MASTER_PLAN.md`, the
+  verified-contact proposal and this append-only entry. No application/backend
+  source, controller/module/runtime wiring, frontend, SQL/schema/migration,
+  payment field, YCLIENTS/API/SSH/server/DB call, secret/env access, provider
+  write, push, merge or deployment occurred. Tests are `not_run/not_needed`
+  because executable code and configuration did not change. `git diff --check`
+  PASS (CRLF conversion warnings only). Independent read-only review of the
+  complete three-file diff found no actionable P0/P1 and confirmed the
+  simplified scope, migration 033 sufficiency, verified-contact blocker and
+  privacy/RBAC/audit boundaries.
+- Deployment is `not_needed` for this docs-only stop checkpoint. Selectel test
+  application remains `c04074459948d0bf545e865b885aea7a4e5fec3c`; containers,
+  health and production were not touched. D2 remains `in_progress`, blocked on
+  explicit product/schema approval for the verified booking-contact authority,
+  uniqueness, re-verification and retention decisions before SQL or runtime
+  work resumes.
