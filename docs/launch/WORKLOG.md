@@ -2035,3 +2035,41 @@
   Operational correction is to extend Court 1's YCLIENTS resource schedule to
   `00:00`; a separate optional UI correction may replace the generic label with
   truthful `Недоступно` unless a documented provider reason is available.
+
+### 2026-08-07 — D2 / persisted-create datetime binding correction
+
+- Owner TMA evidence showed the generic create failure for Court 6 on
+  `2026-08-12` at `15:30` for 1.5 hours. Read-only diagnosis found two matching
+  `POST /api/v1/bookings` responses with HTTP `503`, zero reservation/create
+  operation rows in the preceding two hours and zero provider-attempt markers.
+  The YCLIENTS write gate was enabled, but no provider create was dispatched;
+  there is no duplicate or unknown provider outcome from those attempts.
+- PII-safe PostgreSQL evidence identified the exact pre-dispatch cause: both
+  transactions violated `court_reservations_target_check`. The repository used
+  one parameter as both `$n::timestamptz` and the canonical text column. PostgreSQL
+  inferred `timestamptz` for the parameter and implicitly rendered the text as
+  `YYYY-MM-DD HH:MM:SS+00`, while migration 033 intentionally requires the
+  canonical ISO `T` form.
+- Corrected the repository to bind every paired target start/end value as text
+  first, persist that exact text, and separately cast the same text to
+  `timestamptz`. The correction covers initial reservation create, create
+  operation start, terminal transition and administrator read-only refresh; no
+  schema/migration, provider contract, payment field or frontend behavior was
+  changed.
+- Added a SQL contract regression that rejects the unsafe shared
+  `timestamptz`-inferred parameter form and covers all ten paired conversions.
+  Focused repository suite: `1 suite / 8 tests` PASS. Backend gates: typecheck
+  PASS; unit `131 suites / 3272 tests` PASS; E2E `2 suites / 4 tests` PASS; build
+  PASS. Root E2E PASS `84 passed / 1 skipped` on its owned Vite server; root
+  build PASS (`1615` modules, existing chunk/CJS warnings only). The first root
+  E2E attempt stopped before tests at the known managed-worktree esbuild
+  `Access is denied` boundary; the identical unsandboxed command passed.
+- `git diff --check` PASS (line-ending warnings only). No YCLIENTS/API write,
+  migration, DB mutation, secret read, push, merge or deployment was performed
+  for this correction. Deployment is `pending`: backend runtime changes and
+  Selectel test still runs `b006263fe1f34d374791368cb3691fab89116a39` until a
+  separate integration/rollout approval. Read-only P0/P1 review of the complete
+  correction found no actionable issue: canonical text remains the authoritative
+  persisted value, every paired timestamp derives from that same text, and
+  provider dispatch/idempotency/runtime surfaces are unchanged. Production is
+  unchanged.

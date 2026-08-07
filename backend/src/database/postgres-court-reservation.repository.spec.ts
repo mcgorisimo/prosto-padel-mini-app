@@ -101,9 +101,28 @@ describe('PostgresCourtReservationRepository SQL contract', () => {
       createdAt: unixEpochSeconds(1_800_000_000), updatedAt: unixEpochSeconds(1_800_000_000), version: 1,
     });
     await expect(repository.create({ query } as never, reservation)).resolves.toMatchObject({ outcome: 'created' });
-    expect(query.mock.calls[0][0]).toContain('target_end_datetime');
+    const insertSql = String(query.mock.calls[0][0]).replace(/\s+/gu, ' ');
+    expect(insertSql).toContain('target_end_datetime');
+    expect(insertSql).toContain(
+      '$6::text::timestamptz,$6::text,$7::text::timestamptz,$7::text',
+    );
     expect(query.mock.calls[0][1]).toEqual(expect.arrayContaining([2_079_564, row.target_datetime_text, row.target_end_datetime_text]));
     expect(JSON.stringify(query.mock.calls)).not.toContain('private.owner@example.test');
+  });
+
+  it('preserves canonical ISO text before every paired timestamptz conversion', () => {
+    const repositorySource = readFileSync(
+      __filename.replace(/\.spec\.ts$/u, '.ts'),
+      'utf8',
+    );
+
+    expect(repositorySource).not.toMatch(
+      /\$(\d+)::timestamptz,\$\1(?:[,)]|\b)/u,
+    );
+    expect(repositorySource).not.toMatch(
+      /target_(?:end_)?datetime=\$(\d+)::timestamptz,target_(?:end_)?datetime_text=\$\1/u,
+    );
+    expect(repositorySource.match(/::text::timestamptz/gu)).toHaveLength(10);
   });
 
   it('maps active interval overlap to a fail-closed transaction conflict', async () => {
