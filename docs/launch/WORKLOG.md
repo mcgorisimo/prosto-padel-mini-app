@@ -26,7 +26,7 @@
 | Этап | Статус | Ветка/commit | Проверки | Блокер/следующий шаг |
 |---|---|---|---|---|
 | D1 Backend-only/contracts | done | `main` / deployed `c04074459948d0bf545e865b885aea7a4e5fec3c` | frontend E2E PASS (82/1 skipped); focused fail-closed 2/2 PASS; frontend build PASS; backend all PASS; Selectel test smoke PASS | D1 закрыт; следующий отдельный этап — D2 |
-| D2 YCLIENTS reservation core | in_progress | `main` / Selectel test `b006263fe1f34d374791368cb3691fab89116a39` | migration 033 applied/verified; local gates PASS; Selectel build/health/log audit PASS; operator lookup 0 rows | manual read-only Telegram Mini App smoke remains before D2 deployment gate can close; support contact deferred to D5 by owner |
+| D2 YCLIENTS reservation core | in_progress | `main` / Selectel test `b006263fe1f34d374791368cb3691fab89116a39` | migration 033 applied/verified; local gates, Selectel build/health/log audit and owner read-only TMA smoke PASS; operator lookup 0 rows | correct Court 1 YCLIENTS resource schedule from 22:00 to 00:00; support contact deferred to D5 by owner |
 | D3 Match ↔ reservation lifecycle | pending | — | — | reflect admin cancellation without provider DELETE, owner participant removal, match ↔ reservation binding |
 | D4 Payment Core | pending | — | — | payment provider, pricing/payment snapshot, чеки и возвраты |
 | D5 Settings/moderation/compliance | pending | — | — | standalone phone/email auth, verified backend email, approved club support/contact source and clickable action; затем schema review |
@@ -41,7 +41,7 @@
 | Этап | Среда | Целевой commit | Статус | Проверка |
 |---|---|---|---|---|
 | D1 Backend-only/contracts | Selectel test | `c04074459948d0bf545e865b885aea7a4e5fec3c` | `test_deployed` | frontend healthy; HTTPS root/health и новый asset 200; TMA auth/profile/feed/details/booking availability PASS; bundle/log audit PASS |
-| D2 YCLIENTS reservation core | Selectel test | `b006263fe1f34d374791368cb3691fab89116a39` | `pending` | rollout applied; backend/frontend healthy, HTTPS root/health 200, log audit clean; manual read-only Telegram Mini App smoke pending |
+| D2 YCLIENTS reservation core | Selectel test | `b006263fe1f34d374791368cb3691fab89116a39` | `test_deployed` | backend/frontend healthy, HTTPS root/health 200, log audit clean; owner read-only Telegram Mini App smoke PASS; no provider write in smoke |
 | D2 persistence/privacy proposal | not applicable | docs-only checkpoint | `not_needed` | только Markdown; runtime, schema, containers и конфигурация не менялись |
 | D2 YCLIENTS contract matrix | not applicable | docs-only checkpoint поверх `3e8739b` | `not_needed` | только Markdown; API/DB/server/runtime не вызывались и не менялись |
 | D2 YCLIENTS controlled test plan | not applicable | `040773172a2fa556ffaaf1d12dac540095070976` + docs-only correction from that exact base | `not_needed` | plan only; provider/server/DB/runtime calls и writes не выполнялись |
@@ -2009,3 +2009,29 @@
   opens the exact Selectel Mini App inside Telegram and confirms the read-only
   login/profile/reservation list/detail/refresh flow without submitting a
   booking. Production is unchanged.
+
+### 2026-08-07 — D2 / TMA smoke PASS and late-slot diagnosis
+
+- Owner confirmed the exact Selectel Telegram Mini App is working. The required
+  read-only TMA smoke is PASS; no booking was submitted as part of this smoke.
+  D2 deployment status is now `test_deployed` at exact application commit
+  `b006263fe1f34d374791368cb3691fab89116a39`; production is unchanged.
+- A bounded read-only YCLIENTS diagnosis used only the existing GET contracts
+  and conservative one-request-per-second limiter. No create/PUT/DELETE or
+  other provider write was invoked; no token, PII or raw provider body was
+  printed.
+- Provider evidence for `2026-08-08` proves Court 1 currently has a YCLIENTS
+  resource working-window end of `22:00`, not `00:00`: latest starts are
+  `21:00` for one hour, `20:30` for 1.5 hours and `20:00` for two hours. The
+  same 1.5-hour cutoff was returned for the first three available dates, so the
+  repeated late-day pattern is not explained by random bookings.
+- Court 2 matches the approved club closing boundary at `00:00`: latest starts
+  are `23:00` for one hour, `22:30` for 1.5 hours and `22:00` for two hours.
+  Therefore `23:00` and `23:30` are correctly outside the allowed interval when
+  1.5 hours is selected.
+- Current UI maps every start absent from the provider's available-time list to
+  the generic label `Занято`; it cannot distinguish an occupied interval from
+  a resource schedule boundary. No code was changed in this diagnostic pass.
+  Operational correction is to extend Court 1's YCLIENTS resource schedule to
+  `00:00`; a separate optional UI correction may replace the generic label with
+  truthful `Недоступно` unless a documented provider reason is available.
