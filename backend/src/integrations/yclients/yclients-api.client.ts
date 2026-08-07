@@ -1,4 +1,5 @@
 import type { YclientsApiConfiguration } from '../../config/yclients-api.config';
+import type { YclientsConservativeRequestLimiter } from './yclients-request-limiter';
 
 const MAX_RESPONSE_BYTES = 65_536;
 const MAX_BOOKING_DATE_RANGE_DAYS = 31;
@@ -120,9 +121,12 @@ export type YclientsCreateBookingCommand = Readonly<{
   }>;
 }>;
 
+export type YclientsCreateBookingDispatchGuard = () => Promise<boolean>;
+
 export type YclientsCreateBookingResult =
   | Readonly<{ outcome: 'disabled' }>
   | Readonly<{ outcome: 'write_disabled' }>
+  | Readonly<{ outcome: 'not_dispatched' }>
   | Readonly<{ outcome: 'invalid_request' }>
   | Readonly<{
       outcome: 'created';
@@ -138,6 +142,7 @@ export interface YclientsApiClientConfiguration {
   readonly runtime: YclientsApiConfiguration;
   readonly requestTimeoutMilliseconds: number;
   readonly fetch: typeof globalThis.fetch;
+  readonly limiter: Pick<YclientsConservativeRequestLimiter, 'run'>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -345,10 +350,23 @@ function readBookableTime(
 }
 
 export class YclientsApiClient {
-  constructor(private readonly configuration: YclientsApiClientConfiguration) {}
+  private readonly limitedFetch: typeof globalThis.fetch;
+
+  constructor(private readonly configuration: YclientsApiClientConfiguration) {
+    this.limitedFetch = (input, init) =>
+      this.configuration.limiter.run(() =>
+        this.configuration.fetch(input, {
+          ...init,
+          signal: AbortSignal.timeout(
+            this.configuration.requestTimeoutMilliseconds,
+          ),
+        }),
+      );
+  }
 
   async createBookingRecord(
     command: YclientsCreateBookingCommand,
+    beforeWriteDispatch?: YclientsCreateBookingDispatchGuard,
   ): Promise<YclientsCreateBookingResult> {
     const runtime = this.configuration.runtime;
     if (!runtime.enabled) {
@@ -390,33 +408,45 @@ export class YclientsApiClient {
         `api/v1/book_record/${companyId}`,
         `${runtime.baseUrl}/`,
       );
-      const response = await this.configuration.fetch(url, {
-        method: 'POST',
-        headers: {
-          accept: YCLIENTS_ACCEPT,
-          authorization: `Bearer ${runtime.partnerToken}`,
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify({
-          phone,
-          fullname: fullName,
-          email,
-          notify_by_sms: 0,
-          notify_by_email: 0,
-          api_id: command.apiId,
-          appointments: [
-            {
-              id: 1,
-              services: [command.serviceId],
-              staff_id: command.resourceId,
-              datetime,
-            },
-          ],
-        }),
-        signal: AbortSignal.timeout(
-          this.configuration.requestTimeoutMilliseconds,
-        ),
+      const response = await this.configuration.limiter.run(async () => {
+        if (beforeWriteDispatch !== undefined) {
+          try {
+            if ((await beforeWriteDispatch()) !== true) return undefined;
+          } catch {
+            return undefined;
+          }
+        }
+        return this.configuration.fetch(url, {
+          method: 'POST',
+          headers: {
+            accept: YCLIENTS_ACCEPT,
+            authorization: `Bearer ${runtime.partnerToken}`,
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({
+            phone,
+            fullname: fullName,
+            email,
+            notify_by_sms: 0,
+            notify_by_email: 0,
+            api_id: command.apiId,
+            appointments: [
+              {
+                id: 1,
+                services: [command.serviceId],
+                staff_id: command.resourceId,
+                datetime,
+              },
+            ],
+          }),
+          signal: AbortSignal.timeout(
+            this.configuration.requestTimeoutMilliseconds,
+          ),
+        });
       });
+      if (response === undefined) {
+        return Object.freeze({ outcome: 'not_dispatched' as const });
+      }
 
       if (response.status === 401) {
         return Object.freeze({ outcome: 'unauthorized' as const });
@@ -475,7 +505,7 @@ export class YclientsApiClient {
         `api/v1/book_check/${companyId}`,
         `${runtime.baseUrl}/`,
       );
-      const response = await this.configuration.fetch(url, {
+      const response = await this.limitedFetch(url, {
         method: 'POST',
         headers: {
           accept: YCLIENTS_ACCEPT,
@@ -492,9 +522,6 @@ export class YclientsApiClient {
             },
           ],
         }),
-        signal: AbortSignal.timeout(
-          this.configuration.requestTimeoutMilliseconds,
-        ),
       });
 
       if (response.status === 401 || response.status === 403) {
@@ -561,15 +588,12 @@ export class YclientsApiClient {
       for (const serviceId of new Set(query.serviceIds)) {
         url.searchParams.append('service_ids[]', String(serviceId));
       }
-      const response = await this.configuration.fetch(url, {
+      const response = await this.limitedFetch(url, {
         method: 'GET',
         headers: {
           accept: YCLIENTS_ACCEPT,
           authorization: `Bearer ${runtime.partnerToken}`,
         },
-        signal: AbortSignal.timeout(
-          this.configuration.requestTimeoutMilliseconds,
-        ),
       });
 
       if (response.status === 401 || response.status === 403) {
@@ -655,15 +679,12 @@ export class YclientsApiClient {
       url.searchParams.set('staff_id', String(query.resourceId));
       url.searchParams.set('date_from', dateFromTimestamp);
       url.searchParams.set('date_to', dateToTimestamp);
-      const response = await this.configuration.fetch(url, {
+      const response = await this.limitedFetch(url, {
         method: 'GET',
         headers: {
           accept: YCLIENTS_ACCEPT,
           authorization: `Bearer ${runtime.partnerToken}`,
         },
-        signal: AbortSignal.timeout(
-          this.configuration.requestTimeoutMilliseconds,
-        ),
       });
 
       if (response.status === 401 || response.status === 403) {
@@ -728,15 +749,12 @@ export class YclientsApiClient {
       for (const serviceId of new Set(serviceIds)) {
         url.searchParams.append('service_ids[]', String(serviceId));
       }
-      const response = await this.configuration.fetch(url, {
+      const response = await this.limitedFetch(url, {
         method: 'GET',
         headers: {
           accept: YCLIENTS_ACCEPT,
           authorization: `Bearer ${runtime.partnerToken}`,
         },
-        signal: AbortSignal.timeout(
-          this.configuration.requestTimeoutMilliseconds,
-        ),
       });
 
       if (response.status === 401 || response.status === 403) {
@@ -791,15 +809,12 @@ export class YclientsApiClient {
         `api/v1/book_services/${companyId}`,
         `${runtime.baseUrl}/`,
       );
-      const response = await this.configuration.fetch(url, {
+      const response = await this.limitedFetch(url, {
         method: 'GET',
         headers: {
           accept: YCLIENTS_ACCEPT,
           authorization: `Bearer ${runtime.partnerToken}`,
         },
-        signal: AbortSignal.timeout(
-          this.configuration.requestTimeoutMilliseconds,
-        ),
       });
 
       if (response.status === 401 || response.status === 403) {
@@ -857,15 +872,12 @@ export class YclientsApiClient {
     try {
       const url = new URL('api/v1/companies', `${runtime.baseUrl}/`);
       url.searchParams.set('my', '1');
-      const response = await this.configuration.fetch(url, {
+      const response = await this.limitedFetch(url, {
         method: 'GET',
         headers: {
           accept: YCLIENTS_ACCEPT,
           authorization: `Bearer ${runtime.partnerToken}, User ${runtime.userToken}`,
         },
-        signal: AbortSignal.timeout(
-          this.configuration.requestTimeoutMilliseconds,
-        ),
       });
 
       if (response.status === 401 || response.status === 403) {

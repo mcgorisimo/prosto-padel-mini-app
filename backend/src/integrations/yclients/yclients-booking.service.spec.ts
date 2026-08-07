@@ -63,7 +63,7 @@ describe('YclientsBookingService', () => {
         fullName: 'Тест Просто Падел',
         email: 'test@example.test',
       },
-    });
+    }, undefined);
     expect(preflightBooking.mock.invocationCallOrder[0]).toBeLessThan(
       createBookingRecord.mock.invocationCallOrder[0],
     );
@@ -125,6 +125,24 @@ describe('YclientsBookingService', () => {
       outcome: 'unavailable',
     });
     expect(createBookingRecord).not.toHaveBeenCalled();
+  });
+
+  it('forwards the atomic dispatch guard to the low-level limited client', async () => {
+    const { service, preflightBooking, createBookingRecord } = createSubject();
+    const guard = jest.fn().mockResolvedValue(false);
+    preflightBooking.mockResolvedValue({ outcome: 'bookable' });
+    createBookingRecord.mockImplementationOnce(async (_command, receivedGuard) =>
+      (await receivedGuard?.()) === true
+        ? { outcome: 'unknown_outcome' }
+        : { outcome: 'not_dispatched' },
+    );
+
+    await expect(service.createBooking(command, guard)).resolves.toEqual({
+      outcome: 'not_dispatched',
+    });
+    expect(guard).toHaveBeenCalledTimes(1);
+    expect(createBookingRecord).toHaveBeenCalledTimes(1);
+    expect(createBookingRecord).toHaveBeenCalledWith(expect.any(Object), guard);
   });
 
   it('maps an unexpected create failure to unknown outcome without retry', async () => {

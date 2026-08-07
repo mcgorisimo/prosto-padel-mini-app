@@ -166,9 +166,10 @@ export default function BookingScreen({
   const dates = useMemo(() => buildDates(14), []);
   const times = useMemo(buildTimes, []);
   const usesBackendAvailability = availabilityActions !== null;
+  const [bookingEmail, setBookingEmail] = useState('');
   const normalizedBookingClient = useMemo(
-    () => normalizeBookingClient(bookingClient),
-    [bookingClient?.email, bookingClient?.fullName, bookingClient?.phone],
+    () => normalizeBookingClient({ ...bookingClient, email: bookingEmail }),
+    [bookingClient?.fullName, bookingClient?.phone, bookingEmail],
   );
   const [selectedDateISO, setSelectedDateISO] = useState(dates[0]?.dateISO);
   const [duration, setDuration] = useState(1.5);
@@ -176,6 +177,8 @@ export default function BookingScreen({
   const [selectedSlot, setSelectedSlot] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
   const [successText, setSuccessText] = useState('');
+  const [latestReservation, setLatestReservation] = useState(null);
+  const [isRefreshingReservation, setIsRefreshingReservation] = useState(false);
   const [servicesState, setServicesState] = useState({
     status: 'idle',
     groups: [],
@@ -196,6 +199,28 @@ export default function BookingScreen({
     slots: [],
     partial: false,
   });
+
+  useEffect(() => {
+    if (typeof availabilityActions?.listBookings !== 'function') return undefined;
+    let active = true;
+    void (async () => {
+      const listed = await availabilityActions.listBookings();
+      const latest = listed?.outcome === 'bookings_loaded'
+        ? listed.reservations?.[0]
+        : null;
+      if (!active || !latest) return;
+      const refreshed = typeof availabilityActions.readBooking === 'function'
+        ? await availabilityActions.readBooking(latest.reservationId)
+        : null;
+      if (!active) return;
+      setLatestReservation(
+        refreshed?.outcome === 'booking_loaded'
+          ? refreshed.reservation
+          : latest,
+      );
+    })();
+    return () => { active = false; };
+  }, [availabilityActions]);
   const isSavingRef = useRef(false);
 
   useEffect(() => {
@@ -631,7 +656,7 @@ export default function BookingScreen({
           typeof availabilityActions.createBooking !== 'function'
         ) {
           showToast?.(
-            'Проверьте имя, телефон и email в профиле перед бронированием.',
+            'Проверьте имя и телефон в профиле и укажите email для бронирования.',
             'error',
           );
           return;
@@ -641,12 +666,13 @@ export default function BookingScreen({
           serviceId: selectedSlot.serviceId,
           courtId: selectedSlot.court.id,
           datetime: selectedSlot.datetime,
-          client: normalizedBookingClient,
+          email: normalizedBookingClient.email,
         });
         if (result?.outcome === 'booking_created') {
           const message =
             'Бронь создана в YCLIENTS без онлайн-оплаты. Оплату подтвердит администратор клуба.';
           setSuccessText(message);
+          setLatestReservation(result.reservation);
           showToast?.(message, 'success');
           setTimesState((current) => ({
             ...current,
@@ -659,6 +685,15 @@ export default function BookingScreen({
           setSelectedSlot(null);
           return;
         }
+        if (result?.outcome === 'booking_unknown') {
+          setLatestReservation(result.reservation);
+          setSelectedSlot(null);
+          showToast?.(
+            'Статус брони уточняется. Не повторяйте создание — обновите бронь или свяжитесь с администратором клуба.',
+            'error',
+          );
+          return;
+        }
         if (result?.reason === 'not_bookable') {
           setSelectedSlot(null);
           showToast?.(
@@ -668,6 +703,12 @@ export default function BookingScreen({
           return;
         }
         if (result?.reason === 'unknown_outcome') {
+          if (typeof availabilityActions.readBookingByRequestKey === 'function') {
+            const recovered = await availabilityActions.readBookingByRequestKey(requestKey);
+            if (recovered?.outcome === 'booking_loaded') {
+              setLatestReservation(recovered.reservation);
+            }
+          }
           setSelectedSlot(null);
           showToast?.(
             'Статус брони не определён. Не повторяйте запрос — обратитесь к администратору клуба.',
@@ -709,6 +750,27 @@ export default function BookingScreen({
     } finally {
       isSavingRef.current = false;
       setIsSaving(false);
+    }
+  };
+
+  const handleRefreshReservation = async () => {
+    if (
+      isRefreshingReservation ||
+      typeof latestReservation?.reservationId !== 'string' ||
+      typeof availabilityActions?.readBooking !== 'function'
+    ) return;
+    setIsRefreshingReservation(true);
+    try {
+      const result = await availabilityActions.readBooking(
+        latestReservation.reservationId,
+      );
+      if (result?.outcome === 'booking_loaded') {
+        setLatestReservation(result.reservation);
+        return;
+      }
+      showToast?.('Не удалось обновить бронь. Попробуйте позже.', 'error');
+    } finally {
+      setIsRefreshingReservation(false);
     }
   };
 
@@ -945,9 +1007,25 @@ export default function BookingScreen({
                 {usesBackendAvailability
                   ? normalizedBookingClient
                     ? 'Бронь появится в YCLIENTS без онлайн-оплаты. Оплату подтвердит администратор клуба.'
-                    : 'Для бронирования заполните имя, телефон и email в профиле.'
+                    : 'Для бронирования нужны имя и телефон в профиле, а также email в форме.'
                   : 'Бронь создаётся без онлайн-оплаты. Администратор клуба подтвердит оплату отдельно.'}
               </p>
+
+              {usesBackendAvailability && (
+                <label className="mt-4 block text-xs font-bold text-warm-white/72">
+                  Email для этой брони
+                  <input
+                    data-testid="booking-contact-email"
+                    type="email"
+                    value={bookingEmail}
+                    onChange={(event) => setBookingEmail(event.target.value)}
+                    autoComplete="email"
+                    maxLength={320}
+                    placeholder="name@example.com"
+                    className="mt-2 w-full rounded-xl border border-warm-white/12 bg-app-bg/70 px-3 py-3 text-sm text-warm-white outline-none"
+                  />
+                </label>
+              )}
             </div>
 
             <div className="booking-sheet-footer">
@@ -962,7 +1040,7 @@ export default function BookingScreen({
                 {isSaving
                   ? 'Создаём бронь...'
                   : usesBackendAvailability && normalizedBookingClient === null
-                    ? 'Заполните профиль'
+                    ? 'Заполните контакты'
                     : 'Создать бронь'}
               </button>
             </div>
@@ -974,6 +1052,26 @@ export default function BookingScreen({
         <div className="booking-success p-4 text-sm font-semibold leading-relaxed text-accent-light">
           {successText}
         </div>
+      )}
+
+      {latestReservation && (
+        <section data-testid="booking-reservation-card" className="booking-success mt-3 p-4 text-sm leading-relaxed">
+          <div className="font-black">Статус: {latestReservation.status}</div>
+          <div className="mt-1 text-warm-white/68">
+            {new Date(latestReservation.startsAt).toLocaleString('ru-RU')} · корт {latestReservation.courtId}
+          </div>
+          {latestReservation.stale && (
+            <div className="mt-2 text-amber-200">Данные YCLIENTS временно не подтверждены.</div>
+          )}
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button type="button" onClick={handleRefreshReservation} disabled={isRefreshingReservation} className="rounded-xl bg-warm-white/10 px-3 py-2 font-bold">
+              {isRefreshingReservation ? 'Обновляем…' : 'Обновить бронь'}
+            </button>
+            <div className="rounded-xl bg-warm-white/10 px-3 py-2 text-sm">
+              Для отмены или переноса свяжитесь с администратором клуба. Прямая ссылка появится после подключения официального контакта клуба.
+            </div>
+          </div>
+        </section>
       )}
     </div>
   );

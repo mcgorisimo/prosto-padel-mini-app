@@ -77,6 +77,7 @@ export function createYclientsControlledExecutableRunner(
     runtime,
     requestTimeoutMilliseconds: configuration.requestTimeoutMilliseconds,
     fetch: configuration.fetch,
+    limiter,
   });
   const availability = new YclientsAvailabilityService(api);
   const adminRead = new YclientsAdminReadClient({

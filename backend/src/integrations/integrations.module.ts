@@ -22,6 +22,8 @@ import {
 import { YclientsApiClient } from './yclients/yclients-api.client';
 import { YclientsAvailabilityService } from './yclients/yclients-availability.service';
 import { YclientsBookingService } from './yclients/yclients-booking.service';
+import { YclientsAdminReadClient } from './yclients/yclients-admin-read.client';
+import { YclientsConservativeRequestLimiter } from './yclients/yclients-request-limiter';
 
 @Module({
   imports: [DatabaseModule],
@@ -31,15 +33,35 @@ import { YclientsBookingService } from './yclients/yclients-booking.service';
     YclientsAvailabilityService,
     YclientsBookingService,
     YclientsWebhookService,
+    YclientsConservativeRequestLimiter,
     {
       provide: YclientsApiClient,
-      inject: [ConfigService],
-      useFactory: (config: ConfigService): YclientsApiClient =>
+      inject: [ConfigService, YclientsConservativeRequestLimiter],
+      useFactory: (
+        config: ConfigService,
+        limiter: YclientsConservativeRequestLimiter,
+      ): YclientsApiClient =>
         new YclientsApiClient({
           runtime: readYclientsApiConfiguration(config),
           requestTimeoutMilliseconds:
             YCLIENTS_API_REQUEST_TIMEOUT_MILLISECONDS,
           fetch: globalThis.fetch,
+          limiter,
+        }),
+    },
+    {
+      provide: YclientsAdminReadClient,
+      inject: [ConfigService, YclientsConservativeRequestLimiter],
+      useFactory: (
+        config: ConfigService,
+        limiter: YclientsConservativeRequestLimiter,
+      ): YclientsAdminReadClient =>
+        new YclientsAdminReadClient({
+          runtime: readYclientsApiConfiguration(config),
+          requestTimeoutMilliseconds:
+            YCLIENTS_API_REQUEST_TIMEOUT_MILLISECONDS,
+          fetch: globalThis.fetch,
+          limiter,
         }),
     },
     {
@@ -93,6 +115,7 @@ import { YclientsBookingService } from './yclients/yclients-booking.service';
     YclientsApiClient,
     YclientsAvailabilityService,
     YclientsBookingService,
+    YclientsAdminReadClient,
   ],
 })
 export class IntegrationsModule {}

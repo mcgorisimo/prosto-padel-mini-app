@@ -2,7 +2,12 @@ const PROVIDER_MINIMUM_INTERVAL_MILLISECONDS = 200;
 const PROVIDER_MAXIMUM_REQUESTS_PER_MINUTE = 200;
 const DEFAULT_MINIMUM_INTERVAL_MILLISECONDS = 1_000;
 const DEFAULT_MAXIMUM_REQUESTS_PER_MINUTE = 60;
+const DEFAULT_MAXIMUM_PENDING_REQUESTS = 8;
+const MAXIMUM_PENDING_REQUESTS = 60;
 const MINUTE_MILLISECONDS = 60_000;
+
+export const YCLIENTS_REQUEST_QUEUE_SATURATED =
+  'YCLIENTS request queue is saturated';
 
 export interface YclientsRequestLimiterClock {
   nowMilliseconds(): number;
@@ -13,6 +18,7 @@ export interface YclientsRequestLimiterOptions {
   readonly clock?: YclientsRequestLimiterClock;
   readonly minimumIntervalMilliseconds?: number;
   readonly maximumRequestsPerMinute?: number;
+  readonly maximumPendingRequests?: number;
 }
 
 const systemClock: YclientsRequestLimiterClock = Object.freeze({
@@ -33,6 +39,8 @@ export class YclientsConservativeRequestLimiter {
   private readonly clock: YclientsRequestLimiterClock;
   private readonly minimumIntervalMilliseconds: number;
   private readonly maximumRequestsPerMinute: number;
+  private readonly maximumPendingRequests: number;
+  private pendingRequests = 0;
   private queue: Promise<void> = Promise.resolve();
   private readonly requestStarts: number[] = [];
 
@@ -43,11 +51,15 @@ export class YclientsConservativeRequestLimiter {
     const maximumRequestsPerMinute =
       options.maximumRequestsPerMinute ??
       DEFAULT_MAXIMUM_REQUESTS_PER_MINUTE;
+    const maximumPendingRequests =
+      options.maximumPendingRequests ?? DEFAULT_MAXIMUM_PENDING_REQUESTS;
     if (
       !positiveSafeInteger(minimumIntervalMilliseconds) ||
       minimumIntervalMilliseconds < PROVIDER_MINIMUM_INTERVAL_MILLISECONDS ||
       !positiveSafeInteger(maximumRequestsPerMinute) ||
-      maximumRequestsPerMinute > PROVIDER_MAXIMUM_REQUESTS_PER_MINUTE
+      maximumRequestsPerMinute > PROVIDER_MAXIMUM_REQUESTS_PER_MINUTE ||
+      !positiveSafeInteger(maximumPendingRequests) ||
+      maximumPendingRequests > MAXIMUM_PENDING_REQUESTS
     ) {
       throw new TypeError('Invalid YCLIENTS request limiter configuration');
     }
@@ -55,9 +67,14 @@ export class YclientsConservativeRequestLimiter {
     this.clock = options.clock ?? systemClock;
     this.minimumIntervalMilliseconds = minimumIntervalMilliseconds;
     this.maximumRequestsPerMinute = maximumRequestsPerMinute;
+    this.maximumPendingRequests = maximumPendingRequests;
   }
 
   async run<T>(request: () => Promise<T>): Promise<T> {
+    if (this.pendingRequests >= this.maximumPendingRequests) {
+      throw new Error(YCLIENTS_REQUEST_QUEUE_SATURATED);
+    }
+    this.pendingRequests += 1;
     const previous = this.queue;
     let release: (() => void) | undefined;
     this.queue = new Promise<void>((resolve) => {
@@ -71,6 +88,7 @@ export class YclientsConservativeRequestLimiter {
       return await request();
     } finally {
       release?.();
+      this.pendingRequests -= 1;
     }
   }
 

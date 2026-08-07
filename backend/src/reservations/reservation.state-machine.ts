@@ -124,6 +124,7 @@ function immutableTarget(
     serviceId: target.serviceId,
     courtId: target.courtId,
     startsAt: target.startsAt,
+    endsAt: target.endsAt,
   });
 }
 

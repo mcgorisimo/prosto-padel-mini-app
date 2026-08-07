@@ -11,7 +11,6 @@ import {
   Res,
   UseGuards,
 } from '@nestjs/common';
-import { createHash } from 'node:crypto';
 import { FastifyReply, FastifyRequest } from 'fastify';
 import {
   SessionBearerGuard,
@@ -25,10 +24,7 @@ import {
   YclientsBookingServicesResult,
   YclientsCourtsForServiceResult,
 } from '../integrations/yclients/yclients-availability.service';
-import {
-  YclientsBookingCreationResult,
-  YclientsBookingService,
-} from '../integrations/yclients/yclients-booking.service';
+import { BookingReservationService } from './booking-reservation.service';
 
 type AvailabilityResult =
   | YclientsBookingServicesResult
@@ -49,22 +45,8 @@ const AVAILABILITY_OUTCOMES = [
   'unavailable',
 ] as const;
 
-const BOOKING_CREATION_OUTCOMES = [
-  'invalid_request',
-  'disabled',
-  'write_disabled',
-  'not_bookable',
-  'created',
-  'unauthorized',
-  'rejected',
-  'invalid_response',
-  'unavailable',
-  'unknown_outcome',
-] as const;
-
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
-const MAX_SIGNED_INTEGER = 2_147_483_647;
 
 function publicError(
   statusCode: number,
@@ -146,11 +128,7 @@ function readBookingCreationRequest(value: unknown):
       serviceId: number;
       courtId: number;
       datetime: string;
-      client: Readonly<{
-        phone: string;
-        fullName: string;
-        email: string;
-      }>;
+      email: string;
     }>
   | undefined {
   if (
@@ -160,7 +138,7 @@ function readBookingCreationRequest(value: unknown):
       'serviceId',
       'courtId',
       'datetime',
-      'client',
+      'email',
     ]) ||
     typeof value.requestKey !== 'string' ||
     !UUID_PATTERN.test(value.requestKey) ||
@@ -169,11 +147,7 @@ function readBookingCreationRequest(value: unknown):
     !Number.isSafeInteger(value.courtId) ||
     Number(value.courtId) <= 0 ||
     typeof value.datetime !== 'string' ||
-    !isRecord(value.client) ||
-    !hasExactKeys(value.client, ['phone', 'fullName', 'email']) ||
-    typeof value.client.phone !== 'string' ||
-    typeof value.client.fullName !== 'string' ||
-    typeof value.client.email !== 'string'
+    typeof value.email !== 'string'
   ) {
     return undefined;
   }
@@ -182,22 +156,8 @@ function readBookingCreationRequest(value: unknown):
     serviceId: Number(value.serviceId),
     courtId: Number(value.courtId),
     datetime: value.datetime,
-    client: Object.freeze({
-      phone: value.client.phone,
-      fullName: value.client.fullName,
-      email: value.client.email,
-    }),
+    email: value.email,
   });
-}
-
-function bookingApiId(accountId: string, requestKey: string): number {
-  const digest = createHash('sha256')
-    .update('yclients-booking\0', 'utf8')
-    .update(accountId, 'utf8')
-    .update('\0', 'utf8')
-    .update(requestKey, 'utf8')
-    .digest();
-  return (digest.readUInt32BE(0) % MAX_SIGNED_INTEGER) + 1;
 }
 
 function readStringQuery(
@@ -242,37 +202,15 @@ async function execute<T extends AvailabilityResult>(
   return result as T;
 }
 
-async function executeCreation(
-  operation: () => Promise<YclientsBookingCreationResult>,
-): Promise<YclientsBookingCreationResult> {
-  let result: unknown;
-  try {
-    result = await operation();
-  } catch {
-    throw publicError(
-      HttpStatus.INTERNAL_SERVER_ERROR,
-      'booking_creation_internal_error',
-      'Booking creation request failed',
-    );
-  }
-  if (
-    !isRecord(result) ||
-    typeof result.outcome !== 'string' ||
-    !BOOKING_CREATION_OUTCOMES.includes(
-      result.outcome as (typeof BOOKING_CREATION_OUTCOMES)[number],
-    )
-  ) {
-    throw publicError(
-      HttpStatus.INTERNAL_SERVER_ERROR,
-      'booking_creation_internal_error',
-      'Booking creation request failed',
-    );
-  }
-  return result as YclientsBookingCreationResult;
-}
-
 function creationRejection(
-  reason: Exclude<YclientsBookingCreationResult['outcome'], 'created'>,
+  reason:
+    | 'invalid_request'
+    | 'contact_incomplete'
+    | 'not_bookable'
+    | 'conflict'
+    | 'provider_rejected'
+    | 'unavailable'
+    | 'unknown',
 ): HttpException {
   switch (reason) {
     case 'invalid_request':
@@ -287,27 +225,30 @@ function creationRejection(
         'booking_slot_not_bookable',
         'Booking slot is no longer available',
       );
-    case 'rejected':
+    case 'provider_rejected':
       return publicError(
         HttpStatus.UNPROCESSABLE_ENTITY,
         'booking_creation_rejected',
         'Booking creation was rejected',
       );
-    case 'invalid_response':
-      return publicError(
-        HttpStatus.BAD_GATEWAY,
-        'booking_creation_invalid_response',
-        'Booking creation response is invalid',
-      );
-    case 'unknown_outcome':
+    case 'unknown':
       return publicError(
         HttpStatus.BAD_GATEWAY,
         'booking_creation_unknown_outcome',
         'Booking creation outcome is unknown',
       );
-    case 'disabled':
-    case 'write_disabled':
-    case 'unauthorized':
+    case 'contact_incomplete':
+      return publicError(
+        HttpStatus.UNPROCESSABLE_ENTITY,
+        'booking_contact_incomplete',
+        'Booking contact data is incomplete',
+      );
+    case 'conflict':
+      return publicError(
+        HttpStatus.CONFLICT,
+        'booking_idempotency_conflict',
+        'Booking request key conflicts with an earlier request',
+      );
     case 'unavailable':
       return publicError(
         HttpStatus.SERVICE_UNAVAILABLE,
@@ -321,7 +262,7 @@ function creationRejection(
 export class BookingsController {
   constructor(
     private readonly availability: YclientsAvailabilityService,
-    private readonly booking: YclientsBookingService,
+    private readonly reservations: BookingReservationService,
   ) {}
 
   @Post()
@@ -337,19 +278,31 @@ export class BookingsController {
     if (principal === undefined || body === undefined) {
       throw creationRejection('invalid_request');
     }
-    const result = await executeCreation(() =>
-      this.booking.createBooking({
-        apiId: bookingApiId(principal.accountId, body.requestKey),
-        serviceId: body.serviceId,
-        courtId: body.courtId,
-        datetime: body.datetime,
-        client: body.client,
-      }),
-    );
-    if (result.outcome !== 'created') {
+    const result = await this.reservations.create(principal.accountId, body);
+    if (result.outcome === 'unknown') {
+      reply.status(HttpStatus.ACCEPTED);
+      return result.reservation;
+    }
+    if (result.outcome !== 'created' && result.outcome !== 'idempotent_retry') {
       throw creationRejection(result.outcome);
     }
-    return Object.freeze({ recordId: result.recordId });
+    return result.reservation;
+  }
+
+  @Get()
+  @UseGuards(SessionBearerGuard)
+  async listBookings(
+    @Req() request: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ) {
+    disableCaching(reply);
+    const principal = readAuthenticatedSessionPrincipal(request);
+    if (principal === undefined) throw creationRejection('invalid_request');
+    const result = await this.reservations.list(principal.accountId);
+    if (result.outcome === 'unavailable') {
+      throw publicError(HttpStatus.SERVICE_UNAVAILABLE, 'booking_list_unavailable', 'Bookings are temporarily unavailable');
+    }
+    return Object.freeze({ reservations: result.reservations });
   }
 
   @Get('services')
@@ -438,5 +391,45 @@ export class BookingsController {
       throw rejection(result.outcome);
     }
     return Object.freeze({ times: result.times });
+  }
+
+  @Get('requests/:requestKey')
+  @UseGuards(SessionBearerGuard)
+  async readBookingByRequestKey(
+    @Param('requestKey') requestKey: string,
+    @Req() request: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ) {
+    disableCaching(reply);
+    const principal = readAuthenticatedSessionPrincipal(request);
+    if (principal === undefined) throw creationRejection('invalid_request');
+    const result = await this.reservations.readByRequestKey(principal.accountId, requestKey);
+    if (result.outcome === 'not_found') {
+      throw publicError(HttpStatus.NOT_FOUND, 'booking_not_found', 'Booking was not found');
+    }
+    if (result.outcome === 'unavailable') {
+      throw publicError(HttpStatus.SERVICE_UNAVAILABLE, 'booking_read_unavailable', 'Booking is temporarily unavailable');
+    }
+    return result.reservation;
+  }
+
+  @Get(':reservationId')
+  @UseGuards(SessionBearerGuard)
+  async readBooking(
+    @Param('reservationId') reservationId: string,
+    @Req() request: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ) {
+    disableCaching(reply);
+    const principal = readAuthenticatedSessionPrincipal(request);
+    if (principal === undefined) throw creationRejection('invalid_request');
+    const result = await this.reservations.read(principal.accountId, reservationId);
+    if (result.outcome === 'not_found') {
+      throw publicError(HttpStatus.NOT_FOUND, 'booking_not_found', 'Booking was not found');
+    }
+    if (result.outcome === 'unavailable') {
+      throw publicError(HttpStatus.SERVICE_UNAVAILABLE, 'booking_read_unavailable', 'Booking is temporarily unavailable');
+    }
+    return result.reservation;
   }
 }

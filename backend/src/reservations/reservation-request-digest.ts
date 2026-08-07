@@ -41,6 +41,7 @@ export function digestReservationOperationRequest(
           String(request.target.serviceId),
           String(request.target.courtId),
           request.target.startsAt,
+          request.target.endsAt,
         ];
 
   return reservationRequestDigest(

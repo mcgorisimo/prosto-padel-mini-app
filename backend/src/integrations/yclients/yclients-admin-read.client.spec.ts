@@ -148,7 +148,7 @@ describe('YclientsAdminReadClient', () => {
 
     it('uses exact admin URL and both auth schemes while returning safe fields only', async () => {
       const fetch = fetchMock().mockResolvedValue(
-        jsonResponse(200, { success: true, data: providerRecord() }),
+        jsonResponse(200, { success: true, data: providerRecord({ seance_length: 3_600 }) }),
       );
 
       const result = await client(fetch).getRecord(RECORD_ID);
@@ -161,6 +161,7 @@ describe('YclientsAdminReadClient', () => {
           resourceId: RESOURCE_ID,
           serviceIds: [SERVICE_ID],
           datetime: '2026-08-05T16:30:00+03:00',
+          seanceLengthSeconds: 3_600,
           deleted: false,
           apiId: API_ID,
           lastChangeDate: '2026-08-05 15:00:00',
@@ -180,6 +181,14 @@ describe('YclientsAdminReadClient', () => {
       const safeResult = JSON.stringify(result);
       expect(safeResult.includes('private-client')).toBe(false);
       expect(safeResult.includes('private-record-hash')).toBe(false);
+    });
+
+    it('fails closed on a malformed provider seance length', async () => {
+      const fetch = fetchMock().mockResolvedValue(
+        jsonResponse(200, { success: true, data: providerRecord({ seance_length: '3600' }) }),
+      );
+      await expect(client(fetch).getRecord(RECORD_ID)).resolves.toEqual({ outcome: 'unknown' });
+      expect(fetch).toHaveBeenCalledTimes(1);
     });
 
     it.each([0, -1, Number.MAX_SAFE_INTEGER + 1])(

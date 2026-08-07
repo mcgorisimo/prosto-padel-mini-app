@@ -21,6 +21,7 @@ import {
   YCLIENTS_API_DEFAULT_BASE_URL,
   readYclientsApiConfiguration,
 } from './yclients-api.config';
+import { RESERVATION_SNAPSHOT_CONFIG_KEYS } from './reservation-snapshot.config';
 
 const TEST_DATABASE_URL =
   'postgresql://test-only.invalid/prosto_padel';
@@ -30,6 +31,10 @@ const TEST_BOT_TOKEN =
 const TEST_LOOKUP_PEPPER = Buffer.alloc(32, 0x31).toString('base64');
 const TEST_WORKFLOW_SECRET = Buffer.alloc(32, 0x42).toString('base64');
 const TEST_UUID_NAMESPACE = '12345678-1234-5678-9234-567812345678';
+const TEST_RESERVATION_SNAPSHOT_MASTER_KEY = Buffer.alloc(
+  32,
+  0x53,
+).toString('base64');
 
 const DIRECT_DATABASE_ENVIRONMENT = Object.freeze({
   DATABASE_ENABLED: 'true',
@@ -66,6 +71,8 @@ const DIRECT_YCLIENTS_ENVIRONMENT = Object.freeze({
   [YCLIENTS_API_CONFIG_KEYS.companyId]: '2079564',
   [YCLIENTS_API_CONFIG_KEYS.partnerToken]: 'synthetic-partner-token',
   [YCLIENTS_API_CONFIG_KEYS.userToken]: 'synthetic-user-token',
+  [RESERVATION_SNAPSHOT_CONFIG_KEYS.masterKeyBase64]:
+    TEST_RESERVATION_SNAPSHOT_MASTER_KEY,
 });
 
 const COMPONENT_DATABASE_ENVIRONMENT = Object.freeze({

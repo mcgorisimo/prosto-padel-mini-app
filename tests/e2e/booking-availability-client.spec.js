@@ -151,7 +151,12 @@ test('creates exactly one authenticated booking without payment fields', async (
             options.headers.Authorization === `Bearer ${credential}`,
           body: JSON.parse(options.body),
         });
-        return new Response(JSON.stringify({ recordId: 2820023 }), {
+        return new Response(JSON.stringify({
+          reservationId: '22222222-2222-4222-8222-222222222222',
+          status: 'confirmed', serviceId: 30539679, courtId: 5730531,
+          startsAt: '2026-08-06T07:00:00+03:00',
+          endsAt: '2026-08-06T08:00:00+03:00', stale: false,
+        }), {
           status: 201,
           headers: { 'Content-Type': 'application/json' },
         });
@@ -162,18 +167,19 @@ test('creates exactly one authenticated booking without payment fields', async (
       serviceId: 30539679,
       courtId: 5730531,
       datetime: '2026-08-06T07:00:00+03:00',
-      client: {
-        phone: '79000000000',
-        fullName: 'Test Player',
-        email: 'test@example.test',
-      },
+      email: 'test@example.test',
     });
     return { calls, result };
   }, CREDENTIAL);
 
   expect(summary.result).toEqual({
     outcome: 'booking_created',
-    recordId: 2820023,
+    reservation: {
+      reservationId: '22222222-2222-4222-8222-222222222222',
+      status: 'confirmed', serviceId: 30539679, courtId: 5730531,
+      startsAt: '2026-08-06T07:00:00+03:00',
+      endsAt: '2026-08-06T08:00:00+03:00', stale: false,
+    },
   });
   expect(summary.calls).toEqual([{
     path: '/api/v1/bookings',
@@ -189,11 +195,7 @@ test('creates exactly one authenticated booking without payment fields', async (
       serviceId: 30539679,
       courtId: 5730531,
       datetime: '2026-08-06T07:00:00+03:00',
-      client: {
-        phone: '79000000000',
-        fullName: 'Test Player',
-        email: 'test@example.test',
-      },
+      email: 'test@example.test',
     },
   }]);
   expect(summary.calls[0].body).not.toHaveProperty('paymentStatus');
@@ -221,11 +223,7 @@ test('does not retry a booking when its network outcome is unknown', async ({
       serviceId: 30539679,
       courtId: 5730531,
       datetime: '2026-08-06T07:00:00+03:00',
-      client: {
-        phone: '79000000000',
-        fullName: 'Test Player',
-        email: 'test@example.test',
-      },
+      email: 'test@example.test',
     });
     return { calls, result };
   }, CREDENTIAL);
@@ -234,6 +232,68 @@ test('does not retry a booking when its network outcome is unknown', async ({
     calls: 1,
     result: { outcome: 'rejected', reason: 'unknown_outcome' },
   });
+});
+
+test('refreshes one persisted reservation through an authenticated GET only', async ({ page }) => {
+  const summary = await page.evaluate(async (credential) => {
+    const { createBookingAvailabilityClient } = await import('/src/lib/bookingAvailabilityClient.js');
+    const calls = [];
+    const reservationId = '22222222-2222-4222-8222-222222222222';
+    const client = createBookingAvailabilityClient({
+      fetchImpl: async (path, options) => {
+        calls.push({ path, method: options.method, hasBody: options.body !== undefined });
+        return new Response(JSON.stringify({
+          reservationId, status: 'cancelled', serviceId: 30539679,
+          courtId: 5730531, startsAt: '2026-08-06T07:00:00+03:00',
+          endsAt: '2026-08-06T08:00:00+03:00', stale: false,
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      },
+    });
+    return { calls, result: await client.readBooking(credential, reservationId) };
+  }, CREDENTIAL);
+  expect(summary.calls).toEqual([{
+    path: '/api/v1/bookings/22222222-2222-4222-8222-222222222222',
+    method: 'GET', hasBody: false,
+  }]);
+  expect(summary.result).toMatchObject({
+    outcome: 'booking_loaded', reservation: { status: 'cancelled', stale: false },
+  });
+});
+
+test('keeps an unknown create handle and supports owner list/request-key recovery', async ({ page }) => {
+  const summary = await page.evaluate(async (credential) => {
+    const { createBookingAvailabilityClient } = await import('/src/lib/bookingAvailabilityClient.js');
+    const reservation = {
+      reservationId: '22222222-2222-4222-8222-222222222222',
+      status: 'unknown', serviceId: 30539679, courtId: 5730531,
+      startsAt: '2026-08-06T07:00:00+03:00',
+      endsAt: '2026-08-06T08:00:00+03:00', stale: true,
+    };
+    const calls = [];
+    const client = createBookingAvailabilityClient({
+      fetchImpl: async (path, options) => {
+        calls.push({ path, method: options.method });
+        const body = path === '/api/v1/bookings' && options.method === 'GET'
+          ? { reservations: [reservation] }
+          : reservation;
+        const status = path === '/api/v1/bookings' && options.method === 'POST' ? 202 : 200;
+        return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+      },
+    });
+    const requestKey = '11111111-1111-4111-8111-111111111111';
+    const created = await client.createBooking(credential, { requestKey, serviceId:30539679,courtId:5730531,datetime:reservation.startsAt,email:'test@example.test' });
+    const listed = await client.listBookings(credential);
+    const recovered = await client.readBookingByRequestKey(credential, requestKey);
+    return { calls, created, listed, recovered };
+  }, CREDENTIAL);
+  expect(summary.created).toMatchObject({ outcome:'booking_unknown', reservation:{status:'unknown'} });
+  expect(summary.listed).toMatchObject({ outcome:'bookings_loaded', reservations:[{status:'unknown'}] });
+  expect(summary.recovered).toMatchObject({ outcome:'booking_loaded', reservation:{status:'unknown'} });
+  expect(summary.calls).toEqual([
+    {path:'/api/v1/bookings',method:'POST'},
+    {path:'/api/v1/bookings',method:'GET'},
+    {path:'/api/v1/bookings/requests/11111111-1111-4111-8111-111111111111',method:'GET'},
+  ]);
 });
 
 test('rejects invalid input before fetch', async ({ page }) => {
@@ -268,11 +328,7 @@ test('rejects invalid input before fetch', async ({ page }) => {
         serviceId: 30539679,
         courtId: 5730531,
         datetime: '2026-08-06T07:00:00+03:00',
-        client: {
-          phone: '79000000000',
-          fullName: 'Test Player',
-          email: 'test@example.test',
-        },
+        email: 'test@example.test',
       }),
     };
   }, CREDENTIAL);
@@ -398,7 +454,12 @@ test('keeps the credential private while lifecycle reads booking availability', 
           checkCredential(credential, 'create');
           return {
             outcome: 'booking_created',
-            recordId: command.serviceId,
+            reservation: {
+              reservationId: '44444444-4444-4444-8444-444444444444',
+              status: 'confirmed', serviceId: command.serviceId,
+              courtId: command.courtId, startsAt: command.datetime,
+              endsAt: '2026-08-06T08:00:00+03:00', stale: false,
+            },
           };
         },
       },
@@ -438,11 +499,7 @@ test('keeps the credential private while lifecycle reads booking availability', 
       serviceId: 30539679,
       courtId: 5730531,
       datetime: '2026-08-06T07:00:00+03:00',
-      client: {
-        phone: '79000000000',
-        fullName: 'Test Player',
-        email: 'test@example.test',
-      },
+      email: 'test@example.test',
     });
     detach();
 
@@ -480,7 +537,12 @@ test('keeps the credential private while lifecycle reads booking availability', 
         datetime: '2026-08-05T16:30:00+03:00',
       }],
     },
-    booking: { outcome: 'booking_created', recordId: 30539679 },
+    booking: { outcome: 'booking_created', reservation: {
+      reservationId: '44444444-4444-4444-8444-444444444444',
+      status: 'confirmed', serviceId: 30539679, courtId: 5730531,
+      startsAt: '2026-08-06T07:00:00+03:00',
+      endsAt: '2026-08-06T08:00:00+03:00', stale: false,
+    } },
     publicResultsHideCredential: true,
   });
 });
@@ -561,7 +623,24 @@ test('creates a backend booking from the availability confirmation', async ({ pa
       async createBooking(command) {
         writes += 1;
         calls.push({ operation: 'create', command });
-        return { outcome: 'booking_created', recordId: 2820023 };
+        return { outcome: 'booking_created', reservation: {
+          reservationId: '55555555-5555-4555-8555-555555555555',
+          status: 'confirmed', serviceId: command.serviceId,
+          courtId: command.courtId, startsAt: command.datetime,
+          endsAt: '2026-08-05T18:30:00+03:00', stale: false,
+        } };
+      },
+      async listBookings() {
+        return { outcome: 'bookings_loaded', reservations: [] };
+      },
+      async readBooking(reservationId) {
+        calls.push({ operation: 'read', reservationId });
+        return { outcome: 'booking_loaded', reservation: {
+          reservationId,
+          status: 'cancelled', serviceId: 30539748,
+          courtId: 5762241, startsAt: '2026-08-05T18:00:00+03:00',
+          endsAt: '2026-08-05T19:30:00+03:00', stale: false,
+        } };
       },
     };
     const availabilityActions =
@@ -611,6 +690,7 @@ test('creates a backend booking from the availability confirmation', async ({ pa
   await primeTime.click();
   const dialog = root.getByRole('dialog', { name: 'Подтверждение брони' });
   await expect(dialog).toBeVisible();
+  await dialog.getByTestId('booking-contact-email').fill('test@example.test');
   const createButton = dialog.getByRole('button', { name: 'Создать бронь' });
   await expect(createButton).toBeEnabled();
   await expect(dialog).toContainText(
@@ -620,13 +700,22 @@ test('creates a backend booking from the availability confirmation', async ({ pa
   await expect(root).toContainText(
     'Бронь создана в YCLIENTS без онлайн-оплаты.',
   );
+  const reservationCard = root.getByTestId('booking-reservation-card');
+  await expect(reservationCard).toContainText('Статус: confirmed');
+  await expect(reservationCard.getByRole('button', { name: /отмен|перенос/iu })).toHaveCount(0);
+  await reservationCard.getByRole('button', { name: 'Обновить бронь' }).click();
+  await expect(reservationCard).toContainText('Статус: cancelled');
+  await expect(reservationCard).toContainText('корт 5762241');
+  await expect(reservationCard).toContainText(
+    'Для отмены или переноса свяжитесь с администратором клуба.',
+  );
 
   const summary = await page.evaluate(() => ({
     calls: window.__bookingReadOnlySummary.calls,
     writes: window.__bookingReadOnlySummary.writes,
   }));
   expect(summary.writes).toBe(1);
-  expect(summary.calls.slice(0, -1)).toEqual([
+  expect(summary.calls.slice(0, -2)).toEqual([
     { operation: 'services' },
     { operation: 'courts', serviceId: 30539694 },
     { operation: 'courts', serviceId: 30539748 },
@@ -657,23 +746,23 @@ test('creates a backend booking from the availability confirmation', async ({ pa
       date: '2026-08-05',
     },
   ]);
-  expect(summary.calls.at(-1)).toMatchObject({
+  expect(summary.calls.at(-2)).toMatchObject({
     operation: 'create',
     command: {
       serviceId: 30539748,
       courtId: 5730531,
       datetime: '2026-08-05T17:00:00+03:00',
-      client: {
-        phone: '79000000000',
-        fullName: 'Test Player',
-        email: 'test@example.test',
-      },
+      email: 'test@example.test',
     },
   });
-  expect(summary.calls.at(-1).command.requestKey).toMatch(
+  expect(summary.calls.at(-2).command.requestKey).toMatch(
     /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
   );
-  expect(summary.calls.at(-1).command).not.toHaveProperty('paymentStatus');
+  expect(summary.calls.at(-2).command).not.toHaveProperty('paymentStatus');
+  expect(summary.calls.at(-1)).toEqual({
+    operation: 'read',
+    reservationId: '55555555-5555-4555-8555-555555555555',
+  });
 });
 
 test('preserves a future date across duration changes and only falls forward', async ({

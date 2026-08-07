@@ -1188,9 +1188,38 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
       (credential, signal) =>
         bookings.createBooking(credential, command, { signal }),
       (result) =>
-        result?.outcome === 'booking_created' &&
-        Number.isSafeInteger(result.recordId) &&
-        result.recordId > 0,
+        ['booking_created', 'booking_unknown'].includes(result?.outcome) &&
+        typeof result.reservation?.reservationId === 'string',
+    );
+  }
+
+  function listBookings() {
+    return runMatchOperation(
+      (credential, signal) =>
+        bookings.listBookings(credential, { signal }),
+      (result) =>
+        result?.outcome === 'bookings_loaded' &&
+        Array.isArray(result.reservations),
+    );
+  }
+
+  function readBooking(reservationId) {
+    return runMatchOperation(
+      (credential, signal) =>
+        bookings.readBooking(credential, reservationId, { signal }),
+      (result) =>
+        result?.outcome === 'booking_loaded' &&
+        typeof result.reservation?.reservationId === 'string',
+    );
+  }
+
+  function readBookingByRequestKey(requestKey) {
+    return runMatchOperation(
+      (credential, signal) =>
+        bookings.readBookingByRequestKey(credential, requestKey, { signal }),
+      (result) =>
+        result?.outcome === 'booking_loaded' &&
+        typeof result.reservation?.reservationId === 'string',
     );
   }
 
@@ -1711,6 +1740,9 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
     listBookingDates,
     listBookingTimes,
     createBooking,
+    listBookings,
+    readBooking,
+    readBookingByRequestKey,
     listMatches,
     listAccountMatches,
     loadMatch,
@@ -1861,6 +1893,36 @@ export function useTelegramBackendLogin() {
       }));
     }
     return telegramBackendLoginLifecycle.createBooking(command);
+  }, []);
+
+  const listBookings = useCallback(() => {
+    if (!FEATURE_ENABLED) {
+      return Promise.resolve(Object.freeze({
+        outcome: 'rejected',
+        reason: 'not_authenticated',
+      }));
+    }
+    return telegramBackendLoginLifecycle.listBookings();
+  }, []);
+
+  const readBooking = useCallback((reservationId) => {
+    if (!FEATURE_ENABLED) {
+      return Promise.resolve(Object.freeze({
+        outcome: 'rejected',
+        reason: 'not_authenticated',
+      }));
+    }
+    return telegramBackendLoginLifecycle.readBooking(reservationId);
+  }, []);
+
+  const readBookingByRequestKey = useCallback((requestKey) => {
+    if (!FEATURE_ENABLED) {
+      return Promise.resolve(Object.freeze({
+        outcome: 'rejected',
+        reason: 'not_authenticated',
+      }));
+    }
+    return telegramBackendLoginLifecycle.readBookingByRequestKey(requestKey);
   }, []);
 
   const listMatches = useCallback((limit = 20) => {
@@ -2242,6 +2304,9 @@ export function useTelegramBackendLogin() {
     listBookingDates,
     listBookingTimes,
     createBooking,
+    listBookings,
+    readBooking,
+    readBookingByRequestKey,
     listMatches,
     listAccountMatches,
     loadMatch,

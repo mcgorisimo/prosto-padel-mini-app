@@ -49,7 +49,7 @@ const PROVIDER_REJECTED = reservationProviderRejectionReason(
 );
 const EXTERNAL_REFERENCE = Object.freeze({ apiId: 7_770_001 });
 const CLIENT: ReservationClientSnapshot = Object.freeze({
-  phone: '79000000000',
+  phone: '+79000000000',
   fullName: 'Тест Просто Падел',
   email: 'test@example.test',
 });
@@ -58,11 +58,13 @@ const ORIGINAL_TARGET: ReservationTarget = Object.freeze({
   serviceId: 30_539_679,
   courtId: 5_730_531,
   startsAt: '2026-08-08T16:30:00+03:00',
+  endsAt: '2026-08-08T17:30:00+03:00',
 });
 const RESCHEDULED_TARGET: ReservationTarget = Object.freeze({
   serviceId: 30_539_679,
   courtId: 5_730_532,
   startsAt: '2026-08-08T18:00:00+03:00',
+  endsAt: '2026-08-08T19:00:00+03:00',
 });
 const PROVIDER_BINDING: YclientsReservationBinding = Object.freeze({
   provider: 'yclients',
@@ -319,7 +321,7 @@ describe('reservation operation state machine', () => {
     ['client snapshot', request('create', ORIGINAL_TARGET, {
       client: Object.freeze({
         ...CLIENT,
-        phone: '79000000001',
+        phone: '+79000000001',
       }),
     })],
     ['external reference', request('create', ORIGINAL_TARGET, {

@@ -18,6 +18,9 @@ services:
       YCLIENTS_USER_TOKEN: !reset null
       YCLIENTS_PARTNER_TOKEN_FILE: /run/secrets/yclients-partner-token
       YCLIENTS_USER_TOKEN_FILE: /run/secrets/yclients-user-token
+      RESERVATION_SNAPSHOT_MASTER_KEY_BASE64: !reset null
+      RESERVATION_SNAPSHOT_MASTER_KEY_BASE64_FILE: /run/secrets/reservation-snapshot-master-key-base64
+      RESERVATION_SNAPSHOT_KEY_VERSION: ${RESERVATION_SNAPSHOT_KEY_VERSION:-1}
       TELEGRAM_AUTH_ENABLED: ${TELEGRAM_AUTH_ENABLED:-false}
       TELEGRAM_BOT_TOKEN: !reset null
       TELEGRAM_IDENTITY_LOOKUP_PEPPER_BASE64: !reset null
@@ -70,4 +73,8 @@ services:
       - type: bind
         source: ${YCLIENTS_USER_TOKEN_FILE_HOST:?YCLIENTS_USER_TOKEN_FILE_HOST is required}
         target: /run/secrets/yclients-user-token
+        read_only: true
+      - type: bind
+        source: ${RESERVATION_SNAPSHOT_MASTER_KEY_BASE64_FILE_HOST:?RESERVATION_SNAPSHOT_MASTER_KEY_BASE64_FILE_HOST is required}
+        target: /run/secrets/reservation-snapshot-master-key-base64
         read_only: true

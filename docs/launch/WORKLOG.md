@@ -26,7 +26,7 @@
 | Этап | Статус | Ветка/commit | Проверки | Блокер/следующий шаг |
 |---|---|---|---|---|
 | D1 Backend-only/contracts | done | `main` / deployed `c04074459948d0bf545e865b885aea7a4e5fec3c` | frontend E2E PASS (82/1 skipped); focused fail-closed 2/2 PASS; frontend build PASS; backend all PASS; Selectel test smoke PASS | D1 закрыт; следующий отдельный этап — D2 |
-| D2 YCLIENTS reservation core | in_progress | D2 branch / base `b5856b6384e9e3ed5a1bf621ce0a60ee24e820d3` / verified-contact blocker docs | migration 033 applied/verified; latest code gates: backend 128/3229 unit, 2/4 E2E, typecheck/build PASS; root build PASS; root E2E 82/1 skipped | app PUT/DELETE superseded; runtime wiring blocked on approved verified phone/email source and exact support/contact source |
+| D2 YCLIENTS reservation core | in_progress | D2 branch / local vertical checkpoint (this revision), independently reviewed | migration 033 applied/verified; backend 131/3271 unit, 2/4 E2E, typecheck/build PASS; root build PASS; root E2E 84/1 skipped | app PUT/DELETE absent; before rollout approve unknown-create operator lookup, exact support/contact source, integration and Selectel rollout |
 | D3 Match ↔ reservation lifecycle | pending | — | — | reflect admin cancellation without provider DELETE, owner participant removal, match ↔ reservation binding |
 | D4 Payment Core | pending | — | — | payment provider, pricing/payment snapshot, чеки и возвраты |
 | D5 Settings/moderation/compliance | pending | — | — | standalone phone/email auth и verified backend email; затем schema review |
@@ -41,7 +41,7 @@
 | Этап | Среда | Целевой commit | Статус | Проверка |
 |---|---|---|---|---|
 | D1 Backend-only/contracts | Selectel test | `c04074459948d0bf545e865b885aea7a4e5fec3c` | `test_deployed` | frontend healthy; HTTPS root/health и новый asset 200; TMA auth/profile/feed/details/booking availability PASS; bundle/log audit PASS |
-| D2 YCLIENTS reservation core | Selectel test | correction `7c31d29b639d6b29016d2378ccc7006df6129b52` | `pending` | migration 033 `applied_verified`, tables empty и runtime disconnected; runtime/containers остаются на D1 commit |
+| D2 YCLIENTS reservation core | Selectel test | local vertical checkpoint pending integration | `pending` | migration 033 `applied_verified`; runtime/config/frontend changed locally, but Selectel application/containers remain on D1 `c04074459948d0bf545e865b885aea7a4e5fec3c` |
 | D2 persistence/privacy proposal | not applicable | docs-only checkpoint | `not_needed` | только Markdown; runtime, schema, containers и конфигурация не менялись |
 | D2 YCLIENTS contract matrix | not applicable | docs-only checkpoint поверх `3e8739b` | `not_needed` | только Markdown; API/DB/server/runtime не вызывались и не менялись |
 | D2 YCLIENTS controlled test plan | not applicable | `040773172a2fa556ffaaf1d12dac540095070976` + docs-only correction from that exact base | `not_needed` | plan only; provider/server/DB/runtime calls и writes не выполнялись |
@@ -55,10 +55,11 @@
 Это входы последующих этапов, а не незавершённая работа D1.
 
 1. YCLIENTS availability/preflight/create и exact/bounded read contracts уже
-   подтверждены. App-originated reschedule/cancel и controlled write lifecycle
-   больше не входят в D2; webhook остаётся disabled. Перед create runtime wiring
-   нужен approved backend-owned verified phone/email source; provider `api_id`
-   uniqueness/idempotency не предполагаются и recovery остаётся bounded/read-only.
+   подтверждены. App-originated reschedule/cancel отсутствуют; webhook disabled.
+   Declared booking contact contract одобрен, verification перенесена в D5.
+   Перед rollout нужны approved bounded operator lookup для `unknown` create,
+   exact support/contact source и provisioning root-only snapshot key; provider
+   `api_id` uniqueness не предполагается и provider write не retry-ится.
 2. Не подтверждён платёжный провайдер, sandbox и фискальные настройки.
 3. Не записаны фактические Selectel resources/accesses для staging/production.
 4. Не известны тип и дата создания Google Play developer account.
@@ -1882,3 +1883,72 @@
   explicit product/schema approval for the verified booking-contact authority,
   uniqueness, re-verification and retention decisions before SQL or runtime
   work resumes.
+
+### 2026-08-07 — D2 / persisted create and read-only reconciliation vertical slice
+
+- The owner superseded the verified-contact blocker with the MVP declared
+  booking-contact contract. Backend profile first/last name and canonical E.164
+  phone are server-sourced; only a normalized lowercase email is accepted from
+  the authenticated owner's booking request. These values are not described as
+  verified identity/auth factors; D5 owns phone/email verification. The prior
+  verified-contact proposal is retained as history and marked deferred to D5.
+- Implemented the concrete migration-033 PostgreSQL repository: owner-scoped
+  reads/list, advisory idempotency locking, transactional operation start and
+  transitions, provider-attempt/reconciliation metadata, optimistic/row locks,
+  interval overlap mapping and AEAD-encrypted client/provider snapshots. Manual
+  admin reschedule atomically releases the immutable old hold and inserts the
+  exact provider-duration hold; canonical exact `deleted=true` releases it.
+- Wired owner-authenticated `POST /bookings`, `GET /bookings`, request-key
+  recovery and exact reservation GET/refresh. Create double-submit binds the
+  same owner key+digest; dispatch is claimed immediately before one guarded
+  POST. A post-dispatch timeout/crash becomes `unknown/held` and never retries
+  POST. The owner receives a persisted recovery handle.
+- Exact GET refresh accepts only the same company/record/api binding, one
+  service and provider duration. It reflects administrator-changed court/time
+  or canonical deleted/cancelled state; mismatch/404/invalid/timeout returns
+  stale persisted data without mutation. Webhook and background polling remain
+  disabled.
+- All runtime YCLIENTS HTTP dispatches share the singleton conservative limiter.
+  Its pending queue is bounded, and write attempt claim plus request timeout are
+  created only inside the granted permit immediately before fetch. A stale
+  pending operation with no attempt marker is safely rejected/released as not
+  dispatched; a stale started attempt becomes `unknown/held`. Unknown-create
+  reconciliation atomically claims at most one bounded candidate scan;
+  subsequent owner refreshes perform no further scan. Migration 033 cannot
+  safely promote that candidate without appointment ID, record ID and encrypted
+  hash, so it remains `unknown/held`. The PII-safe, bounded read-only operator
+  lookup is the rollout gate documented in
+  `D2_UNKNOWN_CREATE_RECONCILIATION_PROPOSAL.md`; terminal automation still
+  requires separately approved provider proof or expand-only migration.
+  Stale classification locks reservation then create-operation rows in the
+  same transaction, so a concurrent provider-attempt claim cannot coexist with
+  a local rejection/slot release.
+- Frontend booking flow now sends only booking email, keeps it in component
+  memory, retains unknown request handles, restores the latest owner reservation
+  and performs one exact refresh. It displays pending/unknown/confirmed/cancelled
+  and current court/time. No cancel/reschedule command is exposed. Because no
+  approved support destination exists in the repository, the UI truthfully says
+  the club contact link is pending instead of presenting a fake action.
+- Runtime boundaries: booking controller/module/frontend contain no PUT/DELETE,
+  cancel/reschedule provider import or command. Existing cancel/controlled-runner
+  code remains unreachable historical foundation. Payment fields
+  `paymentStatus`, `ownerPaid`, `holdAmount`, `prepay` were not changed.
+- Final local gates: backend typecheck PASS; unit 131 suites / 3271 tests PASS;
+  E2E 2 suites / 4 tests PASS; build PASS. Root Playwright 84 passed / 1 skipped
+  PASS on an owned Vite process; root build PASS (`1615` modules, existing
+  chunk/CJS warnings only). The first sandboxed root build failed only because
+  esbuild could not traverse the managed worktree; the approved unsandboxed
+  build passed. `git diff --check` PASS (line-ending warnings only).
+- Independent read-only review of the complete final diff found no actionable
+  P0/P1. It specifically confirmed the reservation-to-operation lock ordering
+  closes the stale-pending/provider-claim TOCTOU, the limiter queue and dispatch
+  boundary are fail-closed, unknown reconciliation is bounded, and no runtime
+  or UI PUT/DELETE/cancel/reschedule surface is reachable.
+- Migration 033 remains `applied_verified`; no schema/migration or executable
+  SQL was added/applied (the proposal records only a review-only SELECT shape).
+  No YCLIENTS/API/SSH/Selectel/DB call, provider write, secret read,
+  push, merge or deployment occurred. Deployment is `pending` because this
+  checkpoint changes backend/frontend/config. Selectel test remains runtime
+  `c04074459948d0bf545e865b885aea7a4e5fec3c`; production is unchanged. D2 stays
+  `in_progress` pending managing review, fast-forward integration and separately
+  approved Selectel rollout/operator lookup.

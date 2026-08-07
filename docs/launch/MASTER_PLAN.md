@@ -34,6 +34,11 @@ Codex. Текущий фактический статус хранится в `W
   делает живой администратор в YCLIENTS. Приложение только отражает новые
   дату/время/корт или deleted/cancelled после bounded read-only refresh. Webhook
   остаётся выключенным.
+- D2 booking contact — declared data, а не verified identity: `fullName`
+  строит backend из профиля, phone берётся из профиля в canonical E.164, email
+  вводит authenticated owner для конкретной брони и backend нормализует его в
+  lowercase. Snapshot хранится только AEAD-encrypted по migration 033; OTP/email
+  verification отложены в D5, rating `isVerified` не используется.
 - Один матч не равен одной брони. Матч может временно существовать без корта.
 - `scenario`, `paymentStatus`, `ownerPaid`, `holdAmount`, `prepay` не являются
   источником истины о реальной брони или платеже.
@@ -169,7 +174,10 @@ Acceptance:
 - Добавить reservation repository, state machine и operation ledger.
 - Реализовать create/get и bounded exact reconciliation только при открытии или
   явном refresh; background polling требует отдельного решения.
-- Закрыть unknown outcome и повтор запроса с тем же ключом.
+- Для unknown outcome не повторять write: сохранить owner-scoped recovery
+  handle, выполнить не более одного atomically-claimed bounded scan и оставить
+  слот held до полного binding; admin attention покрыть ограниченным read-only
+  operator lookup до rollout.
 - Синхронизировать ручной перенос или отмену bounded exact GET при
   открытии/refresh; webhook оставить выключенным.
 - Добавить admin lookup по собственному и YCLIENTS ID.

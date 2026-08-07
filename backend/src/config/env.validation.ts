@@ -18,6 +18,7 @@ import {
   YCLIENTS_API_DEFAULT_BASE_URL,
   normalizeYclientsHttpsBaseUrl,
 } from './yclients-api.config';
+import { RESERVATION_SNAPSHOT_CONFIG_KEYS } from './reservation-snapshot.config';
 
 const canonicalBase64Secret = Joi.string()
   .base64()
@@ -31,6 +32,18 @@ const canonicalBase64Secret = Joi.string()
   })
   .messages({
     'string.base64Secret': '{{#label}} must be a canonical base64 secret of at least 32 bytes',
+  });
+
+const canonicalBase64Key32 = Joi.string()
+  .base64()
+  .custom((value: string, helpers) => {
+    const decoded = Buffer.from(value, 'base64');
+    const valid = decoded.length === 32 && decoded.toString('base64') === value;
+    decoded.fill(0);
+    return valid ? value : helpers.error('string.base64Key32');
+  })
+  .messages({
+    'string.base64Key32': '{{#label}} must be a canonical base64 32-byte key',
   });
 
 const telegramBotToken = Joi.string()
@@ -137,6 +150,18 @@ export const envValidationSchema = Joi.object({
     requiredWhenYclientsApiEnabled(yclientsToken),
   [YCLIENTS_API_CONFIG_KEYS.userToken]:
     requiredWhenYclientsApiEnabled(yclientsToken),
+  [RESERVATION_SNAPSHOT_CONFIG_KEYS.masterKeyBase64]: Joi.when(
+    YCLIENTS_API_CONFIG_KEYS.enabled,
+    {
+      is: true,
+      then: canonicalBase64Key32.required(),
+      otherwise: canonicalBase64Key32.allow('').default(''),
+    },
+  ),
+  [RESERVATION_SNAPSHOT_CONFIG_KEYS.keyVersion]: Joi.number()
+    .integer()
+    .valid(1)
+    .default(1),
   [YCLIENTS_WEBHOOK_CONFIG_KEYS.enabled]: Joi.boolean()
     .truthy('true')
     .falsy('false')

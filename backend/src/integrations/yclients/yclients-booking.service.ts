@@ -14,10 +14,13 @@ export type YclientsBookingCreationCommand = Readonly<{
   }>;
 }>;
 
+export type YclientsBookingDispatchGuard = () => Promise<boolean>;
+
 export type YclientsBookingCreationResult =
   | Readonly<{ outcome: 'invalid_request' }>
   | Readonly<{ outcome: 'disabled' }>
   | Readonly<{ outcome: 'write_disabled' }>
+  | Readonly<{ outcome: 'not_dispatched' }>
   | Readonly<{ outcome: 'not_bookable' }>
   | Readonly<{
       outcome: 'created';
@@ -75,6 +78,7 @@ export class YclientsBookingService {
 
   async createBooking(
     command: YclientsBookingCreationCommand,
+    beforeWriteDispatch?: YclientsBookingDispatchGuard,
   ): Promise<YclientsBookingCreationResult> {
     const client = readClient(command?.client);
     if (
@@ -112,7 +116,7 @@ export class YclientsBookingService {
         resourceId: command.courtId,
         datetime: command.datetime,
         client,
-      });
+      }, beforeWriteDispatch);
       if (result.outcome !== 'created') {
         return Object.freeze({ outcome: result.outcome });
       }

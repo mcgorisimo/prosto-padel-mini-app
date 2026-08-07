@@ -8,6 +8,7 @@ const MAX_SERVICES = 128;
 const MAX_COURTS = 128;
 const MAX_DATES = 31;
 const MAX_TIMES = 288;
+const MAX_BOOKINGS = 20;
 const DAY_MILLISECONDS = 86_400_000;
 const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/u;
 const TIME_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/u;
@@ -15,7 +16,6 @@ const ISO_DATETIME_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/u;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
-const PHONE_PATTERN = /^\d{10,15}$/u;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
 
 class InvalidResponseBodyError extends Error {}
@@ -163,12 +163,32 @@ function readTimes(body, expectedDate) {
 
 function readCreatedBooking(body) {
   if (
-    !hasExactKeys(body, ['recordId']) ||
-    !isPositiveSafeInteger(body.recordId)
+    !hasExactKeys(body, ['reservationId', 'status', 'serviceId', 'courtId', 'startsAt', 'endsAt', 'stale']) ||
+    typeof body.reservationId !== 'string' || !UUID_PATTERN.test(body.reservationId) ||
+    !['pending_confirmation', 'confirmed', 'unknown', 'rejected', 'cancelled'].includes(body.status) ||
+    !isPositiveSafeInteger(body.serviceId) || !isPositiveSafeInteger(body.courtId) ||
+    typeof body.startsAt !== 'string' || !ISO_DATETIME_PATTERN.test(body.startsAt) ||
+    typeof body.endsAt !== 'string' || !ISO_DATETIME_PATTERN.test(body.endsAt) ||
+    Date.parse(body.endsAt) <= Date.parse(body.startsAt) || typeof body.stale !== 'boolean'
   ) {
     return undefined;
   }
-  return frozen('booking_created', { recordId: body.recordId });
+  return frozen('booking_created', { reservation: Object.freeze({ ...body }) });
+}
+
+function readBookings(body) {
+  if (!hasExactKeys(body, ['reservations']) || !Array.isArray(body.reservations) || body.reservations.length > MAX_BOOKINGS) {
+    return undefined;
+  }
+  const reservations = [];
+  const ids = new Set();
+  for (const value of body.reservations) {
+    const parsed = readCreatedBooking(value);
+    if (parsed === undefined || ids.has(parsed.reservation.reservationId)) return undefined;
+    ids.add(parsed.reservation.reservationId);
+    reservations.push(parsed.reservation);
+  }
+  return frozen('bookings_loaded', { reservations: Object.freeze(reservations) });
 }
 
 function readCreateBookingCommand(value) {
@@ -178,7 +198,7 @@ function readCreateBookingCommand(value) {
       'serviceId',
       'courtId',
       'datetime',
-      'client',
+      'email',
     ]) ||
     typeof value.requestKey !== 'string' ||
     !UUID_PATTERN.test(value.requestKey) ||
@@ -187,17 +207,11 @@ function readCreateBookingCommand(value) {
     typeof value.datetime !== 'string' ||
     !ISO_DATETIME_PATTERN.test(value.datetime) ||
     !Number.isFinite(Date.parse(value.datetime)) ||
-    !hasExactKeys(value.client, ['phone', 'fullName', 'email']) ||
-    typeof value.client.phone !== 'string' ||
-    !PHONE_PATTERN.test(value.client.phone) ||
-    typeof value.client.fullName !== 'string' ||
-    value.client.fullName.length === 0 ||
-    value.client.fullName.length > 256 ||
-    value.client.fullName.trim() !== value.client.fullName ||
-    typeof value.client.email !== 'string' ||
-    value.client.email.length > 320 ||
-    value.client.email.trim() !== value.client.email ||
-    !EMAIL_PATTERN.test(value.client.email)
+    typeof value.email !== 'string' ||
+    value.email.length > 320 ||
+    value.email.trim() !== value.email ||
+    value.email !== value.email.toLowerCase() ||
+    !EMAIL_PATTERN.test(value.email)
   ) {
     return undefined;
   }
@@ -206,11 +220,7 @@ function readCreateBookingCommand(value) {
     serviceId: value.serviceId,
     courtId: value.courtId,
     datetime: value.datetime,
-    client: Object.freeze({
-      phone: value.client.phone,
-      fullName: value.client.fullName,
-      email: value.client.email,
-    }),
+    email: value.email,
   });
 }
 
@@ -264,6 +274,7 @@ function rejected(reason) {
 function mapHttpFailure(status) {
   if (status === 400) return rejected('invalid_request');
   if (status === 401) return rejected('invalid');
+  if (status === 404) return rejected('not_found');
   if (status === 502) return rejected('invalid_response');
   if (status === 503) return rejected('unavailable');
   return rejected('internal_error');
@@ -354,9 +365,12 @@ export function createBookingAvailabilityClient(dependencies = {}) {
         redirect: 'error',
         signal: controller.signal,
       });
-      if (response.status === 201) {
+      if (response.status === 201 || response.status === 202) {
         const result = readCreatedBooking(await readResponseBody(response));
-        return result ?? rejected('unknown_outcome');
+        if (result === undefined) return rejected('unknown_outcome');
+        return response.status === 202 || ['pending_confirmation', 'unknown'].includes(result.reservation.status)
+          ? frozen('booking_unknown', { reservation: result.reservation })
+          : result;
       }
       if (response.status === 400) return rejected('invalid_request');
       if (response.status === 401) return rejected('invalid');
@@ -436,6 +450,41 @@ export function createBookingAvailabilityClient(dependencies = {}) {
     },
     createBooking(credential, command, options) {
       return createRequest(credential, command, options);
+    },
+    listBookings(credential, options) {
+      return request(credential, BOOKINGS_PATH, readBookings, options);
+    },
+    readBooking(credential, reservationId, options) {
+      if (typeof reservationId !== 'string' || !UUID_PATTERN.test(reservationId)) {
+        return Promise.resolve(rejected('invalid_request'));
+      }
+      return request(
+        credential,
+        `${BOOKINGS_PATH}/${reservationId.toLowerCase()}`,
+        (body) => {
+          const parsed = readCreatedBooking(body);
+          return parsed === undefined
+            ? undefined
+            : frozen('booking_loaded', { reservation: parsed.reservation });
+        },
+        options,
+      );
+    },
+    readBookingByRequestKey(credential, requestKey, options) {
+      if (typeof requestKey !== 'string' || !UUID_PATTERN.test(requestKey)) {
+        return Promise.resolve(rejected('invalid_request'));
+      }
+      return request(
+        credential,
+        `${BOOKINGS_PATH}/requests/${requestKey.toLowerCase()}`,
+        (body) => {
+          const parsed = readCreatedBooking(body);
+          return parsed === undefined
+            ? undefined
+            : frozen('booking_loaded', { reservation: parsed.reservation });
+        },
+        options,
+      );
     },
   });
 }

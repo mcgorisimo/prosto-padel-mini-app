@@ -33,11 +33,15 @@ function response(status: number, body: unknown): Response {
 function client(
   fetch: jest.MockedFunction<typeof globalThis.fetch>,
   configuration: YclientsApiConfiguration = runtime(),
+  limiter: Readonly<{ run<T>(request: () => Promise<T>): Promise<T> }> = {
+    run: (request) => request(),
+  },
 ): YclientsApiClient {
   return new YclientsApiClient({
     runtime: configuration,
     requestTimeoutMilliseconds: 5_000,
     fetch,
+    limiter,
   });
 }
 
@@ -61,6 +65,54 @@ describe('YclientsApiClient', () => {
       await expect(
         client(fetch, runtime({ enabled: false })).createBookingRecord(command),
       ).resolves.toEqual({ outcome: 'disabled' });
+      expect(fetch).not.toHaveBeenCalled();
+    });
+
+    it('claims write dispatch only after the shared limiter grants a permit', async () => {
+      const fetch = fetchMock().mockResolvedValueOnce(response(201, {
+        success: true,
+        data: [{ id: 1, record_id: 42, record_hash: '0123456789abcdef0123456789abcdef' }],
+      }));
+      const run = jest.fn();
+      let releasePermit: (() => void) | undefined;
+      const permit = new Promise<void>((resolve) => {
+        releasePermit = resolve;
+      });
+      const limiter: Readonly<{
+        run<T>(request: () => Promise<T>): Promise<T>;
+      }> = {
+        run: async <T>(request: () => Promise<T>): Promise<T> => {
+          run();
+          await permit;
+          return request();
+        },
+      };
+      const guard = jest.fn().mockResolvedValue(true);
+
+      const result = client(fetch, runtime({ bookingWriteEnabled: true }), limiter)
+        .createBookingRecord(command, guard);
+
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(run).toHaveBeenCalledTimes(1);
+      expect(guard).not.toHaveBeenCalled();
+      expect(fetch).not.toHaveBeenCalled();
+
+      releasePermit?.();
+      await expect(result).resolves.toMatchObject({ outcome: 'created' });
+
+      expect(guard).toHaveBeenCalledTimes(1);
+      expect(fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('returns not_dispatched without fetch when the in-permit guard rejects', async () => {
+      const fetch = fetchMock();
+      const guard = jest.fn().mockResolvedValue(false);
+
+      await expect(
+        client(fetch, runtime({ bookingWriteEnabled: true }))
+          .createBookingRecord(command, guard),
+      ).resolves.toEqual({ outcome: 'not_dispatched' });
+      expect(guard).toHaveBeenCalledTimes(1);
       expect(fetch).not.toHaveBeenCalled();
     });
 

@@ -17,6 +17,8 @@ export const FILE_SECRET_KEYS = Object.freeze({
     'TELEGRAM_LOGIN_WORKFLOW_HMAC_SECRET_BASE64_FILE',
   yclientsPartnerToken: 'YCLIENTS_PARTNER_TOKEN_FILE',
   yclientsUserToken: 'YCLIENTS_USER_TOKEN_FILE',
+  reservationSnapshotMasterKey:
+    'RESERVATION_SNAPSHOT_MASTER_KEY_BASE64_FILE',
 });
 
 const DIRECT_SECRET_KEYS = Object.freeze({
@@ -31,6 +33,8 @@ const DIRECT_SECRET_KEYS = Object.freeze({
     'TELEGRAM_LOGIN_WORKFLOW_HMAC_SECRET_BASE64',
   [FILE_SECRET_KEYS.yclientsPartnerToken]: 'YCLIENTS_PARTNER_TOKEN',
   [FILE_SECRET_KEYS.yclientsUserToken]: 'YCLIENTS_USER_TOKEN',
+  [FILE_SECRET_KEYS.reservationSnapshotMasterKey]:
+    'RESERVATION_SNAPSHOT_MASTER_KEY_BASE64',
 });
 
 const ALLOWED_FILE_KEYS = new Set<string>(Object.values(FILE_SECRET_KEYS));

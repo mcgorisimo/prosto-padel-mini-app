@@ -65,6 +65,7 @@ export interface ReservationTarget {
   readonly serviceId: number;
   readonly courtId: number;
   readonly startsAt: string;
+  readonly endsAt: string;
 }
 
 export interface YclientsReservationExternalReference {
@@ -297,7 +298,7 @@ export function isReservationTarget(
       : '';
   const dateTimestamp = Date.parse(`${date}T00:00:00.000Z`);
   return (
-    Object.keys(candidate).length === 3 &&
+    Object.keys(candidate).length === 4 &&
     Number.isSafeInteger(candidate.serviceId) &&
     Number(candidate.serviceId) > 0 &&
     Number.isSafeInteger(candidate.courtId) &&
@@ -306,7 +307,11 @@ export function isReservationTarget(
     OFFSET_DATE_TIME_PATTERN.test(candidate.startsAt) &&
     Number.isFinite(dateTimestamp) &&
     new Date(dateTimestamp).toISOString().slice(0, 10) === date &&
-    !Number.isNaN(Date.parse(candidate.startsAt))
+    !Number.isNaN(Date.parse(candidate.startsAt)) &&
+    typeof candidate.endsAt === 'string' &&
+    OFFSET_DATE_TIME_PATTERN.test(candidate.endsAt) &&
+    !Number.isNaN(Date.parse(candidate.endsAt)) &&
+    Date.parse(candidate.endsAt) > Date.parse(candidate.startsAt)
   );
 }
 
@@ -347,7 +352,7 @@ export function isReservationClientSnapshot(
   return (
     Object.keys(candidate).length === 3 &&
     isCanonicalClientText(candidate.phone, 32) &&
-    /^\d{10,15}$/u.test(candidate.phone) &&
+    /^\+[1-9]\d{6,14}$/u.test(candidate.phone) &&
     isCanonicalClientText(candidate.fullName, 256) &&
     isCanonicalClientText(candidate.email, 320) &&
     /^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(candidate.email)
@@ -370,7 +375,7 @@ export function isYclientsReservationBinding(
     Number(candidate.recordId) > 0 &&
     typeof candidate.recordHash === 'string' &&
     candidate.recordHash.length > 0 &&
-    candidate.recordHash.length <= 256 &&
+    candidate.recordHash.length <= 512 &&
     candidate.recordHash.trim() === candidate.recordHash &&
     !/[\u0000-\u001f\u007f-\u009f]/u.test(candidate.recordHash)
   );

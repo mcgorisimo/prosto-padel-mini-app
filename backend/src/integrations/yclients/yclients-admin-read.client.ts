@@ -22,6 +22,7 @@ export type YclientsSafeAdminRecord = Readonly<{
   resourceId: number;
   serviceIds: ReadonlyArray<number>;
   datetime: string;
+  seanceLengthSeconds?: number;
   deleted: boolean;
   apiId?: number;
   lastChangeDate?: string;
@@ -254,6 +255,9 @@ function readSafeAdminRecord(
   const resourceId = readConsistentId(value, 'staff_id', 'staff');
   const serviceIds = readServiceIds(value.services);
   const datetime = readIsoDatetime(value.datetime);
+  const seanceLengthSeconds = positiveSafeInteger(value.seance_length) && Number(value.seance_length) <= 86_400
+    ? Number(value.seance_length)
+    : undefined;
   const normalizedApiId = normalizeYclientsSystemApiId(value.api_id);
   const apiId =
     normalizedApiId.outcome === 'present' ? normalizedApiId.value : undefined;
@@ -267,6 +271,7 @@ function readSafeAdminRecord(
     resourceId === undefined ||
     serviceIds === undefined ||
     datetime === undefined ||
+    (value.seance_length !== undefined && value.seance_length !== null && seanceLengthSeconds === undefined) ||
     typeof value.deleted !== 'boolean' ||
     normalizedApiId.outcome === 'invalid' ||
     (value.last_change_date !== undefined &&
@@ -282,6 +287,7 @@ function readSafeAdminRecord(
     resourceId,
     serviceIds,
     datetime,
+    ...(seanceLengthSeconds === undefined ? {} : { seanceLengthSeconds }),
     deleted: value.deleted,
     ...(apiId === undefined ? {} : { apiId }),
     ...(lastChangeDate === undefined ? {} : { lastChangeDate }),

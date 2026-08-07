@@ -13,7 +13,7 @@ import {
 import { SessionAuthenticationService } from '../auth/session-authentication.service';
 import { SessionAuthenticationResult } from '../auth/session-authentication.types';
 import { YclientsAvailabilityService } from '../integrations/yclients/yclients-availability.service';
-import { YclientsBookingService } from '../integrations/yclients/yclients-booking.service';
+import { BookingReservationService } from './booking-reservation.service';
 import { BookingsController } from './bookings.controller';
 
 const CREDENTIAL = Buffer.alloc(32, 0x62).toString('base64url');
@@ -28,6 +28,9 @@ interface Harness {
   readonly listAvailableDates: jest.Mock;
   readonly listAvailableTimes: jest.Mock;
   readonly createBooking: jest.Mock;
+  readonly listBookings: jest.Mock;
+  readonly readBooking: jest.Mock;
+  readonly readBookingByRequestKey: jest.Mock;
   readonly authenticate: jest.Mock<
     Promise<SessionAuthenticationResult>,
     [unknown]
@@ -60,12 +63,16 @@ async function createHarness(): Promise<Harness> {
       },
     ],
   });
-  const createBooking = jest.fn().mockResolvedValue({
-    outcome: 'created',
-    appointmentId: 1,
-    recordId: 2_820_023,
-    recordHash: 'private-record-hash',
-  });
+  const reservation = {
+    reservationId: deterministicUuid('booking-controller-reservation'),
+    status: 'confirmed', serviceId: 30_539_679, courtId: 5_730_531,
+    startsAt: '2026-08-06T07:00:00+03:00',
+    endsAt: '2026-08-06T08:00:00+03:00', stale: false,
+  };
+  const createBooking = jest.fn().mockResolvedValue({ outcome: 'created', reservation });
+  const listBookings = jest.fn().mockResolvedValue({ outcome: 'loaded', reservations: [reservation] });
+  const readBooking = jest.fn().mockResolvedValue({ outcome: 'found', reservation });
+  const readBookingByRequestKey = jest.fn().mockResolvedValue({ outcome: 'found', reservation });
   const authenticate = jest
     .fn<Promise<SessionAuthenticationResult>, [unknown]>()
     .mockResolvedValue({
@@ -94,8 +101,8 @@ async function createHarness(): Promise<Harness> {
         useValue: { authenticate },
       },
       {
-        provide: YclientsBookingService,
-        useValue: { createBooking },
+        provide: BookingReservationService,
+        useValue: { create: createBooking, list: listBookings, read: readBooking, readByRequestKey: readBookingByRequestKey },
       },
       {
         provide: SESSION_AUTHENTICATION_CLOCK,
@@ -125,6 +132,9 @@ async function createHarness(): Promise<Harness> {
     listAvailableDates,
     listAvailableTimes,
     createBooking,
+    listBookings,
+    readBooking,
+    readBookingByRequestKey,
     authenticate,
     logs,
   };
@@ -231,34 +241,22 @@ describe('BookingsController', () => {
         serviceId: 30_539_679,
         courtId: 5_730_531,
         datetime: '2026-08-06T07:00:00+03:00',
-        client: {
-          phone: '79000000000',
-          fullName: 'Test Player',
-          email: 'test@example.test',
-        },
+        email: 'test@example.test',
       },
     });
 
     expect(response.statusCode).toBe(201);
-    expect(response.json()).toEqual({ recordId: 2_820_023 });
+    expect(response.json()).toMatchObject({ reservationId: expect.any(String), status: 'confirmed', stale: false });
     expect(response.headers['cache-control']).toBe('no-store');
     expect(response.headers.pragma).toBe('no-cache');
     expect(harness.createBooking).toHaveBeenCalledTimes(1);
-    expect(harness.createBooking).toHaveBeenCalledWith({
-      apiId: expect.any(Number),
+    expect(harness.createBooking).toHaveBeenCalledWith(ACCOUNT_ID, {
+      requestKey,
       serviceId: 30_539_679,
       courtId: 5_730_531,
       datetime: '2026-08-06T07:00:00+03:00',
-      client: {
-        phone: '79000000000',
-        fullName: 'Test Player',
-        email: 'test@example.test',
-      },
+      email: 'test@example.test',
     });
-    const command = harness.createBooking.mock.calls[0][0];
-    expect(Number.isSafeInteger(command.apiId)).toBe(true);
-    expect(command.apiId).toBeGreaterThan(0);
-    expect(command.apiId).toBeLessThanOrEqual(2_147_483_647);
     expect(JSON.stringify(response.json())).not.toContain('record-hash');
   });
 
@@ -272,11 +270,7 @@ describe('BookingsController', () => {
         serviceId: 30_539_679,
         courtId: 5_730_531,
         datetime: '2026-08-06T07:00:00+03:00',
-        client: {
-          phone: PRIVATE_MARKER,
-          fullName: 'Test Player',
-          email: 'test@example.test',
-        },
+        email: PRIVATE_MARKER,
       },
     });
 
@@ -291,10 +285,9 @@ describe('BookingsController', () => {
 
   it.each([
     ['not_bookable', 409, 'booking_slot_not_bookable'],
-    ['rejected', 422, 'booking_creation_rejected'],
-    ['invalid_response', 502, 'booking_creation_invalid_response'],
-    ['unknown_outcome', 502, 'booking_creation_unknown_outcome'],
-    ['write_disabled', 503, 'booking_creation_unavailable'],
+    ['provider_rejected', 422, 'booking_creation_rejected'],
+    ['contact_incomplete', 422, 'booking_contact_incomplete'],
+    ['conflict', 409, 'booking_idempotency_conflict'],
     ['unavailable', 503, 'booking_creation_unavailable'],
   ] as const)(
     'maps booking creation outcome %s to a safe public error',
@@ -309,11 +302,7 @@ describe('BookingsController', () => {
           serviceId: 30_539_679,
           courtId: 5_730_531,
           datetime: '2026-08-06T07:00:00+03:00',
-          client: {
-            phone: '79000000000',
-            fullName: 'Test Player',
-            email: 'test@example.test',
-          },
+          email: 'test@example.test',
         },
       });
 
@@ -322,6 +311,56 @@ describe('BookingsController', () => {
       expect(harness.createBooking).toHaveBeenCalledTimes(1);
     },
   );
+
+  it('returns a safe persisted handle with 202 for an unknown create outcome', async () => {
+    const reservationId = deterministicUuid('booking-controller-reservation');
+    harness.createBooking.mockResolvedValueOnce({
+      outcome: 'unknown',
+      reservation: {
+        reservationId, status: 'unknown', serviceId: 30_539_679,
+        courtId: 5_730_531, startsAt: '2026-08-06T07:00:00+03:00',
+        endsAt: '2026-08-06T08:00:00+03:00', stale: true,
+      },
+    });
+    const response = await harness.app.inject({
+      method: 'POST', url: '/bookings', headers: headers(),
+      payload: { requestKey: deterministicUuid('booking-controller-unknown'), serviceId: 30_539_679, courtId: 5_730_531, datetime: '2026-08-06T07:00:00+03:00', email: 'test@example.test' },
+    });
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toMatchObject({ reservationId, status: 'unknown', stale: true });
+  });
+
+  it('lists owner reservations and resolves an uncertain request key without a write route', async () => {
+    const requestKey = deterministicUuid('booking-controller-request-lookup');
+    const listed = await harness.app.inject({ method: 'GET', url: '/bookings', headers: headers() });
+    const recovered = await harness.app.inject({ method: 'GET', url: `/bookings/requests/${requestKey}`, headers: headers() });
+    expect(listed.statusCode).toBe(200);
+    expect(listed.json().reservations).toHaveLength(1);
+    expect(recovered.statusCode).toBe(200);
+    expect(harness.listBookings).toHaveBeenCalledWith(ACCOUNT_ID);
+    expect(harness.readBookingByRequestKey).toHaveBeenCalledWith(ACCOUNT_ID, requestKey);
+  });
+
+  it('reads only the authenticated owner reservation through the read-only service', async () => {
+    const reservationId = deterministicUuid('booking-controller-reservation');
+    const response = await harness.app.inject({ method: 'GET', url: `/bookings/${reservationId}`, headers: headers() });
+    expect(response.statusCode).toBe(200);
+    expect(harness.readBooking).toHaveBeenCalledWith(ACCOUNT_ID, reservationId);
+    expect(response.json()).toMatchObject({ reservationId, status: 'confirmed' });
+  });
+
+  it('publishes no cancel or reschedule route', async () => {
+    const reservationId = deterministicUuid('booking-controller-reservation');
+    for (const request of [
+      { method: 'DELETE' as const, url: `/bookings/${reservationId}` },
+      { method: 'PUT' as const, url: `/bookings/${reservationId}` },
+      { method: 'POST' as const, url: `/bookings/${reservationId}/cancel` },
+      { method: 'POST' as const, url: `/bookings/${reservationId}/reschedule` },
+    ]) {
+      const response = await harness.app.inject({ ...request, headers: headers() });
+      expect(response.statusCode).toBe(404);
+    }
+  });
 
   it('rejects malformed path and query inputs before service calls', async () => {
     const court = await harness.app.inject({

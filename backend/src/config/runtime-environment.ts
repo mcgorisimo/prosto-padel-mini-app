@@ -30,6 +30,8 @@ const RUNTIME_SECRET_SOURCE_KEYS = Object.freeze([
   FILE_SECRET_KEYS.yclientsPartnerToken,
   'YCLIENTS_USER_TOKEN',
   FILE_SECRET_KEYS.yclientsUserToken,
+  'RESERVATION_SNAPSHOT_MASTER_KEY_BASE64',
+  FILE_SECRET_KEYS.reservationSnapshotMasterKey,
 ] as const);
 const ASCII_CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f-\u009f]/u;
 const DATABASE_HOST_PATTERN =

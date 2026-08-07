@@ -60,7 +60,7 @@ const CANCEL_KEY = reservationIdempotencyKey(
 const API_ID = 7_710_001;
 const RECORD_ID = 2_910_001;
 const CLIENT: ReservationClientSnapshot = Object.freeze({
-  phone: '79000000000',
+  phone: '+79000000000',
   fullName: 'Diagnostic Client Marker',
   email: 'diagnostic-marker@example.test',
 });
@@ -68,6 +68,7 @@ const TARGET = Object.freeze({
   serviceId: 30_539_679,
   courtId: 5_730_531,
   startsAt: '2026-08-09T16:30:00+03:00',
+  endsAt: '2026-08-09T17:30:00+03:00',
 });
 const BINDING = Object.freeze({
   provider: 'yclients' as const,

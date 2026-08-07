@@ -1,6 +1,15 @@
 # D2 verified booking contact — migration proposal
 
-Status: `product_and_schema_approval_required`; no SQL is included or approved.
+Status: `superseded`; deferred to D5. No SQL was prepared or approved.
+
+Owner decision superseding this proposal: D2 booking contacts are declared,
+owner-confirmed data for one booking, not verified identity and not an auth
+factor. The backend derives `fullName` from the authenticated owner's profile,
+uses the profile's canonical E.164 phone, and accepts only a normalized
+lowercase email from that owner's booking request. All three values are stored
+only in migration 033's AEAD-encrypted operation snapshot. Phone OTP and email
+verification move to D5; rating `isVerified` is unrelated. The historical
+proposal below remains for that later stage.
 
 ## Proven blocker
 

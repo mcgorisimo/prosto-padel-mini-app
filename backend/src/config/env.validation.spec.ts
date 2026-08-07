@@ -12,6 +12,7 @@ import {
   YCLIENTS_API_CONFIG_KEYS,
   YCLIENTS_API_DEFAULT_BASE_URL,
 } from './yclients-api.config';
+import { RESERVATION_SNAPSHOT_CONFIG_KEYS } from './reservation-snapshot.config';
 
 const SAFE_TEST_TELEGRAM_CRYPTO_CONFIG = Object.freeze({
   [TELEGRAM_LOGIN_CONFIG_KEYS.lookupPepperBase64]: Buffer.alloc(
@@ -35,6 +36,7 @@ const SAFE_TEST_YCLIENTS_CONFIG = Object.freeze({
   [YCLIENTS_API_CONFIG_KEYS.companyId]: '2079564',
   [YCLIENTS_API_CONFIG_KEYS.partnerToken]: 'synthetic-partner-token',
   [YCLIENTS_API_CONFIG_KEYS.userToken]: 'synthetic-user-token',
+  [RESERVATION_SNAPSHOT_CONFIG_KEYS.masterKeyBase64]: Buffer.alloc(32, 0x5a).toString('base64'),
 });
 
 function validate(environment: Record<string, unknown> = {}) {
@@ -72,6 +74,41 @@ describe('envValidationSchema', () => {
     expect(
       apiEnabled.value[YCLIENTS_API_CONFIG_KEYS.bookingWriteEnabled],
     ).toBe(true);
+  });
+
+  it('requires an exact canonical 32-byte reservation snapshot key for writes', () => {
+    const common = {
+      ...SAFE_TEST_DATABASE_CONFIG,
+      ...SAFE_TEST_YCLIENTS_CONFIG,
+      [YCLIENTS_API_CONFIG_KEYS.enabled]: 'true',
+      [YCLIENTS_API_CONFIG_KEYS.bookingWriteEnabled]: 'true',
+    };
+    expect(validate({
+      ...common,
+      [RESERVATION_SNAPSHOT_CONFIG_KEYS.masterKeyBase64]: Buffer.alloc(31, 1).toString('base64'),
+    }).error).toBeDefined();
+    expect(validate({
+      ...common,
+      [RESERVATION_SNAPSHOT_CONFIG_KEYS.masterKeyBase64]: Buffer.alloc(33, 1).toString('base64'),
+    }).error).toBeDefined();
+  });
+
+  it('keeps read/decrypt configured when booking writes are disabled and rejects rotation without a keyring', () => {
+    const enabledRead = {
+      ...SAFE_TEST_DATABASE_CONFIG,
+      ...SAFE_TEST_YCLIENTS_CONFIG,
+      [YCLIENTS_API_CONFIG_KEYS.enabled]: 'true',
+      [YCLIENTS_API_CONFIG_KEYS.bookingWriteEnabled]: 'false',
+    };
+    expect(validate(enabledRead).error).toBeUndefined();
+    expect(validate({
+      ...enabledRead,
+      [RESERVATION_SNAPSHOT_CONFIG_KEYS.masterKeyBase64]: '',
+    }).error).toBeDefined();
+    expect(validate({
+      ...enabledRead,
+      [RESERVATION_SNAPSHOT_CONFIG_KEYS.keyVersion]: '2',
+    }).error).toBeDefined();
   });
 
   it('requires the database, company and both tokens for the enabled YCLIENTS API', () => {

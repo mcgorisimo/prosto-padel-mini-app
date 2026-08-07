@@ -1,5 +1,8 @@
 import { Module, Provider } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { readReservationSnapshotConfiguration } from '../config/reservation-snapshot.config';
+import { YCLIENTS_API_CONFIG_KEYS } from '../config/yclients-api.config';
+import { ReservationSnapshotCrypto } from '../reservations/reservation-snapshot.crypto';
 import {
   PlayerProfilePhotoUrlResolver,
   readPlayerProfilePhotoStorageConfiguration,
@@ -37,8 +40,36 @@ import { PostgresTelegramNotificationOutboxRepository } from './postgres-telegra
 import { PostgresYclientsWebhookSignalRepository } from './postgres-yclients-webhook-signal.repository';
 import { PostgresTransactionRunner } from './postgres-transaction';
 import { PostgresTransactionExecutorAdapter } from './postgres-transaction-executor.adapter';
+import { PostgresCourtReservationRepository } from './postgres-court-reservation.repository';
 
 const DATABASE_WORKFLOW_PROVIDERS: Provider[] = [
+  {
+    provide: ReservationSnapshotCrypto,
+    inject: [ConfigService],
+    useFactory: (config: ConfigService): ReservationSnapshotCrypto => {
+      if (config.get<boolean>(YCLIENTS_API_CONFIG_KEYS.enabled) !== true) {
+        return ReservationSnapshotCrypto.disabled();
+      }
+      const snapshot = readReservationSnapshotConfiguration(config);
+      try {
+        return new ReservationSnapshotCrypto(snapshot.masterKey, snapshot.keyVersion);
+      } finally {
+        snapshot.masterKey.fill(0);
+      }
+    },
+  },
+  {
+    provide: PostgresCourtReservationRepository,
+    inject: [ReservationSnapshotCrypto, ConfigService],
+    useFactory: (
+      crypto: ReservationSnapshotCrypto,
+      config: ConfigService,
+    ): PostgresCourtReservationRepository =>
+      new PostgresCourtReservationRepository(
+        crypto,
+        config.get<number>(YCLIENTS_API_CONFIG_KEYS.companyId) ?? 0,
+      ),
+  },
   PostgresAdminPlayerRatingRepository,
   PostgresSecurityAuditRepository,
   PostgresExternalIdentityResolutionRepository,
@@ -159,6 +190,7 @@ const DATABASE_WORKFLOW_PROVIDERS: Provider[] = [
 ];
 
 const DATABASE_WORKFLOW_EXPORTS = [
+  PostgresCourtReservationRepository,
   PostgresTransactionRunner,
   PostgresTransactionExecutorAdapter,
   PostgresAdminPlayerRatingRepository,

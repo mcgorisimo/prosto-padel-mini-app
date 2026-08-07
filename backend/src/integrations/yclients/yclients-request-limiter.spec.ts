@@ -1,5 +1,6 @@
 import {
   YclientsConservativeRequestLimiter,
+  YCLIENTS_REQUEST_QUEUE_SATURATED,
   YclientsRequestLimiterClock,
 } from './yclients-request-limiter';
 
@@ -72,10 +73,34 @@ describe('YclientsConservativeRequestLimiter', () => {
     { maximumRequestsPerMinute: 201 },
     { minimumIntervalMilliseconds: 0 },
     { maximumRequestsPerMinute: 0 },
+    { maximumPendingRequests: 0 },
+    { maximumPendingRequests: 61 },
   ])('rejects unsafe provider ceilings %#', (options) => {
     expect(
       () => new YclientsConservativeRequestLimiter(options),
     ).toThrow('Invalid YCLIENTS request limiter configuration');
+  });
+
+  it('fails fast when the bounded pending queue is saturated', async () => {
+    const clock = new FakeClock();
+    const limiter = new YclientsConservativeRequestLimiter({
+      clock,
+      maximumPendingRequests: 2,
+    });
+    let releaseFirst: (() => void) | undefined;
+    const first = limiter.run(() => new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    }));
+    const second = limiter.run(async () => undefined);
+
+    await expect(limiter.run(async () => undefined)).rejects.toThrow(
+      YCLIENTS_REQUEST_QUEUE_SATURATED,
+    );
+    releaseFirst?.();
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      undefined,
+      undefined,
+    ]);
   });
 
   it('releases the queue after a failed request without retrying it', async () => {
