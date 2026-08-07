@@ -36,6 +36,12 @@ export interface StartReservationOperationInput {
   readonly now: CourtReservation['updatedAt'];
 }
 
+export type ReservationCancellationConfirmationProof = Readonly<{
+  readonly recordId: number;
+  readonly apiId: number;
+  readonly deleted: true;
+}>;
+
 export type StartReservationOperationResult =
   | Readonly<{
       outcome: 'started';
@@ -65,6 +71,7 @@ export type ReservationOperationTransitionCommand =
       actorAccountId: CourtReservation['ownerAccountId'];
       now: CourtReservation['updatedAt'];
       providerBinding?: YclientsReservationBinding;
+      cancellationProof?: ReservationCancellationConfirmationProof;
     }>
   | Readonly<{
       type: 'reject';
@@ -85,6 +92,7 @@ export type ReservationOperationTransitionCommand =
         | Readonly<{
             outcome: 'confirmed';
             providerBinding?: YclientsReservationBinding;
+            cancellationProof?: ReservationCancellationConfirmationProof;
           }>
         | Readonly<{
             outcome: 'rejected';
@@ -402,12 +410,36 @@ export function reservationOperationMatchesReservation(
 }
 
 function hasValidBindingForConfirmation(
+  reservation: CourtReservation,
   operation: ReservationOperation,
   binding: YclientsReservationBinding | undefined,
+  cancellationProof: ReservationCancellationConfirmationProof | undefined,
 ): boolean {
-  return operation.request.type === 'cancel'
-    ? binding === undefined
-    : isYclientsReservationBinding(binding);
+  if (operation.request.type !== 'cancel') {
+    return (
+      cancellationProof === undefined && isYclientsReservationBinding(binding)
+    );
+  }
+  if (
+    binding !== undefined ||
+    !isYclientsReservationBinding(reservation.providerBinding) ||
+    typeof cancellationProof !== 'object' ||
+    cancellationProof === null ||
+    Array.isArray(cancellationProof)
+  ) {
+    return false;
+  }
+  const proof = cancellationProof as Record<string, unknown>;
+  return (
+    Object.keys(proof).length === 3 &&
+    Number.isSafeInteger(proof.recordId) &&
+    Number(proof.recordId) > 0 &&
+    proof.recordId === reservation.providerBinding.recordId &&
+    Number.isSafeInteger(proof.apiId) &&
+    Number(proof.apiId) > 0 &&
+    proof.apiId === operation.request.externalReference.apiId &&
+    proof.deleted === true
+  );
 }
 
 function terminalReservation(
@@ -525,8 +557,10 @@ export function transitionReservationOperation(
     if (command.type === 'confirm') {
       if (
         !hasValidBindingForConfirmation(
+          reservation,
           operation,
           command.providerBinding,
+          command.cancellationProof,
         )
       ) {
         return Object.freeze({
@@ -585,8 +619,10 @@ export function transitionReservationOperation(
     if (
       command.result.outcome === 'confirmed' &&
       !hasValidBindingForConfirmation(
+        reservation,
         operation,
         command.result.providerBinding,
+        command.result.cancellationProof,
       )
     ) {
       return Object.freeze({

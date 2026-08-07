@@ -2,7 +2,6 @@ import { reservationOperationMatchesReservation } from './reservation.state-mach
 import {
   CourtReservation,
   PendingReservationOperation,
-  ReservationProviderRejectionReason,
   isYclientsReservationBinding,
 } from './reservation.types';
 
@@ -17,10 +16,10 @@ export type ReservationCancellationDeleteCommand = Readonly<{
 
 export type ReservationCancellationDeleteResult =
   | Readonly<{ outcome: 'accepted' }>
-  /** `rejected` is allowed only when the adapter proves no DELETE effect. */
   | Readonly<{
-      outcome: 'rejected';
-      reason: ReservationProviderRejectionReason;
+      /** The adapter proved that no provider request was dispatched. */
+      outcome: 'not_sent';
+      reason: 'provider_disabled' | 'invalid_request';
     }>
   | Readonly<{ outcome: 'unknown' }>;
 
@@ -87,7 +86,7 @@ function positiveSafeInteger(value: unknown): value is number {
 export function isCanonicalReservationDeletedProof(
   value: unknown,
   command: ReservationCancellationDeleteCommand,
-): value is ReservationCancellationExactRecord {
+): value is ReservationCancellationExactRecord & Readonly<{ deleted: true }> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return false;
   }

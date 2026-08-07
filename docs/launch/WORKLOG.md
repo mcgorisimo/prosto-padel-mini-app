@@ -1768,3 +1768,51 @@
   slice is a code-only adapter mapping the existing one-DELETE client and exact
   safe reader into this cancel-only port; app-originated reschedule stays
   forbidden.
+
+### 2026-08-07 — D2 / cancel-only adapter foundation
+
+- Independent read-only review of checkpoint
+  `c615caec04f72f65408d39eddddaed0e92a8f061` found no P0 and three P1 before
+  adapter wiring: the generic state-machine confirmation could bypass canonical
+  cancel proof, the outer exact-read result was not exact-shape checked, and
+  arbitrary provider rejection reasons could be mistaken for proved no-effect.
+- Closed those boundaries code-only. Pending and reconciled cancel confirmation
+  now require the exact `{recordId, apiId, deleted:true}` projection to match the
+  persisted YCLIENTS record binding and immutable external reference inside the
+  state machine. Missing, mismatched or extra proof remains rejected/held. The
+  service accepts only an exact two-field `found` wrapper; missing or
+  contradictory outer fields remain `unknown` and do not release the slot.
+- Replaced the broad cancellation `rejected` port result with the narrow
+  `not_sent` outcomes `provider_disabled|invalid_request`. Only those local
+  pre-dispatch cases may restore `confirmed` without readback; every provider
+  response, transport error or undocumented effect stays `unknown` and uses the
+  one allowed exact read-only reconciliation.
+- Added runtime-disabled `YclientsReservationCancellationAdapter`. It depends
+  only on `Pick<YclientsAdminWriteClient,'cancel'>` and
+  `Pick<YclientsAdminReadClient,'getRecord'>`, validates the PII-free command,
+  invokes at most one DELETE or one exact GET per method, performs no retry/list
+  fallback, projects only record/API/deleted fields and exposes no PUT,
+  reschedule or generic write method. It is not imported by any Nest module,
+  controller or application main.
+- Focused mocked verification: state machine, cancel service and adapter `3
+  suites / 77 tests` PASS. Full backend gates: typecheck PASS; unit `128 suites
+  / 3229 tests` PASS; E2E `2 suites / 4 tests` PASS; build PASS.
+- Root synthetic Playwright at the default 9 workers produced two unrelated
+  resource timeout flakes in unchanged chat/profile-photo specs (`80 passed / 1
+  skipped / 2 failed`); both exact failures then PASSed focused `2/2`, and the
+  complete owned-Vite rerun with `--workers=4` PASSed `82 passed / 1 skipped`.
+  Root build first hit the known sandbox-only esbuild parent-directory `Access
+  denied`; the identical command outside that filesystem restriction PASSed
+  (`1615` modules, existing chunk/CJS warnings only).
+- No YCLIENTS/API/SSH/server/DB call, provider write, secret/env read,
+  schema/migration, payment-field, frontend, runtime/Nest wiring, push, merge or
+  deployment occurred. Deployment `not_needed`: all new code remains
+  unreachable from application runtime. Selectel test application remains D1
+  `c04074459948d0bf545e865b885aea7a4e5fec3c`; production was not changed.
+- Independent read-only review of the complete adapter diff: actionable P0/P1
+  none. It confirmed both proof-gated terminal paths, exact outer/result shapes,
+  pre-dispatch-only `not_sent`, one-call/no-retry behavior, PII/hash stripping,
+  no PUT/reschedule surface and no Nest/module/controller/main import.
+- D2 remains `in_progress`. Production repository/controller/runtime wiring
+  requires a separate later approval; app-originated reschedule remains
+  forbidden.

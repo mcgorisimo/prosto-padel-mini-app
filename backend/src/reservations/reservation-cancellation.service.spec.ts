@@ -30,7 +30,6 @@ import {
   courtReservationId,
   reservationIdempotencyKey,
   reservationOperationId,
-  reservationProviderRejectionReason,
 } from './reservation.types';
 
 const CREATED_AT = unixEpochSeconds(1_786_000_000);
@@ -76,10 +75,6 @@ const BINDING = Object.freeze({
   recordId: RECORD_ID,
   recordHash: 'record-hash-must-not-leak',
 });
-const PROVIDER_REJECTED = reservationProviderRejectionReason(
-  'provider_rejected',
-);
-
 function cancellationRequest(
   ownerAccountId = OWNER_ACCOUNT_ID,
   client = CLIENT,
@@ -387,11 +382,11 @@ describe('ReservationCancellationService', () => {
     expect(reservationHoldsCourtSlot(test.repository.reservation)).toBe(true);
   });
 
-  it('rejects a known no-effect provider result without exact read', async () => {
+  it('rejects only a provider request proven not sent without exact read', async () => {
     const test = harness({
       deleteResult: Object.freeze({
-        outcome: 'rejected',
-        reason: PROVIDER_REJECTED,
+        outcome: 'not_sent',
+        reason: 'provider_disabled',
       }),
     });
 
@@ -659,5 +654,54 @@ describe('ReservationCancellationService', () => {
     expect(test.provider.deleteOnce).toHaveBeenCalledTimes(1);
     expect(test.provider.readExact).toHaveBeenCalledTimes(1);
     expect(JSON.stringify(result)).not.toContain(CLIENT.phone);
+  });
+
+  it.each([
+    ['missing record', { outcome: 'found' }],
+    [
+      'contradictory outer field',
+      {
+        outcome: 'found',
+        record: {
+          recordId: RECORD_ID,
+          apiId: API_ID,
+          deleted: true,
+        },
+        ambiguous: true,
+      },
+    ],
+  ])('does not accept %s around exact-read proof', async (_name, readResult) => {
+    const test = harness();
+    test.provider.readExact.mockResolvedValueOnce(readResult);
+
+    const result = await test.service.request(input());
+
+    expect(result).toMatchObject({
+      outcome: 'unknown',
+      reason: 'exact_deleted_proof_missing',
+    });
+    expect(test.provider.deleteOnce).toHaveBeenCalledTimes(1);
+    expect(test.provider.readExact).toHaveBeenCalledTimes(1);
+    expect(reservationHoldsCourtSlot(test.repository.reservation)).toBe(true);
+  });
+
+  it.each([
+    [{ outcome: 'not_sent', reason: 'provider_rejected' }],
+    [{ outcome: 'not_sent', reason: 'provider_disabled', extra: true }],
+    [{ outcome: 'rejected', reason: 'provider_disabled' }],
+  ])('treats malformed no-send result %p as unknown and reads back', async (deleteResult) => {
+    const test = harness({
+      readResult: Object.freeze({ outcome: 'unknown' }),
+    });
+    test.provider.deleteOnce.mockResolvedValueOnce(deleteResult);
+
+    const result = await test.service.request(input());
+
+    expect(result).toMatchObject({
+      outcome: 'unknown',
+      reason: 'delete_outcome_unknown',
+    });
+    expect(test.provider.deleteOnce).toHaveBeenCalledTimes(1);
+    expect(test.provider.readExact).toHaveBeenCalledTimes(1);
   });
 });

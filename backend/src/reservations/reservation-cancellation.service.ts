@@ -3,6 +3,7 @@ import { isUnixEpochSeconds, UnixEpochSeconds } from '../auth/auth.types';
 import { CourtReservationRepository } from '../database/court-reservation.repository';
 import { PostgresTransaction } from '../database/postgres-transaction';
 import {
+  ReservationOperationTransitionCommand,
   ReservationOperationTransitionResult,
   StartReservationOperationResult,
   reservationOperationMatchesReservation,
@@ -11,6 +12,7 @@ import {
   isCanonicalReservationDeletedProof,
   ReservationCancellationDeleteCommand,
   ReservationCancellationDeleteResult,
+  ReservationCancellationExactRecord,
   ReservationCancellationExactReadResult,
   ReservationCancellationProviderPort,
   reservationCancellationDeleteCommand,
@@ -207,39 +209,33 @@ function classifyDeleteResult(
   }
   if (
     Object.keys(result).length === 2 &&
-    result.outcome === 'rejected' &&
-    typeof result.reason === 'string' &&
-    /^[a-z][a-z0-9_]{0,127}$/u.test(result.reason)
+    result.outcome === 'not_sent' &&
+    (result.reason === 'provider_disabled' ||
+      result.reason === 'invalid_request')
   ) {
-    let reason: Extract<
-      ReservationCancellationDeleteResult,
-      { outcome: 'rejected' }
-    >['reason'];
-    try {
-      reason = reservationProviderRejectionReason(result.reason);
-    } catch {
-      return Object.freeze({ outcome: 'unknown' as const });
-    }
     return Object.freeze({
-      outcome: 'rejected' as const,
-      reason,
+      outcome: 'not_sent' as const,
+      reason: result.reason,
     });
   }
   return Object.freeze({ outcome: 'unknown' as const });
 }
 
-function hasCanonicalDeletedProof(
+function canonicalDeletedProof(
   value: unknown,
   command: ReservationCancellationDeleteCommand,
-): boolean {
+):
+  | (ReservationCancellationExactRecord & Readonly<{ deleted: true }>)
+  | undefined {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    return false;
+    return undefined;
   }
-  const result = value as Partial<ReservationCancellationExactReadResult>;
-  return (
+  const result = value as Record<string, unknown>;
+  return Object.keys(result).length === 2 &&
     result.outcome === 'found' &&
     isCanonicalReservationDeletedProof(result.record, command)
-  );
+    ? result.record
+    : undefined;
 }
 
 export class ReservationCancellationService {
@@ -263,21 +259,7 @@ export class ReservationCancellationService {
   private async transition(
     reservation: CourtReservation,
     operation: PendingReservationOperation,
-    command:
-      | Readonly<{
-          type: 'confirm' | 'mark_unknown';
-          actorAccountId: CourtReservation['ownerAccountId'];
-          now: UnixEpochSeconds;
-        }>
-      | Readonly<{
-          type: 'reject';
-          actorAccountId: CourtReservation['ownerAccountId'];
-          now: UnixEpochSeconds;
-          reason: Extract<
-            ReservationCancellationDeleteResult,
-            { outcome: 'rejected' }
-          >['reason'];
-        }>,
+    command: ReservationOperationTransitionCommand,
   ): Promise<ReservationOperationTransitionResult | undefined> {
     try {
       return await this.dependencies.transactions.runInTransaction(
@@ -385,7 +367,7 @@ export class ReservationCancellationService {
       deleteResult = Object.freeze({ outcome: 'unknown' as const });
     }
 
-    if (deleteResult.outcome === 'rejected') {
+    if (deleteResult.outcome === 'not_sent') {
       const terminalAt = this.terminalAt(input.cancellationRequestedAt);
       if (terminalAt === undefined) {
         return Object.freeze({
@@ -398,7 +380,7 @@ export class ReservationCancellationService {
         type: 'reject',
         actorAccountId: input.ownerAccountId,
         now: terminalAt,
-        reason: deleteResult.reason,
+        reason: reservationProviderRejectionReason(deleteResult.reason),
       });
       return transitioned?.outcome === 'transitioned'
         ? Object.freeze({
@@ -431,11 +413,13 @@ export class ReservationCancellationService {
       });
     }
 
-    if (hasCanonicalDeletedProof(proof, providerCommand)) {
+    const deletedProof = canonicalDeletedProof(proof, providerCommand);
+    if (deletedProof !== undefined) {
       const transitioned = await this.transition(reservation, operation, {
         type: 'confirm',
         actorAccountId: input.ownerAccountId,
         now: terminalAt,
+        cancellationProof: deletedProof,
       });
       return transitioned?.outcome === 'transitioned' &&
         transitioned.reservation.status === 'cancelled'

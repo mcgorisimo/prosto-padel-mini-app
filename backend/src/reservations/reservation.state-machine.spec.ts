@@ -665,6 +665,127 @@ describe('reservation operation state machine', () => {
     expect(reservationHoldsCourtSlot(uncertain.reservation)).toBe(true);
   });
 
+  it('rejects a direct cancel confirmation without exact deleted proof', () => {
+    const confirmed = confirmedReservation();
+    const cancelling = start(confirmed, request('cancel'), {
+      operationId: reservationOperationId(
+        deterministicUuid('d2-proof-cancel-operation'),
+      ),
+      idempotencyKey: reservationIdempotencyKey(
+        deterministicUuid('d2-proof-cancel-idempotency'),
+      ),
+      now: unixEpochSeconds(TERMINAL_AT + 1),
+    });
+
+    expect(
+      transitionReservationOperation(
+        cancelling.reservation,
+        cancelling.operation,
+        {
+          type: 'confirm',
+          actorAccountId: OWNER_ACCOUNT_ID,
+          now: unixEpochSeconds(TERMINAL_AT + 2),
+        },
+      ),
+    ).toMatchObject({ outcome: 'rejected', reason: 'invalid_command' });
+    expect(reservationHoldsCourtSlot(cancelling.reservation)).toBe(true);
+
+    const proved = transitionReservationOperation(
+      cancelling.reservation,
+      cancelling.operation,
+      {
+        type: 'confirm',
+        actorAccountId: OWNER_ACCOUNT_ID,
+        now: unixEpochSeconds(TERMINAL_AT + 2),
+        cancellationProof: Object.freeze({
+          recordId: PROVIDER_BINDING.recordId,
+          apiId: EXTERNAL_REFERENCE.apiId,
+          deleted: true,
+        }),
+      },
+    );
+    expect(proved.outcome).toBe('transitioned');
+    if (proved.outcome === 'transitioned') {
+      expect(proved.reservation.status).toBe('cancelled');
+      expect(reservationHoldsCourtSlot(proved.reservation)).toBe(false);
+    }
+  });
+
+  it('rejects cancel reconciliation without exact deleted proof or with a mismatched proof', () => {
+    const confirmed = confirmedReservation();
+    const cancelling = start(confirmed, request('cancel'), {
+      operationId: reservationOperationId(
+        deterministicUuid('d2-proof-reconcile-operation'),
+      ),
+      idempotencyKey: reservationIdempotencyKey(
+        deterministicUuid('d2-proof-reconcile-idempotency'),
+      ),
+      now: unixEpochSeconds(TERMINAL_AT + 1),
+    });
+    const uncertain = transitionReservationOperation(
+      cancelling.reservation,
+      cancelling.operation,
+      {
+        type: 'mark_unknown',
+        actorAccountId: OWNER_ACCOUNT_ID,
+        now: unixEpochSeconds(TERMINAL_AT + 2),
+      },
+    );
+    expect(uncertain.outcome).toBe('transitioned');
+    if (uncertain.outcome !== 'transitioned') {
+      throw new Error('Expected an unknown cancellation');
+    }
+
+    for (const result of [
+      { outcome: 'confirmed' as const },
+      {
+        outcome: 'confirmed' as const,
+        cancellationProof: Object.freeze({
+          recordId: PROVIDER_BINDING.recordId + 1,
+          apiId: EXTERNAL_REFERENCE.apiId,
+          deleted: true as const,
+        }),
+      },
+    ]) {
+      expect(
+        transitionReservationOperation(
+          uncertain.reservation,
+          uncertain.operation,
+          {
+            type: 'reconcile',
+            actorAccountId: OWNER_ACCOUNT_ID,
+            now: unixEpochSeconds(TERMINAL_AT + 3),
+            result,
+          },
+        ),
+      ).toMatchObject({ outcome: 'rejected', reason: 'invalid_command' });
+    }
+    expect(reservationHoldsCourtSlot(uncertain.reservation)).toBe(true);
+
+    const proved = transitionReservationOperation(
+      uncertain.reservation,
+      uncertain.operation,
+      {
+        type: 'reconcile',
+        actorAccountId: OWNER_ACCOUNT_ID,
+        now: unixEpochSeconds(TERMINAL_AT + 3),
+        result: {
+          outcome: 'confirmed',
+          cancellationProof: Object.freeze({
+            recordId: PROVIDER_BINDING.recordId,
+            apiId: EXTERNAL_REFERENCE.apiId,
+            deleted: true,
+          }),
+        },
+      },
+    );
+    expect(proved.outcome).toBe('transitioned');
+    if (proved.outcome === 'transitioned') {
+      expect(proved.reservation.status).toBe('cancelled');
+      expect(reservationHoldsCourtSlot(proved.reservation)).toBe(false);
+    }
+  });
+
   it('rejects transitions after an operation reaches a terminal state', () => {
     const started = start(unbookedReservation());
     const confirmed = transitionReservationOperation(
