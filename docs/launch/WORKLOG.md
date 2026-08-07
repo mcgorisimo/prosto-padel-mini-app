@@ -26,7 +26,7 @@
 | Этап | Статус | Ветка/commit | Проверки | Блокер/следующий шаг |
 |---|---|---|---|---|
 | D1 Backend-only/contracts | done | `main` / deployed `c04074459948d0bf545e865b885aea7a4e5fec3c` | frontend E2E PASS (82/1 skipped); focused fail-closed 2/2 PASS; frontend build PASS; backend all PASS; Selectel test smoke PASS | D1 закрыт; следующий отдельный этап — D2 |
-| D2 YCLIENTS reservation core | in_progress | local hydration correction over `908b295ef911ae290946442d50cbcd9ecc4e02e1`; Selectel test `d7812d3ef28eda7100bca6bdc5d56afa0be29703` | migration 033 applied/verified; pending-operation hydration root cause proved; local backend/root gates PASS; owner TMA Home booking-card smoke PASS on deployed runtime | integrate/roll out the int4 decoder correction, then verify a fresh create reaches confirmed; existing lost-response records remain held without repeat create; Court 1 YCLIENTS schedule still needs 00:00 correction |
+| D2 YCLIENTS reservation core | in_progress | `main` / Selectel test `b2edf2348fffb0c5ba8647ad99b743b40ce79238` | migration 033 applied/verified; int4 hydration correction deployed; backend/root gates and rollout health/auth/log checks PASS | owner fresh-booking smoke must verify a new create reaches confirmed; existing lost-response records remain held without repeat create; Court 1 YCLIENTS schedule still needs 00:00 correction |
 | D3 Match ↔ reservation lifecycle | pending | — | — | reflect admin cancellation without provider DELETE, owner participant removal, match ↔ reservation binding |
 | D4 Payment Core | pending | — | — | payment provider, pricing/payment snapshot, чеки и возвраты |
 | D5 Settings/moderation/compliance | pending | — | — | standalone phone/email auth, verified backend email, approved club support/contact source and clickable action; затем schema review |
@@ -2244,3 +2244,34 @@
   exact `d7812d3...`; backend/frontend/nginx/PostgreSQL containers were not
   changed by diagnosis or local verification. Migration 033 remains
   `applied_verified`; production is unchanged.
+
+### 2026-08-08 — D2 / PostgreSQL int4 hydration correction Selectel rollout
+
+- Git delivery PASS: exact checkpoint
+  `b2edf2348fffb0c5ba8647ad99b743b40ce79238` was pushed to
+  `codex/week1-d2-reservation-core`; clean local `main` was fast-forwarded from
+  `d7812d3ef28eda7100bca6bdc5d56afa0be29703` to the same checkpoint and pushed.
+- Selectel test precheck PASS at clean checkout `d7812d3...`: persistent-runtime
+  Compose validation passed, all four containers were healthy with restart
+  count `0`, and internal health returned `200`.
+- Selectel fetched and detached the clean application checkout at exact
+  `b2edf234...`, rebuilt the backend image and recreated only
+  `prosto-padel-test-backend-1`. Backend container changed from
+  `b058838bcf95...` to `7a2cf73acede...`; frontend stayed
+  `096935705c5c...`, nginx `e5b98b53a385...` and PostgreSQL
+  `5e36d4dc1a5c...`. All four are healthy with restart count `0`.
+- Postcheck PASS: internal health `200`, HTTPS health `200`, HTTPS root `200`,
+  and unauthenticated `GET /api/v1/bookings` retained fail-closed `401`.
+  Backend/frontend/PostgreSQL error-signal counts were `0`. Nginx recorded one
+  expected transient upstream-connect failure during the backend replacement;
+  the separate stable post-health window returned backend/nginx error-signal
+  counts `0/0`.
+- No migration, schema, DB write, secret/env, frontend/nginx/PostgreSQL change
+  or operator YCLIENTS/provider request was made. Production is unchanged.
+  Runtime deployment is exact `b2edf234...`; migration 033 remains
+  `applied_verified`.
+- Deployment verification is `pending_manual_fresh_booking_smoke`: the owner
+  must submit one new booking in the exact Telegram Mini App and confirm it
+  appears in YCLIENTS and in Home with local status `confirmed`. Existing
+  lost-response bookings must not be submitted again by the operator and are
+  not treated as payment proof.
