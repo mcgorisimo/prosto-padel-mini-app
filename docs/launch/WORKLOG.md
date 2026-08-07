@@ -26,10 +26,10 @@
 | Этап | Статус | Ветка/commit | Проверки | Блокер/следующий шаг |
 |---|---|---|---|---|
 | D1 Backend-only/contracts | done | `main` / deployed `c04074459948d0bf545e865b885aea7a4e5fec3c` | frontend E2E PASS (82/1 skipped); focused fail-closed 2/2 PASS; frontend build PASS; backend all PASS; Selectel test smoke PASS | D1 закрыт; следующий отдельный этап — D2 |
-| D2 YCLIENTS reservation core | in_progress | D2 branch / local vertical checkpoint (this revision), independently reviewed | migration 033 applied/verified; backend 131/3271 unit, 2/4 E2E, typecheck/build PASS; root build PASS; root E2E 84/1 skipped | app PUT/DELETE absent; before rollout approve unknown-create operator lookup, exact support/contact source, integration and Selectel rollout |
+| D2 YCLIENTS reservation core | in_progress | D2 branch / vertical checkpoint `4c7a4e4c7b75141c20beb48524aba9fb4891c653`, independently reviewed | migration 033 applied/verified; backend 131/3271 unit, 2/4 E2E, typecheck/build PASS; root build PASS; root E2E 84/1 skipped | app PUT/DELETE absent; before rollout approve unknown-create operator lookup, integration and Selectel rollout; support contact deferred to D5 by owner |
 | D3 Match ↔ reservation lifecycle | pending | — | — | reflect admin cancellation without provider DELETE, owner participant removal, match ↔ reservation binding |
 | D4 Payment Core | pending | — | — | payment provider, pricing/payment snapshot, чеки и возвраты |
-| D5 Settings/moderation/compliance | pending | — | — | standalone phone/email auth и verified backend email; затем schema review |
+| D5 Settings/moderation/compliance | pending | — | — | standalone phone/email auth, verified backend email, approved club support/contact source and clickable action; затем schema review |
 | D6 Selectel readiness/load | pending | — | — | backend staging fixture, live concurrency и Selectel production readiness |
 | D7 Release candidate | pending | — | — | после D1–D6 |
 | Mobile/store track | pending | — | — | developer account status и native decision |
@@ -57,8 +57,9 @@
 1. YCLIENTS availability/preflight/create и exact/bounded read contracts уже
    подтверждены. App-originated reschedule/cancel отсутствуют; webhook disabled.
    Declared booking contact contract одобрен, verification перенесена в D5.
-   Перед rollout нужны approved bounded operator lookup для `unknown` create,
-   exact support/contact source и provisioning root-only snapshot key; provider
+   Перед rollout нужны approved bounded operator lookup для `unknown` create и
+   provisioning root-only snapshot key; support/contact source is
+   `deferred_to_D5_by_owner` and is not a D2 rollout blocker. Provider
    `api_id` uniqueness не предполагается и provider write не retry-ится.
 2. Не подтверждён платёжный провайдер, sandbox и фискальные настройки.
 3. Не записаны фактические Selectel resources/accesses для staging/production.
@@ -1952,3 +1953,20 @@
   `c04074459948d0bf545e865b885aea7a4e5fec3c`; production is unchanged. D2 stays
   `in_progress` pending managing review, fast-forward integration and separately
   approved Selectel rollout/operator lookup.
+
+### 2026-08-07 — D2 / administrator contact deferred to D5
+
+- Owner decision: there is no official administrator contact source yet.
+  Source selection and any clickable support/contact action are
+  `deferred_to_D5_by_owner`; this is no longer a D2 rollout blocker.
+- D2 retains truthful non-clickable text that cancellation and reschedule are
+  performed through the club administrator. It must not invent a phone number,
+  link, env setting or fallback.
+- The independently reviewed vertical implementation remains exact checkpoint
+  `4c7a4e4c7b75141c20beb48524aba9fb4891c653`. This follow-up is docs-only:
+  application/backend/frontend/config/schema/runtime were not changed. Tests
+  were not run because executable code did not change; `git diff --check` PASS.
+- Deployment is `not_needed` for this docs-only decision record. No
+  YCLIENTS/API/SSH/Selectel/DB call, provider write, secret access, push, merge
+  or deployment occurred. Selectel test remains on
+  `c04074459948d0bf545e865b885aea7a4e5fec3c`; production is unchanged.

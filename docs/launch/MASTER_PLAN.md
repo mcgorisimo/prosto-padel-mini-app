@@ -39,6 +39,11 @@ Codex. Текущий фактический статус хранится в `W
   вводит authenticated owner для конкретной брони и backend нормализует его в
   lowercase. Snapshot хранится только AEAD-encrypted по migration 033; OTP/email
   verification отложены в D5, rating `isVerified` не используется.
+- Official administrator support/contact source is not available yet. By owner
+  decision, D2 keeps only truthful non-clickable text that cancellation and
+  reschedule are handled by the club administrator. Selecting the source and
+  adding a clickable action are deferred to D5/compliance; D2 must not invent a
+  phone number, link, env value or fallback.
 - Один матч не равен одной брони. Матч может временно существовать без корта.
 - `scenario`, `paymentStatus`, `ownerPaid`, `holdAmount`, `prepay` не являются
   источником истины о реальной брони или платеже.
@@ -195,9 +200,10 @@ Acceptance:
 - Удалить вывод `scenario = booked`.
 - Реализовать `searching/unbooked` и действие «забронировать корт».
 - После подтверждения YCLIENTS связать match с reservation.
-- Для переноса или отмены показывать единое действие связи с клубом только
-  после выбора точного approved support/contact source без hardcode;
-  app/backend PUT и DELETE endpoints отсутствуют.
+- Для переноса или отмены D2 показывает только некликабельный текст о связи с
+  администратором клуба; выбор approved support/contact source и кликабельное
+  действие отложены владельцем в D5/compliance. App/backend PUT и DELETE
+  endpoints отсутствуют; номер, ссылка, env или fallback не придумываются.
 - Отражать provider `deleted/cancelled` только после канонического read-only
   подтверждения; при `unknown` слот не освобождать.
 - Уведомлять участников об окончательном корте, времени, цене и отмене.
