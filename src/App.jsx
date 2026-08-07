@@ -32,7 +32,10 @@ import {
   shouldApplyBackendMatchDetail,
   shouldApplyBackendMatchFeedResponse,
 } from './lib/backendMatchAdapter';
-import { selectBackendReservationsForHome } from './lib/backendBookingHomeAdapter';
+import {
+  selectBackendReservationsForHome,
+  selectMissingBookingCourtServiceIds,
+} from './lib/backendBookingHomeAdapter';
 import { getMyProfile, getPublicPlayerProfiles } from './lib/profileApi';
 import {
   acceptMatchInvitation,
@@ -358,6 +361,7 @@ export default function App({
   const [backendFeedError, setBackendFeedError] = useState('');
   const [backendAccountMatches, setBackendAccountMatches] = useState([]);
   const [backendReservations, setBackendReservations] = useState([]);
+  const [backendCourtNamesById, setBackendCourtNamesById] = useState({});
   const [backendMatchNow, setBackendMatchNow] = useState(
     () => Math.floor(Date.now() / 1_000),
   );
@@ -377,6 +381,7 @@ export default function App({
   const backendFeedRequestRef = useRef(0);
   const backendAccountRequestRef = useRef(0);
   const backendReservationRequestRef = useRef(0);
+  const attemptedBookingCourtServicesRef = useRef(new Set());
   const backendInvitationRequestRef = useRef(0);
   const backendChatRequestRef = useRef(0);
   const backendNotificationRequestRef = useRef(0);
@@ -569,6 +574,28 @@ export default function App({
       return null;
     }
   }, [backendBookingAvailabilityActions]);
+
+  const mergeBackendCourtCatalog = useCallback((courts) => {
+    if (!Array.isArray(courts)) return;
+    setBackendCourtNamesById((previous) => {
+      const next = { ...previous };
+      let changed = false;
+      for (const court of courts) {
+        if (
+          !Number.isSafeInteger(court?.id) ||
+          court.id < 1 ||
+          typeof court.name !== 'string' ||
+          court.name.trim().length < 1 ||
+          court.name.trim().length > 128
+        ) continue;
+        const name = court.name.trim();
+        if (next[court.id] === name) continue;
+        next[court.id] = name;
+        changed = true;
+      }
+      return changed ? Object.freeze(next) : previous;
+    });
+  }, []);
 
   const loadMessages = useCallback(async (match = null) => {
     if (!shouldUseLegacyMatchMessages(match, usesBackendMatches)) {
@@ -911,6 +938,48 @@ export default function App({
       void loadBackendReservations();
     }
   }, [activeTab, loadBackendReservations]);
+
+  useEffect(() => {
+    if (
+      activeTab !== 'home' ||
+      typeof backendBookingAvailabilityActions?.listCourts !== 'function'
+    ) return undefined;
+
+    const serviceIds = selectMissingBookingCourtServiceIds(
+      backendReservations,
+      backendCourtNamesById,
+      attemptedBookingCourtServicesRef.current,
+    );
+    if (serviceIds.length === 0) return undefined;
+    for (const serviceId of serviceIds) {
+      attemptedBookingCourtServicesRef.current.add(serviceId);
+    }
+
+    let active = true;
+    void (async () => {
+      for (const serviceId of serviceIds) {
+        if (!active) return;
+        let result;
+        try {
+          result = await backendBookingAvailabilityActions.listCourts(serviceId);
+        } catch {
+          if (!active) return;
+          continue;
+        }
+        if (!active) return;
+        if (result?.outcome === 'courts_loaded') {
+          mergeBackendCourtCatalog(result.courts);
+        }
+      }
+    })();
+    return () => { active = false; };
+  }, [
+    activeTab,
+    backendBookingAvailabilityActions,
+    backendCourtNamesById,
+    backendReservations,
+    mergeBackendCourtCatalog,
+  ]);
 
   useEffect(() => {
     const refreshVisibleAccountData = () => {
@@ -2644,8 +2713,9 @@ const handleBookSlot = async (booking) => {
     () => selectBackendReservationsForHome(
       backendReservations,
       Date.now(),
+      backendCourtNamesById,
     ),
-    [backendReservations],
+    [backendCourtNamesById, backendReservations],
   );
   const homeUpcomingEvents = useMemo(
     () => [...upcomingMatches, ...backendBookingEvents],
@@ -3005,6 +3075,8 @@ const handleBookSlot = async (booking) => {
             allMatches={allMatches}
             availabilityActions={backendBookingAvailabilityActions}
             initialReservationId={selectedBookingReservationId}
+            courtNamesById={backendCourtNamesById}
+            onCourtCatalogChange={mergeBackendCourtCatalog}
             bookingClient={{
               fullName: [currentUser.firstName, currentUser.lastName]
                 .filter(Boolean)

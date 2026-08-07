@@ -29,6 +29,7 @@ test('maps persisted owner bookings to truthful Home events', async ({ page }) =
     const {
       getBackendBookingStatusPresentation,
       selectBackendReservationsForHome,
+      selectMissingBookingCourtServiceIds,
     } = await import('/src/lib/backendBookingHomeAdapter.js');
     const reservation = {
       reservationId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
@@ -51,9 +52,24 @@ test('maps persisted owner bookings to truthful Home events', async ({ page }) =
         },
       ],
       Date.parse('2035-08-12T19:00:00+03:00'),
+      { 5730531: 'Корт №1' },
+    );
+    const withoutCatalog = selectBackendReservationsForHome(
+      [reservation],
+      Date.parse('2035-08-12T19:00:00+03:00'),
+    );
+    const catalogServiceIds = selectMissingBookingCourtServiceIds(
+      Array.from({ length: 10 }, (_, index) => ({
+        serviceId: 100 + index,
+        courtId: 200 + index,
+      })),
+      {},
+      new Set(),
     );
     return {
       visible,
+      fallbackCourtName: withoutCatalog[0]?.courtName,
+      catalogServiceIds,
       pending: getBackendBookingStatusPresentation('pending_confirmation'),
       unknown: getBackendBookingStatusPresentation('unknown'),
       confirmed: getBackendBookingStatusPresentation('confirmed'),
@@ -73,8 +89,10 @@ test('maps persisted owner bookings to truthful Home events', async ({ page }) =
     time: '20:30',
     duration: 1.5,
     courtId: 5730531,
-    courtName: 'Корт 5730531',
+    courtName: 'Корт №1',
   });
+  expect(summary.fallbackCourtName).toBe('Корт');
+  expect(summary.catalogServiceIds).toEqual([100, 101, 102, 103, 104, 105, 106, 107]);
   expect(summary.pending).toEqual({ label: 'Ожидает', tone: 'pending' });
   expect(summary.unknown).toEqual({ label: 'Уточняется', tone: 'pending' });
   expect(summary.confirmed).toEqual({ label: 'Подтверждено', tone: 'confirmed' });
@@ -762,7 +780,7 @@ test('creates a backend booking from the availability confirmation', async ({ pa
   await expect(reservationCard.getByRole('button', { name: /отмен|перенос/iu })).toHaveCount(0);
   await reservationCard.getByRole('button', { name: 'Обновить бронь' }).click();
   await expect(reservationCard).toContainText('Статус: cancelled');
-  await expect(reservationCard).toContainText('корт 5762241');
+  await expect(reservationCard).toContainText('Корт №2');
   await expect(reservationCard).toContainText(
     'Для отмены или переноса свяжитесь с администратором клуба.',
   );

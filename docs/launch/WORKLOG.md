@@ -2140,3 +2140,34 @@
   newer list request, the selected reservation ID is preserved for exact
   readback, and persisted bookings cannot enter legacy conversion or any
   provider-write surface.
+
+### 2026-08-08 — D2 / customer-facing court labels and payment-status boundary
+
+- Owner correctly identified that `5730531` is a YCLIENTS resource identifier,
+  not a customer-facing court number. Persisted booking cards now resolve the
+  selected resource through the existing authenticated read-only court catalog
+  and display the provider label (`Корт №1`, `Корт №2`, etc.). Home performs
+  sequential catalog reads for at most eight distinct service groups per app
+  session; unavailable/invalid catalog data falls back to `Корт` and never
+  exposes the internal resource ID. The booking detail card uses the same
+  catalog.
+- Product boundary clarified: reservation `pending_confirmation` means the
+  YCLIENTS create/binding outcome is not yet canonically confirmed; it is not a
+  payment status. A successful future D4 payment must not remove the booking
+  from Home. The card remains in `Мои брони` with its court/date/time and D4 may
+  add a separate truthful payment state such as paid only after payment proof.
+  Payment must not turn an unresolved reservation binding into `confirmed`.
+- No payment implementation or changes to `paymentStatus`, `ownerPaid`,
+  `holdAmount` or `prepay` were made. No provider write, schema/migration,
+  backend route or runtime cancel/reschedule surface was added.
+- Focused Playwright PASS `3/3`; full root E2E PASS `85 passed / 1 skipped`;
+  root build PASS (`1616` modules, existing chunk/CJS warnings only).
+  Backend gates were not repeated because backend source and image did not
+  change. `git diff --check` PASS. Deployment remains `pending`; Selectel test
+  still runs exact `92c7af19...` until this frontend checkpoint receives a new
+  push/integration/rollout approval. Production is unchanged.
+- Read-only P0/P1 review found no actionable issue: catalog requests are
+  authenticated GETs, serialized, deduplicated and capped across the app
+  session; invalid/missing labels fail closed to a generic customer label, and
+  neither resource lookup nor status rendering can dispatch a booking/payment
+  write.

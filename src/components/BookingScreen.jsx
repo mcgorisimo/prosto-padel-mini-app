@@ -161,6 +161,8 @@ export default function BookingScreen({
   availabilityActions = null,
   bookingClient = null,
   initialReservationId = null,
+  courtNamesById = {},
+  onCourtCatalogChange = null,
   onBookSlot,
   showToast,
 }) {
@@ -299,6 +301,7 @@ export default function BookingScreen({
         return;
       }
       const courts = mergeCourts(results);
+      onCourtCatalogChange?.(courts);
       setCourtsState({
         status: courts.length > 0 ? 'ready' : 'error',
         serviceKey,
@@ -322,12 +325,17 @@ export default function BookingScreen({
     availabilityActions,
     selectedServiceIds,
     selectedServiceKey,
+    onCourtCatalogChange,
     usesBackendAvailability,
   ]);
 
   const backendCourts = courtsState.serviceKey === selectedServiceKey
     ? courtsState.courts
     : [];
+  const latestReservationCourtName =
+    courtNamesById?.[latestReservation?.courtId] ??
+    backendCourts.find((court) => court.id === latestReservation?.courtId)?.name ??
+    'Корт';
   const queryCourtIds = useMemo(() => {
     if (courtId === ANY_COURT) {
       return backendCourts.map((court) => court.id);
@@ -1075,7 +1083,7 @@ export default function BookingScreen({
         <section data-testid="booking-reservation-card" className="booking-success mt-3 p-4 text-sm leading-relaxed">
           <div className="font-black">Статус: {latestReservation.status}</div>
           <div className="mt-1 text-warm-white/68">
-            {new Date(latestReservation.startsAt).toLocaleString('ru-RU')} · корт {latestReservation.courtId}
+            {new Date(latestReservation.startsAt).toLocaleString('ru-RU')} · {latestReservationCourtName}
           </div>
           {latestReservation.stale && (
             <div className="mt-2 text-amber-200">Данные YCLIENTS временно не подтверждены.</div>
