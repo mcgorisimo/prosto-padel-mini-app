@@ -2073,3 +2073,33 @@
   persisted value, every paired timestamp derives from that same text, and
   provider dispatch/idempotency/runtime surfaces are unchanged. Production is
   unchanged.
+
+### 2026-08-07 — D2 / datetime binding correction Selectel rollout
+
+- Git delivery PASS: exact correction checkpoint
+  `92c7af19f22fa20cc75c8c447015bda1ebc6ecaf` was pushed to
+  `codex/week1-d2-reservation-core`; `main` was fast-forwarded from
+  `b006263fe1f34d374791368cb3691fab89116a39` to the same exact commit and
+  pushed. The clean local main worktree was fast-forwarded to the same SHA.
+- Selectel test precheck PASS: application checkout was clean at `b006263...`,
+  all four containers were healthy with restart count `0`, and the merged
+  persistent-runtime Compose configuration passed quiet validation without
+  printing secrets.
+- Selectel fetched `origin/main`, proved the exact target SHA, detached the
+  clean application checkout at `92c7af19...`, rebuilt the backend image and
+  recreated only `prosto-padel-test-backend-1`. Backend container changed from
+  `29283ca28f29...` to `b058838bcf95...`; PostgreSQL stayed
+  `5e36d4dc1a5c...`, frontend stayed `8af545a18ff4...`, and nginx stayed
+  `e5b98b53a385...`. All four are healthy with restart count `0`.
+- Post-rollout HTTP PASS: internal health `200`, HTTPS health `200`, HTTPS root
+  `200`, and unauthenticated `GET /api/v1/bookings` retained the fail-closed
+  `401` boundary. Five-minute log audit: backend
+  `error/fatal/unhandled=0`, nginx `error=0`, PostgreSQL
+  `error/fatal/panic=0`.
+- No migration, schema, DB write, secret change or provider request was made by
+  the rollout. No YCLIENTS create/PUT/DELETE was invoked by the operator;
+  production is unchanged. Runtime deployment is exact `92c7af19...` on
+  Selectel test. Deployment correction remains `pending_manual_booking_smoke`
+  until the owner submits one fresh booking in the Telegram Mini App and
+  confirms the reservation appears in YCLIENTS; the operator must not submit a
+  synthetic provider write as a substitute.
