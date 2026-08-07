@@ -10,6 +10,7 @@ import {
   YclientsControlledLifecycle,
   YclientsControlledLifecycleDependencies,
   YclientsControlledLifecycleInput,
+  YclientsControlledProviderBinding,
 } from './yclients-controlled-lifecycle';
 
 const COMPANY_ID = 2_079_564;
@@ -127,6 +128,7 @@ function loaded(
 type Harness = Readonly<{
   runner: YclientsControlledLifecycle;
   events: YclientsControlledEvidenceEvent[];
+  bindings: YclientsControlledProviderBinding[];
   listAvailableTimes: jest.Mock;
   preflightBooking: jest.Mock;
   createBookingRecord: jest.Mock;
@@ -135,6 +137,7 @@ type Harness = Readonly<{
   listRecords: jest.Mock;
   reschedule: jest.Mock;
   cancel: jest.Mock;
+  recordBinding: jest.Mock;
 }>;
 
 function harness(
@@ -145,9 +148,12 @@ function harness(
     listResults: ReadonlyArray<YclientsBoundedAdminRecordsResult>;
     rescheduleResult: { outcome: string; [key: string]: unknown };
     cancelResults: ReadonlyArray<{ outcome: string; [key: string]: unknown }>;
+    bindingFailure: boolean;
+    evidenceFailureStep: number;
   }> = {},
 ): Harness {
   const events: YclientsControlledEvidenceEvent[] = [];
+  const bindings: YclientsControlledProviderBinding[] = [];
   let now = Date.parse('2026-08-07T12:00:00Z');
   const listAvailableTimes = jest.fn(async (request: { datetime?: string; date: string }) => ({
     outcome: 'loaded' as const,
@@ -206,6 +212,12 @@ function harness(
   const cancel = jest.fn(async () =>
     cancelQueue.shift() ?? ({ outcome: 'unknown' as const, reason: 'timeout_or_transport' as const }),
   );
+  const recordBinding = jest.fn(
+    async (binding: YclientsControlledProviderBinding) => {
+      if (overrides.bindingFailure) throw new Error('artifact unavailable');
+      bindings.push(binding);
+    },
+  );
 
   const dependencies = {
     availability: { listAvailableTimes, preflightBooking },
@@ -221,14 +233,19 @@ function harness(
     },
     evidence: {
       record: (event: YclientsControlledEvidenceEvent) => {
+        if (event.step === overrides.evidenceFailureStep) {
+          throw new Error('evidence unavailable');
+        }
         events.push(event);
       },
     },
+    bindings: { record: recordBinding },
   } as unknown as YclientsControlledLifecycleDependencies;
 
   return Object.freeze({
     runner: new YclientsControlledLifecycle(dependencies),
     events,
+    bindings,
     listAvailableTimes,
     preflightBooking,
     createBookingRecord,
@@ -237,6 +254,7 @@ function harness(
     listRecords,
     reschedule,
     cancel,
+    recordBinding,
   });
 }
 
@@ -254,6 +272,10 @@ describe('YclientsControlledLifecycle', () => {
     expect(test.listAvailableTimes).toHaveBeenCalledTimes(2);
     expect(test.preflightBooking).toHaveBeenCalledTimes(2);
     expect(test.createBookingRecord).toHaveBeenCalledTimes(1);
+    expect(test.recordBinding).toHaveBeenCalledTimes(1);
+    expect(test.bindings).toEqual([
+      { slot: 'A', appointmentId: 1, recordId: RECORD_ID },
+    ]);
     expect(test.getRecordSnapshot).toHaveBeenCalledTimes(1);
     expect(test.reschedule).toHaveBeenCalledTimes(1);
     expect(test.cancel).toHaveBeenCalledTimes(2);
@@ -311,9 +333,46 @@ describe('YclientsControlledLifecycle', () => {
       holds: ['A'],
     });
     expect(test.getRecordSnapshot).not.toHaveBeenCalled();
+    expect(test.recordBinding).not.toHaveBeenCalled();
     expect(test.reschedule).not.toHaveBeenCalled();
     expect(test.cancel).not.toHaveBeenCalled();
     expect(test.events.map((event) => event.step)).toEqual([1, 2, 3, 4, 5, 7]);
+  });
+
+  it('stops immediately after known create when the root-only binding cannot be persisted', async () => {
+    const test = harness({ bindingFailure: true });
+
+    await expect(test.runner.run(input)).resolves.toEqual({
+      outcome: 'cleanup_required',
+      reason: 'binding_unavailable',
+      requestCount: 5,
+      holds: ['A'],
+    });
+    expect(test.recordBinding).toHaveBeenCalledWith({
+      slot: 'A',
+      appointmentId: 1,
+      recordId: RECORD_ID,
+    });
+    expect(test.getRecordSnapshot).not.toHaveBeenCalled();
+    expect(test.listRecords).not.toHaveBeenCalled();
+    expect(test.reschedule).not.toHaveBeenCalled();
+    expect(test.cancel).not.toHaveBeenCalled();
+  });
+
+  it('persists a known create binding before ordinary evidence can fail', async () => {
+    const test = harness({ evidenceFailureStep: 5 });
+
+    await expect(test.runner.run(input)).resolves.toMatchObject({
+      outcome: 'unknown',
+      reason: 'evidence_unavailable',
+      requestCount: 5,
+    });
+    expect(test.bindings).toEqual([
+      { slot: 'A', appointmentId: 1, recordId: RECORD_ID },
+    ]);
+    expect(test.getRecordSnapshot).not.toHaveBeenCalled();
+    expect(test.reschedule).not.toHaveBeenCalled();
+    expect(test.cancel).not.toHaveBeenCalled();
   });
 
   it.each([

@@ -89,6 +89,25 @@ export interface YclientsControlledEvidenceSink {
   record(event: YclientsControlledEvidenceEvent): void | Promise<void>;
 }
 
+export type YclientsControlledProviderBinding = Readonly<{
+  slot: 'A';
+  appointmentId: number;
+  recordId: number;
+}>;
+
+/**
+ * Separate root-only recovery channel. Provider identifiers must never be
+ * copied into the ordinary evidence stream.
+ */
+export interface YclientsControlledBindingSink {
+  record(binding: YclientsControlledProviderBinding): void | Promise<void>;
+}
+
+export interface YclientsControlledRootOnlyBindingSink
+  extends YclientsControlledBindingSink {
+  readonly persistence: 'root_only_exclusive';
+}
+
 export interface YclientsControlledLifecycleClock {
   nowMilliseconds(): number;
   sleep(milliseconds: number): Promise<void>;
@@ -114,6 +133,7 @@ export interface YclientsControlledLifecycleDependencies {
   readonly writer: WritePort;
   readonly clock: YclientsControlledLifecycleClock;
   readonly evidence: YclientsControlledEvidenceSink;
+  readonly bindings: YclientsControlledBindingSink;
 }
 
 export type YclientsControlledLifecycleResult = Readonly<{
@@ -140,12 +160,14 @@ export type YclientsControlledLifecycleResult = Readonly<{
     | 'repeat_delete_accepted'
     | 'repeat_delete_rejected'
     | 'repeat_delete_unknown'
+    | 'binding_unavailable'
     | 'evidence_unavailable';
   requestCount: number;
   holds: ReadonlyArray<SlotAlias>;
 }>;
 
 class EvidenceUnavailableError extends Error {}
+class BindingUnavailableError extends Error {}
 
 function positiveSafeInteger(value: unknown): value is number {
   return Number.isSafeInteger(value) && Number(value) > 0;
@@ -202,7 +224,9 @@ function validListQuery(
   );
 }
 
-function validInput(value: YclientsControlledLifecycleInput): boolean {
+export function isValidYclientsControlledLifecycleInput(
+  value: YclientsControlledLifecycleInput,
+): boolean {
   const client = value?.client;
   return (
     positiveSafeInteger(value?.apiId) &&
@@ -332,6 +356,7 @@ export class YclientsControlledLifecycle {
     effectFromResult?: (
       result: T,
     ) => YclientsControlledEvidenceEvent['effect'] | undefined,
+    beforeEvidence?: (result: T) => void | Promise<void>,
   ): Promise<T> {
     if (this.inFlight || this.requestCount >= HARD_REQUEST_BUDGET) {
       throw new TypeError('Controlled YCLIENTS request budget violated');
@@ -365,6 +390,11 @@ export class YclientsControlledLifecycle {
       this.lastRequestStartedAt = startedAt;
       this.requestCount += 1;
       operationResult = await operation();
+      try {
+        await beforeEvidence?.(operationResult);
+      } catch {
+        throw new BindingUnavailableError();
+      }
     } finally {
       this.inFlight = false;
     }
@@ -441,7 +471,10 @@ export class YclientsControlledLifecycle {
   async run(
     input: YclientsControlledLifecycleInput,
   ): Promise<YclientsControlledLifecycleResult> {
-    if (this.requestCount !== 0 || !validInput(input)) {
+    if (
+      this.requestCount !== 0 ||
+      !isValidYclientsControlledLifecycleInput(input)
+    ) {
       return result('stopped', 'invalid_plan', this.requestCount, ['A', 'B']);
     }
     try {
@@ -489,6 +522,17 @@ export class YclientsControlledLifecycle {
             datetime: input.slotA.datetime,
             client: input.client,
           }),
+        undefined,
+        async (createResult) => {
+          if (createResult.outcome !== 'created') return;
+          await this.dependencies.bindings.record(
+            Object.freeze({
+              slot: 'A' as const,
+              appointmentId: createResult.appointmentId,
+              recordId: createResult.recordId,
+            }),
+          );
+        },
       );
       if (created.outcome === 'unknown_outcome') {
         const candidate = await this.request(
@@ -750,7 +794,14 @@ export class YclientsControlledLifecycle {
         [],
       );
     } catch (error) {
-      return error instanceof EvidenceUnavailableError
+      return error instanceof BindingUnavailableError
+        ? result(
+            'cleanup_required',
+            'binding_unavailable',
+            this.requestCount,
+            ['A'],
+          )
+        : error instanceof EvidenceUnavailableError
         ? result(
             'unknown',
             'evidence_unavailable',

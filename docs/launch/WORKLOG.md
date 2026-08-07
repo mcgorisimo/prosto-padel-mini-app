@@ -1184,3 +1184,96 @@
   parser/write split, lifecycle и PII/runtime boundaries.
 - Следующий шаг: создать отдельный локальный correction commit и вернуть его на
   независимый review управляющего чата; push/merge/deploy не выполнять.
+
+### 2026-08-07 — D2 / executable controlled runner and read-only plan preparation
+
+- Задача/ветка: `codex/week1-d2-reservation-core`; clean base
+  `e2e88542ece27a384164084f320d788979444cde`. Предыдущие api_id/official GET/
+  notification-gate corrections приняты; открытых P0/P1 на base нет.
+- Добавлен отдельный runtime-disabled controlled runner:
+  - default `dry_run` строго валидирует immutable plan, company и root-only
+    identity binding, выдаёт только non-PII SHA-256 plan digest и делает 0
+    provider requests;
+  - execution требует mode `execute`, exact digest и отдельный one-time approval
+    consume до создания lifecycle; missing/mismatch/consumed approval блокирует
+    все provider calls;
+  - concrete one-shot assembly использует существующие guarded create,
+    availability/preflight, exact/bounded readers, controlled PUT/DELETE,
+    общий conservative limiter, evidence sink и lifecycle C5/C8/C10/C13;
+    Nest module, controller, frontend, env loader и package runtime не изменены;
+  - plan digest связывает company, opaque identity config version, run-scoped
+    external reference, A/B effect, bounded list contracts и controls 14/1/1s.
+    Raw PII и обычный PII digest в projection отсутствуют; identity verifier
+    отдельно доказывает соответствие root-only snapshot binding.
+- Disposable identity: владелец предоставил fullName/phone/email в управляющем
+  чате; значения не повторялись и не записывались в Git/WORKLOG/evidence. Binding
+  `d2-disposable-identity-v1` подтверждён только как non-PII config version.
+- Read-only Selectel test preparation:
+  - mounted Partner/User credential files, API enabled flag и company `2079564`
+    проверены только как `present/match`, без чтения/вывода значений;
+  - выполнено 9 последовательных provider preparation requests: 7 safe GET и 2
+    разрешённых semantic read-only `book_check`; raw bodies не сохранялись;
+  - A: `2026-08-17T12:00:00+03:00`, Корт №1/resource `5730531`, service
+    `30539679` «Аренда корта 1ч.», 3600 seconds, availability + preflight PASS;
+  - B: `2026-08-18T12:00:00+03:00`, Корт №2/resource `5762241`, тот же service,
+    3600 seconds, availability + preflight PASS;
+  - availability является point-in-time evidence; будущий approved lifecycle
+    обязан повторить steps 1–4 и остановиться до create при изменении слота.
+- Exact plan digest:
+  `5ab6f618addc65d2fb669d8adfa288e601fd9ac89ffa45529ec00c59e2fc916d`.
+  Run-scoped external reference входит в digest, но не выводится в summary.
+- Recovery/cleanup для `unknown`/`cleanup_required`, exact recordId readback,
+  held-slot semantics и manual YCLIENTS UI cleanup с отдельным approval описаны в
+  `D2_YCLIENTS_CONTROLLED_RUNBOOK.md`. Duplicate api_id experiment запрещён.
+- Tests:
+  - focused artifacts/runner/executable/lifecycle/admin specs: PASS, 63/63;
+  - backend typecheck: PASS;
+  - backend unit: PASS, 119 suites / 3061 tests;
+  - backend E2E: PASS, 2 suites / 4 tests;
+  - backend build: PASS;
+  - root E2E: PASS, 82 passed / 1 skipped / 0 failed;
+  - root build: PASS, 1615 modules; sandboxed запуск получил известный local
+    access-denied к `vite.config.js`, повтор вне sandbox прошёл; только штатный
+    chunk-size warning.
+- External effects: реальные create/reschedule/cancel/repeat-delete calls,
+  booking records, DB operations, migration, server/runtime/container/config
+  changes отсутствовали. Migration 033 не повторялась (`applied_verified`).
+- Deployment: `not_needed` — runner не импортируется application runtime и не
+  имеет Nest/frontend wiring. D2 integration/test rollout остаётся `pending`.
+- Deployed environment/commit: Selectel test runtime без изменений на D1
+  `c04074459948d0bf545e865b885aea7a4e5fec3c`; production не менялся;
+  containers changed: none.
+- Health/HTTP, Telegram smoke и runtime log audit: not run / not needed — runtime
+  не менялся. Provider evidence ограничено разрешённой read-only plan preparation.
+- Следующий шаг: независимый read-only P0/P1 review всего runner checkpoint.
+  Approval на реальные writes пока не запрашивать; после clean review вернуть
+  exact commit SHA, digest и формулировку отдельного one-time approval.
+- Independent pre-commit review correction (append-only within this open
+  checkpoint): initial review found two P1 safety gaps before any write was
+  enabled. Process-memory approval could be replayed after restart, and a known
+  create response had no durable recovery binding. Both are corrected:
+  - concrete executable assembly now requires a cross-process approval gate;
+    the root-only approval digest is claimed by an exclusive `0600` consumed
+    marker before lifecycle construction, so a second process cannot reuse it;
+  - successful create must persist an exclusive root-only allowlisted binding
+    (`version`, slot A, appointment ID, record ID) before exact GET. Binding
+    failure stops at request 5 with `cleanup_required`; PII, external reference,
+    record hash, auth and raw bodies are forbidden from the artifact;
+  - the root-only directory/file layout and crash/manual cleanup boundaries are
+    now explicit in `D2_YCLIENTS_CONTROLLED_RUNBOOK.md`. No approval/binding file
+    was created and no provider write was performed during this correction.
+- Second independent pre-commit review correction: two additional P1s were
+  found before checkpoint and closed. The executable now accepts only the
+  canonical `https://api.yclients.com` origin (optional trailing slash only)
+  before any identity/approval/client work; HTTP, foreign host, URL credentials,
+  query, fragment and extra path have explicit zero-fetch regressions. The
+  POSIX artifact store now requires the effective UID on the final `0700`
+  directory and `0600` files, rejects writable/untrusted ancestors and symlinks,
+  and verifies parent plus temp/final device/inode identity around atomic link
+  and fsync. Owner/race regressions cover fail-closed behavior. No external call
+  or filesystem artifact was created by these mocked tests.
+- Final independent read-only P0/P1 review after both corrections: `none`.
+  Canonical endpoint gating, effective-UID/inode-safe artifacts,
+  approval-before-provider ordering, binding-before-evidence ordering,
+  C5/C8/C10/C13, PII/hash/token exclusions, hard budget 14 and zero Nest/runtime
+  imports were rechecked on the complete diff.
