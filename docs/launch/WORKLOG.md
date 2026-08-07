@@ -1688,3 +1688,83 @@
   one-request diagnostic read requires separately approved branch delivery,
   isolated dry-run and a fresh exact read-only approval; DELETE remains outside
   that diagnostic gate.
+
+### 2026-08-07 — D2 / product scope correction and cancel-only workflow foundation
+
+- Product owner superseded the previous live-reschedule plan: the application
+  must not originate YCLIENTS `PUT`/reschedule. A player requests a move from a
+  live administrator, the administrator edits YCLIENTS directly, and the app
+  later synchronizes the current date/time/court by bounded read-only exact
+  refresh/reconciliation. Webhook remains disabled. Existing controlled
+  reschedule clients/runners stay runtime-disabled and must not be wired into
+  production.
+- The in-progress diagnostic cleanup Gate 1 was stopped on that decision before
+  dry-run. The D2 branch had already been pushed at exact
+  `7e0c1651164a263ac298a00c10486ca7dda7a127`. Selectel application checkout
+  remained clean at `c04074459948d0bf545e865b885aea7a4e5fec3c`; the same four
+  application container IDs remained running with restart count `0`.
+- The old cleanup layout was preserved without deletion at
+  `/root/prosto-padel-d2-cleanup-1891713981-gate2-archive-fce01e96`; its old
+  approval/consumed artifacts remain root-owned `0600`. The fresh isolated
+  checkout is clean at `7e0c165...`, its artifact directory is empty, the
+  interrupted build left a compiled launcher, and no temporary Gate container
+  remains. Build PASS was not claimed for that interrupted remote command.
+  Cleanup dry-run/execute was not invoked, no new approval artifact was created,
+  and no YCLIENTS/API call or provider write occurred. Automatic cleanup of test
+  record `1891713981` is no longer a D2 goal; slot A remains conservatively held
+  until a later canonical read observes an administrator action.
+- Owner then authorized only a code-only, runtime-disabled cancellation
+  workflow. Added a narrow cancel-only provider port: it exposes one
+  `deleteOnce` and one exact record-ID read, with no generic write, reschedule,
+  list fallback or retry. The provider command contains only scoped internal
+  IDs, request digest, record ID and external API ID; client PII and record hash
+  do not cross this boundary.
+- Added owner-scoped transactional orchestration. A new cancellation atomically
+  enters `cancel_pending`; same-key/same-digest retries return the persisted
+  operation without a second DELETE, different owner/binding/digest fails before
+  provider access, and concurrent retries cannot duplicate the write. One DELETE
+  response is never sufficient to release the slot: only a strict exact safe
+  projection with the same record/API IDs and `deleted=true` can confirm
+  `cancelled`. A timeout, thrown/unknown DELETE, missing/malformed proof or
+  terminal persistence uncertainty remains `unknown`/held with no blind retry.
+  A known no-effect rejection returns the reservation to `confirmed` and keeps
+  its hold.
+- The exact proof intentionally does not compare court/datetime: those may have
+  been changed by the live administrator. A separate read-only sync workflow
+  will update the current target; the cancellation binding remains the immutable
+  record ID plus external API ID.
+- Corrected operation idempotency ordering: an existing valid same-key/same-
+  digest operation is checked before the new-operation monotonic timestamp gate.
+  This permits a completed cancellation retry carrying its original
+  `cancellationRequestedAt` while preserving ownership, reservation/type,
+  request-digest and key checks. The cancel-only service additionally requires
+  `operation.createdAt` to equal that original request timestamp, so the
+  policy-relevant instant cannot be changed on retry. Full YCLIENTS binding
+  validation rejects malformed persisted record IDs before provider access. The
+  timestamp gate still applies before any new operation starts.
+- Focused mocked tests: reservation state machine + cancellation workflow
+  `2 suites / 47 tests` PASS. Regressions cover accepted/uncertain/thrown DELETE,
+  exact proof and mismatches, no retry, concurrent and completed idempotent
+  retries, different timestamp/client/owner, invalid input/binding and record ID,
+  persistence failures, held-slot behavior and absence of PII/hash from
+  command/result projections.
+- Backend gates: typecheck PASS; unit `127 suites / 3199 tests` PASS; E2E
+  `2 suites / 4 tests` PASS; build PASS.
+- Root build: the first sandboxed Vite attempt hit the existing esbuild
+  filesystem `Access is denied` boundary before compilation; the identical
+  build outside that filesystem sandbox PASS (`1615` modules, only existing
+  CJS/chunk-size warnings). Root E2E initially exposed unrelated UI timeout
+  flakes at 9 workers (`80/1/2`, then `81/1/1`); both failing specs passed
+  focused `2/2`, and the final full owned-Vite run with `--workers=4` PASS
+  `82 passed / 1 skipped` without assertion/runtime changes.
+- Runtime/import boundary review: no Nest module, controller, application main,
+  environment loader or executable entry point imports the new port/service.
+  No schema/migration, DB, YCLIENTS/API/server call, payment field, frontend,
+  push, merge or deployment occurred for this code slice. Deployment
+  `not_needed`: code is unreachable from application runtime. Selectel test
+  runtime remains `c040744...`; production was not changed.
+- D2 remains `in_progress`. Before production repository/provider/controller
+  wiring, this checkpoint needs independent read-only review. The next safe
+  slice is a code-only adapter mapping the existing one-DELETE client and exact
+  safe reader into this cancel-only port; app-originated reschedule stays
+  forbidden.

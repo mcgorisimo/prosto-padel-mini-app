@@ -259,8 +259,7 @@ export function startReservationOperation(
     !isReservationIdempotencyKey(input?.idempotencyKey) ||
     !isReservationOperationRequest(input?.request) ||
     input.request.reservationId !== reservation.reservationId ||
-    !isUnixEpochSeconds(input?.now) ||
-    input.now < reservation.updatedAt
+    !isUnixEpochSeconds(input?.now)
   ) {
     return Object.freeze({
       outcome: 'rejected',
@@ -328,6 +327,14 @@ export function startReservationOperation(
       outcome: 'idempotent_retry',
       reservation,
       operation: existingOperation,
+    });
+  }
+
+  if (input.now < reservation.updatedAt) {
+    return Object.freeze({
+      outcome: 'rejected',
+      reason: 'invalid_input',
+      reservation,
     });
   }
 
