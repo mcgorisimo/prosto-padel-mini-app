@@ -2479,3 +2479,48 @@
   code-only diagnostic/correction slice followed by review and another exact
   rollout; the admin-delete/Home-refresh smoke remains blocked until a fresh
   booking persists a complete confirmed binding.
+
+### 2026-08-08 — D2 / post-dispatch create finalization control projection
+
+- This local correction starts from clean docs/evidence HEAD
+  `97b79cccabb152492a5b07c91a5d34800f646526`; Selectel test remains exact
+  runtime `fa5eb38c6608d07c0140f39467dfebe3a058862b`. No Selectel, YCLIENTS or
+  PostgreSQL call was made in this slice.
+- The retained live evidence proves that both `confirm_binding` and the fresh
+  `mark_unknown` fallback failed inside their common repository persistence
+  path, but it does not prove which encrypted-snapshot field or SQL statement
+  produced the old generic `storage_failure`. The code-level failure boundary
+  was exact: both post-dispatch transitions unnecessarily joined and decrypted
+  the full PII client snapshot before they could persist a provider result.
+- Claimed create finalization now locks the owner reservation and exact create
+  operation, then compares a PII-free persisted control projection against the
+  already-started immutable operation: owner/actor/reservation/operation IDs,
+  type/status, idempotency key, request digest, external API ID, target,
+  previous status, created time and provider-attempt markers. Only an exact
+  match may reach the unchanged domain transition and atomic reservation plus
+  operation updates. The finalizer does not select/decrypt client ciphertext;
+  a mismatch fails closed before either update. It accepts only `confirm` or
+  `mark_unknown`, never a retrying provider action.
+- Booking contact is now checked with the same strict client-snapshot validator
+  before persistence/provider dispatch, closing the validation/rehydration
+  mismatch. Logs still receive only reservation/operation correlation IDs,
+  business stage, allowlisted outcome and a new allowlisted persistence stage;
+  no contact value, token, record hash, ciphertext or raw error is emitted.
+- Regression coverage proves strict control-row matching, row locks, zero
+  client-snapshot join/decrypt during finalization, no PII/hash in SQL values or
+  diagnostics, fail-closed mismatch before updates, one provider dispatch and
+  fresh unknown fallback behavior. Focused PASS: backend typecheck and `3
+  suites / 37 tests`. Full PASS: backend unit `132 suites / 3290 tests`, backend
+  E2E `2 suites / 4 tests`, backend build; root E2E `85 passed / 1 skipped` and
+  root build (`1616` modules, existing CJS/chunk warnings only). The first
+  sandboxed root build hit the known managed-worktree esbuild access boundary;
+  the identical approved build outside that boundary passed. `git diff
+  --check` PASS (line-ending warnings only).
+- The live YCLIENTS record from the stopped smoke and its local
+  `pending_confirmation`/held reservation were not read, retried, deleted or
+  changed. Migration 033, schema, payment fields, provider contracts and
+  frontend are unchanged. Independent read-only review found no actionable
+  P0/P1. Deployment impact is `pending_integration_rollout`: backend runtime
+  code changed locally, while push/merge/deploy are explicitly outside this
+  correction gate. A new live booking must not be attempted before this clean
+  checkpoint is integrated and rolled out separately.

@@ -35,6 +35,7 @@ import {
 import { classifyPostgresError } from './postgres-error-classifier';
 import {
   CourtReservationPersistenceError,
+  CourtReservationPersistenceStage,
   CourtReservationRepository,
   CreateCourtReservationPersistenceResult,
 } from './court-reservation.repository';
@@ -125,6 +126,28 @@ interface OperationRow extends QueryResultRow {
   aad_version: unknown;
 }
 
+interface StartedCreateOperationControlRow extends QueryResultRow {
+  operation_id: unknown;
+  reservation_id: unknown;
+  owner_account_id: unknown;
+  actor_account_id: unknown;
+  operation_type: unknown;
+  status: unknown;
+  idempotency_key: unknown;
+  request_digest: unknown;
+  external_api_id: unknown;
+  target_service_id: unknown;
+  target_resource_id: unknown;
+  target_datetime_text: unknown;
+  target_end_datetime_text: unknown;
+  provider_appointment_id: unknown;
+  provider_record_id: unknown;
+  previous_reservation_status: unknown;
+  provider_attempt_started_at: unknown;
+  provider_attempt_finished_at: unknown;
+  created_at: unknown;
+}
+
 const RESERVATION_COLUMNS = `
   reservation_id, owner_account_id, status, target_service_id,
   target_resource_id, target_datetime_text, target_end_datetime_text,
@@ -155,25 +178,41 @@ const OPERATION_COLUMNS = `
   s.aad_version
 `;
 
-function persistenceError(error: unknown): CourtReservationPersistenceError {
-  if (error instanceof CourtReservationPersistenceError) return error;
+const STARTED_CREATE_OPERATION_CONTROL_COLUMNS = `
+  operation_id, reservation_id, owner_account_id, actor_account_id,
+  operation_type, status, idempotency_key, request_digest, external_api_id,
+  target_service_id, target_resource_id, target_datetime_text,
+  target_end_datetime_text, provider_appointment_id, provider_record_id,
+  previous_reservation_status, provider_attempt_started_at,
+  provider_attempt_finished_at, created_at
+`;
+
+function persistenceError(
+  error: unknown,
+  stage: CourtReservationPersistenceStage = 'unspecified',
+): CourtReservationPersistenceError {
+  if (error instanceof CourtReservationPersistenceError) {
+    return error.stage === 'unspecified' && stage !== 'unspecified'
+      ? new CourtReservationPersistenceError(error.reason, stage)
+      : error;
+  }
   const classified = classifyPostgresError(error);
   if (classified.kind === 'non_postgres_error') {
-    return new CourtReservationPersistenceError('storage_failure');
+    return new CourtReservationPersistenceError('storage_failure', stage);
   }
   if (classified.metadata.code === '23P01') {
-    return new CourtReservationPersistenceError('transaction_conflict');
+    return new CourtReservationPersistenceError('transaction_conflict', stage);
   }
   switch (classified.category) {
-    case 'foreign_key_violation': return new CourtReservationPersistenceError('referential_integrity');
-    case 'insufficient_privilege': return new CourtReservationPersistenceError('permission_denied');
+    case 'foreign_key_violation': return new CourtReservationPersistenceError('referential_integrity', stage);
+    case 'insufficient_privilege': return new CourtReservationPersistenceError('permission_denied', stage);
     case 'serialization_failure':
     case 'deadlock_detected':
-    case 'unique_violation': return new CourtReservationPersistenceError('transaction_conflict');
+    case 'unique_violation': return new CourtReservationPersistenceError('transaction_conflict', stage);
     case 'connection_exception':
     case 'admin_shutdown':
-    case 'query_canceled': return new CourtReservationPersistenceError('database_unavailable');
-    default: return new CourtReservationPersistenceError('storage_failure');
+    case 'query_canceled': return new CourtReservationPersistenceError('database_unavailable', stage);
+    default: return new CourtReservationPersistenceError('storage_failure', stage);
   }
 }
 
@@ -346,6 +385,44 @@ function hydrateOperation(row: OperationRow, crypto: ReservationSnapshotCrypto):
   }
 }
 
+function assertStartedCreateOperationControl(
+  row: StartedCreateOperationControlRow,
+  expected: ReservationOperation,
+): void {
+  if (
+    expected.status !== 'pending' ||
+    expected.type !== 'create' ||
+    expected.request.type !== 'create' ||
+    String(row.operation_id) !== expected.operationId ||
+    String(row.reservation_id) !== expected.reservationId ||
+    String(row.owner_account_id) !== expected.ownerAccountId ||
+    String(row.actor_account_id) !== expected.actorAccountId ||
+    row.operation_type !== 'create' ||
+    row.status !== 'pending' ||
+    String(row.idempotency_key) !== expected.idempotencyKey ||
+    String(row.request_digest) !== expected.requestDigest ||
+    readPositive(row.external_api_id) !==
+      expected.request.externalReference.apiId ||
+    readPositive(row.target_service_id) !== expected.request.target.serviceId ||
+    readPositive(row.target_resource_id) !== expected.request.target.courtId ||
+    String(row.target_datetime_text) !== expected.request.target.startsAt ||
+    String(row.target_end_datetime_text) !== expected.request.target.endsAt ||
+    row.provider_appointment_id !== null ||
+    row.provider_record_id !== null ||
+    row.previous_reservation_status !== expected.previousReservationStatus ||
+    row.provider_attempt_started_at === null ||
+    Number(readEpoch(row.provider_attempt_started_at)) <
+      Number(expected.createdAt) ||
+    row.provider_attempt_finished_at !== null ||
+    Number(readEpoch(row.created_at)) !== Number(expected.createdAt)
+  ) {
+    throw new CourtReservationPersistenceError(
+      'invalid_persisted_state',
+      'operation_control_validation',
+    );
+  }
+}
+
 @Injectable()
 export class PostgresCourtReservationRepository implements CourtReservationRepository {
   constructor(private readonly crypto: ReservationSnapshotCrypto, private readonly companyId: number) {}
@@ -460,31 +537,99 @@ export class PostgresCourtReservationRepository implements CourtReservationRepos
     } catch (error) { throw persistenceError(error); }
   }
 
-  async transitionOperation(transaction: PostgresTransaction, actorAccountId: AccountId, reservationId: CourtReservationId, operationId: ReservationOperationId, command: ReservationOperationTransitionCommand): Promise<ReservationOperationTransitionResult> {
+  private async persistTransition(
+    transaction: PostgresTransaction,
+    actorAccountId: AccountId,
+    reservationId: CourtReservationId,
+    operationId: ReservationOperationId,
+    previousReservation: CourtReservation,
+    previousOperation: ReservationOperation,
+    command: ReservationOperationTransitionCommand,
+    transition: Extract<ReservationOperationTransitionResult, { outcome: 'transitioned' }>,
+  ): Promise<ReservationOperationTransitionResult> {
+    let stage: CourtReservationPersistenceStage = 'record_hash_encryption';
     try {
-      const selected = await transaction.query<ReservationRow>(`SELECT ${RESERVATION_COLUMNS} FROM backend_reservation.court_reservations WHERE owner_account_id=$1 AND reservation_id=$2 FOR UPDATE`, [actorAccountId,reservationId]);
-      if (selected.rowCount !== 1) throw new CourtReservationPersistenceError('invalid_input');
-      const reservation = hydrateReservation(selected.rows[0], this.crypto);
-      const operation = await this.findOperationById(transaction, actorAccountId, operationId);
-      if (operation === null) throw new CourtReservationPersistenceError('invalid_input');
-      const transition = transitionReservationOperation(reservation, operation, command);
-      if (transition.outcome !== 'transitioned') return transition;
       const binding = transition.reservation.providerBinding;
-      const encrypted = binding === undefined ? undefined : this.crypto.encryptRecordHash(binding.recordHash);
-      const updated = await transaction.query(`UPDATE backend_reservation.court_reservations SET status=$3,target_service_id=$4,target_resource_id=$5,target_datetime=$6::text::timestamptz,target_datetime_text=$6::text,target_end_datetime=$7::text::timestamptz,target_end_datetime_text=$7::text,yclients_appointment_id=$8,yclients_record_id=$9,yclients_record_hash_ciphertext=$10,yclients_record_hash_nonce=$11,yclients_record_hash_auth_tag=$12,yclients_record_hash_algorithm=$13,yclients_record_hash_encryption_key_version=$14,yclients_record_hash_digest=$15,yclients_record_hash_digest_key_version=$16,version=$17,updated_at=$18,status_changed_at=$18,terminal_at=$19 WHERE owner_account_id=$1 AND reservation_id=$2 AND version=$20`, [actorAccountId,reservationId,transition.reservation.status,transition.reservation.target.serviceId,transition.reservation.target.courtId,transition.reservation.target.startsAt,transition.reservation.target.endsAt,binding?.appointmentId??null,binding?.recordId??null,encrypted?.ciphertext??null,encrypted?.nonce??null,encrypted?.authTag??null,encrypted?.algorithm??null,encrypted?.keyVersion??null,encrypted?.digest??null,encrypted?.digestKeyVersion??null,transition.reservation.version,transition.reservation.updatedAt,['cancelled','rejected'].includes(transition.reservation.status)?transition.reservation.updatedAt:null,reservation.version]);
-      if (updated.rowCount !== 1) throw new CourtReservationPersistenceError('transaction_conflict');
+      const encrypted = binding === undefined
+        ? undefined
+        : this.crypto.encryptRecordHash(binding.recordHash);
+      stage = 'reservation_update';
+      const updated = await transaction.query(`UPDATE backend_reservation.court_reservations SET status=$3,target_service_id=$4,target_resource_id=$5,target_datetime=$6::text::timestamptz,target_datetime_text=$6::text,target_end_datetime=$7::text::timestamptz,target_end_datetime_text=$7::text,yclients_appointment_id=$8,yclients_record_id=$9,yclients_record_hash_ciphertext=$10,yclients_record_hash_nonce=$11,yclients_record_hash_auth_tag=$12,yclients_record_hash_algorithm=$13,yclients_record_hash_encryption_key_version=$14,yclients_record_hash_digest=$15,yclients_record_hash_digest_key_version=$16,version=$17,updated_at=$18,status_changed_at=$18,terminal_at=$19 WHERE owner_account_id=$1 AND reservation_id=$2 AND version=$20`, [actorAccountId,reservationId,transition.reservation.status,transition.reservation.target.serviceId,transition.reservation.target.courtId,transition.reservation.target.startsAt,transition.reservation.target.endsAt,binding?.appointmentId??null,binding?.recordId??null,encrypted?.ciphertext??null,encrypted?.nonce??null,encrypted?.authTag??null,encrypted?.algorithm??null,encrypted?.keyVersion??null,encrypted?.digest??null,encrypted?.digestKeyVersion??null,transition.reservation.version,transition.reservation.updatedAt,['cancelled','rejected'].includes(transition.reservation.status)?transition.reservation.updatedAt:null,previousReservation.version]);
+      if (updated.rowCount !== 1) throw new CourtReservationPersistenceError('transaction_conflict', stage);
       const opBinding = 'providerBinding' in transition.operation ? transition.operation.providerBinding : undefined;
+      stage = 'record_hash_encryption';
       const opEncrypted = opBinding === undefined ? undefined : this.crypto.encryptRecordHash(opBinding.recordHash);
       const result = 'result' in transition.operation ? transition.operation.result : undefined;
       const reason = 'reason' in transition.operation ? transition.operation.reason : result?.outcome === 'rejected' ? result.reason : null;
-      const operationUpdated = await transaction.query(`UPDATE backend_reservation.reservation_operations SET status=$4,provider_appointment_id=$5,provider_record_id=$6,provider_record_hash_ciphertext=$7,provider_record_hash_nonce=$8,provider_record_hash_auth_tag=$9,provider_record_hash_algorithm=$10,provider_record_hash_encryption_key_version=$11,provider_record_hash_digest=$12,provider_record_hash_digest_key_version=$13,provider_attempt_finished_at=CASE WHEN provider_attempt_started_at IS NULL THEN NULL ELSE $14 END,unknown_at=$15,terminal_at=$16,reconciled_at=$17,reconciliation_outcome=$18,rejection_reason=$19,version=version+1,updated_at=$14 WHERE owner_account_id=$1 AND reservation_id=$2 AND operation_id=$3 AND status=$20`, [actorAccountId,reservationId,operationId,transition.operation.status,opBinding?.appointmentId??null,opBinding?.recordId??null,opEncrypted?.ciphertext??null,opEncrypted?.nonce??null,opEncrypted?.authTag??null,opEncrypted?.algorithm??null,opEncrypted?.keyVersion??null,opEncrypted?.digest??null,opEncrypted?.digestKeyVersion??null,command.now,transition.operation.status==='unknown' ? command.now : 'uncertainAt' in transition.operation ? transition.operation.uncertainAt : null,'terminalAt' in transition.operation?transition.operation.terminalAt:null,transition.operation.status==='reconciled'?transition.operation.terminalAt:null,result?.outcome??null,reason,operation.status]);
-      if (operationUpdated.rowCount !== 1) throw new CourtReservationPersistenceError('transaction_conflict');
+      stage = 'operation_update';
+      const operationUpdated = await transaction.query(`UPDATE backend_reservation.reservation_operations SET status=$4,provider_appointment_id=$5,provider_record_id=$6,provider_record_hash_ciphertext=$7,provider_record_hash_nonce=$8,provider_record_hash_auth_tag=$9,provider_record_hash_algorithm=$10,provider_record_hash_encryption_key_version=$11,provider_record_hash_digest=$12,provider_record_hash_digest_key_version=$13,provider_attempt_finished_at=CASE WHEN provider_attempt_started_at IS NULL THEN NULL ELSE $14 END,unknown_at=$15,terminal_at=$16,reconciled_at=$17,reconciliation_outcome=$18,rejection_reason=$19,version=version+1,updated_at=$14 WHERE owner_account_id=$1 AND reservation_id=$2 AND operation_id=$3 AND status=$20`, [actorAccountId,reservationId,operationId,transition.operation.status,opBinding?.appointmentId??null,opBinding?.recordId??null,opEncrypted?.ciphertext??null,opEncrypted?.nonce??null,opEncrypted?.authTag??null,opEncrypted?.algorithm??null,opEncrypted?.keyVersion??null,opEncrypted?.digest??null,opEncrypted?.digestKeyVersion??null,command.now,transition.operation.status==='unknown' ? command.now : 'uncertainAt' in transition.operation ? transition.operation.uncertainAt : null,'terminalAt' in transition.operation?transition.operation.terminalAt:null,transition.operation.status==='reconciled'?transition.operation.terminalAt:null,result?.outcome??null,reason,previousOperation.status]);
+      if (operationUpdated.rowCount !== 1) throw new CourtReservationPersistenceError('transaction_conflict', stage);
       if (transition.reservation.status === 'rejected' || transition.reservation.status === 'cancelled') {
+        stage = 'slot_hold_release';
         const released = await transaction.query(`UPDATE backend_reservation.reservation_slot_holds SET released_at=$3,updated_at=$3,version=version+1 WHERE owner_account_id=$1 AND reservation_id=$2 AND released_at IS NULL`, [actorAccountId,reservationId,command.now]);
-        if (released.rowCount !== 1) throw new CourtReservationPersistenceError('invalid_persisted_state');
+        if (released.rowCount !== 1) throw new CourtReservationPersistenceError('invalid_persisted_state', stage);
       }
       return transition;
-    } catch (error) { throw persistenceError(error); }
+    } catch (error) {
+      throw persistenceError(error, stage);
+    }
+  }
+
+  async transitionOperation(transaction: PostgresTransaction, actorAccountId: AccountId, reservationId: CourtReservationId, operationId: ReservationOperationId, command: ReservationOperationTransitionCommand): Promise<ReservationOperationTransitionResult> {
+    let stage: CourtReservationPersistenceStage = 'reservation_lock';
+    try {
+      const selected = await transaction.query<ReservationRow>(`SELECT ${RESERVATION_COLUMNS} FROM backend_reservation.court_reservations WHERE owner_account_id=$1 AND reservation_id=$2 FOR UPDATE`, [actorAccountId,reservationId]);
+      if (selected.rowCount !== 1) throw new CourtReservationPersistenceError('invalid_input', stage);
+      stage = 'reservation_hydration';
+      const reservation = hydrateReservation(selected.rows[0], this.crypto);
+      stage = 'operation_hydration';
+      const operation = await this.findOperationById(transaction, actorAccountId, operationId);
+      if (operation === null) throw new CourtReservationPersistenceError('invalid_input', stage);
+      stage = 'domain_transition';
+      const transition = transitionReservationOperation(reservation, operation, command);
+      if (transition.outcome !== 'transitioned') return transition;
+      return this.persistTransition(transaction, actorAccountId, reservationId, operationId, reservation, operation, command, transition);
+    } catch (error) { throw persistenceError(error, stage); }
+  }
+
+  async finalizeStartedCreateOperation(
+    transaction: PostgresTransaction,
+    actorAccountId: AccountId,
+    reservationId: CourtReservationId,
+    expectedOperation: ReservationOperation,
+    command:
+      | Extract<ReservationOperationTransitionCommand, { type: 'confirm' }>
+      | Extract<ReservationOperationTransitionCommand, { type: 'mark_unknown' }>,
+  ): Promise<ReservationOperationTransitionResult> {
+    let stage: CourtReservationPersistenceStage = 'reservation_lock';
+    try {
+      if (
+        expectedOperation.status !== 'pending' ||
+        expectedOperation.type !== 'create' ||
+        expectedOperation.request.type !== 'create' ||
+        (command.type !== 'confirm' && command.type !== 'mark_unknown')
+      ) {
+        throw new CourtReservationPersistenceError(
+          'invalid_input',
+          'operation_control_validation',
+        );
+      }
+      const selected = await transaction.query<ReservationRow>(`SELECT ${RESERVATION_COLUMNS} FROM backend_reservation.court_reservations WHERE owner_account_id=$1 AND reservation_id=$2 FOR UPDATE`, [actorAccountId,reservationId]);
+      if (selected.rowCount !== 1) throw new CourtReservationPersistenceError('invalid_input', stage);
+      stage = 'reservation_hydration';
+      const reservation = hydrateReservation(selected.rows[0], this.crypto);
+      stage = 'operation_lock';
+      const operationResult = await transaction.query<StartedCreateOperationControlRow>(`SELECT ${STARTED_CREATE_OPERATION_CONTROL_COLUMNS} FROM backend_reservation.reservation_operations WHERE owner_account_id=$1 AND reservation_id=$2 AND operation_id=$3 FOR UPDATE`, [actorAccountId,reservationId,expectedOperation.operationId]);
+      if (operationResult.rowCount !== 1) throw new CourtReservationPersistenceError('invalid_input', stage);
+      stage = 'operation_control_validation';
+      assertStartedCreateOperationControl(operationResult.rows[0], expectedOperation);
+      stage = 'domain_transition';
+      const transition = transitionReservationOperation(reservation, expectedOperation, command);
+      if (transition.outcome !== 'transitioned') return transition;
+      return this.persistTransition(transaction, actorAccountId, reservationId, expectedOperation.operationId, reservation, expectedOperation, command, transition);
+    } catch (error) {
+      throw persistenceError(error, stage);
+    }
   }
 
   async claimProviderAttempt(transaction: PostgresTransaction, ownerAccountId: AccountId, operationId: ReservationOperationId, now: number): Promise<'claimed'|'already_started'|'not_pending'> {

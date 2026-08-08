@@ -18,6 +18,7 @@ describe('BookingReservationDiagnosticLogger', () => {
       operationId: deterministicUuid('diagnostic-operation') as ReservationOperationId,
       stage: 'confirm_binding',
       outcome: 'storage_failure',
+      persistenceStage: 'operation_control_validation',
     }));
 
     expect(warn).toHaveBeenCalledTimes(1);
@@ -27,6 +28,7 @@ describe('BookingReservationDiagnosticLogger', () => {
       operationId: deterministicUuid('diagnostic-operation'),
       stage: 'confirm_binding',
       outcome: 'storage_failure',
+      persistenceStage: 'operation_control_validation',
     });
     const serialized = JSON.stringify(warn.mock.calls);
     expect(serialized).not.toContain('phone');

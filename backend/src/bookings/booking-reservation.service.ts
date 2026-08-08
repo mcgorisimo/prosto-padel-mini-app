@@ -5,6 +5,7 @@ import { unixEpochSeconds } from '../auth/auth.types';
 import {
   CourtReservationPersistenceError,
   CourtReservationPersistenceFailure,
+  CourtReservationPersistenceStage,
 } from '../database/court-reservation.repository';
 import { PostgresCourtReservationRepository } from '../database/postgres-court-reservation.repository';
 import { PostgresPlayerProfileReader } from '../database/postgres-player-profile-reader';
@@ -20,6 +21,7 @@ import {
   ReservationIdempotencyKey,
   ReservationOperation,
   courtReservationId,
+  isReservationClientSnapshot,
   newCourtReservationId,
   newReservationOperationId,
   reservationIdempotencyKey,
@@ -116,10 +118,18 @@ function terminalResult(operation: ReservationOperation, reservation: CourtReser
 
 function persistenceDiagnosticOutcome(
   error: unknown,
-): CourtReservationPersistenceFailure | 'unexpected_failure' {
+): Readonly<{
+  outcome: CourtReservationPersistenceFailure | 'unexpected_failure';
+  persistenceStage?: CourtReservationPersistenceStage;
+}> {
   return error instanceof CourtReservationPersistenceError
-    ? error.reason
-    : 'unexpected_failure';
+    ? Object.freeze({
+        outcome: error.reason,
+        ...(error.stage === 'unspecified'
+          ? {}
+          : { persistenceStage: error.stage }),
+      })
+    : Object.freeze({ outcome: 'unexpected_failure' });
 }
 
 @Injectable()
@@ -141,6 +151,7 @@ export class BookingReservationService {
     operation: ReservationOperation,
     stage: BookingReservationFinalizationStage,
     outcome: BookingReservationFinalizationOutcome,
+    persistenceStage?: CourtReservationPersistenceStage,
   ): void {
     try {
       this.diagnostics.record(Object.freeze({
@@ -148,6 +159,7 @@ export class BookingReservationService {
         operationId: operation.operationId,
         stage,
         outcome,
+        ...(persistenceStage === undefined ? {} : { persistenceStage }),
       }));
     } catch {
       // Diagnostics are best-effort and must never alter reservation safety.
@@ -162,11 +174,11 @@ export class BookingReservationService {
   ): Promise<CourtReservation> {
     try {
       const fallback = await this.transactions.runInTransaction((tx) =>
-        this.reservations.transitionOperation(
+        this.reservations.finalizeStartedCreateOperation(
           tx,
           ownerAccountId,
           reservation.reservationId,
-          operation.operationId,
+          operation,
           {
             type: 'mark_unknown',
             actorAccountId: ownerAccountId,
@@ -190,11 +202,13 @@ export class BookingReservationService {
         'transition_rejected',
       );
     } catch (error) {
+      const diagnostic = persistenceDiagnosticOutcome(error);
       this.recordFinalization(
         reservation,
         operation,
         'persist_unknown_fallback',
-        persistenceDiagnosticOutcome(error),
+        diagnostic.outcome,
+        diagnostic.persistenceStage,
       );
     }
     return reservation;
@@ -215,7 +229,11 @@ export class BookingReservationService {
       const name = profileResult.outcome === 'found' ? fullName(profileResult.profile.firstName, profileResult.profile.lastName) : undefined;
       const phone = profileResult.outcome === 'found' ? profileResult.profile.phone : undefined;
       if (name === undefined || phone === undefined || !/^\+[1-9]\d{6,14}$/u.test(phone)) return Object.freeze({ outcome: 'contact_incomplete' });
-      contact = Object.freeze({ phone, fullName: name, email });
+      const snapshot = Object.freeze({ phone, fullName: name, email });
+      if (!isReservationClientSnapshot(snapshot)) {
+        return Object.freeze({ outcome: 'contact_incomplete' });
+      }
+      contact = snapshot;
     } catch { return Object.freeze({ outcome: 'unavailable' }); }
 
     let started: Readonly<{reservation:CourtReservation;operation:ReservationOperation;retry:boolean}> | undefined;
@@ -323,8 +341,8 @@ export class BookingReservationService {
     try {
       const transitioned = await this.transactions.runInTransaction((tx) => {
         if (dispatchClaim !== 'claimed') return this.reservations.transitionOperation(tx, ownerAccountId, started.reservation.reservationId, started.operation.operationId, { type:'reject',actorAccountId:ownerAccountId,now:timestamp,reason:reservationProviderRejectionReason(provider.outcome==='not_bookable'?'not_bookable':'provider_not_dispatched') });
-        if (provider.outcome === 'created') return this.reservations.transitionOperation(tx, ownerAccountId, started.reservation.reservationId, started.operation.operationId, { type:'confirm',actorAccountId:ownerAccountId,now:timestamp,providerBinding:{provider:'yclients',appointmentId:provider.appointmentId,recordId:provider.recordId,recordHash:provider.recordHash} });
-        return this.reservations.transitionOperation(tx, ownerAccountId, started.reservation.reservationId, started.operation.operationId, {type:'mark_unknown',actorAccountId:ownerAccountId,now:timestamp});
+        if (provider.outcome === 'created') return this.reservations.finalizeStartedCreateOperation(tx, ownerAccountId, started.reservation.reservationId, started.operation, { type:'confirm',actorAccountId:ownerAccountId,now:timestamp,providerBinding:{provider:'yclients',appointmentId:provider.appointmentId,recordId:provider.recordId,recordHash:provider.recordHash} });
+        return this.reservations.finalizeStartedCreateOperation(tx, ownerAccountId, started.reservation.reservationId, started.operation, {type:'mark_unknown',actorAccountId:ownerAccountId,now:timestamp});
       });
       if (transitioned.outcome !== 'transitioned') {
         this.recordFinalization(
@@ -362,11 +380,13 @@ export class BookingReservationService {
       );
       return Object.freeze({outcome:'unknown',reservation:view(transitioned.reservation,true)});
     } catch (error) {
+      const diagnostic = persistenceDiagnosticOutcome(error);
       this.recordFinalization(
         started.reservation,
         started.operation,
         finalizationStage,
-        persistenceDiagnosticOutcome(error),
+        diagnostic.outcome,
+        diagnostic.persistenceStage,
       );
       if (dispatchClaim !== 'claimed') {
         return Object.freeze({ outcome: 'unknown', reservation: view(started.reservation, true) });

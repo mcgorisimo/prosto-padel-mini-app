@@ -4,6 +4,10 @@ import { unixEpochSeconds } from '../auth/auth.types';
 import { ReservationSnapshotCrypto } from '../reservations/reservation-snapshot.crypto';
 import { digestReservationOperationRequest } from '../reservations/reservation-request-digest';
 import {
+  createCourtReservation,
+  startReservationOperation,
+} from '../reservations/reservation.state-machine';
+import {
   CourtReservation,
   ReservationIdempotencyKey,
   ReservationOperationRequest,
@@ -216,6 +220,223 @@ describe('PostgresCourtReservationRepository SQL contract', () => {
         recordHash: '0123456789abcdef0123456789abcdef',
       },
     });
+  });
+
+  it('finalizes a claimed create from the persisted control row without decrypting client PII', async () => {
+    const crypto = new ReservationSnapshotCrypto(Buffer.alloc(32, 11), 1);
+    const target = Object.freeze({
+      serviceId: 11,
+      courtId: 22,
+      startsAt: '2027-01-15T10:00:00+03:00',
+      endsAt: '2027-01-15T11:00:00+03:00',
+    });
+    const initial = createCourtReservation({
+      reservationId: RESERVATION_ID,
+      ownerAccountId: OWNER,
+      target,
+      now: unixEpochSeconds(1_800_000_000),
+    });
+    const started = startReservationOperation(initial, {
+      operationId: OPERATION_ID,
+      actorAccountId: OWNER,
+      idempotencyKey: REQUEST_KEY,
+      now: unixEpochSeconds(1_800_000_000),
+      request: {
+        type: 'create',
+        reservationId: RESERVATION_ID,
+        ownerAccountId: OWNER,
+        externalReference: { apiId: 77 },
+        client: {
+          phone: '+79800000000',
+          fullName: 'Private Player',
+          email: 'private.owner@example.test',
+        },
+        target,
+      },
+    });
+    if (started.outcome !== 'started') throw new Error('invalid fixture');
+    const reservationRow = {
+      reservation_id: RESERVATION_ID,
+      owner_account_id: OWNER,
+      status: 'pending_confirmation',
+      target_service_id: '11',
+      target_resource_id: '22',
+      target_datetime_text: target.startsAt,
+      target_end_datetime_text: target.endsAt,
+      yclients_appointment_id: null,
+      yclients_record_id: null,
+      yclients_record_hash_ciphertext: null,
+      yclients_record_hash_nonce: null,
+      yclients_record_hash_auth_tag: null,
+      yclients_record_hash_algorithm: null,
+      yclients_record_hash_encryption_key_version: null,
+      yclients_record_hash_digest: null,
+      yclients_record_hash_digest_key_version: null,
+      version: '2',
+      created_at: '1800000000',
+      updated_at: '1800000000',
+    };
+    const controlRow = {
+      operation_id: OPERATION_ID,
+      reservation_id: RESERVATION_ID,
+      owner_account_id: OWNER,
+      actor_account_id: OWNER,
+      operation_type: 'create',
+      status: 'pending',
+      idempotency_key: REQUEST_KEY,
+      request_digest: started.operation.requestDigest,
+      external_api_id: '77',
+      target_service_id: '11',
+      target_resource_id: '22',
+      target_datetime_text: target.startsAt,
+      target_end_datetime_text: target.endsAt,
+      provider_appointment_id: null,
+      provider_record_id: null,
+      previous_reservation_status: 'unbooked',
+      provider_attempt_started_at: '1800000001',
+      provider_attempt_finished_at: null,
+      created_at: '1800000000',
+    };
+    const query = jest.fn()
+      .mockResolvedValueOnce(result([reservationRow]))
+      .mockResolvedValueOnce(result([controlRow]))
+      .mockResolvedValueOnce(result([{}]))
+      .mockResolvedValueOnce(result([{}]));
+    const repository = new PostgresCourtReservationRepository(
+      crypto,
+      2_079_564,
+    );
+
+    await expect(repository.finalizeStartedCreateOperation(
+      { query } as never,
+      OWNER,
+      RESERVATION_ID,
+      started.operation,
+      {
+        type: 'confirm',
+        actorAccountId: OWNER,
+        now: unixEpochSeconds(1_800_000_002),
+        providerBinding: {
+          provider: 'yclients',
+          appointmentId: 33,
+          recordId: 44,
+          recordHash: 'private-hash',
+        },
+      },
+    )).resolves.toMatchObject({
+      outcome: 'transitioned',
+      reservation: { status: 'confirmed' },
+      operation: { status: 'confirmed' },
+    });
+
+    expect(query).toHaveBeenCalledTimes(4);
+    const controlSql = String(query.mock.calls[1][0]).replace(/\s+/gu, ' ');
+    expect(controlSql).toContain('reservation_operations');
+    expect(controlSql).toContain('FOR UPDATE');
+    expect(controlSql).not.toContain('reservation_operation_client_snapshots');
+    expect(controlSql).not.toContain('ciphertext');
+    const serializedQueries = JSON.stringify(query.mock.calls);
+    expect(serializedQueries).not.toContain('Private Player');
+    expect(serializedQueries).not.toContain('private.owner@example.test');
+    expect(serializedQueries).not.toContain('+79800000000');
+    expect(serializedQueries).not.toContain('private-hash');
+  });
+
+  it('fails closed before updates when the persisted control row differs from the started operation', async () => {
+    const target = Object.freeze({
+      serviceId: 11,
+      courtId: 22,
+      startsAt: '2027-01-15T10:00:00+03:00',
+      endsAt: '2027-01-15T11:00:00+03:00',
+    });
+    const initial = createCourtReservation({
+      reservationId: RESERVATION_ID,
+      ownerAccountId: OWNER,
+      target,
+      now: unixEpochSeconds(1_800_000_000),
+    });
+    const started = startReservationOperation(initial, {
+      operationId: OPERATION_ID,
+      actorAccountId: OWNER,
+      idempotencyKey: REQUEST_KEY,
+      now: unixEpochSeconds(1_800_000_000),
+      request: {
+        type: 'create',
+        reservationId: RESERVATION_ID,
+        ownerAccountId: OWNER,
+        externalReference: { apiId: 77 },
+        client: {
+          phone: '+79800000000',
+          fullName: 'Private Player',
+          email: 'private.owner@example.test',
+        },
+        target,
+      },
+    });
+    if (started.outcome !== 'started') throw new Error('invalid fixture');
+    const query = jest.fn()
+      .mockResolvedValueOnce(result([{
+        reservation_id: RESERVATION_ID,
+        owner_account_id: OWNER,
+        status: 'pending_confirmation',
+        target_service_id: '11',
+        target_resource_id: '22',
+        target_datetime_text: target.startsAt,
+        target_end_datetime_text: target.endsAt,
+        yclients_appointment_id: null,
+        yclients_record_id: null,
+        yclients_record_hash_ciphertext: null,
+        yclients_record_hash_nonce: null,
+        yclients_record_hash_auth_tag: null,
+        yclients_record_hash_algorithm: null,
+        yclients_record_hash_encryption_key_version: null,
+        yclients_record_hash_digest: null,
+        yclients_record_hash_digest_key_version: null,
+        version: '2',
+        created_at: '1800000000',
+        updated_at: '1800000000',
+      }]))
+      .mockResolvedValueOnce(result([{
+        operation_id: OPERATION_ID,
+        reservation_id: RESERVATION_ID,
+        owner_account_id: OWNER,
+        actor_account_id: OWNER,
+        operation_type: 'create',
+        status: 'pending',
+        idempotency_key: REQUEST_KEY,
+        request_digest: '0'.repeat(64),
+        external_api_id: '77',
+        target_service_id: '11',
+        target_resource_id: '22',
+        target_datetime_text: target.startsAt,
+        target_end_datetime_text: target.endsAt,
+        provider_appointment_id: null,
+        provider_record_id: null,
+        previous_reservation_status: 'unbooked',
+        provider_attempt_started_at: '1800000001',
+        provider_attempt_finished_at: null,
+        created_at: '1800000000',
+      }]));
+    const repository = new PostgresCourtReservationRepository(
+      new ReservationSnapshotCrypto(Buffer.alloc(32, 12), 1),
+      2_079_564,
+    );
+
+    await expect(repository.finalizeStartedCreateOperation(
+      { query } as never,
+      OWNER,
+      RESERVATION_ID,
+      started.operation,
+      {
+        type: 'mark_unknown',
+        actorAccountId: OWNER,
+        now: unixEpochSeconds(1_800_000_002),
+      },
+    )).rejects.toMatchObject({
+      reason: 'invalid_persisted_state',
+      stage: 'operation_control_validation',
+    });
+    expect(query).toHaveBeenCalledTimes(2);
   });
 
   it('persists the exact interval/company binding without contact plaintext', async () => {

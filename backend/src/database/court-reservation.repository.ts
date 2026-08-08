@@ -37,10 +37,26 @@ export type CourtReservationPersistenceFailure =
   | 'database_unavailable'
   | 'storage_failure';
 
+export type CourtReservationPersistenceStage =
+  | 'unspecified'
+  | 'reservation_lock'
+  | 'reservation_hydration'
+  | 'operation_lock'
+  | 'operation_hydration'
+  | 'operation_control_validation'
+  | 'domain_transition'
+  | 'record_hash_encryption'
+  | 'reservation_update'
+  | 'operation_update'
+  | 'slot_hold_release';
+
 export class CourtReservationPersistenceError extends Error {
   readonly name = 'CourtReservationPersistenceError';
 
-  constructor(readonly reason: CourtReservationPersistenceFailure) {
+  constructor(
+    readonly reason: CourtReservationPersistenceFailure,
+    readonly stage: CourtReservationPersistenceStage = 'unspecified',
+  ) {
     super('Court reservation persistence failed');
   }
 }

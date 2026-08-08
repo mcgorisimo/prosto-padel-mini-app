@@ -119,6 +119,14 @@ function harness() {
       }
       return result;
     }),
+    finalizeStartedCreateOperation: jest.fn(async (_tx: unknown, _actor: AccountId, _reservationId: string, operation: ReservationOperation, command: Parameters<typeof transitionReservationOperation>[2]) => {
+      const result = transitionReservationOperation(storedReservation!, operation, command);
+      if (result.outcome === 'transitioned') {
+        storedReservation = result.reservation;
+        storedOperation = result.operation;
+      }
+      return result;
+    }),
     noteReconciliationAttempt: jest.fn(),
     applyExactRefresh: jest.fn(),
   };
@@ -163,6 +171,31 @@ describe('BookingReservationService', () => {
     expect((await h.service.create(OWNER, { requestKey: REQUEST_KEY, serviceId: 11, courtId: 22, datetime: '2027-01-15T10:00:00+03:00', email: 'invalid' })).outcome).toBe('invalid_request');
     expect(h.booking.createBooking).not.toHaveBeenCalled();
     expect(h.reservations.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects a profile contact that cannot be rehydrated as the strict encrypted snapshot', async () => {
+    const h = harness();
+    h.profiles.findByAccountId.mockResolvedValueOnce({
+      outcome: 'found',
+      profile: {
+        accountId: OWNER,
+        firstName: 'Andrey',
+        phone: '+79804440505\n',
+        rating: 3,
+        isVerified: false,
+        capabilities: [],
+      },
+    } as never);
+
+    await expect(h.service.create(OWNER, {
+      requestKey: REQUEST_KEY,
+      serviceId: 11,
+      courtId: 22,
+      datetime: '2027-01-15T10:00:00+03:00',
+      email: PRIVATE_EMAIL,
+    })).resolves.toEqual({ outcome: 'contact_incomplete' });
+    expect(h.reservations.create).not.toHaveBeenCalled();
+    expect(h.booking.createBooking).not.toHaveBeenCalled();
   });
 
   it('returns a terminal same-key retry without a second provider create', async () => {
@@ -237,13 +270,13 @@ describe('BookingReservationService', () => {
     const result = await h.service.create(OWNER, { requestKey: REQUEST_KEY, serviceId: 11, courtId: 22, datetime: '2027-01-15T10:00:00+03:00', email: PRIVATE_EMAIL });
     expect(result.outcome).toBe('unknown');
     expect(h.booking.createBooking).toHaveBeenCalledTimes(1);
-    expect(h.reservations.transitionOperation).toHaveBeenLastCalledWith(expect.anything(), OWNER, expect.any(String), expect.any(String), expect.objectContaining({ type: 'mark_unknown' }));
+    expect(h.reservations.finalizeStartedCreateOperation).toHaveBeenLastCalledWith(expect.anything(), OWNER, expect.any(String), expect.objectContaining({ status: 'pending' }), expect.objectContaining({ type: 'mark_unknown' }));
   });
 
   it('persists unknown in a fresh transaction when post-dispatch confirm fails', async () => {
     const h = harness();
-    h.reservations.transitionOperation
-      .mockRejectedValueOnce(new CourtReservationPersistenceError('storage_failure'));
+    h.reservations.finalizeStartedCreateOperation
+      .mockRejectedValueOnce(new CourtReservationPersistenceError('storage_failure', 'reservation_update'));
 
     const result = await h.service.create(OWNER, {
       requestKey: REQUEST_KEY,
@@ -259,12 +292,12 @@ describe('BookingReservationService', () => {
     });
     expect(h.booking.createBooking).toHaveBeenCalledTimes(1);
     expect(h.providerDispatchCount()).toBe(1);
-    expect(h.reservations.transitionOperation).toHaveBeenCalledTimes(2);
-    expect(h.reservations.transitionOperation).toHaveBeenLastCalledWith(
+    expect(h.reservations.finalizeStartedCreateOperation).toHaveBeenCalledTimes(2);
+    expect(h.reservations.finalizeStartedCreateOperation).toHaveBeenLastCalledWith(
       expect.anything(),
       OWNER,
       expect.any(String),
-      expect.any(String),
+      expect.objectContaining({ status: 'pending' }),
       expect.objectContaining({ type: 'mark_unknown' }),
     );
     expect(h.diagnostics.record).toHaveBeenNthCalledWith(
@@ -272,6 +305,7 @@ describe('BookingReservationService', () => {
       expect.objectContaining({
         stage: 'confirm_binding',
         outcome: 'storage_failure',
+        persistenceStage: 'reservation_update',
       }),
     );
     expect(h.diagnostics.record).toHaveBeenNthCalledWith(
@@ -285,8 +319,8 @@ describe('BookingReservationService', () => {
 
   it('never retries POST or leaks provider/contact data when both finalization attempts fail', async () => {
     const h = harness();
-    h.reservations.transitionOperation
-      .mockRejectedValueOnce(new CourtReservationPersistenceError('database_unavailable'))
+    h.reservations.finalizeStartedCreateOperation
+      .mockRejectedValueOnce(new CourtReservationPersistenceError('database_unavailable', 'operation_update'))
       .mockRejectedValueOnce(new Error('private provider body private-hash 79804440505'));
 
     const result = await h.service.create(OWNER, {
@@ -303,7 +337,7 @@ describe('BookingReservationService', () => {
     });
     expect(h.booking.createBooking).toHaveBeenCalledTimes(1);
     expect(h.providerDispatchCount()).toBe(1);
-    expect(h.reservations.transitionOperation).toHaveBeenCalledTimes(2);
+    expect(h.reservations.finalizeStartedCreateOperation).toHaveBeenCalledTimes(2);
     const diagnosticJson = JSON.stringify(h.diagnostics.record.mock.calls);
     expect(diagnosticJson).toContain('database_unavailable');
     expect(diagnosticJson).toContain('unexpected_failure');
@@ -331,7 +365,7 @@ describe('BookingReservationService', () => {
     }) as never);
     const result = await h.service.create(OWNER, { requestKey: REQUEST_KEY, serviceId: 11, courtId: 22, datetime: '2027-01-15T10:00:00+03:00', email: PRIVATE_EMAIL });
     expect(result.outcome).toBe('unknown');
-    expect(h.reservations.transitionOperation).toHaveBeenLastCalledWith(expect.anything(), OWNER, expect.any(String), expect.any(String), expect.objectContaining({ type: 'mark_unknown' }));
+    expect(h.reservations.finalizeStartedCreateOperation).toHaveBeenLastCalledWith(expect.anything(), OWNER, expect.any(String), expect.objectContaining({ status: 'pending' }), expect.objectContaining({ type: 'mark_unknown' }));
   });
 
   it.each([

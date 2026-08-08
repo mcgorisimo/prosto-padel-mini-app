@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import type { CourtReservationPersistenceStage } from '../database/court-reservation.repository';
 import {
   CourtReservationId,
   ReservationOperationId,
@@ -27,6 +28,7 @@ export type BookingReservationFinalizationDiagnostic = Readonly<{
   operationId: ReservationOperationId;
   stage: BookingReservationFinalizationStage;
   outcome: BookingReservationFinalizationOutcome;
+  persistenceStage?: CourtReservationPersistenceStage;
 }>;
 
 export interface BookingReservationDiagnosticSink {
@@ -50,6 +52,9 @@ export class BookingReservationDiagnosticLogger
       operationId: event.operationId,
       stage: event.stage,
       outcome: event.outcome,
+      ...(event.persistenceStage === undefined
+        ? {}
+        : { persistenceStage: event.persistenceStage }),
     });
   }
 }
