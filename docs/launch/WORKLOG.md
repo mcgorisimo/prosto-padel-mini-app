@@ -26,7 +26,7 @@
 | Этап | Статус | Ветка/commit | Проверки | Блокер/следующий шаг |
 |---|---|---|---|---|
 | D1 Backend-only/contracts | done | `main` / deployed `c04074459948d0bf545e865b885aea7a4e5fec3c` | frontend E2E PASS (82/1 skipped); focused fail-closed 2/2 PASS; frontend build PASS; backend all PASS; Selectel test smoke PASS | D1 закрыт; следующий отдельный этап — D2 |
-| D2 YCLIENTS reservation core | in_progress | local booking-details correction over `66c9a1fef68b6bfd35fe8c13ca4ecf594826aa60`; Selectel test `b2edf2348fffb0c5ba8647ad99b743b40ce79238` | migration 033 applied/verified; int4 hydration correction deployed; booking-details focused/full E2E and build PASS | integrate/roll out booking details, then owner fresh-booking smoke must verify a new create reaches confirmed; existing lost-response records remain held without repeat create; Court 1 YCLIENTS schedule still needs 00:00 correction |
+| D2 YCLIENTS reservation core | in_progress | `main` / Selectel test `02f746d58b202f2ff3a1ffa1641428597dcb44f6` | migration 033 applied/verified; int4 hydration correction deployed; booking-details frontend rollout healthy; focused/full E2E and build PASS | owner TMA booking-details/cancelled-list smoke; prepare a separate reviewed cleanup decision for four inventoried unbound local reservations; Court 1 YCLIENTS schedule still needs 00:00 correction |
 | D3 Match ↔ reservation lifecycle | pending | — | — | reflect admin cancellation without provider DELETE, owner participant removal, match ↔ reservation binding |
 | D4 Payment Core | pending | — | — | payment provider, pricing/payment snapshot, чеки и возвраты |
 | D5 Settings/moderation/compliance | pending | — | — | standalone phone/email auth, verified backend email, approved club support/contact source and clickable action; затем schema review |
@@ -41,7 +41,7 @@
 | Этап | Среда | Целевой commit | Статус | Проверка |
 |---|---|---|---|---|
 | D1 Backend-only/contracts | Selectel test | `c04074459948d0bf545e865b885aea7a4e5fec3c` | `test_deployed` | frontend healthy; HTTPS root/health и новый asset 200; TMA auth/profile/feed/details/booking availability PASS; bundle/log audit PASS |
-| D2 YCLIENTS reservation core | Selectel test | `d7812d3ef28eda7100bca6bdc5d56afa0be29703` | `test_deployed` | frontend-only rollout applied; all containers healthy/restart 0, HTTPS root/health/new asset 200, unauth bookings 401, fresh log audit clean and owner TMA Home booking-card smoke PASS |
+| D2 YCLIENTS reservation core | Selectel test | `02f746d58b202f2ff3a1ffa1641428597dcb44f6` | `test_deployed` | frontend-only booking-details rollout applied; frontend recreated, backend/nginx/PostgreSQL unchanged; all healthy/restart 0; HTTPS root/health/new asset 200, unauth bookings 401 and fresh log audit clean; owner TMA details/cancelled-list smoke pending |
 | D2 persistence/privacy proposal | not applicable | docs-only checkpoint | `not_needed` | только Markdown; runtime, schema, containers и конфигурация не менялись |
 | D2 YCLIENTS contract matrix | not applicable | docs-only checkpoint поверх `3e8739b` | `not_needed` | только Markdown; API/DB/server/runtime не вызывались и не менялись |
 | D2 YCLIENTS controlled test plan | not applicable | `040773172a2fa556ffaaf1d12dac540095070976` + docs-only correction from that exact base | `not_needed` | plan only; provider/server/DB/runtime calls и writes не выполнялись |
@@ -2314,3 +2314,41 @@
   runs exact backend/application checkout `b2edf234...`; production is
   unchanged. A frontend-only rollout and real TMA booking-details smoke are
   required before this correction is `test_deployed`.
+
+### 2026-08-08 — D2 / booking details frontend rollout and unbound inventory
+
+- Git delivery PASS: exact checkpoint
+  `02f746d58b202f2ff3a1ffa1641428597dcb44f6` was pushed to
+  `codex/week1-d2-reservation-core`; clean local `main` was fast-forwarded to
+  the same checkpoint and pushed.
+- Selectel test fetched the exact clean checkpoint and rebuilt/recreated only
+  `prosto-padel-test-frontend-1`. Its container ID changed from
+  `096935705c5c...` to `52b8487ceba9...`; backend `7a2cf73acede...`, nginx
+  `e5b98b53a385...` and PostgreSQL `5e36d4dc1a5c...` were unchanged. All four
+  containers are healthy with restart count `0`.
+- Postcheck PASS: internal health `200`, HTTPS health/root/new frontend asset
+  `200`, unauthenticated `GET /api/v1/bookings` `401`, and backend/frontend/
+  nginx/PostgreSQL error-signal counts in the stable five-minute window were
+  all `0`. The frontend asset is `assets/index-CECF15bu.js`.
+- A read-only PostgreSQL transaction with a five-second statement timeout
+  inventoried four local reservations with no YCLIENTS record binding. All
+  four are `pending_confirmation`; their latest create operation is `pending`,
+  `provider_attempt_started_at` is present, `provider_attempt_finished_at` is
+  absent, reconciliation has not run, and each retains one active slot hold.
+  The PII-safe inventory is:
+  - `94105b19-c497-4ff3-816b-bc28691daab5`: service `30539748`, resource
+    `5730531`, `2026-08-12T20:30:00+03:00` for 1.5 hours;
+  - `48c74dee-5248-4f75-8fc7-cfafc4a3223c`: service `30539748`, resource
+    `5762274`, `2026-08-13T22:30:00+03:00` for 1.5 hours;
+  - `d7a8a984-7131-4047-94da-38e39c5b597a`: service `30539748`, resource
+    `5762274`, `2026-08-13T21:00:00+03:00` for 1.5 hours;
+  - `1e1fa95a-c042-4141-a922-29a0d78bf61f`: service `30539694`, resource
+    `5762280`, `2026-08-11T08:00:00+03:00` for 1.5 hours.
+- The inventory transaction ended with `ROLLBACK`; no DB row changed. Manual
+  deletion in YCLIENTS cannot canonically delete these local rows because the
+  lost create responses left no persisted record/hash binding. Any cleanup of
+  the four local rows and their holds requires a separate reviewed DB-write
+  plan and explicit approval; no repeat create or provider cleanup is implied.
+- No YCLIENTS/provider write, DB write, migration, backend/nginx/PostgreSQL
+  rollout or production change was made. Owner TMA details/cancelled-list smoke
+  remains the only rollout verification still requiring a manual check.
