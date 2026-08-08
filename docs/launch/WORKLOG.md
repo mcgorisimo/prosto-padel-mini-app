@@ -2524,3 +2524,51 @@
   code changed locally, while push/merge/deploy are explicitly outside this
   correction gate. A new live booking must not be attempted before this clean
   checkpoint is integrated and rolled out separately.
+
+### 2026-08-08 — D2 / control-projection rollout and fresh create smoke STOP
+
+- Git delivery PASS: exact checkpoint
+  `507896ff67077dc146618f146cb7ed484a1a1aae` was pushed to
+  `codex/week1-d2-reservation-core`; clean local `main` was fast-forwarded from
+  `fa5eb38c6608d07c0140f39467dfebe3a058862b` to the same exact SHA and pushed.
+- Selectel test precheck PASS at clean checkout `fa5eb38...`: Compose config was
+  valid, all four containers were healthy with restart count `0`, and proxy
+  health returned `200`. The server fetched `origin/main`, proved exact
+  `507896f...`, detached the clean application checkout at it, built the
+  backend image and recreated only `prosto-padel-test-backend-1`.
+- Backend changed from `d850a600e83a...` to `a3bf38ef947e...`. Frontend remains
+  `8a572cd993d3...`, nginx `e5b98b53a385...` and PostgreSQL
+  `5e36d4dc1a5c...`. All four remained healthy with restart count `0`.
+  Internal/external health and root returned `200`; unauthenticated bookings
+  retained `401`. A separate stable twenty-second audit found zero
+  error/fatal/unhandled/panic/exception signals in every container.
+- The owner then created exactly one fresh Telegram Mini App booking for
+  service `30539694`, resource/court `5762283`, starting
+  `2026-08-15T07:00:00+03:00`. The strict provider-created branch was reached,
+  but the UI and PostgreSQL reservation
+  `953f1810-9a65-4a1b-bee5-c2b9d9cd4f12` remained
+  `pending_confirmation`; operation
+  `1b183ad8-3cd4-4788-b7f8-79805f326cce` remained `pending` with a started but
+  unfinished provider attempt and no appointment/record/encrypted-hash binding.
+- The new allowlisted diagnostic proved the narrower shared failure point:
+  both `confirm_binding` and the single `persist_unknown_fallback` failed as
+  `storage_failure` at `operation_update`. The reservation update was rolled
+  back atomically in both transactions; no partial binding or false confirmed
+  state exists, and the slot hold remains active. No second POST was sent.
+- Read-only catalog verification found the runtime migration-033 operation
+  constraints present, no custom trigger on `reservation_operations`, and all
+  eighteen columns used by the update granted to `backend_auth_app`. Operation
+  times were ordered (`created_at=1786189969`, provider attempt and current
+  update at `1786189970`). The exact SQLSTATE/constraint name was not retained
+  by the allowlist, so this evidence does not claim a more specific low-level
+  cause. Every PostgreSQL inspection used `BEGIN READ ONLY`, a five-second
+  statement timeout and `ROLLBACK`; no client-snapshot/raw PII row, token,
+  ciphertext, record hash or provider body was read or printed.
+- Smoke status is `STOP / pending_confirmation`, not PASS. The owner must not
+  submit this request again or delete/treat the provider record as locally
+  confirmed. Runtime stays healthy at exact `507896f...`; production is
+  unchanged. A separate reviewed code-only correction is required before any
+  further live create smoke. Its minimum scope is safe classification of the
+  `operation_update` SQL failure plus a regression against the exact
+  migration-033 terminal/time constraints; no migration or provider retry is
+  implied by this evidence.
