@@ -26,7 +26,7 @@
 | Этап | Статус | Ветка/commit | Проверки | Блокер/следующий шаг |
 |---|---|---|---|---|
 | D1 Backend-only/contracts | done | `main` / deployed `c04074459948d0bf545e865b885aea7a4e5fec3c` | frontend E2E PASS (82/1 skipped); focused fail-closed 2/2 PASS; frontend build PASS; backend all PASS; Selectel test smoke PASS | D1 закрыт; следующий отдельный этап — D2 |
-| D2 YCLIENTS reservation core | in_progress | local create-finalization/read-sync correction over `720c47afc38ce58f465dfd74ca19ae3db67e72f4`; Selectel test `02f746d58b202f2ff3a1ffa1641428597dcb44f6` | migration 033 applied/verified; focused/full backend and root gates PASS | managing review, fast-forward integration and Selectel test rollout; fresh create must persist confirmed binding, then manual YCLIENTS delete + explicit Home refresh must remove the active card; five legacy unbound test reservations remain held for a separate cleanup gate |
+| D2 YCLIENTS reservation core | in_progress | `main` / Selectel test `fa5eb38c6608d07c0140f39467dfebe3a058862b` | migration 033 applied/verified; backend/frontend rollout healthy; automated gates and stable log window PASS | owner TMA smoke: one fresh create must persist confirmed binding, then manual YCLIENTS delete + explicit Home refresh must remove the active card; five legacy unbound test reservations remain held for a separate cleanup gate |
 | D3 Match ↔ reservation lifecycle | pending | — | — | reflect admin cancellation without provider DELETE, owner participant removal, match ↔ reservation binding |
 | D4 Payment Core | pending | — | — | payment provider, pricing/payment snapshot, чеки и возвраты |
 | D5 Settings/moderation/compliance | pending | — | — | standalone phone/email auth, verified backend email, approved club support/contact source and clickable action; затем schema review |
@@ -41,7 +41,7 @@
 | Этап | Среда | Целевой commit | Статус | Проверка |
 |---|---|---|---|---|
 | D1 Backend-only/contracts | Selectel test | `c04074459948d0bf545e865b885aea7a4e5fec3c` | `test_deployed` | frontend healthy; HTTPS root/health и новый asset 200; TMA auth/profile/feed/details/booking availability PASS; bundle/log audit PASS |
-| D2 YCLIENTS reservation core | Selectel test | `02f746d58b202f2ff3a1ffa1641428597dcb44f6` | `test_deployed` | frontend-only booking-details rollout applied; frontend recreated, backend/nginx/PostgreSQL unchanged; all healthy/restart 0; HTTPS root/health/new asset 200, unauth bookings 401 and fresh log audit clean; owner TMA details/cancelled-list smoke pending |
+| D2 YCLIENTS reservation core | Selectel test | `fa5eb38c6608d07c0140f39467dfebe3a058862b` | `pending_manual_smoke` | backend/frontend recreated; all containers healthy/restart 0; checkout exact, HTTPS root/health/new asset 200, unauth bookings 401 and stable log audit clean; fresh create/confirmed + admin delete/Home refresh smoke pending |
 | D2 persistence/privacy proposal | not applicable | docs-only checkpoint | `not_needed` | только Markdown; runtime, schema, containers и конфигурация не менялись |
 | D2 YCLIENTS contract matrix | not applicable | docs-only checkpoint поверх `3e8739b` | `not_needed` | только Markdown; API/DB/server/runtime не вызывались и не менялись |
 | D2 YCLIENTS controlled test plan | not applicable | `040773172a2fa556ffaaf1d12dac540095070976` + docs-only correction from that exact base | `not_needed` | plan only; provider/server/DB/runtime calls и writes не выполнялись |
@@ -2415,3 +2415,35 @@
   create must return/persist `confirmed`; then an administrator deletes that
   bound record in YCLIENTS and one explicit Home refresh must remove its active
   card, with health and PII-safe log review after each step.
+
+### 2026-08-08 — D2 / create-finalization correction Selectel rollout
+
+- Git delivery PASS: exact reviewed checkpoint
+  `fa5eb38c6608d07c0140f39467dfebe3a058862b` was pushed to
+  `codex/week1-d2-reservation-core`. Clean `main` was fast-forwarded from
+  `02f746d58b202f2ff3a1ffa1641428597dcb44f6` to the same exact checkpoint;
+  local and remote `main` both match it.
+- Selectel precheck PASS at clean checkout `02f746d...`: backend, frontend,
+  nginx and PostgreSQL were healthy with restart count `0`. Backend/frontend
+  images built successfully from exact `fa5eb38...`; the application checkout
+  was detached cleanly at that SHA and persistent-runtime Compose validation
+  passed before any container replacement.
+- Only backend and frontend were recreated. Backend changed from
+  `7a2cf73acede...` to `d850a600e83a...`; frontend changed from
+  `52b8487ceba9...` to `8a572cd993d3...`. Nginx remains
+  `e5b98b53a385...` and PostgreSQL remains `5e36d4dc1a5c...`. All four are
+  healthy with restart count `0`.
+- Postcheck PASS: internal and HTTPS health/root returned `200`; exact frontend
+  asset `assets/index-CMWbs4Ha.js` returned `200`; unauthenticated
+  `GET /api/v1/bookings` retained the fail-closed `401` boundary. A separate
+  stable twenty-second window found `0` error/exception/fatal/unhandled/panic
+  signals in backend, frontend, nginx and PostgreSQL logs; all health states
+  remained `healthy`.
+- No migration/schema/DB write, operator YCLIENTS/provider call, secret/env,
+  nginx/PostgreSQL container or production change occurred. Deployment remains
+  `pending_manual_smoke`: the owner must create exactly one fresh booking in
+  the Telegram Mini App and first prove the persisted state is `confirmed`.
+  Only then should the same bound record be deleted manually in YCLIENTS and
+  one explicit Home `Обновить` action used to prove the active card disappears.
+  The five legacy unbound test reservations must not be resubmitted or cleaned
+  by this smoke.
