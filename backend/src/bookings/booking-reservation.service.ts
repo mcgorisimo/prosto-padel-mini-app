@@ -2,6 +2,10 @@ import { createHash } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import { AccountId } from '../accounts/account.types';
 import { unixEpochSeconds } from '../auth/auth.types';
+import {
+  CourtReservationPersistenceError,
+  CourtReservationPersistenceFailure,
+} from '../database/court-reservation.repository';
 import { PostgresCourtReservationRepository } from '../database/postgres-court-reservation.repository';
 import { PostgresPlayerProfileReader } from '../database/postgres-player-profile-reader';
 import { PostgresTransactionRunner } from '../database/postgres-transaction';
@@ -21,6 +25,12 @@ import {
   reservationIdempotencyKey,
   reservationProviderRejectionReason,
 } from '../reservations/reservation.types';
+import {
+  BOOKING_RESERVATION_DIAGNOSTIC_SINK,
+  BookingReservationDiagnosticSink,
+  BookingReservationFinalizationOutcome,
+  BookingReservationFinalizationStage,
+} from './booking-reservation.diagnostics';
 
 export const BOOKING_RESERVATION_CLOCK = Symbol('BOOKING_RESERVATION_CLOCK');
 export interface BookingReservationClock { nowEpochSeconds(): number }
@@ -104,6 +114,14 @@ function terminalResult(operation: ReservationOperation, reservation: CourtReser
   return Object.freeze({ outcome: 'unknown', reservation: view(reservation, true) });
 }
 
+function persistenceDiagnosticOutcome(
+  error: unknown,
+): CourtReservationPersistenceFailure | 'unexpected_failure' {
+  return error instanceof CourtReservationPersistenceError
+    ? error.reason
+    : 'unexpected_failure';
+}
+
 @Injectable()
 export class BookingReservationService {
   constructor(
@@ -114,7 +132,73 @@ export class BookingReservationService {
     private readonly booking: YclientsBookingService,
     private readonly adminRead: YclientsAdminReadClient,
     @Inject(BOOKING_RESERVATION_CLOCK) private readonly clock: BookingReservationClock,
+    @Inject(BOOKING_RESERVATION_DIAGNOSTIC_SINK)
+    private readonly diagnostics: BookingReservationDiagnosticSink,
   ) {}
+
+  private recordFinalization(
+    reservation: CourtReservation,
+    operation: ReservationOperation,
+    stage: BookingReservationFinalizationStage,
+    outcome: BookingReservationFinalizationOutcome,
+  ): void {
+    try {
+      this.diagnostics.record(Object.freeze({
+        reservationId: reservation.reservationId,
+        operationId: operation.operationId,
+        stage,
+        outcome,
+      }));
+    } catch {
+      // Diagnostics are best-effort and must never alter reservation safety.
+    }
+  }
+
+  private async persistUnknownAfterDispatch(
+    ownerAccountId: AccountId,
+    reservation: CourtReservation,
+    operation: ReservationOperation,
+    timestamp: ReturnType<typeof now>,
+  ): Promise<CourtReservation> {
+    try {
+      const fallback = await this.transactions.runInTransaction((tx) =>
+        this.reservations.transitionOperation(
+          tx,
+          ownerAccountId,
+          reservation.reservationId,
+          operation.operationId,
+          {
+            type: 'mark_unknown',
+            actorAccountId: ownerAccountId,
+            now: timestamp,
+          },
+        ),
+      );
+      if (fallback.outcome === 'transitioned') {
+        this.recordFinalization(
+          fallback.reservation,
+          fallback.operation,
+          'persist_unknown_fallback',
+          'unknown_persisted',
+        );
+        return fallback.reservation;
+      }
+      this.recordFinalization(
+        reservation,
+        operation,
+        'persist_unknown_fallback',
+        'transition_rejected',
+      );
+    } catch (error) {
+      this.recordFinalization(
+        reservation,
+        operation,
+        'persist_unknown_fallback',
+        persistenceDiagnosticOutcome(error),
+      );
+    }
+    return reservation;
+  }
 
   async create(ownerAccountId: AccountId, input: Readonly<{requestKey: string;serviceId:number;courtId:number;datetime:string;email:string}>): Promise<CreateBookingReservationResult> {
     let requestKey: ReservationIdempotencyKey;
@@ -234,17 +318,67 @@ export class BookingReservationService {
     }
     const dispatchClaim = claim as DispatchClaim;
     const timestamp = now(this.clock);
+    const finalizationStage: BookingReservationFinalizationStage =
+      provider.outcome === 'created' ? 'confirm_binding' : 'persist_unknown';
     try {
       const transitioned = await this.transactions.runInTransaction((tx) => {
         if (dispatchClaim !== 'claimed') return this.reservations.transitionOperation(tx, ownerAccountId, started.reservation.reservationId, started.operation.operationId, { type:'reject',actorAccountId:ownerAccountId,now:timestamp,reason:reservationProviderRejectionReason(provider.outcome==='not_bookable'?'not_bookable':'provider_not_dispatched') });
         if (provider.outcome === 'created') return this.reservations.transitionOperation(tx, ownerAccountId, started.reservation.reservationId, started.operation.operationId, { type:'confirm',actorAccountId:ownerAccountId,now:timestamp,providerBinding:{provider:'yclients',appointmentId:provider.appointmentId,recordId:provider.recordId,recordHash:provider.recordHash} });
         return this.reservations.transitionOperation(tx, ownerAccountId, started.reservation.reservationId, started.operation.operationId, {type:'mark_unknown',actorAccountId:ownerAccountId,now:timestamp});
       });
-      if (transitioned.outcome !== 'transitioned') return Object.freeze({outcome:'unknown',reservation:view(started.reservation,true)});
-      if (transitioned.operation.status === 'confirmed') return Object.freeze({ outcome:'created', reservation:view(transitioned.reservation,false) });
+      if (transitioned.outcome !== 'transitioned') {
+        this.recordFinalization(
+          started.reservation,
+          started.operation,
+          finalizationStage,
+          'transition_rejected',
+        );
+        if (dispatchClaim === 'claimed') {
+          const held = await this.persistUnknownAfterDispatch(
+            ownerAccountId,
+            started.reservation,
+            started.operation,
+            timestamp,
+          );
+          return Object.freeze({ outcome:'unknown', reservation:view(held,true) });
+        }
+        return Object.freeze({outcome:'unknown',reservation:view(started.reservation,true)});
+      }
+      if (transitioned.operation.status === 'confirmed') {
+        this.recordFinalization(
+          transitioned.reservation,
+          transitioned.operation,
+          'confirm_binding',
+          'confirmed',
+        );
+        return Object.freeze({ outcome:'created', reservation:view(transitioned.reservation,false) });
+      }
       if (transitioned.operation.status === 'rejected') return Object.freeze({ outcome: provider.outcome === 'not_bookable' ? 'not_bookable' : 'unavailable' });
+      this.recordFinalization(
+        transitioned.reservation,
+        transitioned.operation,
+        'persist_unknown',
+        'unknown_persisted',
+      );
       return Object.freeze({outcome:'unknown',reservation:view(transitioned.reservation,true)});
-    } catch { return Object.freeze({ outcome: 'unknown', reservation: view(started.reservation, true) }); }
+    } catch (error) {
+      this.recordFinalization(
+        started.reservation,
+        started.operation,
+        finalizationStage,
+        persistenceDiagnosticOutcome(error),
+      );
+      if (dispatchClaim !== 'claimed') {
+        return Object.freeze({ outcome: 'unknown', reservation: view(started.reservation, true) });
+      }
+      const held = await this.persistUnknownAfterDispatch(
+        ownerAccountId,
+        started.reservation,
+        started.operation,
+        timestamp,
+      );
+      return Object.freeze({ outcome: 'unknown', reservation: view(held, true) });
+    }
   }
 
   async read(ownerAccountId: AccountId, rawReservationId: string): Promise<ReadBookingReservationResult> {
@@ -353,6 +487,66 @@ export class BookingReservationService {
     let exact;
     try { exact = await this.adminRead.getRecord(reservation.providerBinding.recordId); }
     catch { exact = Object.freeze({outcome:'unknown' as const}); }
+    if (exact.outcome === 'not_found') {
+      try {
+        const deleted = await scanBoundedYclientsCandidates(
+          this.adminRead,
+          {
+            page: 1,
+            count: 50,
+            resourceId: reservation.target.courtId,
+            dateFrom: reservation.target.startsAt.slice(0, 10),
+            dateTo: reservation.target.startsAt.slice(0, 10),
+            withDeleted: true,
+          },
+          {
+            apiId: await this.transactions.runInTransaction(async (tx) => {
+              const operation = await this.reservations.readLatestCreateAttempt(
+                tx,
+                ownerAccountId,
+                reservationId,
+              );
+              if (operation === null) throw new Error('missing create operation');
+              return operation.apiId;
+            }),
+            resourceId: reservation.target.courtId,
+            serviceIds: [reservation.target.serviceId],
+            datetime: reservation.target.startsAt,
+            deleted: true,
+          },
+        );
+        if (
+          deleted.outcome === 'candidate' &&
+          deleted.record.recordId === reservation.providerBinding.recordId
+        ) {
+          const exactApiId = deleted.record.apiId;
+          if (exactApiId === undefined) throw new Error('missing external id');
+          const updated = await this.transactions.runInTransaction((tx) =>
+            this.reservations.applyExactRefresh(tx, ownerAccountId, reservationId, {
+              companyId: deleted.record.companyId,
+              recordId: deleted.record.recordId,
+              apiId: exactApiId,
+              serviceId: reservation.target.serviceId,
+              courtId: reservation.target.courtId,
+              startsAt: reservation.target.startsAt,
+              endsAt: reservation.target.endsAt,
+              deleted: true,
+              now: now(this.clock),
+            }),
+          );
+          if (updated.outcome === 'updated') {
+            return Object.freeze({
+              outcome: 'found',
+              reservation: view(updated.reservation, false),
+            });
+          }
+        }
+      } catch {
+        // A 404/list mismatch remains stale and held; no provider write follows.
+      }
+      try { await this.transactions.runInTransaction((tx) => this.reservations.noteReconciliationAttempt(tx,ownerAccountId,reservationId,now(this.clock))); } catch { /* response stays stale */ }
+      return Object.freeze({outcome:'found',reservation:view(reservation,true)});
+    }
     if (exact.outcome !== 'found' || exact.record.apiId === undefined || exact.record.serviceIds.length !== 1 || exact.record.seanceLengthSeconds === undefined) {
       try { await this.transactions.runInTransaction((tx) => this.reservations.noteReconciliationAttempt(tx,ownerAccountId,reservationId,now(this.clock))); } catch { /* response stays stale */ }
       return Object.freeze({outcome:'found',reservation:view(reservation,true)});

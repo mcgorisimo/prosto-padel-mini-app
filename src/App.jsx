@@ -53,6 +53,16 @@ import {
 // ─── Seed data (shown until user creates real matches) ────────────────────────
 
 const SEED_MATCHES = [];
+const MAX_EXPLICIT_HOME_BOOKING_REFRESHES = 3;
+
+export function selectBackendReservationsForExplicitRefresh(reservations) {
+  return (Array.isArray(reservations) ? reservations : [])
+    .filter((reservation) =>
+      typeof reservation?.reservationId === 'string' &&
+      !['cancelled', 'rejected'].includes(reservation.status),
+    )
+    .slice(0, MAX_EXPLICIT_HOME_BOOKING_REFRESHES);
+}
 
 const devCreatedBookingMatchIds = new Set();
 
@@ -361,6 +371,7 @@ export default function App({
   const [backendFeedError, setBackendFeedError] = useState('');
   const [backendAccountMatches, setBackendAccountMatches] = useState([]);
   const [backendReservations, setBackendReservations] = useState([]);
+  const [backendReservationsRefreshing, setBackendReservationsRefreshing] = useState(false);
   const [backendCourtNamesById, setBackendCourtNamesById] = useState({});
   const [backendMatchNow, setBackendMatchNow] = useState(
     () => Math.floor(Date.now() / 1_000),
@@ -381,6 +392,7 @@ export default function App({
   const backendFeedRequestRef = useRef(0);
   const backendAccountRequestRef = useRef(0);
   const backendReservationRequestRef = useRef(0);
+  const backendReservationRefreshInFlightRef = useRef(false);
   const attemptedBookingCourtServicesRef = useRef(new Set());
   const backendInvitationRequestRef = useRef(0);
   const backendChatRequestRef = useRef(0);
@@ -574,6 +586,36 @@ export default function App({
       return null;
     }
   }, [backendBookingAvailabilityActions]);
+
+  const refreshBackendReservations = useCallback(async () => {
+    if (
+      backendReservationRefreshInFlightRef.current ||
+      typeof backendBookingAvailabilityActions?.readBooking !== 'function'
+    ) return;
+
+    backendReservationRefreshInFlightRef.current = true;
+    setBackendReservationsRefreshing(true);
+    try {
+      const listed = await loadBackendReservations();
+      const targets = selectBackendReservationsForExplicitRefresh(listed);
+      for (const reservation of targets) {
+        try {
+          await backendBookingAvailabilityActions.readBooking(
+            reservation.reservationId,
+          );
+        } catch {
+          // Each owner read is independent; the final persisted list stays truthful.
+        }
+      }
+      await loadBackendReservations();
+    } finally {
+      backendReservationRefreshInFlightRef.current = false;
+      setBackendReservationsRefreshing(false);
+    }
+  }, [
+    backendBookingAvailabilityActions,
+    loadBackendReservations,
+  ]);
 
   const mergeBackendCourtCatalog = useCallback((courts) => {
     if (!Array.isArray(courts)) return;
@@ -2980,6 +3022,8 @@ const handleBookSlot = async (booking) => {
               setSelectedBookingReservationId(reservationId);
               setActiveTab('booking');
             }}
+            onRefreshBookings={refreshBackendReservations}
+            bookingsRefreshing={backendReservationsRefreshing}
             onSetupTraining={handleSetupTraining}
             onConvertToPublic={handleConvertToPublic} // This needs showToast
             user={currentUser}

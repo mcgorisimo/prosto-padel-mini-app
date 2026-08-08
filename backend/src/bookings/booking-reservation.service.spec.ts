@@ -1,6 +1,7 @@
 import { deterministicUuid } from '../../test/deterministic-uuid';
 import { AccountId } from '../accounts/account.types';
 import { unixEpochSeconds } from '../auth/auth.types';
+import { CourtReservationPersistenceError } from '../database/court-reservation.repository';
 import { createCourtReservation, startReservationOperation, transitionReservationOperation } from '../reservations/reservation.state-machine';
 import {
   CourtReservation,
@@ -24,6 +25,50 @@ function confirmedReservation(overrides: Partial<CourtReservation> = {}): CourtR
     createdAt: unixEpochSeconds(NOW), updatedAt: unixEpochSeconds(NOW), version: 3,
     ...overrides,
   });
+}
+
+function confirmedCreateOperation(
+  reservation: CourtReservation,
+): ReservationOperation {
+  const initial = createCourtReservation({
+    reservationId: reservation.reservationId,
+    ownerAccountId: OWNER,
+    target: reservation.target,
+    now: unixEpochSeconds(NOW),
+  });
+  const pending = startReservationOperation(initial, {
+    operationId: newReservationOperationId(),
+    actorAccountId: OWNER,
+    idempotencyKey: REQUEST_KEY as never,
+    now: unixEpochSeconds(NOW),
+    request: {
+      type: 'create',
+      reservationId: reservation.reservationId,
+      ownerAccountId: OWNER,
+      externalReference: { apiId: 77 },
+      client: {
+        phone: '+79804440505',
+        fullName: 'Andrey Player',
+        email: PRIVATE_EMAIL,
+      },
+      target: reservation.target,
+    },
+  });
+  if (pending.outcome !== 'started') throw new Error('invalid confirmed fixture');
+  const confirmed = transitionReservationOperation(
+    pending.reservation,
+    pending.operation,
+    {
+      type: 'confirm',
+      actorAccountId: OWNER,
+      now: unixEpochSeconds(NOW + 1),
+      providerBinding: reservation.providerBinding,
+    },
+  );
+  if (confirmed.outcome !== 'transitioned') {
+    throw new Error('invalid confirmed fixture');
+  }
+  return confirmed.operation;
 }
 
 function harness() {
@@ -85,12 +130,14 @@ function harness() {
     return { outcome: 'created' as const, appointmentId: 33, recordId: 44, recordHash: 'private-hash' };
   }) };
   const adminRead = { getRecord: jest.fn(), listRecords: jest.fn() };
+  const diagnostics = { record: jest.fn() };
   const service = new BookingReservationService(
     transactions as never, reservations as never, profiles as never,
     availability as never, booking as never, adminRead as never,
     { nowEpochSeconds: () => currentNow },
+    diagnostics,
   );
-  return { service, transactions, reservations, profiles, availability, booking, adminRead,
+  return { service, transactions, reservations, profiles, availability, booking, adminRead, diagnostics,
     setStored(reservation: CourtReservation, operation?: ReservationOperation) { storedReservation = reservation; storedOperation = operation ?? null; },
     setNow(value: number) { currentNow = value; },
     setAttemptStartedAt(value: number | undefined) { attemptStartedAt = value; },
@@ -193,6 +240,79 @@ describe('BookingReservationService', () => {
     expect(h.reservations.transitionOperation).toHaveBeenLastCalledWith(expect.anything(), OWNER, expect.any(String), expect.any(String), expect.objectContaining({ type: 'mark_unknown' }));
   });
 
+  it('persists unknown in a fresh transaction when post-dispatch confirm fails', async () => {
+    const h = harness();
+    h.reservations.transitionOperation
+      .mockRejectedValueOnce(new CourtReservationPersistenceError('storage_failure'));
+
+    const result = await h.service.create(OWNER, {
+      requestKey: REQUEST_KEY,
+      serviceId: 11,
+      courtId: 22,
+      datetime: '2027-01-15T10:00:00+03:00',
+      email: PRIVATE_EMAIL,
+    });
+
+    expect(result).toMatchObject({
+      outcome: 'unknown',
+      reservation: { status: 'unknown', stale: true },
+    });
+    expect(h.booking.createBooking).toHaveBeenCalledTimes(1);
+    expect(h.providerDispatchCount()).toBe(1);
+    expect(h.reservations.transitionOperation).toHaveBeenCalledTimes(2);
+    expect(h.reservations.transitionOperation).toHaveBeenLastCalledWith(
+      expect.anything(),
+      OWNER,
+      expect.any(String),
+      expect.any(String),
+      expect.objectContaining({ type: 'mark_unknown' }),
+    );
+    expect(h.diagnostics.record).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        stage: 'confirm_binding',
+        outcome: 'storage_failure',
+      }),
+    );
+    expect(h.diagnostics.record).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        stage: 'persist_unknown_fallback',
+        outcome: 'unknown_persisted',
+      }),
+    );
+  });
+
+  it('never retries POST or leaks provider/contact data when both finalization attempts fail', async () => {
+    const h = harness();
+    h.reservations.transitionOperation
+      .mockRejectedValueOnce(new CourtReservationPersistenceError('database_unavailable'))
+      .mockRejectedValueOnce(new Error('private provider body private-hash 79804440505'));
+
+    const result = await h.service.create(OWNER, {
+      requestKey: REQUEST_KEY,
+      serviceId: 11,
+      courtId: 22,
+      datetime: '2027-01-15T10:00:00+03:00',
+      email: PRIVATE_EMAIL,
+    });
+
+    expect(result).toMatchObject({
+      outcome: 'unknown',
+      reservation: { status: 'pending_confirmation', stale: true },
+    });
+    expect(h.booking.createBooking).toHaveBeenCalledTimes(1);
+    expect(h.providerDispatchCount()).toBe(1);
+    expect(h.reservations.transitionOperation).toHaveBeenCalledTimes(2);
+    const diagnosticJson = JSON.stringify(h.diagnostics.record.mock.calls);
+    expect(diagnosticJson).toContain('database_unavailable');
+    expect(diagnosticJson).toContain('unexpected_failure');
+    expect(diagnosticJson).not.toContain(PRIVATE_EMAIL);
+    expect(diagnosticJson).not.toContain('79804440505');
+    expect(diagnosticJson).not.toContain('private-hash');
+    expect(diagnosticJson).not.toContain('private provider body');
+  });
+
   it('releases a pre-dispatch preflight failure without claiming provider effect', async () => {
     const h = harness();
     h.booking.createBooking.mockResolvedValueOnce({ outcome: 'unavailable' } as never);
@@ -220,7 +340,7 @@ describe('BookingReservationService', () => {
   ] as const)('applies read-only %s only after exact record/api binding', async (_label, deleted, courtId, startsAt, status) => {
     const h = harness();
     const reservation = confirmedReservation();
-    h.setStored(reservation);
+    h.setStored(reservation, confirmedCreateOperation(reservation));
     h.adminRead.getRecord.mockResolvedValueOnce({ outcome: 'found', record: { recordId: 44, companyId: 2_079_564, resourceId: courtId, serviceIds: [11], datetime: startsAt, seanceLengthSeconds: 3600, deleted, apiId: 77 } });
     h.reservations.applyExactRefresh.mockResolvedValueOnce({ outcome: 'updated', reservation: confirmedReservation({ status, target: { ...reservation.target, courtId, startsAt, endsAt: deleted ? reservation.target.endsAt : '2027-01-15T13:00:00.000Z' } }) });
     const result = await h.service.read(OWNER, reservation.reservationId);
@@ -228,15 +348,84 @@ describe('BookingReservationService', () => {
     expect(h.adminRead.getRecord).toHaveBeenCalledTimes(1);
   });
 
-  it('returns stale persisted data on 404/mismatch without provider write or false cancellation', async () => {
+  it('confirms a canonical deleted record after one exact 404 and one bounded deleted list', async () => {
     const h = harness();
     const reservation = confirmedReservation();
-    h.setStored(reservation);
+    h.setStored(reservation, confirmedCreateOperation(reservation));
     h.adminRead.getRecord.mockResolvedValueOnce({ outcome: 'not_found' });
+    h.adminRead.listRecords.mockResolvedValueOnce({
+      outcome: 'loaded',
+      page: 1,
+      count: 50,
+      totalCount: 1,
+      exhaustive: true,
+      records: [{
+        recordId: 44,
+        companyId: 2_079_564,
+        resourceId: 22,
+        serviceIds: [11],
+        datetime: reservation.target.startsAt,
+        deleted: true,
+        apiId: 77,
+      }],
+    });
+    h.reservations.applyExactRefresh.mockResolvedValueOnce({
+      outcome: 'updated',
+      reservation: confirmedReservation({ status: 'cancelled' }),
+    });
+
+    const result = await h.service.read(OWNER, reservation.reservationId);
+
+    expect(result).toMatchObject({
+      outcome: 'found',
+      reservation: { status: 'cancelled', stale: false },
+    });
+    expect(h.adminRead.getRecord).toHaveBeenCalledTimes(1);
+    expect(h.adminRead.listRecords).toHaveBeenCalledTimes(1);
+    expect(h.adminRead.listRecords).toHaveBeenCalledWith({
+      page: 1,
+      count: 50,
+      resourceId: 22,
+      dateFrom: '2027-01-15',
+      dateTo: '2027-01-15',
+      withDeleted: true,
+    });
+    expect(h.reservations.applyExactRefresh).toHaveBeenCalledWith(
+      expect.anything(),
+      OWNER,
+      reservation.reservationId,
+      expect.objectContaining({ recordId: 44, apiId: 77, deleted: true }),
+    );
+  });
+
+  it.each([
+    ['different record', 45, 1],
+    ['ambiguous records', 44, 2],
+  ] as const)('keeps a 404 stale for %s without false cancellation', async (_label, recordId, count) => {
+    const h = harness();
+    const reservation = confirmedReservation();
+    h.setStored(reservation, confirmedCreateOperation(reservation));
+    h.adminRead.getRecord.mockResolvedValueOnce({ outcome: 'not_found' });
+    const record = {
+      recordId,
+      companyId: 2_079_564,
+      resourceId: 22,
+      serviceIds: [11],
+      datetime: reservation.target.startsAt,
+      deleted: true,
+      apiId: 77,
+    };
+    h.adminRead.listRecords.mockResolvedValueOnce({
+      outcome: 'loaded', page: 1, count: 50, totalCount: count,
+      exhaustive: true,
+      records: count === 1 ? [record] : [record, { ...record, recordId: 46 }],
+    });
     const result = await h.service.read(OWNER, reservation.reservationId);
     expect(result).toMatchObject({ outcome: 'found', reservation: { status: 'confirmed', stale: true } });
     expect(h.reservations.applyExactRefresh).not.toHaveBeenCalled();
     expect(h.reservations.noteReconciliationAttempt).toHaveBeenCalledTimes(1);
+    expect(h.adminRead.getRecord).toHaveBeenCalledTimes(1);
+    expect(h.adminRead.listRecords).toHaveBeenCalledTimes(1);
   });
 
   it('does not mutate the hold when exact refresh lacks provider duration', async () => {

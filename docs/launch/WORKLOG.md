@@ -26,7 +26,7 @@
 | Этап | Статус | Ветка/commit | Проверки | Блокер/следующий шаг |
 |---|---|---|---|---|
 | D1 Backend-only/contracts | done | `main` / deployed `c04074459948d0bf545e865b885aea7a4e5fec3c` | frontend E2E PASS (82/1 skipped); focused fail-closed 2/2 PASS; frontend build PASS; backend all PASS; Selectel test smoke PASS | D1 закрыт; следующий отдельный этап — D2 |
-| D2 YCLIENTS reservation core | in_progress | `main` / Selectel test `02f746d58b202f2ff3a1ffa1641428597dcb44f6` | migration 033 applied/verified; int4 hydration correction deployed; booking-details frontend rollout healthy; focused/full E2E and build PASS | owner TMA booking-details/cancelled-list smoke; prepare a separate reviewed cleanup decision for four inventoried unbound local reservations; Court 1 YCLIENTS schedule still needs 00:00 correction |
+| D2 YCLIENTS reservation core | in_progress | local create-finalization/read-sync correction over `720c47afc38ce58f465dfd74ca19ae3db67e72f4`; Selectel test `02f746d58b202f2ff3a1ffa1641428597dcb44f6` | migration 033 applied/verified; focused/full backend and root gates PASS | managing review, fast-forward integration and Selectel test rollout; fresh create must persist confirmed binding, then manual YCLIENTS delete + explicit Home refresh must remove the active card; five legacy unbound test reservations remain held for a separate cleanup gate |
 | D3 Match ↔ reservation lifecycle | pending | — | — | reflect admin cancellation without provider DELETE, owner participant removal, match ↔ reservation binding |
 | D4 Payment Core | pending | — | — | payment provider, pricing/payment snapshot, чеки и возвраты |
 | D5 Settings/moderation/compliance | pending | — | — | standalone phone/email auth, verified backend email, approved club support/contact source and clickable action; затем schema review |
@@ -2352,3 +2352,66 @@
 - No YCLIENTS/provider write, DB write, migration, backend/nginx/PostgreSQL
   rollout or production change was made. Owner TMA details/cancelled-list smoke
   remains the only rollout verification still requiring a manual check.
+
+### 2026-08-08 — D2 / create finalization and deleted-readback correction
+
+- The accepted read-only diagnosis proved a runtime control-flow defect after
+  YCLIENTS create dispatch: the provider effect could already exist, while any
+  exception or rejected transition from the atomic PostgreSQL finalization was
+  collapsed by one generic `catch` into an `unknown` HTTP result. No durable
+  fallback transition was attempted, so the database operation could remain
+  `pending` with a started attempt and no binding until an owner detail read
+  crossed the stale threshold. Home list reads did not invoke that exact owner
+  refresh at all. This directly explains why the later manual YCLIENTS delete
+  could not synchronize a locally unbound reservation.
+- Migration 033 and the domain transition already support the safe terminal
+  states: a strictly parsed create binding is written to reservation and
+  operation atomically as `confirmed`; `unknown` keeps the active slot hold and
+  records provider attempt completion without a binding. The exact historical
+  PostgreSQL/provider-response trigger for the latest failed finalization is
+  not recoverable from retained evidence because the old generic catch stored
+  no failure category. This correction does not invent that cause: it adds a
+  PII-safe allowlisted diagnostic containing only reservation/operation
+  correlation IDs, finalization stage and classified persistence outcome.
+- After a claimed provider dispatch, a failed/rejected `confirm` now performs
+  exactly one fresh PostgreSQL `mark_unknown` finalization. It never repeats
+  POST, never synthesizes a provider binding and never releases the hold. If
+  PostgreSQL is still unavailable, the result remains truthful stale
+  `pending_confirmation`; the existing stale owner-read classifier is retained
+  as the later safe recovery path. Provider timeout, invalid response and other
+  uncertain dispatched outcomes persist `unknown/held` through the same
+  terminal path.
+- A fully bound confirmed reservation whose exact GET returns canonical
+  `not_found` now performs one bounded `with_deleted=true` page read for the
+  exact stored day/resource/apiId/service/datetime. Local cancellation and hold
+  release occur only for one exhaustive candidate with the same persisted
+  record ID and `deleted=true`; a different/ambiguous/incomplete result remains
+  confirmed but stale. No provider write, fallback window or blind retry was
+  added.
+- Home now exposes an explicit `Обновить` action for persisted bookings. One
+  click first loads the owner list, performs at most three owner booking reads
+  sequentially, then reloads the persisted list. The backend shared limiter
+  continues to serialize provider reads. There is no timer/background polling,
+  and an in-flight guard prevents concurrent refresh batches. A canonically
+  synchronized cancelled booking disappears from the active Home list;
+  pending/unknown are not hidden or reclassified.
+- Regressions cover finalization persistence failure plus one unknown fallback,
+  double persistence failure with one provider dispatch and PII-safe
+  diagnostics, exact 404 + canonical deleted list proof, record mismatch and
+  ambiguous candidates, bounded Home target selection, explicit refresh and
+  zero frontend booking writes. Focused PASS: backend typecheck, `2 suites / 24
+  tests`, Home E2E `1/1`. Full PASS: backend unit `132 suites / 3287 tests`,
+  backend E2E `2 suites / 4 tests`, backend build; root E2E `85 passed / 1
+  skipped`, root build (`1616` modules, existing CJS/chunk warnings only), and
+  `git diff --check`. The first sandboxed root gate hit only the known managed
+  worktree esbuild access boundary; the identical approved run outside that
+  boundary passed.
+- The five known legacy unbound test reservations and their holds were not
+  changed or cleaned. No YCLIENTS/API/DB/server call, migration, payment field,
+  webhook, cancel/reschedule route or provider write was made. Deployment
+  impact is `pending`: backend and frontend runtime changed locally, while
+  Selectel test remains exact `02f746d58b202f2ff3a1ffa1641428597dcb44f6` and
+  production is unchanged. Required future test rollout smoke: one fresh TMA
+  create must return/persist `confirmed`; then an administrator deletes that
+  bound record in YCLIENTS and one explicit Home refresh must remove its active
+  card, with health and PII-safe log review after each step.

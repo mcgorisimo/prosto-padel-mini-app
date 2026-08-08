@@ -3746,19 +3746,38 @@ test.describe('backend match credential lifecycle', () => {
         write: 0,
         lastReadReservationId: null,
       };
+      window.__backendBookingDeleted = false;
       const backendBookingAvailabilityActions = Object.freeze({
         async listBookings() {
           window.__backendBookingCalls.list += 1;
           return {
             outcome: 'bookings_loaded',
-            reservations: [persistedBooking],
+            reservations: [{
+              ...persistedBooking,
+              status: window.__backendBookingDeleted
+                ? 'cancelled'
+                : persistedBooking.status,
+              stale: false,
+            }],
           };
         },
         async readBooking(reservationId) {
           window.__backendBookingCalls.read += 1;
           window.__backendBookingCalls.lastReadReservationId = reservationId;
+          if (window.__backendBookingCalls.read > 1) {
+            window.__backendBookingDeleted = true;
+          }
           return reservationId === persistedBooking.reservationId
-            ? { outcome: 'booking_loaded', reservation: persistedBooking }
+            ? {
+                outcome: 'booking_loaded',
+                reservation: {
+                  ...persistedBooking,
+                  status: window.__backendBookingDeleted
+                    ? 'cancelled'
+                    : persistedBooking.status,
+                  stale: false,
+                },
+              }
             : { outcome: 'rejected', reason: 'not_found' };
         },
         async listCourts(serviceId) {
@@ -3885,6 +3904,37 @@ test.describe('backend match credential lifecycle', () => {
       name: /Назад к моим броням/u,
     }).click();
     await expect(harness.getByText('Корт №1').first()).toBeVisible();
+
+    const bookingCallsBeforeRefresh = await page.evaluate(
+      () => ({ ...window.__backendBookingCalls }),
+    );
+    await harness.getByRole('button', {
+      name: 'Обновить мои брони',
+    }).click();
+    await expect.poll(() => page.evaluate(
+      () => window.__backendBookingCalls.read,
+    )).toBe(bookingCallsBeforeRefresh.read + 1);
+    await expect.poll(() => page.evaluate(
+      () => window.__backendBookingCalls.list,
+    )).toBeGreaterThanOrEqual(bookingCallsBeforeRefresh.list + 2);
+    await expect(harness.getByText('Корт №1')).toHaveCount(0);
+    expect(await page.evaluate(
+      () => window.__backendBookingCalls.write,
+    )).toBe(0);
+
+    const boundedRefreshTargets = await page.evaluate(async () => {
+      const { selectBackendReservationsForExplicitRefresh } = await import(
+        '/src/App.jsx'
+      );
+      return selectBackendReservationsForExplicitRefresh([
+        { reservationId: '1', status: 'confirmed' },
+        { reservationId: '2', status: 'cancelled' },
+        { reservationId: '3', status: 'unknown' },
+        { reservationId: '4', status: 'pending_confirmation' },
+        { reservationId: '5', status: 'confirmed' },
+      ]).map((reservation) => reservation.reservationId);
+    });
+    expect(boundedRefreshTargets).toEqual(['1', '3', '4']);
 
     await page.evaluate(() => window.__refreshAccountMatches());
     await expect(
