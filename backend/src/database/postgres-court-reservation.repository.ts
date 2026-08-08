@@ -34,6 +34,7 @@ import {
 } from '../reservations/reservation.types';
 import { classifyPostgresError } from './postgres-error-classifier';
 import {
+  CourtReservationPersistenceCause,
   CourtReservationPersistenceError,
   CourtReservationPersistenceStage,
   CourtReservationRepository,
@@ -146,6 +147,7 @@ interface StartedCreateOperationControlRow extends QueryResultRow {
   provider_attempt_started_at: unknown;
   provider_attempt_finished_at: unknown;
   created_at: unknown;
+  updated_at: unknown;
 }
 
 const RESERVATION_COLUMNS = `
@@ -184,8 +186,33 @@ const STARTED_CREATE_OPERATION_CONTROL_COLUMNS = `
   target_service_id, target_resource_id, target_datetime_text,
   target_end_datetime_text, provider_appointment_id, provider_record_id,
   previous_reservation_status, provider_attempt_started_at,
-  provider_attempt_finished_at, created_at
+  provider_attempt_finished_at, created_at, updated_at
 `;
+
+function persistenceCause(
+  classified: ReturnType<typeof classifyPostgresError>,
+): CourtReservationPersistenceCause {
+  if (classified.kind === 'non_postgres_error') return 'non_postgres_error';
+  if (classified.category === 'check_violation') {
+    switch (classified.metadata.constraint) {
+      case 'reservation_operations_time_check':
+        return 'operation_time_constraint';
+      case 'reservation_operations_terminal_shape_check':
+        return 'operation_terminal_shape_constraint';
+      case 'reservation_operations_provider_binding_shape_check':
+        return 'operation_provider_binding_shape_constraint';
+      default:
+        return 'check_violation';
+    }
+  }
+  switch (classified.category) {
+    case 'not_null_violation': return 'not_null_violation';
+    case 'invalid_text_representation': return 'invalid_text_representation';
+    case 'object_not_in_prerequisite_state':
+      return 'object_not_in_prerequisite_state';
+    default: return 'unknown_postgres_error';
+  }
+}
 
 function persistenceError(
   error: unknown,
@@ -193,12 +220,16 @@ function persistenceError(
 ): CourtReservationPersistenceError {
   if (error instanceof CourtReservationPersistenceError) {
     return error.stage === 'unspecified' && stage !== 'unspecified'
-      ? new CourtReservationPersistenceError(error.reason, stage)
+      ? new CourtReservationPersistenceError(error.reason, stage, error.cause)
       : error;
   }
   const classified = classifyPostgresError(error);
   if (classified.kind === 'non_postgres_error') {
-    return new CourtReservationPersistenceError('storage_failure', stage);
+    return new CourtReservationPersistenceError(
+      'storage_failure',
+      stage,
+      persistenceCause(classified),
+    );
   }
   if (classified.metadata.code === '23P01') {
     return new CourtReservationPersistenceError('transaction_conflict', stage);
@@ -212,7 +243,11 @@ function persistenceError(
     case 'connection_exception':
     case 'admin_shutdown':
     case 'query_canceled': return new CourtReservationPersistenceError('database_unavailable', stage);
-    default: return new CourtReservationPersistenceError('storage_failure', stage);
+    default: return new CourtReservationPersistenceError(
+      'storage_failure',
+      stage,
+      persistenceCause(classified),
+    );
   }
 }
 
@@ -388,7 +423,11 @@ function hydrateOperation(row: OperationRow, crypto: ReservationSnapshotCrypto):
 function assertStartedCreateOperationControl(
   row: StartedCreateOperationControlRow,
   expected: ReservationOperation,
-): void {
+): Readonly<{ providerAttemptStartedAt: ReturnType<typeof unixEpochSeconds>; operationUpdatedAt: ReturnType<typeof unixEpochSeconds> }> {
+  const providerAttemptStartedAt = row.provider_attempt_started_at === null
+    ? undefined
+    : readEpoch(row.provider_attempt_started_at);
+  const operationUpdatedAt = readEpoch(row.updated_at);
   if (
     expected.status !== 'pending' ||
     expected.type !== 'create' ||
@@ -410,17 +449,19 @@ function assertStartedCreateOperationControl(
     row.provider_appointment_id !== null ||
     row.provider_record_id !== null ||
     row.previous_reservation_status !== expected.previousReservationStatus ||
-    row.provider_attempt_started_at === null ||
-    Number(readEpoch(row.provider_attempt_started_at)) <
+    providerAttemptStartedAt === undefined ||
+    Number(providerAttemptStartedAt) <
       Number(expected.createdAt) ||
     row.provider_attempt_finished_at !== null ||
-    Number(readEpoch(row.created_at)) !== Number(expected.createdAt)
+    Number(readEpoch(row.created_at)) !== Number(expected.createdAt) ||
+    Number(operationUpdatedAt) < Number(providerAttemptStartedAt)
   ) {
     throw new CourtReservationPersistenceError(
       'invalid_persisted_state',
       'operation_control_validation',
     );
   }
+  return Object.freeze({ providerAttemptStartedAt, operationUpdatedAt });
 }
 
 @Injectable()
@@ -622,11 +663,26 @@ export class PostgresCourtReservationRepository implements CourtReservationRepos
       const operationResult = await transaction.query<StartedCreateOperationControlRow>(`SELECT ${STARTED_CREATE_OPERATION_CONTROL_COLUMNS} FROM backend_reservation.reservation_operations WHERE owner_account_id=$1 AND reservation_id=$2 AND operation_id=$3 FOR UPDATE`, [actorAccountId,reservationId,expectedOperation.operationId]);
       if (operationResult.rowCount !== 1) throw new CourtReservationPersistenceError('invalid_input', stage);
       stage = 'operation_control_validation';
-      assertStartedCreateOperationControl(operationResult.rows[0], expectedOperation);
+      const control = assertStartedCreateOperationControl(
+        operationResult.rows[0],
+        expectedOperation,
+      );
+      const effectiveNow = unixEpochSeconds(Math.max(
+        Number(command.now),
+        Number(reservation.updatedAt),
+        Number(expectedOperation.createdAt),
+        Number(control.providerAttemptStartedAt),
+        Number(control.operationUpdatedAt),
+      ));
+      const effectiveCommand = Object.freeze({ ...command, now: effectiveNow });
       stage = 'domain_transition';
-      const transition = transitionReservationOperation(reservation, expectedOperation, command);
+      const transition = transitionReservationOperation(
+        reservation,
+        expectedOperation,
+        effectiveCommand,
+      );
       if (transition.outcome !== 'transitioned') return transition;
-      return this.persistTransition(transaction, actorAccountId, reservationId, expectedOperation.operationId, reservation, expectedOperation, command, transition);
+      return this.persistTransition(transaction, actorAccountId, reservationId, expectedOperation.operationId, reservation, expectedOperation, effectiveCommand, transition);
     } catch (error) {
       throw persistenceError(error, stage);
     }

@@ -109,6 +109,24 @@ describe('migration 033 backend reservation persistence contract', () => {
     expect(sql).toContain('reservation_operations_unknown_reconciliation_idx');
   });
 
+  it('requires operation finalization time to be monotonic after provider dispatch', () => {
+    const operation = tableDefinition(
+      compact(MIGRATION),
+      'reservation_operations',
+      'create unique index reservation_operations_active_reservation_uq',
+    );
+
+    expect(operation).toContain(
+      'constraint reservation_operations_time_check check',
+    );
+    expect(operation).toContain(
+      'provider_attempt_started_at between created_at and updated_at',
+    );
+    expect(operation).toContain(
+      'provider_attempt_finished_at between provider_attempt_started_at and updated_at',
+    );
+  });
+
   it('binds every operation type to its only legal previous reservation state', () => {
     const sql = compact(MIGRATION);
 

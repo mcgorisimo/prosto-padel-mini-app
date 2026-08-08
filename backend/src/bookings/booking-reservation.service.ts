@@ -5,6 +5,7 @@ import { unixEpochSeconds } from '../auth/auth.types';
 import {
   CourtReservationPersistenceError,
   CourtReservationPersistenceFailure,
+  CourtReservationPersistenceCause,
   CourtReservationPersistenceStage,
 } from '../database/court-reservation.repository';
 import { PostgresCourtReservationRepository } from '../database/postgres-court-reservation.repository';
@@ -121,6 +122,7 @@ function persistenceDiagnosticOutcome(
 ): Readonly<{
   outcome: CourtReservationPersistenceFailure | 'unexpected_failure';
   persistenceStage?: CourtReservationPersistenceStage;
+  persistenceCause?: CourtReservationPersistenceCause;
 }> {
   return error instanceof CourtReservationPersistenceError
     ? Object.freeze({
@@ -128,6 +130,9 @@ function persistenceDiagnosticOutcome(
         ...(error.stage === 'unspecified'
           ? {}
           : { persistenceStage: error.stage }),
+        ...(error.cause === undefined
+          ? {}
+          : { persistenceCause: error.cause }),
       })
     : Object.freeze({ outcome: 'unexpected_failure' });
 }
@@ -152,6 +157,7 @@ export class BookingReservationService {
     stage: BookingReservationFinalizationStage,
     outcome: BookingReservationFinalizationOutcome,
     persistenceStage?: CourtReservationPersistenceStage,
+    persistenceCause?: CourtReservationPersistenceCause,
   ): void {
     try {
       this.diagnostics.record(Object.freeze({
@@ -160,6 +166,7 @@ export class BookingReservationService {
         stage,
         outcome,
         ...(persistenceStage === undefined ? {} : { persistenceStage }),
+        ...(persistenceCause === undefined ? {} : { persistenceCause }),
       }));
     } catch {
       // Diagnostics are best-effort and must never alter reservation safety.
@@ -209,6 +216,7 @@ export class BookingReservationService {
         'persist_unknown_fallback',
         diagnostic.outcome,
         diagnostic.persistenceStage,
+        diagnostic.persistenceCause,
       );
     }
     return reservation;
@@ -387,6 +395,7 @@ export class BookingReservationService {
         finalizationStage,
         diagnostic.outcome,
         diagnostic.persistenceStage,
+        diagnostic.persistenceCause,
       );
       if (dispatchClaim !== 'claimed') {
         return Object.freeze({ outcome: 'unknown', reservation: view(started.reservation, true) });

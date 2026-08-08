@@ -222,7 +222,7 @@ describe('PostgresCourtReservationRepository SQL contract', () => {
     });
   });
 
-  it('finalizes a claimed create from the persisted control row without decrypting client PII', async () => {
+  it('finalizes a claimed create monotonically against migration 033 without decrypting client PII', async () => {
     const crypto = new ReservationSnapshotCrypto(Buffer.alloc(32, 11), 1);
     const target = Object.freeze({
       serviceId: 11,
@@ -296,6 +296,7 @@ describe('PostgresCourtReservationRepository SQL contract', () => {
       provider_attempt_started_at: '1800000001',
       provider_attempt_finished_at: null,
       created_at: '1800000000',
+      updated_at: '1800000001',
     };
     const query = jest.fn()
       .mockResolvedValueOnce(result([reservationRow]))
@@ -315,7 +316,7 @@ describe('PostgresCourtReservationRepository SQL contract', () => {
       {
         type: 'confirm',
         actorAccountId: OWNER,
-        now: unixEpochSeconds(1_800_000_002),
+        now: unixEpochSeconds(1_800_000_000),
         providerBinding: {
           provider: 'yclients',
           appointmentId: 33,
@@ -335,11 +336,67 @@ describe('PostgresCourtReservationRepository SQL contract', () => {
     expect(controlSql).toContain('FOR UPDATE');
     expect(controlSql).not.toContain('reservation_operation_client_snapshots');
     expect(controlSql).not.toContain('ciphertext');
+    expect(query.mock.calls[2][1][17]).toBe(1_800_000_001);
+    expect(query.mock.calls[3][1][13]).toBe(1_800_000_001);
+    expect(query.mock.calls[3][1][15]).toBe(1_800_000_001);
     const serializedQueries = JSON.stringify(query.mock.calls);
     expect(serializedQueries).not.toContain('Private Player');
     expect(serializedQueries).not.toContain('private.owner@example.test');
     expect(serializedQueries).not.toContain('+79800000000');
     expect(serializedQueries).not.toContain('private-hash');
+
+    const failedQuery = jest.fn()
+      .mockResolvedValueOnce(result([reservationRow]))
+      .mockResolvedValueOnce(result([controlRow]))
+      .mockResolvedValueOnce(result([{}]))
+      .mockRejectedValueOnce({
+        code: '23514',
+        constraint: 'reservation_operations_time_check',
+        detail: 'private.owner@example.test private-hash',
+      });
+    await expect(repository.finalizeStartedCreateOperation(
+      { query: failedQuery } as never,
+      OWNER,
+      RESERVATION_ID,
+      started.operation,
+      {
+        type: 'mark_unknown',
+        actorAccountId: OWNER,
+        now: unixEpochSeconds(1_800_000_000),
+      },
+    )).rejects.toMatchObject({
+      reason: 'storage_failure',
+      stage: 'operation_update',
+      cause: 'operation_time_constraint',
+    });
+    expect(failedQuery.mock.calls[3][1][13]).toBe(1_800_000_001);
+    const caught = await repository.finalizeStartedCreateOperation(
+      { query: jest.fn()
+        .mockResolvedValueOnce(result([reservationRow]))
+        .mockResolvedValueOnce(result([controlRow]))
+        .mockResolvedValueOnce(result([{}]))
+        .mockRejectedValueOnce({
+          code: '23514',
+          constraint: 'private_check_name',
+          detail: 'private.owner@example.test private-hash',
+        }) } as never,
+      OWNER,
+      RESERVATION_ID,
+      started.operation,
+      {
+        type: 'mark_unknown',
+        actorAccountId: OWNER,
+        now: unixEpochSeconds(1_800_000_000),
+      },
+    ).catch((error: unknown) => error);
+    expect(caught).toMatchObject({
+      reason: 'storage_failure',
+      stage: 'operation_update',
+      cause: 'check_violation',
+    });
+    expect(JSON.stringify(caught)).not.toContain('private_check_name');
+    expect(JSON.stringify(caught)).not.toContain('private.owner@example.test');
+    expect(JSON.stringify(caught)).not.toContain('private-hash');
   });
 
   it('fails closed before updates when the persisted control row differs from the started operation', async () => {
@@ -416,6 +473,7 @@ describe('PostgresCourtReservationRepository SQL contract', () => {
         provider_attempt_started_at: '1800000001',
         provider_attempt_finished_at: null,
         created_at: '1800000000',
+        updated_at: '1800000001',
       }]));
     const repository = new PostgresCourtReservationRepository(
       new ReservationSnapshotCrypto(Buffer.alloc(32, 12), 1),

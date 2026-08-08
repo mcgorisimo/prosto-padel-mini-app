@@ -50,12 +50,24 @@ export type CourtReservationPersistenceStage =
   | 'operation_update'
   | 'slot_hold_release';
 
+export type CourtReservationPersistenceCause =
+  | 'non_postgres_error'
+  | 'operation_time_constraint'
+  | 'operation_terminal_shape_constraint'
+  | 'operation_provider_binding_shape_constraint'
+  | 'check_violation'
+  | 'not_null_violation'
+  | 'invalid_text_representation'
+  | 'object_not_in_prerequisite_state'
+  | 'unknown_postgres_error';
+
 export class CourtReservationPersistenceError extends Error {
   readonly name = 'CourtReservationPersistenceError';
 
   constructor(
     readonly reason: CourtReservationPersistenceFailure,
     readonly stage: CourtReservationPersistenceStage = 'unspecified',
+    readonly cause?: CourtReservationPersistenceCause,
   ) {
     super('Court reservation persistence failed');
   }

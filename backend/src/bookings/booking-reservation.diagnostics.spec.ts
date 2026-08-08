@@ -19,6 +19,7 @@ describe('BookingReservationDiagnosticLogger', () => {
       stage: 'confirm_binding',
       outcome: 'storage_failure',
       persistenceStage: 'operation_control_validation',
+      persistenceCause: 'operation_time_constraint',
     }));
 
     expect(warn).toHaveBeenCalledTimes(1);
@@ -29,6 +30,7 @@ describe('BookingReservationDiagnosticLogger', () => {
       stage: 'confirm_binding',
       outcome: 'storage_failure',
       persistenceStage: 'operation_control_validation',
+      persistenceCause: 'operation_time_constraint',
     });
     const serialized = JSON.stringify(warn.mock.calls);
     expect(serialized).not.toContain('phone');

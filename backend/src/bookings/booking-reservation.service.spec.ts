@@ -276,7 +276,11 @@ describe('BookingReservationService', () => {
   it('persists unknown in a fresh transaction when post-dispatch confirm fails', async () => {
     const h = harness();
     h.reservations.finalizeStartedCreateOperation
-      .mockRejectedValueOnce(new CourtReservationPersistenceError('storage_failure', 'reservation_update'));
+      .mockRejectedValueOnce(new CourtReservationPersistenceError(
+        'storage_failure',
+        'reservation_update',
+        'operation_time_constraint',
+      ));
 
     const result = await h.service.create(OWNER, {
       requestKey: REQUEST_KEY,
@@ -306,6 +310,7 @@ describe('BookingReservationService', () => {
         stage: 'confirm_binding',
         outcome: 'storage_failure',
         persistenceStage: 'reservation_update',
+        persistenceCause: 'operation_time_constraint',
       }),
     );
     expect(h.diagnostics.record).toHaveBeenNthCalledWith(

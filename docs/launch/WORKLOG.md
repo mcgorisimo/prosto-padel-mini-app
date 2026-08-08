@@ -2572,3 +2572,49 @@
   `operation_update` SQL failure plus a regression against the exact
   migration-033 terminal/time constraints; no migration or provider retry is
   implied by this evidence.
+
+### 2026-08-08 — D2 / operation-update monotonic-time correction
+
+- This code-only correction starts from local evidence HEAD `9d755566796e9deaee0896a712994181845dee0a`.
+  Selectel test remains on exact runtime `507896ff67077dc146618f146cb7ed484a1a1aae`;
+  no YCLIENTS, PostgreSQL, SSH/server, provider or production call/write was
+  made. The existing pending reservation and its active hold were not changed,
+  retried or cleaned.
+- A migration-033 regression now reproduces the operation-update failure class:
+  a claimed provider attempt may have a persisted start/update second newer
+  than a final application timestamp. The repository previously wrote that
+  raw timestamp as `provider_attempt_finished_at`, `terminal_at`/`unknown_at`
+  and `updated_at`, which can violate the exact
+  `reservation_operations_time_check` ordering. This is a proven code/schema
+  defect matching the failed statement class; the retained live evidence still
+  does not claim the exact historical SQLSTATE or constraint name.
+- Claimed-create finalization now derives one monotonic effective timestamp
+  from the locked reservation update time, immutable operation creation time,
+  persisted provider-attempt start and persisted operation update time. Both
+  confirm and fail-closed unknown transitions use that same timestamp
+  atomically. No provider binding is synthesized, no parser is weakened and no
+  POST/retry path was added.
+- Persistence diagnostics now preserve only an allowlisted semantic cause.
+  Migration-033 time, terminal-shape and provider-binding checks have fixed
+  public cause names; unknown check violations and other SQLSTATE classes are
+  reduced to fixed categories. Raw SQLSTATE, arbitrary constraint/detail,
+  error message, row values, contact PII, token and record hash are discarded.
+- Regression coverage proves the one-second clock case, exact migration-033
+  ordering text, the `operation_update` stage/cause mapping, generic handling
+  of an unknown constraint name, absence of private values, and propagation
+  through the PII-safe booking diagnostic sink. Focused PASS: backend typecheck
+  and `4 suites / 46 tests`. Full PASS: backend typecheck, unit `132 suites /
+  3291 tests`, E2E `2 suites / 4 tests`, and build; root build PASS (`1616`
+  modules). Parallel root E2E attempts exposed unrelated WebKit resource
+  timeouts (`78/1/7`, then `82/1/3`); the identical full suite with one worker
+  passed `85/1` without code or assertion changes. `git diff --check` PASS.
+- Independent read-only review of all nine changed files is CLEAN: no
+  actionable P0/P1. It confirmed the migration-033 clock regression would fail
+  on the previous code, the single effective timestamp covers both confirm and
+  unknown finalization, raw PostgreSQL metadata cannot cross the diagnostic
+  boundary, and no provider/runtime/schema/payment surface was added.
+- Migration 033 and all schema/payment/frontend/runtime wiring remain
+  unchanged. Deployment impact is `pending_integration_rollout`: backend code
+  changes are local only. No further live booking or cleanup is permitted by
+  this checkpoint; integration/Selectel rollout and a new controlled create
+  smoke require a separate explicit gate after independent review.
