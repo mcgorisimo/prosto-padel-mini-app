@@ -3742,6 +3742,7 @@ test.describe('backend match credential lifecycle', () => {
         list: 0,
         read: 0,
         catalog: 0,
+        availability: 0,
         write: 0,
         lastReadReservationId: null,
       };
@@ -3770,6 +3771,7 @@ test.describe('backend match credential lifecycle', () => {
             : { outcome: 'rejected', reason: 'invalid_request' };
         },
         async listServices() {
+          window.__backendBookingCalls.availability += 1;
           return { outcome: 'rejected', reason: 'unavailable' };
         },
         async createBooking() {
@@ -3846,9 +3848,23 @@ test.describe('backend match credential lifecycle', () => {
       () => window.__backendBookingCalls.list,
     )).toBeGreaterThanOrEqual(1);
 
+    const catalogCallsBeforeOpen = await page.evaluate(
+      () => window.__backendBookingCalls.catalog,
+    );
     await harness.locator('button').filter({ hasText: 'Корт №1' }).first().click();
-    const reservationCard = harness.getByTestId('booking-reservation-card');
-    await expect(reservationCard).toContainText('Статус: pending_confirmation');
+    const reservationDetails = harness.getByTestId('booking-reservation-details');
+    await expect(reservationDetails.getByRole('heading', {
+      name: 'Детали брони',
+    })).toBeVisible();
+    await expect(reservationDetails.getByTestId('booking-reservation-status')).toHaveText('Ожидает');
+    await expect(reservationDetails).toContainText('Корт №1');
+    await expect(reservationDetails).toContainText('1,5 ч');
+    await expect(reservationDetails.getByRole('heading', {
+      name: 'Бронирование корта',
+    })).toHaveCount(0);
+    await expect(reservationDetails.getByRole('button', {
+      name: 'Создать бронь',
+    })).toHaveCount(0);
     await expect.poll(() => page.evaluate(
       () => window.__backendBookingCalls.read,
     )).toBe(1);
@@ -3860,9 +3876,14 @@ test.describe('backend match credential lifecycle', () => {
     )).toBe('dddddddd-dddd-4ddd-8ddd-dddddddddddd');
     expect(await page.evaluate(
       () => window.__backendBookingCalls.catalog,
-    )).toBe(1);
+    )).toBe(catalogCallsBeforeOpen);
+    expect(await page.evaluate(
+      () => window.__backendBookingCalls.availability,
+    )).toBe(0);
 
-    await harness.getByRole('button', { name: 'Главная' }).click();
+    await reservationDetails.getByRole('button', {
+      name: /Назад к моим броням/u,
+    }).click();
     await expect(harness.getByText('Корт №1').first()).toBeVisible();
 
     await page.evaluate(() => window.__refreshAccountMatches());

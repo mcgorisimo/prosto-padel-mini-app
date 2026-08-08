@@ -3075,6 +3075,10 @@ const handleBookSlot = async (booking) => {
             allMatches={allMatches}
             availabilityActions={backendBookingAvailabilityActions}
             initialReservationId={selectedBookingReservationId}
+            onCloseReservation={() => {
+              setSelectedBookingReservationId(null);
+              setActiveTab('home');
+            }}
             courtNamesById={backendCourtNamesById}
             onCourtCatalogChange={mergeBackendCourtCatalog}
             bookingClient={{

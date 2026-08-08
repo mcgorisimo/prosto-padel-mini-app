@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { CalendarDays, Clock3, LockKeyhole, X } from 'lucide-react';
 import { BOOKING_DURATIONS, COURTS, WORKING_HOURS, checkAvailability, fromMin } from '../lib/booking';
+import { getBackendBookingStatusPresentation } from '../lib/backendBookingHomeAdapter';
 import { getMoscowDateRange, hasMoscowSlotStarted } from '../lib/moscowDateTime';
 import { fmtPrice, getPerPlayerPrice, getTotalPrice } from '../lib/pricing';
 
@@ -14,6 +15,30 @@ const TIME_SECTIONS = [
 
 const MONTHS_SHORT = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
 const WEEKDAYS_SHORT = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
+
+const CLUB_DATE_TIME_FORMAT = new Intl.DateTimeFormat('ru-RU', {
+  timeZone: 'Europe/Moscow',
+  weekday: 'short',
+  day: 'numeric',
+  month: 'long',
+  hour: '2-digit',
+  minute: '2-digit',
+});
+
+const CLUB_TIME_FORMAT = new Intl.DateTimeFormat('ru-RU', {
+  timeZone: 'Europe/Moscow',
+  hour: '2-digit',
+  minute: '2-digit',
+});
+
+function formatReservationDateTime(startsAt, endsAt) {
+  return `${CLUB_DATE_TIME_FORMAT.format(new Date(startsAt))}–${CLUB_TIME_FORMAT.format(new Date(endsAt))}`;
+}
+
+function formatReservationDuration(startsAt, endsAt) {
+  const hours = (Date.parse(endsAt) - Date.parse(startsAt)) / 3_600_000;
+  return Number.isFinite(hours) && hours > 0 ? formatDuration(hours) : 'Уточняется';
+}
 
 function buildDates(days = 14) {
   return getMoscowDateRange(days).map((dateISO, index) => {
@@ -161,6 +186,7 @@ export default function BookingScreen({
   availabilityActions = null,
   bookingClient = null,
   initialReservationId = null,
+  onCloseReservation = null,
   courtNamesById = {},
   onCourtCatalogChange = null,
   onBookSlot,
@@ -169,6 +195,8 @@ export default function BookingScreen({
   const dates = useMemo(() => buildDates(14), []);
   const times = useMemo(buildTimes, []);
   const usesBackendAvailability = availabilityActions !== null;
+  const isReservationDetailsMode =
+    typeof initialReservationId === 'string' && initialReservationId.length > 0;
   const [bookingEmail, setBookingEmail] = useState('');
   const normalizedBookingClient = useMemo(
     () => normalizeBookingClient({ ...bookingClient, email: bookingEmail }),
@@ -181,6 +209,7 @@ export default function BookingScreen({
   const [isSaving, setIsSaving] = useState(false);
   const [successText, setSuccessText] = useState('');
   const [latestReservation, setLatestReservation] = useState(null);
+  const [reservationReadStatus, setReservationReadStatus] = useState('idle');
   const [isRefreshingReservation, setIsRefreshingReservation] = useState(false);
   const [servicesState, setServicesState] = useState({
     status: 'idle',
@@ -207,6 +236,11 @@ export default function BookingScreen({
     const canReadExact =
       typeof initialReservationId === 'string' &&
       typeof availabilityActions?.readBooking === 'function';
+    if (isReservationDetailsMode && !canReadExact) {
+      setLatestReservation(null);
+      setReservationReadStatus('error');
+      return undefined;
+    }
     if (
       !canReadExact &&
       typeof availabilityActions?.listBookings !== 'function'
@@ -214,13 +248,20 @@ export default function BookingScreen({
     let active = true;
     void (async () => {
       if (canReadExact) {
-        const refreshed = await availabilityActions.readBooking(initialReservationId);
-        if (!active) return;
-        setLatestReservation(
-          refreshed?.outcome === 'booking_loaded'
-            ? refreshed.reservation
-            : null,
-        );
+        setLatestReservation(null);
+        setReservationReadStatus('loading');
+        try {
+          const refreshed = await availabilityActions.readBooking(initialReservationId);
+          if (!active) return;
+          if (refreshed?.outcome === 'booking_loaded') {
+            setLatestReservation(refreshed.reservation);
+            setReservationReadStatus('ready');
+          } else {
+            setReservationReadStatus('error');
+          }
+        } catch {
+          if (active) setReservationReadStatus('error');
+        }
         return;
       }
       const listed = await availabilityActions.listBookings();
@@ -239,11 +280,11 @@ export default function BookingScreen({
       );
     })();
     return () => { active = false; };
-  }, [availabilityActions, initialReservationId]);
+  }, [availabilityActions, initialReservationId, isReservationDetailsMode]);
   const isSavingRef = useRef(false);
 
   useEffect(() => {
-    if (!usesBackendAvailability) return undefined;
+    if (!usesBackendAvailability || isReservationDetailsMode) return undefined;
     let active = true;
     setServicesState({ status: 'loading', groups: [] });
 
@@ -265,16 +306,17 @@ export default function BookingScreen({
     return () => {
       active = false;
     };
-  }, [availabilityActions, usesBackendAvailability]);
+  }, [availabilityActions, isReservationDetailsMode, usesBackendAvailability]);
 
   useEffect(() => {
+    if (isReservationDetailsMode) return;
     if (servicesState.status !== 'ready') return;
     if (servicesState.groups.some((group) => group.duration === duration)) {
       return;
     }
     setDuration(servicesState.groups[0].duration);
     setSelectedSlot(null);
-  }, [duration, servicesState]);
+  }, [duration, isReservationDetailsMode, servicesState]);
 
   const selectedServiceIds = useMemo(() => (
     servicesState.groups
@@ -284,7 +326,11 @@ export default function BookingScreen({
   const selectedServiceKey = selectedServiceIds.join(',');
 
   useEffect(() => {
-    if (!usesBackendAvailability || selectedServiceIds.length === 0) {
+    if (
+      !usesBackendAvailability ||
+      isReservationDetailsMode ||
+      selectedServiceIds.length === 0
+    ) {
       return undefined;
     }
     let active = true;
@@ -323,6 +369,7 @@ export default function BookingScreen({
     };
   }, [
     availabilityActions,
+    isReservationDetailsMode,
     selectedServiceIds,
     selectedServiceKey,
     onCourtCatalogChange,
@@ -348,6 +395,7 @@ export default function BookingScreen({
   useEffect(() => {
     if (
       !usesBackendAvailability ||
+      isReservationDetailsMode ||
       courtsState.status !== 'ready' ||
       selectedServiceIds.length === 0 ||
       queryCourtIds.length === 0 ||
@@ -387,6 +435,7 @@ export default function BookingScreen({
     courtsState.status,
     dates,
     datesQueryKey,
+    isReservationDetailsMode,
     queryCourtIds,
     selectedServiceIds,
     usesBackendAvailability,
@@ -400,6 +449,7 @@ export default function BookingScreen({
   useEffect(() => {
     if (
       !usesBackendAvailability ||
+      isReservationDetailsMode ||
       datesState.status !== 'ready' ||
       datesState.queryKey !== datesQueryKey
     ) {
@@ -415,6 +465,7 @@ export default function BookingScreen({
     datesQueryKey,
     datesState.queryKey,
     datesState.status,
+    isReservationDetailsMode,
     selectedDateISO,
     usesBackendAvailability,
   ]);
@@ -424,6 +475,7 @@ export default function BookingScreen({
   useEffect(() => {
     if (
       !usesBackendAvailability ||
+      isReservationDetailsMode ||
       datesState.status !== 'ready' ||
       datesState.queryKey !== datesQueryKey ||
       selectedServiceIds.length === 0 ||
@@ -507,6 +559,7 @@ export default function BookingScreen({
     datesQueryKey,
     datesState.queryKey,
     datesState.status,
+    isReservationDetailsMode,
     queryCourtIds,
     selectedDateISO,
     selectedServiceIds,
@@ -798,6 +851,117 @@ export default function BookingScreen({
       setIsRefreshingReservation(false);
     }
   };
+
+  if (isReservationDetailsMode) {
+    const statusPresentation = latestReservation
+      ? getBackendBookingStatusPresentation(latestReservation.status)
+      : null;
+
+    return (
+      <div
+        data-testid="booking-reservation-details"
+        className="booking-screen min-h-screen bg-app-bg px-4 text-warm-white"
+      >
+        <header className="booking-hero">
+          {typeof onCloseReservation === 'function' && (
+            <button
+              type="button"
+              onClick={onCloseReservation}
+              className="mb-5 text-sm font-bold text-warm-white/64"
+            >
+              ← Назад к моим броням
+            </button>
+          )}
+          <div className="booking-hero-icon flex items-center justify-center text-coral">
+            <CalendarDays size={20} />
+          </div>
+          <h1 className="booking-title text-[30px] font-black leading-tight">
+            Детали брони
+          </h1>
+          <p className="booking-subtitle text-sm leading-relaxed text-warm-white/58">
+            Актуальные данные брони из YCLIENTS.
+          </p>
+        </header>
+
+        {['idle', 'loading'].includes(reservationReadStatus) && (
+          <div
+            data-testid="booking-reservation-loading"
+            className="booking-success p-4 text-sm font-semibold"
+            aria-live="polite"
+          >
+            Обновляем данные брони…
+          </div>
+        )}
+
+        {reservationReadStatus === 'error' && (
+          <div
+            data-testid="booking-reservation-error"
+            className="rounded-2xl border border-coral/25 bg-coral/10 p-4 text-sm leading-relaxed text-warm-white/76"
+          >
+            Не удалось открыть бронь. Вернитесь в «Мои брони» и попробуйте ещё раз.
+          </div>
+        )}
+
+        {latestReservation && statusPresentation && (
+          <section className="booking-success p-4 text-sm leading-relaxed">
+            <div className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-warm-white/42">
+              Статус брони
+            </div>
+            <div
+              data-testid="booking-reservation-status"
+              className="mt-2 text-xl font-black text-accent-light"
+            >
+              {statusPresentation.label}
+            </div>
+
+            <div className="mt-5 rounded-2xl border border-warm-white/8 bg-app-bg/35 p-4">
+              <div className="text-xs font-bold text-warm-white/46">Дата и время</div>
+              <div className="mt-1 text-base font-black">
+                {formatReservationDateTime(
+                  latestReservation.startsAt,
+                  latestReservation.endsAt,
+                )}
+              </div>
+              <div className="mt-4 grid grid-cols-2 gap-3">
+                <div>
+                  <div className="text-xs font-bold text-warm-white/46">Корт</div>
+                  <div className="mt-1 font-black">{latestReservationCourtName}</div>
+                </div>
+                <div>
+                  <div className="text-xs font-bold text-warm-white/46">Длительность</div>
+                  <div className="mt-1 font-black">
+                    {formatReservationDuration(
+                      latestReservation.startsAt,
+                      latestReservation.endsAt,
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {latestReservation.stale && (
+              <div className="mt-3 rounded-xl bg-amber-300/10 px-3 py-3 text-amber-200">
+                Актуальность данных YCLIENTS временно не подтверждена. Слот остаётся удержанным.
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={handleRefreshReservation}
+              disabled={isRefreshingReservation}
+              className="mt-4 w-full rounded-xl bg-warm-white/10 px-3 py-3 font-bold"
+            >
+              {isRefreshingReservation ? 'Обновляем…' : 'Обновить данные'}
+            </button>
+
+            <div className="mt-3 rounded-xl bg-warm-white/10 px-3 py-3 text-sm">
+              Для отмены или переноса обратитесь к администратору клуба. Прямая ссылка появится после подключения официального контакта клуба.
+            </div>
+          </section>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="booking-screen min-h-screen bg-app-bg px-4 text-warm-white">

@@ -26,7 +26,7 @@
 | Этап | Статус | Ветка/commit | Проверки | Блокер/следующий шаг |
 |---|---|---|---|---|
 | D1 Backend-only/contracts | done | `main` / deployed `c04074459948d0bf545e865b885aea7a4e5fec3c` | frontend E2E PASS (82/1 skipped); focused fail-closed 2/2 PASS; frontend build PASS; backend all PASS; Selectel test smoke PASS | D1 закрыт; следующий отдельный этап — D2 |
-| D2 YCLIENTS reservation core | in_progress | `main` / Selectel test `b2edf2348fffb0c5ba8647ad99b743b40ce79238` | migration 033 applied/verified; int4 hydration correction deployed; backend/root gates and rollout health/auth/log checks PASS | owner fresh-booking smoke must verify a new create reaches confirmed; existing lost-response records remain held without repeat create; Court 1 YCLIENTS schedule still needs 00:00 correction |
+| D2 YCLIENTS reservation core | in_progress | local booking-details correction over `66c9a1fef68b6bfd35fe8c13ca4ecf594826aa60`; Selectel test `b2edf2348fffb0c5ba8647ad99b743b40ce79238` | migration 033 applied/verified; int4 hydration correction deployed; booking-details focused/full E2E and build PASS | integrate/roll out booking details, then owner fresh-booking smoke must verify a new create reaches confirmed; existing lost-response records remain held without repeat create; Court 1 YCLIENTS schedule still needs 00:00 correction |
 | D3 Match ↔ reservation lifecycle | pending | — | — | reflect admin cancellation without provider DELETE, owner participant removal, match ↔ reservation binding |
 | D4 Payment Core | pending | — | — | payment provider, pricing/payment snapshot, чеки и возвраты |
 | D5 Settings/moderation/compliance | pending | — | — | standalone phone/email auth, verified backend email, approved club support/contact source and clickable action; затем schema review |
@@ -2275,3 +2275,37 @@
   appears in YCLIENTS and in Home with local status `confirmed`. Existing
   lost-response bookings must not be submitted again by the operator and are
   not treated as payment proof.
+
+### 2026-08-08 — D2 / persisted booking details navigation correction
+
+- Owner TMA feedback proved that tapping a persisted booking on Home passed the
+  correct owner-scoped reservation ID but opened the generic booking calendar;
+  the exact reservation card was rendered only below that calendar. This was a
+  frontend navigation/rendering defect, not a second provider create.
+- `BookingScreen` now has an explicit reservation-details mode for a Home
+  reservation ID. It performs the existing bounded exact authenticated read,
+  shows a customer status label, club-timezone date/time, duration and mapped
+  court, supports an explicit read-only refresh, and returns to Home through
+  `Назад к моим броням`.
+- Details mode fails closed when exact read is unavailable or rejected. It does
+  not load availability services/dates/times, render the calendar or expose a
+  create/cancel/reschedule action. The existing non-clickable administrator
+  contact text is retained without inventing a phone, URL or fallback.
+- Regression coverage opens the Home booking, proves the details heading and
+  fields, proves one exact read, zero booking writes and zero additional
+  availability/catalog requests, proves absence of the calendar/create button,
+  and returns to Home.
+- Verification PASS: focused E2E `1/1`; full root E2E
+  `85 passed / 1 skipped`; root build PASS (`1616` modules, existing CJS/chunk
+  warnings only); `git diff --check`. The first sandboxed build hit only the
+  known managed-worktree esbuild `Access is denied` boundary; the identical
+  approved build outside that boundary passed. Backend gates were not repeated
+  because backend source did not change.
+- Read-only P0/P1 review found no actionable issue: all hooks remain
+  unconditional, exact-read failure cannot fall back to another reservation,
+  details cannot dispatch availability/create calls, and no PII, payment field,
+  provider PUT/DELETE, schema or backend behavior changed.
+- Deployment impact is `pending`: frontend bundle changes. Selectel test still
+  runs exact backend/application checkout `b2edf234...`; production is
+  unchanged. A frontend-only rollout and real TMA booking-details smoke are
+  required before this correction is `test_deployed`.
