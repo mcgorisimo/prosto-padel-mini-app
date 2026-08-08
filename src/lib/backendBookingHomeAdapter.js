@@ -138,6 +138,7 @@ export function selectBackendReservationsForHome(
       ))
       .filter((event) => (
         event !== null &&
+        event.reservationStatus !== 'cancelled' &&
         Date.parse(event.endsAt) > nowMilliseconds
       )),
   );

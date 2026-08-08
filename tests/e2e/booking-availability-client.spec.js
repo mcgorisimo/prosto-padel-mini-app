@@ -44,6 +44,7 @@ test('maps persisted owner bookings to truthful Home events', async ({ page }) =
       [
         reservation,
         { ...reservation, reservationId: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', status: 'rejected' },
+        { ...reservation, reservationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', status: 'cancelled' },
         {
           ...reservation,
           reservationId: 'ffffffff-ffff-4fff-8fff-ffffffffffff',

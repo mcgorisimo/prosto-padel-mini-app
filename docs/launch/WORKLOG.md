@@ -2291,11 +2291,16 @@
   not load availability services/dates/times, render the calendar or expose a
   create/cancel/reschedule action. The existing non-clickable administrator
   contact text is retained without inventing a phone, URL or fallback.
+- A canonically synchronized `cancelled` reservation is no longer rendered in
+  the active Home booking list. Its persisted audit/history row is retained;
+  this is only an active-list presentation filter and never interprets a stale,
+  pending or unknown reservation as cancelled.
 - Regression coverage opens the Home booking, proves the details heading and
   fields, proves one exact read, zero booking writes and zero additional
   availability/catalog requests, proves absence of the calendar/create button,
-  and returns to Home.
-- Verification PASS: focused E2E `1/1`; full root E2E
+  excludes a future cancelled reservation from active Home, and returns to
+  Home.
+- Verification PASS: focused E2E `2/2`; full root E2E
   `85 passed / 1 skipped`; root build PASS (`1616` modules, existing CJS/chunk
   warnings only); `git diff --check`. The first sandboxed build hit only the
   known managed-worktree esbuild `Access is denied` boundary; the identical
