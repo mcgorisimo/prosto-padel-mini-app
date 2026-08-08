@@ -2618,3 +2618,30 @@
   changes are local only. No further live booking or cleanup is permitted by
   this checkpoint; integration/Selectel rollout and a new controlled create
   smoke require a separate explicit gate after independent review.
+
+### 2026-08-08 — D2 / monotonic finalization backend-only rollout
+
+- Git delivery PASS: exact reviewed checkpoint
+  `59c2b9499116642f441772be41bc77a6d7c85900` was pushed to
+  `codex/week1-d2-reservation-core`; clean local `main` fast-forwarded from
+  `507896ff67077dc146618f146cb7ed484a1a1aae` to the same exact SHA and pushed.
+- Selectel test precheck PASS: application checkout was clean at `507896f...`,
+  fetched `origin/main=59c2b94...`, then detached cleanly at the exact reviewed
+  SHA. Compose config validation passed using the existing approved
+  `compose.yaml`, `compose.runtime-backend.yaml` and server-side `.env.test`.
+- Only the backend image was rebuilt and only
+  `prosto-padel-test-backend-1` was recreated. Its container ID changed from
+  `a3bf38ef947e...` to `a456e881a5b6...`. PostgreSQL remained
+  `5e36d4dc1a5c...`, frontend `8a572cd993d3...`, and nginx
+  `e5b98b53a385...`; all four are `healthy` with restart count `0`.
+- Stable-window postcheck PASS: proxy root and health returned `200`,
+  unauthenticated `GET /api/v1/bookings` retained `401`, and backend/frontend/
+  nginx/PostgreSQL each had zero `error|fatal|unhandled|panic|exception`
+  markers in the bounded post-rollout log window. Final server checkout is
+  clean and exact `59c2b949...`.
+- No migration/schema/DB write, YCLIENTS/provider call, booking create, env or
+  secret change, frontend/nginx/PostgreSQL rebuild, cleanup or production
+  change occurred. Deployment status is `pending_manual_booking_smoke`: the
+  next step is exactly one new Telegram Mini App booking, which must persist as
+  `confirmed` before any manual YCLIENTS deletion/read-only refresh check.
+  Existing pending reservations must not be resubmitted.
