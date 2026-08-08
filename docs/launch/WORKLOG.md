@@ -26,7 +26,7 @@
 | Этап | Статус | Ветка/commit | Проверки | Блокер/следующий шаг |
 |---|---|---|---|---|
 | D1 Backend-only/contracts | done | `main` / deployed `c04074459948d0bf545e865b885aea7a4e5fec3c` | frontend E2E PASS (82/1 skipped); focused fail-closed 2/2 PASS; frontend build PASS; backend all PASS; Selectel test smoke PASS | D1 закрыт; следующий отдельный этап — D2 |
-| D2 YCLIENTS reservation core | in_progress | `main` / Selectel test `fa5eb38c6608d07c0140f39467dfebe3a058862b` | migration 033 applied/verified; backend/frontend rollout healthy; automated gates and stable log window PASS | owner TMA smoke: one fresh create must persist confirmed binding, then manual YCLIENTS delete + explicit Home refresh must remove the active card; five legacy unbound test reservations remain held for a separate cleanup gate |
+| D2 YCLIENTS reservation core | in_progress | `main` / Selectel test `fa5eb38c6608d07c0140f39467dfebe3a058862b` | migration 033 applied/verified; backend/frontend runtime healthy; automated gates PASS; fresh-create business smoke STOP | newest strict provider create still failed local finalization: `confirm_binding/storage_failure` and fallback `storage_failure`, leaving pending/unbound/held; do not delete/retry; next gate is code-only diagnostic correction review |
 | D3 Match ↔ reservation lifecycle | pending | — | — | reflect admin cancellation without provider DELETE, owner participant removal, match ↔ reservation binding |
 | D4 Payment Core | pending | — | — | payment provider, pricing/payment snapshot, чеки и возвраты |
 | D5 Settings/moderation/compliance | pending | — | — | standalone phone/email auth, verified backend email, approved club support/contact source and clickable action; затем schema review |
@@ -41,7 +41,7 @@
 | Этап | Среда | Целевой commit | Статус | Проверка |
 |---|---|---|---|---|
 | D1 Backend-only/contracts | Selectel test | `c04074459948d0bf545e865b885aea7a4e5fec3c` | `test_deployed` | frontend healthy; HTTPS root/health и новый asset 200; TMA auth/profile/feed/details/booking availability PASS; bundle/log audit PASS |
-| D2 YCLIENTS reservation core | Selectel test | `fa5eb38c6608d07c0140f39467dfebe3a058862b` | `pending_manual_smoke` | backend/frontend recreated; all containers healthy/restart 0; checkout exact, HTTPS root/health/new asset 200, unauth bookings 401 and stable log audit clean; fresh create/confirmed + admin delete/Home refresh smoke pending |
+| D2 YCLIENTS reservation core | Selectel test | `fa5eb38c6608d07c0140f39467dfebe3a058862b` | `business_smoke_failed` | infrastructure/health/log gates PASS, but new create remained pending/unbound after provider success; admin delete/Home refresh smoke must not proceed until a reviewed correction is rolled out |
 | D2 persistence/privacy proposal | not applicable | docs-only checkpoint | `not_needed` | только Markdown; runtime, schema, containers и конфигурация не менялись |
 | D2 YCLIENTS contract matrix | not applicable | docs-only checkpoint поверх `3e8739b` | `not_needed` | только Markdown; API/DB/server/runtime не вызывались и не менялись |
 | D2 YCLIENTS controlled test plan | not applicable | `040773172a2fa556ffaaf1d12dac540095070976` + docs-only correction from that exact base | `not_needed` | plan only; provider/server/DB/runtime calls и writes не выполнялись |
@@ -2447,3 +2447,35 @@
   one explicit Home `Обновить` action used to prove the active card disappears.
   The five legacy unbound test reservations must not be resubmitted or cleaned
   by this smoke.
+
+### 2026-08-08 — D2 / fresh create smoke STOP after finalization diagnostics
+
+- The owner submitted exactly one fresh booking after the `fa5eb38...` rollout
+  and confirmed that the record appeared in YCLIENTS. A bounded PostgreSQL
+  `BEGIN READ ONLY` transaction with a five-second statement timeout inspected
+  only PII-safe identifiers/status/flags for the newest local reservation
+  `3d49b170-61a6-4b77-b497-ad62b4f414f6` and ended with `ROLLBACK`.
+- Business smoke STOP: the reservation remained `pending_confirmation`; its
+  create operation `e445ab50-e900-4d7f-b266-492d5f9740b5` remained `pending`,
+  provider attempt was started but not finished, and reservation/operation
+  record IDs plus encrypted record-hash binding were all absent. Therefore the
+  strict prerequisite for manual deletion/read-only deleted sync was not met.
+- The new allowlisted diagnostics narrowed the failure without exposing PII,
+  token, record hash or raw provider body: the strictly parsed provider success
+  reached `confirm_binding` and failed as `storage_failure`; the single fresh
+  `persist_unknown_fallback` also failed as `storage_failure`. No second POST
+  was sent.
+- A second bounded read-only metadata check found valid operation time ordering,
+  canonical target interval, PostgreSQL `integer` runtime shapes for all three
+  crypto metadata versions, expected nonce/tag/digest lengths and a valid
+  request-digest shape. Ciphertext and contact values were not read or printed.
+  This rules out the previously fixed int4 metadata shape and operation timing
+  as the new failure, but the current allowlist does not distinguish the common
+  hydration/decryption/transition substage further.
+- The owner must not delete this new YCLIENTS record, press create again or
+  treat the local pending state as payment proof. Its local hold remains active.
+  No DB/provider write, cleanup, migration, runtime/container/env or production
+  change was made during diagnosis. Next permitted work must be a separate
+  code-only diagnostic/correction slice followed by review and another exact
+  rollout; the admin-delete/Home-refresh smoke remains blocked until a fresh
+  booking persists a complete confirmed binding.
