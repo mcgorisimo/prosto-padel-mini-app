@@ -2752,3 +2752,49 @@
   deployed. Selectel test remains healthy on exact `743386c...`; its containers,
   DB, env and production were not changed by this checkpoint. The outstanding
   deleted-record reconciliation defect remains a separate backend correction.
+
+### 2026-08-09 — D2 / exact deleted record without provider api_id correction
+
+- Gate `97e8b418a9f77b3b659dd60515a89ca4ba84600f` was pushed to the
+  D2 branch, fast-forwarded into `main` and deployed frontend-only to Selectel
+  test. The owner confirmed the pull-to-refresh gesture in Telegram. Only the
+  frontend container changed; backend, nginx and PostgreSQL remained healthy
+  with restart count `0`.
+- The same gesture did not remove the manually deleted booking. A bounded
+  `BEGIN READ ONLY` PostgreSQL check found the latest fully-bound reservation
+  `2cf39988-358d-4009-b64c-c017d3c1d0b5` still `confirmed`, its create
+  operation `confirmed`, reconciliation attempts `9` and one active hold.
+  No ciphertext, record hash, contact PII or secret was selected.
+- Two bounded read-only exact YCLIENTS checks used the existing strict admin
+  parser; the first retained only the outcome and the second only allowlisted
+  boolean presence/equality flags. Exact GET returned `found` with the same
+  company/record/resource/service/datetime, positive duration and
+  `deleted=true`, but provider `api_id` was absent. The 404-only deleted-list
+  fallback was therefore not called. No provider write or raw body was read or
+  retained.
+- Root cause is exact: the booking refresh rejected every exact result without
+  `api_id` before reaching persistence, even when the already-bound exact
+  record was canonically deleted. The correction permits an absent provider
+  `api_id` only for `deleted=true` from the exact-record path and only when the
+  reservation plus terminal create operation both carry the same persisted
+  YCLIENTS `recordId`. Active exact records and the bounded-list/404 fallback
+  still require the original external `api_id`; mismatched, malformed or
+  extra-field proof objects fail closed before reservation/hold mutation.
+- Regression coverage proves the live response shape becomes `cancelled` and
+  releases the hold, while an active missing-ID record, a different record,
+  an extra-field proof and a mismatched API ID remain stale/held. Focused PASS:
+  backend typecheck and `2 suites / 43 tests`. Full PASS: backend unit
+  `132 suites / 3298 tests`, E2E `2 suites / 4 tests`, build; root E2E
+  `88 passed / 1 skipped` with one worker and root build (`1617` modules,
+  existing CJS/chunk warnings only). The first root build attempt was blocked
+  by the local filesystem sandbox; the identical approved rerun passed.
+- Independent read-only review is CLEAN with no actionable P0/P1. It confirmed
+  the proof marker is internal-only, owner/company/reservation and terminal
+  create bindings are revalidated under the transaction, exact-404/list stays
+  API-ID strict, and cancellation plus active-hold release remain atomic.
+- Migration 033, schema, frontend, payment fields and provider write surfaces
+  are unchanged. No DB write, booking create, DELETE/PUT/POST, cleanup,
+  production change, push, merge or deployment was performed by this
+  correction. Deployment impact is `pending_integration_rollout`: Selectel
+  backend remains the previously built `743386c...` image until separate
+  review and backend-only rollout approval.

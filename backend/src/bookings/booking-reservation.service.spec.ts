@@ -376,7 +376,7 @@ describe('BookingReservationService', () => {
   it.each([
     ['admin reschedule', false, 55, '2027-01-15T12:00:00+03:00', 'confirmed'],
     ['admin cancellation', true, 22, '2027-01-15T10:00:00+03:00', 'cancelled'],
-  ] as const)('applies read-only %s only after exact record/api binding', async (_label, deleted, courtId, startsAt, status) => {
+  ] as const)('applies read-only %s only after strict provider binding', async (_label, deleted, courtId, startsAt, status) => {
     const h = harness();
     const reservation = confirmedReservation();
     h.setStored(reservation, confirmedCreateOperation(reservation));
@@ -386,6 +386,79 @@ describe('BookingReservationService', () => {
     expect(result).toMatchObject({ outcome: 'found', reservation: { status, courtId, stale: false } });
     expect(h.adminRead.getRecord).toHaveBeenCalledTimes(1);
   });
+
+  it('accepts an exact deleted record without provider api_id after record binding', async () => {
+    const h = harness();
+    const reservation = confirmedReservation();
+    h.setStored(reservation, confirmedCreateOperation(reservation));
+    h.adminRead.getRecord.mockResolvedValueOnce({
+      outcome: 'found',
+      record: {
+        recordId: 44,
+        companyId: 2_079_564,
+        resourceId: 22,
+        serviceIds: [11],
+        datetime: reservation.target.startsAt,
+        seanceLengthSeconds: 3600,
+        deleted: true,
+      },
+    });
+    h.reservations.applyExactRefresh.mockResolvedValueOnce({
+      outcome: 'updated',
+      reservation: confirmedReservation({ status: 'cancelled' }),
+    });
+
+    await expect(
+      h.service.read(OWNER, reservation.reservationId),
+    ).resolves.toMatchObject({
+      outcome: 'found',
+      reservation: { status: 'cancelled', stale: false },
+    });
+    expect(h.reservations.applyExactRefresh).toHaveBeenCalledWith(
+      expect.anything(),
+      OWNER,
+      reservation.reservationId,
+      expect.objectContaining({
+        recordId: 44,
+        proof: { kind: 'exact_deleted_record' },
+        deleted: true,
+      }),
+    );
+    expect(h.adminRead.listRecords).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['active record', false, 44],
+    ['different deleted record', true, 45],
+  ] as const)(
+    'keeps %s without provider api_id stale',
+    async (_label, deleted, recordId) => {
+      const h = harness();
+      const reservation = confirmedReservation();
+      h.setStored(reservation, confirmedCreateOperation(reservation));
+      h.adminRead.getRecord.mockResolvedValueOnce({
+        outcome: 'found',
+        record: {
+          recordId,
+          companyId: 2_079_564,
+          resourceId: 22,
+          serviceIds: [11],
+          datetime: reservation.target.startsAt,
+          seanceLengthSeconds: 3600,
+          deleted,
+        },
+      });
+
+      await expect(
+        h.service.read(OWNER, reservation.reservationId),
+      ).resolves.toMatchObject({
+        outcome: 'found',
+        reservation: { status: 'confirmed', stale: true },
+      });
+      expect(h.reservations.applyExactRefresh).not.toHaveBeenCalled();
+      expect(h.reservations.noteReconciliationAttempt).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it('confirms a canonical deleted record after one exact 404 and one bounded deleted list', async () => {
     const h = harness();
@@ -433,7 +506,11 @@ describe('BookingReservationService', () => {
       expect.anything(),
       OWNER,
       reservation.reservationId,
-      expect.objectContaining({ recordId: 44, apiId: 77, deleted: true }),
+      expect.objectContaining({
+        recordId: 44,
+        proof: { kind: 'external_api_id', apiId: 77 },
+        deleted: true,
+      }),
     );
   });
 

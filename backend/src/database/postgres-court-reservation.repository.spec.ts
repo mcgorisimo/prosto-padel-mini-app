@@ -6,6 +6,7 @@ import { digestReservationOperationRequest } from '../reservations/reservation-r
 import {
   createCourtReservation,
   startReservationOperation,
+  transitionReservationOperation,
 } from '../reservations/reservation.state-machine';
 import {
   CourtReservation,
@@ -592,5 +593,215 @@ describe('PostgresCourtReservationRepository SQL contract', () => {
     expect(repositorySource).toContain("update backend_reservation.reservation_slot_holds set released_at=$3");
     expect(repositorySource).toContain('insert into backend_reservation.reservation_slot_holds');
   });
+
+  it('releases the hold for an exact deleted record even when YCLIENTS omits api_id', async () => {
+    const crypto = new ReservationSnapshotCrypto(Buffer.alloc(32, 17), 1);
+    const target = Object.freeze({
+      serviceId: 11,
+      courtId: 22,
+      startsAt: '2027-01-15T10:00:00+03:00',
+      endsAt: '2027-01-15T11:00:00.000Z',
+    });
+    const initial = createCourtReservation({
+      reservationId: RESERVATION_ID,
+      ownerAccountId: OWNER,
+      target,
+      now: unixEpochSeconds(1_800_000_000),
+    });
+    const started = startReservationOperation(initial, {
+      operationId: OPERATION_ID,
+      actorAccountId: OWNER,
+      idempotencyKey: REQUEST_KEY,
+      now: unixEpochSeconds(1_800_000_000),
+      request: {
+        type: 'create',
+        reservationId: RESERVATION_ID,
+        ownerAccountId: OWNER,
+        externalReference: { apiId: 77 },
+        client: {
+          phone: '+79800000000',
+          fullName: 'Private Player',
+          email: 'private.owner@example.test',
+        },
+        target,
+      },
+    });
+    if (started.outcome !== 'started') throw new Error('invalid fixture');
+    const confirmed = transitionReservationOperation(
+      started.reservation,
+      started.operation,
+      {
+        type: 'confirm',
+        actorAccountId: OWNER,
+        now: unixEpochSeconds(1_800_000_001),
+        providerBinding: {
+          provider: 'yclients',
+          appointmentId: 1,
+          recordId: 44,
+          recordHash: 'private-hash',
+        },
+      },
+    );
+    if (confirmed.outcome !== 'transitioned') throw new Error('invalid fixture');
+    const encryptedHash = crypto.encryptRecordHash('private-hash');
+    const reservationRow = {
+      reservation_id: RESERVATION_ID,
+      owner_account_id: OWNER,
+      status: 'confirmed',
+      target_service_id: '11',
+      target_resource_id: '22',
+      target_datetime_text: target.startsAt,
+      target_end_datetime_text: target.endsAt,
+      yclients_appointment_id: '1',
+      yclients_record_id: '44',
+      yclients_record_hash_ciphertext: encryptedHash.ciphertext,
+      yclients_record_hash_nonce: encryptedHash.nonce,
+      yclients_record_hash_auth_tag: encryptedHash.authTag,
+      yclients_record_hash_algorithm: encryptedHash.algorithm,
+      yclients_record_hash_encryption_key_version: encryptedHash.keyVersion,
+      yclients_record_hash_digest: encryptedHash.digest,
+      yclients_record_hash_digest_key_version: encryptedHash.digestKeyVersion,
+      version: '3',
+      created_at: '1800000000',
+      updated_at: '1800000001',
+    };
+    const query = jest.fn()
+      .mockResolvedValueOnce(result([reservationRow]))
+      .mockResolvedValueOnce(result([{}]))
+      .mockResolvedValueOnce(result([{}]))
+      .mockResolvedValueOnce(result([]));
+    const repository = new PostgresCourtReservationRepository(
+      crypto,
+      2_079_564,
+    );
+    jest.spyOn(repository as never, 'findOperation' as never)
+      .mockResolvedValue(confirmed.operation as never);
+    jest.spyOn(repository, 'findById').mockResolvedValue(Object.freeze({
+      ...confirmed.reservation,
+      status: 'cancelled' as const,
+      version: confirmed.reservation.version + 1,
+    }));
+
+    await expect(repository.applyExactRefresh(
+      { query } as never,
+      OWNER,
+      RESERVATION_ID,
+      {
+        companyId: 2_079_564,
+        recordId: 44,
+        proof: { kind: 'exact_deleted_record' },
+        serviceId: 11,
+        courtId: 22,
+        startsAt: target.startsAt,
+        endsAt: target.endsAt,
+        deleted: true,
+        now: 1_800_000_002,
+      },
+    )).resolves.toMatchObject({
+      outcome: 'updated',
+      reservation: { status: 'cancelled' },
+    });
+    expect(query).toHaveBeenCalledTimes(4);
+    expect(query.mock.calls[1][1][2]).toBe('cancelled');
+    expect(String(query.mock.calls[2][0])).toContain('released_at=$3');
+  });
+
+  it.each([
+    ['active record', false, { kind: 'exact_deleted_record' }],
+    [
+      'extra proof field',
+      true,
+      { kind: 'exact_deleted_record', apiId: 77 },
+    ],
+    ['mismatched api id', true, { kind: 'external_api_id', apiId: 78 }],
+  ] as const)(
+    'rejects %s before reservation or hold mutation',
+    async (_label, deleted, proof) => {
+      const crypto = new ReservationSnapshotCrypto(Buffer.alloc(32, 19), 1);
+      const encryptedHash = crypto.encryptRecordHash('private-hash');
+      const reservationRow = {
+        reservation_id: RESERVATION_ID,
+        owner_account_id: OWNER,
+        status: 'confirmed',
+        target_service_id: '11',
+        target_resource_id: '22',
+        target_datetime_text: '2027-01-15T10:00:00+03:00',
+        target_end_datetime_text: '2027-01-15T11:00:00.000Z',
+        yclients_appointment_id: '1',
+        yclients_record_id: '44',
+        yclients_record_hash_ciphertext: encryptedHash.ciphertext,
+        yclients_record_hash_nonce: encryptedHash.nonce,
+        yclients_record_hash_auth_tag: encryptedHash.authTag,
+        yclients_record_hash_algorithm: encryptedHash.algorithm,
+        yclients_record_hash_encryption_key_version: encryptedHash.keyVersion,
+        yclients_record_hash_digest: encryptedHash.digest,
+        yclients_record_hash_digest_key_version: encryptedHash.digestKeyVersion,
+        version: '3',
+        created_at: '1800000000',
+        updated_at: '1800000001',
+      };
+      const operation = Object.freeze({
+        operationId: OPERATION_ID,
+        reservationId: RESERVATION_ID,
+        ownerAccountId: OWNER,
+        actorAccountId: OWNER,
+        type: 'create' as const,
+        status: 'confirmed' as const,
+        idempotencyKey: REQUEST_KEY,
+        requestDigest: '0'.repeat(64),
+        request: Object.freeze({
+          type: 'create' as const,
+          reservationId: RESERVATION_ID,
+          ownerAccountId: OWNER,
+          externalReference: Object.freeze({ apiId: 77 }),
+          client: Object.freeze({
+            phone: '+79800000000',
+            fullName: 'Private Player',
+            email: 'private.owner@example.test',
+          }),
+          target: Object.freeze({
+            serviceId: 11,
+            courtId: 22,
+            startsAt: reservationRow.target_datetime_text,
+            endsAt: reservationRow.target_end_datetime_text,
+          }),
+        }),
+        previousReservationStatus: 'unbooked' as const,
+        providerBinding: Object.freeze({
+          provider: 'yclients' as const,
+          appointmentId: 1,
+          recordId: 44,
+          recordHash: 'private-hash',
+        }),
+        createdAt: unixEpochSeconds(1_800_000_000),
+        terminalAt: unixEpochSeconds(1_800_000_001),
+      });
+      const query = jest.fn().mockResolvedValueOnce(result([reservationRow]));
+      const repository = new PostgresCourtReservationRepository(
+        crypto,
+        2_079_564,
+      );
+      jest.spyOn(repository as never, 'findOperation' as never)
+        .mockResolvedValue(operation as never);
+
+      await expect(repository.applyExactRefresh(
+        { query } as never,
+        OWNER,
+        RESERVATION_ID,
+        {
+          companyId: 2_079_564,
+          recordId: 44,
+          proof: proof as never,
+          serviceId: 11,
+          courtId: 22,
+          startsAt: reservationRow.target_datetime_text,
+          endsAt: reservationRow.target_end_datetime_text,
+          deleted,
+          now: 1_800_000_002,
+        },
+      )).resolves.toEqual({ outcome: 'binding_mismatch' });
+      expect(query).toHaveBeenCalledTimes(1);
+    },
+  );
 });
 import { readFileSync } from 'node:fs';

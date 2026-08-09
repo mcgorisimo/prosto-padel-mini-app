@@ -59,6 +59,22 @@ export type ReservationRefreshPersistenceResult =
   | Readonly<{ outcome: 'updated'; reservation: CourtReservation }>
   | Readonly<{ outcome: 'not_found' | 'binding_mismatch' }>;
 
+export type ReservationRefreshBindingProof =
+  | Readonly<{ kind: 'external_api_id'; apiId: number }>
+  | Readonly<{ kind: 'exact_deleted_record' }>;
+
+export type ReservationRefreshInput = Readonly<{
+  companyId: number;
+  recordId: number;
+  proof: ReservationRefreshBindingProof;
+  serviceId: number;
+  courtId: number;
+  startsAt: string;
+  endsAt: string;
+  deleted: boolean;
+  now: number;
+}>;
+
 interface ReservationRow extends QueryResultRow {
   reservation_id: unknown;
   owner_account_id: unknown;
@@ -285,6 +301,47 @@ function readOperationStatus(value: unknown): ReservationOperation['status'] {
     default:
       throw new Error('invalid persisted operation status');
   }
+}
+
+function operationProviderRecordId(
+  operation: ReservationOperation,
+): number | undefined {
+  if (operation.status === 'confirmed') {
+    return operation.providerBinding?.recordId;
+  }
+  if (
+    operation.status === 'reconciled' &&
+    operation.result.outcome === 'confirmed'
+  ) {
+    return operation.result.providerBinding?.recordId;
+  }
+  return undefined;
+}
+
+function matchesRefreshBindingProof(
+  proof: unknown,
+  deleted: boolean,
+  recordId: number,
+  operation: ReservationOperation,
+): boolean {
+  if (typeof proof !== 'object' || proof === null || Array.isArray(proof)) {
+    return false;
+  }
+  const candidate = proof as Record<string, unknown>;
+  if (operationProviderRecordId(operation) !== recordId) return false;
+  if (candidate.kind === 'external_api_id') {
+    return (
+      Object.keys(candidate).length === 2 &&
+      Number.isSafeInteger(candidate.apiId) &&
+      Number(candidate.apiId) > 0 &&
+      candidate.apiId === operation.request.externalReference.apiId
+    );
+  }
+  return (
+    candidate.kind === 'exact_deleted_record' &&
+    Object.keys(candidate).length === 1 &&
+    deleted
+  );
 }
 
 function recordBinding(row: ReservationRow | OperationRow, crypto: ReservationSnapshotCrypto): YclientsReservationBinding | undefined {
@@ -780,14 +837,22 @@ export class PostgresCourtReservationRepository implements CourtReservationRepos
     }
   }
 
-  async applyExactRefresh(transaction: PostgresTransaction, ownerAccountId: AccountId, reservationId: CourtReservationId, input: Readonly<{companyId:number;recordId:number;apiId:number;serviceId:number;courtId:number;startsAt:string;endsAt:string;deleted:boolean;now:number}>): Promise<ReservationRefreshPersistenceResult> {
+  async applyExactRefresh(transaction: PostgresTransaction, ownerAccountId: AccountId, reservationId: CourtReservationId, input: ReservationRefreshInput): Promise<ReservationRefreshPersistenceResult> {
     try {
       const selected = await transaction.query<ReservationRow>(`SELECT ${RESERVATION_COLUMNS} FROM backend_reservation.court_reservations WHERE owner_account_id=$1 AND reservation_id=$2 FOR UPDATE`, [ownerAccountId,reservationId]);
       if (selected.rowCount !== 1) return Object.freeze({ outcome:'not_found' });
       const reservation=hydrateReservation(selected.rows[0],this.crypto);
       if (input.companyId!==this.companyId || reservation.providerBinding?.recordId!==input.recordId) return Object.freeze({outcome:'binding_mismatch'});
       const operation=await this.findOperation(transaction,`o.owner_account_id=$1 AND o.reservation_id=$2 AND o.operation_type='create' ORDER BY o.created_at DESC LIMIT 1`,[ownerAccountId,reservationId]);
-      if (operation===null || operation.request.externalReference.apiId!==input.apiId) return Object.freeze({outcome:'binding_mismatch'});
+      if (
+        operation===null ||
+        !matchesRefreshBindingProof(
+          input.proof,
+          input.deleted,
+          input.recordId,
+          operation,
+        )
+      ) return Object.freeze({outcome:'binding_mismatch'});
       if (!isReservationTarget({ serviceId: input.serviceId, courtId: input.courtId, startsAt: input.startsAt, endsAt: input.endsAt })) return Object.freeze({outcome:'binding_mismatch'});
       const nextStatus=input.deleted?'cancelled':'confirmed';
       const updated=await transaction.query(`UPDATE backend_reservation.court_reservations SET status=$3,target_service_id=$4,target_resource_id=$5,target_datetime=$6::text::timestamptz,target_datetime_text=$6::text,target_end_datetime=$7::text::timestamptz,target_end_datetime_text=$7::text,version=version+1,updated_at=$8,status_changed_at=CASE WHEN status<>$3 THEN $8 ELSE status_changed_at END,terminal_at=CASE WHEN $3='cancelled' THEN $8 ELSE NULL END WHERE owner_account_id=$1 AND reservation_id=$2`,[ownerAccountId,reservationId,nextStatus,input.serviceId,input.courtId,input.startsAt,input.endsAt,input.now]);
