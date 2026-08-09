@@ -27,7 +27,7 @@
 |---|---|---|---|---|
 | D1 Backend-only/contracts | done | `main` / deployed `c04074459948d0bf545e865b885aea7a4e5fec3c` | frontend E2E PASS (82/1 skipped); focused fail-closed 2/2 PASS; frontend build PASS; backend all PASS; Selectel test smoke PASS | D1 закрыт; следующий отдельный этап — D2 |
 | D2 YCLIENTS reservation core | done | closure history through exact cleanup source `4515549f58d714624a333fbb059dd4054b1e1439`; Selectel test runtime `ac5b4be4e88c6b45ec8d290a1c68e01a41dc635d` | migration 033 applied/verified; all automated gates PASS; create/delete sync, admin-reschedule T1-T4, repeated-refresh no-churn, fully-bound cleanup and eight-row legacy cleanup live acceptance PASS | D2 closed; next stage is D3 match ↔ reservation lifecycle; payment, webhook and production remain separate gates |
-| D3 Match ↔ reservation lifecycle | pending | — | — | reflect admin cancellation without provider DELETE, owner participant removal, match ↔ reservation binding |
+| D3 Match ↔ reservation lifecycle | in_progress | `codex/week1-d3-match-reservation` / local docs checkpoint | read-only audit complete; `git diff --check` PASS | review D3 persistence proposal; then code-only link/projection domain slice; SQL requires separate approval |
 | D4 Payment Core | pending | — | — | payment provider, pricing/payment snapshot, чеки и возвраты |
 | D5 Settings/moderation/compliance | pending | — | — | standalone phone/email auth, verified backend email, approved club support/contact source and clickable action; затем schema review |
 | D6 Selectel readiness/load | pending | — | — | backend staging fixture, live concurrency и Selectel production readiness |
@@ -46,6 +46,7 @@
 | D2 YCLIENTS contract matrix | not applicable | docs-only checkpoint поверх `3e8739b` | `not_needed` | только Markdown; API/DB/server/runtime не вызывались и не менялись |
 | D2 YCLIENTS controlled test plan | not applicable | `040773172a2fa556ffaaf1d12dac540095070976` + docs-only correction from that exact base | `not_needed` | plan only; provider/server/DB/runtime calls и writes не выполнялись |
 | D2 YCLIENTS read foundation | not applicable | correction `7fedddd5daf2e817aa977509ab120879915a8f26` + live-contract correction from that exact base | `not_needed` | code не импортирован Nest modules/controllers/runtime; image, config, server и containers не менялись |
+| D3 match ↔ reservation audit | not applicable | docs-only checkpoint on `codex/week1-d3-match-reservation` | `not_needed` | Markdown only; runtime, schema, containers, YCLIENTS and Selectel test were not changed |
 
 Допустимые deployment-статусы: `not_needed`, `pending`, `test_deployed`,
 `production_deployed`, `deployment_deferred_by_user`.
@@ -3427,3 +3428,49 @@
   accepted application runtime remains exact `ac5b4be...`, with containers
   unchanged. No schema/migration, provider POST/PUT, payment-field, webhook,
   production, runtime/config or application code change belongs to closure.
+
+### 2026-08-10 — D3 / match ↔ reservation read-only audit
+
+- Baseline verified before work: `main = origin/main =
+  6b369553d2c96d7487710ae1712d435b9d7825d2`, clean. The D3 audit branch is
+  `codex/week1-d3-match-reservation`. Accepted Selectel test runtime remains
+  exact `ac5b4be4e88c6b45ec8d290a1c68e01a41dc635d` from D2.
+- Current backend create derives `searching`, `confirmed` or `upcoming` from
+  `scenario`; `social` and direct-API `private` require a selected static court
+  but do not read or bind a D2 reservation. Match storage has no reservation
+  relation and its active-court exclusion treats planned/unbooked match rows as
+  real court holds.
+- Current frontend derives “court booked” from `scenario = social`, private
+  shape, legacy flags/statuses or `paymentStatus = full`. Feed filters, cards
+  and details therefore can display a court guarantee without canonical
+  YCLIENTS confirmation. Payment fields were inspected only as false truth
+  inputs and were not changed.
+- Actual backend flows are create/feed/detail/join/leave/description update.
+  Backend owner participant removal and match cancellation are absent; their
+  controls are hidden behind the legacy-extension boundary. Private/public
+  conversion and training remain legacy-only. Backend private creation is UI
+  disabled, while D2 private reservations are already excluded from the public
+  match repository/feed.
+- D2 exact refresh has the required canonical move/deletion/unknown semantics,
+  but updates only reservation state. Existing match notifications are
+  waitlist-specific and cannot represent court confirmed/moved/cancelled
+  without new reviewed persistence.
+- P0 gaps: false booking truth, no durable ownership/one-to-one link, and no
+  atomic D2 refresh projection/participant notification. P1 gaps: false match
+  court overlap, overloaded match status, direct private create ambiguity,
+  static-vs-YCLIENTS court identity mismatch, waitlist-only notifications and
+  missing backend lifecycle commands.
+- Migration is required. The review-only proposal is
+  `D3_MATCH_RESERVATION_AUDIT_AND_PERSISTENCE_PROPOSAL.md`: an append/history
+  match-reservation link with partial active uniqueness, composite ownership,
+  full-binding checks, canonical D2 slot holds as the only court-lock authority
+  and a deduplicated lifecycle event/recipient ledger. No SQL was prepared or
+  applied.
+- First proposed implementation slice is code-only, runtime-disabled pure
+  link/projection types and state-machine tests. The next gate is owner review
+  of the persistence contract; migration SQL remains forbidden without a
+  separate explicit approval.
+- This checkpoint changes Markdown only. Application tests/builds were not run
+  because runtime source and schema did not change. Deployment is `not_needed`;
+  no API, YCLIENTS, PostgreSQL, SSH, server, container, secret, payment, webhook
+  or production action was performed.
