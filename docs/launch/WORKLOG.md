@@ -26,7 +26,7 @@
 | Этап | Статус | Ветка/commit | Проверки | Блокер/следующий шаг |
 |---|---|---|---|---|
 | D1 Backend-only/contracts | done | `main` / deployed `c04074459948d0bf545e865b885aea7a4e5fec3c` | frontend E2E PASS (82/1 skipped); focused fail-closed 2/2 PASS; frontend build PASS; backend all PASS; Selectel test smoke PASS | D1 закрыт; следующий отдельный этап — D2 |
-| D2 YCLIENTS reservation core | in_progress | `main` / Selectel test `ac5b4be4e88c6b45ec8d290a1c68e01a41dc635d` | migration 033 applied/verified; automated gates PASS; create/delete sync, admin-reschedule T1-T4 and repeated-refresh no-churn live smokes PASS | core D2 acceptance is proved on Selectel test; legacy unbound cleanup remains deferred and is not acceptance; next gate is the managing D2 closure decision |
+| D2 YCLIENTS reservation core | in_progress | `main` / Selectel test `ac5b4be4e88c6b45ec8d290a1c68e01a41dc635d` | migration 033 applied/verified; automated gates PASS; create/delete sync, admin-reschedule T1-T4 and repeated-refresh no-churn live smokes PASS | closure cleanup stopped fail-closed: the first controlled test-record DELETE was unauthorized/no-effect and the reviewed legacy script no longer matches one row's expected status; owner CRM deletion + one refresh and a separately reviewed legacy-script correction are required |
 | D3 Match ↔ reservation lifecycle | pending | — | — | reflect admin cancellation without provider DELETE, owner participant removal, match ↔ reservation binding |
 | D4 Payment Core | pending | — | — | payment provider, pricing/payment snapshot, чеки и возвраты |
 | D5 Settings/moderation/compliance | pending | — | — | standalone phone/email auth, verified backend email, approved club support/contact source and clickable action; затем schema review |
@@ -3292,3 +3292,42 @@
   webhook or production change was performed. Core D2 live acceptance is now
   proved; D2 remains `in_progress` only until the separate managing closure
   decision. Legacy unbound cleanup remains deferred and is not D2 acceptance.
+
+### 2026-08-10 — D2 / closure cleanup stopped fail-closed
+
+- Read-only inventory found exactly three active, fully-bound D2 test
+  reservations. Each was `confirmed`, had one terminal confirmed create
+  operation with matching company/appointment/record and keyed record proof,
+  and held exactly one active slot. Strict exact YCLIENTS GET classified all
+  three provider records as active and fully matching; no broad search or PII
+  output was used.
+- The first and only permitted controlled DELETE was sent for provider record
+  `1896208857` and returned `unauthorized`. Execution stopped immediately:
+  there was no retry, alternate endpoint, PUT, POST or DELETE for records
+  `1896396891` and `1896181131`. One subsequent exact read-only GET proved
+  record `1896208857` remained active, so the DELETE had no provider effect.
+- PostgreSQL postcheck remained unchanged for all three reservations:
+  `confirmed`, the original full record binding, and exactly one active hold
+  each. Direct status/hold updates are forbidden for bound reservations. The
+  next safe path is for the owner to delete these exact three proven test
+  records in YCLIENTS UI and then perform one owner pull-to-refresh so the
+  normal read-only reconciliation can prove `cancelled` and zero active holds.
+- The exact eight-row legacy inventory is still unbound with one active hold
+  per reservation, but its current split is `5` pending/pending and `3`
+  unknown/unknown. In particular reservation
+  `3d49b170-61a6-4b77-b497-ad62b4f414f6` is now unknown/unknown, while exact
+  reviewed script commit `f6f93a6880ec563e4b380f6d169c3de601cc8e1f`
+  (SHA-256
+  `b551d59d3108e7c2f7cfe6a2014aaa9a78f47d0c4b2b9ed476cb8842c0e9b173`)
+  requires that row in its six-row pending set. The required PRECHECK therefore
+  cannot match. The script was not transferred or executed; no backup/claim
+  artifact, transaction or DB mutation was created. A code-only correction,
+  new SHA, independent review and separate execution approval are required.
+- Runtime postcheck is unchanged at exact
+  `ac5b4be4e88c6b45ec8d290a1c68e01a41dc635d`. Backend `4a837f0226ad...`,
+  frontend `29d0167f496d...`, nginx `e5b98b53a385...` and PostgreSQL
+  `5e36d4dc1a5c...` are healthy with restart count `0`; health returned `200`
+  and bounded critical log-marker counts were `0` for all four containers.
+- D2 remains `in_progress`. Closure commit, D2/main push, fast-forward and
+  deployment were not performed. This is a docs-only factual STOP handoff;
+  application tests were not run because no runtime source changed.
