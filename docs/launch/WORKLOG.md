@@ -2999,3 +2999,45 @@
 - Deployment remains `test_deployed` at exact `e55b9d8...`. D2 stays
   `in_progress` until the managing closure decision; legacy unbound cleanup is
   still deferred and is not part of the accepted primary D2 flow.
+
+### 2026-08-09 — D2 / Home reflects administrator reschedule on open
+
+- The owner created a fresh Selectel-test reservation for the final manual
+  administrator-reschedule acceptance. Read-only PostgreSQL precheck proved
+  local `confirmed`, complete encrypted provider binding, one active hold and
+  one terminal confirmed create operation. The owner then moved the same
+  YCLIENTS record through the CRM. YCLIENTS availability reflected the move,
+  but `Home -> My bookings` still showed the old target.
+- Read-only PostgreSQL postcheck proved the local reservation and its sole
+  active hold still had the original target. The frontend cause was exact:
+  entering Home and returning the Mini App to the foreground called only the
+  persisted owner list; canonical per-reservation read-only reconciliation was
+  reserved for an explicit Home pull gesture. Therefore no backend exact read
+  had updated the stored target yet.
+- Home open/re-entry and visible-app refresh now use the existing bounded
+  `refreshBackendReservations` path: one owner list, at most three sequential
+  exact reads through the authenticated backend action, then one final list.
+  The existing in-flight guard remains; there is no polling, provider write,
+  PUT/DELETE, retry or unbounded fan-out.
+- The account/Home E2E now models provider state separately from persisted
+  state. It proves an administrator move is invisible to the first list,
+  becomes persisted only after exact read, and is rendered with the new court
+  and time when Home is reopened. It then proves the same bounded path removes
+  the booking after an administrator deletion, with zero frontend writes.
+- Focused Home regression PASS `1/1`. The default 9-worker root run produced
+  four resource-sensitive UI timeouts (`85 passed / 1 skipped`), including the
+  same target scenario which had already passed focused. The complete
+  single-worker rerun PASS: `89 passed / 1 skipped`. Root production build PASS
+  (`1617` modules; existing CJS/chunk warnings only). Backend suites were not
+  run because backend source/contracts were unchanged. `git diff --check`
+  PASS (line-ending warnings only).
+- Read-only P0/P1 review found no actionable issue. The changed runtime path is
+  frontend-only, owner-authenticated, bounded to three sequential reads and
+  guarded against overlap. No application-originated reschedule/cancel route,
+  provider write surface, payment field or sensitive logging was added.
+- Deployment impact is `pending_integration_rollout`: this changes the frontend
+  refresh behavior and is not present on Selectel test yet. Runtime remains
+  exact `e55b9d8bd1af35b98fe4f7aae287aaef59413be9`; no YCLIENTS/provider, DB,
+  server, schema/migration, payment-field, webhook or production write was
+  performed by this correction. D2 remains `in_progress` until exact frontend
+  rollout and owner smoke prove Home shows the moved target.

@@ -3707,6 +3707,14 @@ test.describe('backend match credential lifecycle', () => {
         endsAt: new Date(Date.parse(bookingStartsAt) + 5_400_000).toISOString(),
         stale: true,
       });
+      const movedBooking = Object.freeze({
+        ...persistedBooking,
+        status: 'confirmed',
+        courtId: 5762241,
+        startsAt: new Date(Date.parse(bookingStartsAt) + 86_400_000).toISOString(),
+        endsAt: new Date(Date.parse(bookingStartsAt) + 91_800_000).toISOString(),
+        stale: false,
+      });
 
       window.__accountMatchGeneration = 0;
       window.__accountMatchCalls = 0;
@@ -3746,37 +3754,35 @@ test.describe('backend match credential lifecycle', () => {
         write: 0,
         lastReadReservationId: null,
       };
+      window.__backendBookingMoved = false;
+      window.__backendBookingMovedStartsAt = movedBooking.startsAt;
       window.__backendBookingDeleted = false;
+      let locallyPersistedBooking = persistedBooking;
       const backendBookingAvailabilityActions = Object.freeze({
         async listBookings() {
           window.__backendBookingCalls.list += 1;
           return {
             outcome: 'bookings_loaded',
-            reservations: [{
-              ...persistedBooking,
-              status: window.__backendBookingDeleted
-                ? 'cancelled'
-                : persistedBooking.status,
-              stale: false,
-            }],
+            reservations: [{ ...locallyPersistedBooking, stale: false }],
           };
         },
         async readBooking(reservationId) {
           window.__backendBookingCalls.read += 1;
           window.__backendBookingCalls.lastReadReservationId = reservationId;
-          if (window.__backendBookingCalls.read > 2) {
-            window.__backendBookingDeleted = true;
+          if (window.__backendBookingMoved) {
+            locallyPersistedBooking = movedBooking;
+          }
+          if (window.__backendBookingDeleted) {
+            locallyPersistedBooking = Object.freeze({
+              ...locallyPersistedBooking,
+              status: 'cancelled',
+              stale: false,
+            });
           }
           return reservationId === persistedBooking.reservationId
             ? {
                 outcome: 'booking_loaded',
-                reservation: {
-                  ...persistedBooking,
-                  status: window.__backendBookingDeleted
-                    ? 'cancelled'
-                    : persistedBooking.status,
-                  stale: false,
-                },
+                reservation: locallyPersistedBooking,
               }
             : { outcome: 'rejected', reason: 'not_found' };
         },
@@ -3785,7 +3791,10 @@ test.describe('backend match credential lifecycle', () => {
           return serviceId === persistedBooking.serviceId
             ? {
                 outcome: 'courts_loaded',
-                courts: [{ id: persistedBooking.courtId, name: 'Корт №1' }],
+                courts: [
+                  { id: persistedBooking.courtId, name: 'Корт №1' },
+                  { id: movedBooking.courtId, name: 'Корт №2' },
+                ],
               }
             : { outcome: 'rejected', reason: 'invalid_request' };
         },
@@ -3865,10 +3874,16 @@ test.describe('backend match credential lifecycle', () => {
     await expect(harness.getByText('Ожидает').first()).toBeVisible();
     await expect.poll(() => page.evaluate(
       () => window.__backendBookingCalls.list,
+    )).toBeGreaterThanOrEqual(2);
+    await expect.poll(() => page.evaluate(
+      () => window.__backendBookingCalls.read,
     )).toBeGreaterThanOrEqual(1);
 
     const catalogCallsBeforeOpen = await page.evaluate(
       () => window.__backendBookingCalls.catalog,
+    );
+    const bookingReadsBeforeOpen = await page.evaluate(
+      () => window.__backendBookingCalls.read,
     );
     await harness.locator('button').filter({ hasText: 'Корт №1' }).first().click();
     const reservationDetails = harness.getByTestId('booking-reservation-details');
@@ -3889,7 +3904,7 @@ test.describe('backend match credential lifecycle', () => {
     })).toHaveCount(0);
     await expect.poll(() => page.evaluate(
       () => window.__backendBookingCalls.read,
-    )).toBe(1);
+    )).toBe(bookingReadsBeforeOpen + 1);
     expect(await page.evaluate(
       () => window.__backendBookingCalls.write,
     )).toBe(0);
@@ -3903,6 +3918,9 @@ test.describe('backend match credential lifecycle', () => {
       () => window.__backendBookingCalls.availability,
     )).toBe(0);
 
+    const bookingReadsBeforeDetailRefresh = await page.evaluate(
+      () => window.__backendBookingCalls.read,
+    );
     await page.evaluate(() => {
       window.scrollTo(0, 0);
       const target = document.querySelector(
@@ -3919,19 +3937,34 @@ test.describe('backend match credential lifecycle', () => {
     });
     await expect.poll(() => page.evaluate(
       () => window.__backendBookingCalls.read,
-    )).toBe(2);
+    )).toBe(bookingReadsBeforeDetailRefresh + 1);
 
+    const bookingCallsBeforeHomeReopen = await page.evaluate(() => {
+      window.__backendBookingMoved = true;
+      return { ...window.__backendBookingCalls };
+    });
     await reservationDetails.getByRole('button', {
       name: /Назад к моим броням/u,
     }).click();
-    await expect(harness.getByText('Корт №1').first()).toBeVisible();
+    await expect.poll(() => page.evaluate(
+      () => window.__backendBookingCalls.read,
+    )).toBe(bookingCallsBeforeHomeReopen.read + 1);
+    await expect.poll(() => page.evaluate(
+      () => window.__backendBookingCalls.list,
+    )).toBeGreaterThanOrEqual(bookingCallsBeforeHomeReopen.list + 2);
+    await expect(harness.getByText('Корт №2').first()).toBeVisible();
+    const movedTime = await page.evaluate(
+      () => window.__backendBookingMovedStartsAt.slice(11, 16),
+    );
+    await expect(harness.getByText(movedTime).first()).toBeVisible();
     await expect(harness.getByRole('button', {
       name: 'Обновить мои брони',
     })).toHaveCount(0);
 
-    const bookingCallsBeforeRefresh = await page.evaluate(
-      () => ({ ...window.__backendBookingCalls }),
-    );
+    const bookingCallsBeforeRefresh = await page.evaluate(() => {
+      window.__backendBookingDeleted = true;
+      return { ...window.__backendBookingCalls };
+    });
     await page.evaluate(() => {
       window.scrollTo(0, 0);
       const target = document.querySelector(

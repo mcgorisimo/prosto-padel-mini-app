@@ -1018,9 +1018,9 @@ export default function App({
 
   useEffect(() => {
     if (activeTab === 'home') {
-      void loadBackendReservations();
+      void refreshBackendReservations();
     }
-  }, [activeTab, loadBackendReservations]);
+  }, [activeTab, refreshBackendReservations]);
 
   useEffect(() => {
     if (
@@ -1072,7 +1072,11 @@ export default function App({
           setBackendMatchNow(Math.floor(Date.now() / 1_000));
           void loadBackendMatchFeed();
           void loadBackendAccountMatches();
-          void loadBackendReservations();
+          void (
+            activeTab === 'home'
+              ? refreshBackendReservations()
+              : loadBackendReservations()
+          );
           void loadInvitations();
         }
       }
@@ -1092,11 +1096,13 @@ export default function App({
       );
     };
   }, [
+    activeTab,
     fetchProfile,
     loadBackendAccountMatches,
     loadBackendMatchFeed,
     loadBackendReservations,
     loadInvitations,
+    refreshBackendReservations,
     usesBackendMatches,
   ]);
 
