@@ -3165,3 +3165,20 @@
   target to become 22 August 08:45 / court 2, the old hold to be released and
   exactly one new active hold to remain. T2/T3 stay pending and D2 remains
   `in_progress`.
+
+### 2026-08-09 — D2 / T4 cross-date/time/court live acceptance
+
+- The owner refreshed the already-moved reservation on exact deployed backend
+  `fb02bf3f1959970cda7d2d9d9dbd01f0f00d6aad`; no new booking was created.
+  The owner confirmed Home now displays 22 August, 08:45, court 2.
+- A bounded `BEGIN READ ONLY` PostgreSQL postcheck proved the same single local
+  reservation remains `confirmed`, still binds the same provider record and
+  has the provider target 22 August 08:45 / court 2. There is exactly one local
+  create operation and one reservation bound to that provider record.
+- The old 21 August 09:45 / court 8 hold has active count `0`; exactly one
+  active hold matches the new target. No duplicate create/reservation or
+  second active hold exists. This closes T4 (different date, time and court).
+- No provider/API write, application-originated PUT/DELETE, DB write/cleanup,
+  runtime/config change, schema/migration, payment, webhook or production
+  action was performed by the postcheck. T2 and T3 remain separate live
+  acceptance scenarios; D2 remains `in_progress`.
