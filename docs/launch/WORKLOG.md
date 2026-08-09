@@ -3182,3 +3182,23 @@
   runtime/config change, schema/migration, payment, webhook or production
   action was performed by the postcheck. T2 and T3 remain separate live
   acceptance scenarios; D2 remains `in_progress`.
+
+### 2026-08-09 — D2 / T2 cross-date/same-time/same-court live acceptance
+
+- The owner moved the same already-bound YCLIENTS record to a different date
+  while preserving 08:45 and court 2, then refreshed Home. The owner confirmed
+  Home displays 18 August, 08:45, court 2.
+- One bounded exact provider GET through the deployed strict reader and one
+  bounded `BEGIN READ ONLY` PostgreSQL postcheck agreed on the same record ID,
+  service, 18 August 08:45 target, 90-minute duration and court resource. The
+  local reservation and create operation both remain `confirmed`.
+- Exactly one reservation is bound to the provider record, exactly one create
+  operation exists, the prior 22 August hold has active count `0`, and exactly
+  one active hold matches the new target. No duplicate create or second active
+  hold exists. This closes T2 (different date, same time and court).
+- No provider write, application-originated PUT/DELETE, DB write/cleanup,
+  runtime/config change, schema/migration, payment, webhook or production
+  action was performed by the verification. T3 remains pending. Repeated
+  successful reads did create additional released hold history while retaining
+  only one active hold; that separate freshness/hold-churn defect B remains
+  explicitly open after the transfer matrix. D2 remains `in_progress`.
