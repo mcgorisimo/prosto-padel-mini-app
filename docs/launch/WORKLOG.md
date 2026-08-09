@@ -26,7 +26,7 @@
 | Этап | Статус | Ветка/commit | Проверки | Блокер/следующий шаг |
 |---|---|---|---|---|
 | D1 Backend-only/contracts | done | `main` / deployed `c04074459948d0bf545e865b885aea7a4e5fec3c` | frontend E2E PASS (82/1 skipped); focused fail-closed 2/2 PASS; frontend build PASS; backend all PASS; Selectel test smoke PASS | D1 закрыт; следующий отдельный этап — D2 |
-| D2 YCLIENTS reservation core | in_progress | `main` / Selectel test `e55b9d8bd1af35b98fe4f7aae287aaef59413be9` | migration 033 applied/verified; automated gates PASS; fresh create confirmed/bound and admin-delete refresh smoke PASS; fixed-sheet rollout health/log PASS | primary data flow is proved; owner Telegram no-write smoke of the fixed sheet and email keyboard remains before closure review; legacy unbound cleanup is deferred and is not D2 acceptance |
+| D2 YCLIENTS reservation core | in_progress | `main` / Selectel test `e55b9d8bd1af35b98fe4f7aae287aaef59413be9` | migration 033 applied/verified; automated gates PASS; fresh create confirmed/bound, admin-delete refresh and fixed-sheet/email-keyboard owner smokes PASS | primary data flow and current Telegram booking UI are proved on Selectel test; legacy unbound cleanup is deferred and is not D2 acceptance; next gate is managing D2 closure decision |
 | D3 Match ↔ reservation lifecycle | pending | — | — | reflect admin cancellation without provider DELETE, owner participant removal, match ↔ reservation binding |
 | D4 Payment Core | pending | — | — | payment provider, pricing/payment snapshot, чеки и возвраты |
 | D5 Settings/moderation/compliance | pending | — | — | standalone phone/email auth, verified backend email, approved club support/contact source and clickable action; затем schema review |
@@ -41,7 +41,7 @@
 | Этап | Среда | Целевой commit | Статус | Проверка |
 |---|---|---|---|---|
 | D1 Backend-only/contracts | Selectel test | `c04074459948d0bf545e865b885aea7a4e5fec3c` | `test_deployed` | frontend healthy; HTTPS root/health и новый asset 200; TMA auth/profile/feed/details/booking availability PASS; bundle/log audit PASS |
-| D2 YCLIENTS reservation core | Selectel test | `e55b9d8bd1af35b98fe4f7aae287aaef59413be9` | `test_deployed` | frontend-only rollout health/log/asset PASS; fresh create/delete reconciliation remains proved; fixed sheet/email keyboard awaits owner no-write Telegram smoke |
+| D2 YCLIENTS reservation core | Selectel test | `e55b9d8bd1af35b98fe4f7aae287aaef59413be9` | `test_deployed` | health/log/asset PASS; fresh create/delete reconciliation remains proved; owner confirmed fixed sheet, locked background and stable email keyboard UI in Telegram |
 | D2 persistence/privacy proposal | not applicable | docs-only checkpoint | `not_needed` | только Markdown; runtime, schema, containers и конфигурация не менялись |
 | D2 YCLIENTS contract matrix | not applicable | docs-only checkpoint поверх `3e8739b` | `not_needed` | только Markdown; API/DB/server/runtime не вызывались и не менялись |
 | D2 YCLIENTS controlled test plan | not applicable | `040773172a2fa556ffaaf1d12dac540095070976` + docs-only correction from that exact base | `not_needed` | plan only; provider/server/DB/runtime calls и writes не выполнялись |
@@ -2986,3 +2986,16 @@
   cannot scroll, focus/type in the email field and confirm the keyboard causes
   no zoom/split while the CTA remains visible, then close the sheet without
   creating a booking and confirm the prior page position is restored.
+
+### 2026-08-09 — D2 / fixed sheet owner Telegram acceptance
+
+- The owner completed the no-write Telegram Mini App smoke on exact deployed
+  `e55b9d8bd1af35b98fe4f7aae287aaef59413be9` and confirmed the reported
+  confirmation-sheet and email-keyboard interface defects are fixed.
+- The fixed bottom position, background lock and stable email input/keyboard UI
+  are accepted. No new booking, YCLIENTS/API/provider or DB call/write, runtime
+  change, container restart, push, merge, rollout or production action was
+  performed for this factual acceptance entry.
+- Deployment remains `test_deployed` at exact `e55b9d8...`. D2 stays
+  `in_progress` until the managing closure decision; legacy unbound cleanup is
+  still deferred and is not part of the accepted primary D2 flow.
