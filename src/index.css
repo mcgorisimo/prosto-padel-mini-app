@@ -802,6 +802,21 @@ textarea {
   border: 1px solid rgba(216, 243, 74, 0.16); border-radius: 8px; background: rgba(216, 243, 74, 0.075);
 }
 
+html.booking-sheet-open {
+  overflow: hidden !important;
+  overscroll-behavior: none !important;
+}
+
+body.booking-sheet-open {
+  position: fixed !important;
+  top: var(--booking-sheet-scroll-offset, 0) !important;
+  right: 0 !important;
+  left: 0 !important;
+  width: 100% !important;
+  overflow: hidden !important;
+  overscroll-behavior: none !important;
+}
+
 body.booking-sheet-open .bottom-nav {
   opacity: 0;
   pointer-events: none;

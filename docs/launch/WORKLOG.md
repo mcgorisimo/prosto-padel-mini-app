@@ -26,7 +26,7 @@
 | Этап | Статус | Ветка/commit | Проверки | Блокер/следующий шаг |
 |---|---|---|---|---|
 | D1 Backend-only/contracts | done | `main` / deployed `c04074459948d0bf545e865b885aea7a4e5fec3c` | frontend E2E PASS (82/1 skipped); focused fail-closed 2/2 PASS; frontend build PASS; backend all PASS; Selectel test smoke PASS | D1 закрыт; следующий отдельный этап — D2 |
-| D2 YCLIENTS reservation core | in_progress | `main` / Selectel test `5daa2c0ba3884d0024f115bf6b4c1805e60f468d` | migration 033 applied/verified; automated gates PASS; fresh create confirmed/bound and admin-delete refresh smoke PASS; alignment rollout health/log PASS | primary data flow is proved; owner manual Telegram smoke of the aligned post-create screen remains before closure review; legacy unbound cleanup is deferred and is not D2 acceptance |
+| D2 YCLIENTS reservation core | in_progress | `main` / Selectel test `5daa2c0ba3884d0024f115bf6b4c1805e60f468d` | migration 033 applied/verified; automated gates PASS; fresh create confirmed/bound and admin-delete refresh smoke PASS; alignment rollout health/log PASS | primary data flow is proved; owner Telegram smoke found a fixed-sheet/keyboard regression and its local frontend correction awaits integration/rollout; legacy unbound cleanup is deferred and is not D2 acceptance |
 | D3 Match ↔ reservation lifecycle | pending | — | — | reflect admin cancellation without provider DELETE, owner participant removal, match ↔ reservation binding |
 | D4 Payment Core | pending | — | — | payment provider, pricing/payment snapshot, чеки и возвраты |
 | D5 Settings/moderation/compliance | pending | — | — | standalone phone/email auth, verified backend email, approved club support/contact source and clickable action; затем schema review |
@@ -41,7 +41,7 @@
 | Этап | Среда | Целевой commit | Статус | Проверка |
 |---|---|---|---|---|
 | D1 Backend-only/contracts | Selectel test | `c04074459948d0bf545e865b885aea7a4e5fec3c` | `test_deployed` | frontend healthy; HTTPS root/health и новый asset 200; TMA auth/profile/feed/details/booking availability PASS; bundle/log audit PASS |
-| D2 YCLIENTS reservation core | Selectel test | `5daa2c0ba3884d0024f115bf6b4c1805e60f468d` | `test_deployed` | frontend-only rollout health/log/asset PASS; fresh create/delete reconciliation remains proved; aligned post-create screen awaits owner Telegram smoke |
+| D2 YCLIENTS reservation core | Selectel test | `5daa2c0ba3884d0024f115bf6b4c1805e60f468d` | `test_deployed` | frontend-only rollout health/log/asset PASS; fresh create/delete reconciliation remains proved; manual smoke found the confirmation sheet scroll/keyboard regression now corrected locally |
 | D2 persistence/privacy proposal | not applicable | docs-only checkpoint | `not_needed` | только Markdown; runtime, schema, containers и конфигурация не менялись |
 | D2 YCLIENTS contract matrix | not applicable | docs-only checkpoint поверх `3e8739b` | `not_needed` | только Markdown; API/DB/server/runtime не вызывались и не менялись |
 | D2 YCLIENTS controlled test plan | not applicable | `040773172a2fa556ffaaf1d12dac540095070976` + docs-only correction from that exact base | `not_needed` | plan only; provider/server/DB/runtime calls и writes не выполнялись |
@@ -2925,3 +2925,36 @@
   action occurred. Automated rollout is `test_deployed`; the remaining gate is
   one owner Telegram Mini App smoke confirming the booking screen stays aligned
   and the inline success message does not cover the date/court controls.
+
+### 2026-08-09 — D2 / fixed confirmation sheet and keyboard correction
+
+- Owner Telegram smoke of exact deployed `5daa2c0...` confirmed the date/court
+  alignment, but found a separate regression: the booking confirmation sheet
+  moved with the booking page instead of remaining fixed, the background page
+  could scroll, and focusing the email field allowed the keyboard viewport to
+  split the sheet/footer layout.
+- Root cause is exact and frontend-only. `PullToRefresh` keeps a CSS transform
+  on its content wrapper even at zero distance; CSS transforms establish a
+  containing block for descendant `position: fixed`, so the nested overlay was
+  fixed to the scrolling wrapper rather than to the Telegram viewport.
+- The confirmation overlay now renders through a React portal directly under
+  `document.body`. Opening it preserves the current page offset and locks the
+  html/body background; closing restores that offset, while successful create
+  still intentionally returns to page top. The sheet body remains the only
+  vertical scroll area, and its footer/CTA stays pinned to the bottom when the
+  viewport contracts for the keyboard. The email input now uses a `16px` font
+  to prevent iOS focus zoom from scaling and displacing the interface.
+- Focused iPhone/WebKit regression PASS `1/1`: portal ownership, fixed viewport
+  position, html/body lock, compact `520px` keyboard viewport, visible pinned
+  CTA, internal body scrolling, `16px` anti-zoom input, unlock and post-create
+  top restoration are all asserted. Full root E2E PASS `89 passed / 1 skipped`;
+  root build PASS (`1617`
+  modules, existing CJS/chunk warnings only); `git diff --check` PASS.
+- Read-only P0/P1 review found no actionable issue. No backend, API, provider,
+  DB/schema/migration, payment-field, app-originated cancel/reschedule or
+  production change is present. Backend gates were not needed for this
+  frontend-only slice.
+- Deployment impact is `pending_integration_rollout`. Selectel test remains
+  clean and healthy on exact `5daa2c0...`; this correction has not been pushed,
+  merged or deployed and requires a new frontend-only rollout plus owner
+  Telegram keyboard smoke.

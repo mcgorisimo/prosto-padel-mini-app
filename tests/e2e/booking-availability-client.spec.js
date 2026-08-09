@@ -821,20 +821,84 @@ test('creates a backend booking from the availability confirmation', async ({ pa
   await expect(primeTime).toContainText('Свободно');
 
   await primeTime.click();
-  const dialog = root.getByRole('dialog', { name: 'Подтверждение брони' });
+  const dialog = page.getByRole('dialog', { name: 'Подтверждение брони' });
   await expect(dialog).toBeVisible();
-  await dialog.getByTestId('booking-contact-email').fill('test@example.test');
+  const fixedSheetState = await page.evaluate(() => {
+    const overlay = document.querySelector('.booking-sheet-overlay');
+    const sheet = document.querySelector('.booking-sheet');
+    const footer = document.querySelector('.booking-sheet-footer');
+    const sheetRect = sheet.getBoundingClientRect();
+    const footerRect = footer.getBoundingClientRect();
+    return {
+      portalParentIsBody: overlay.parentElement === document.body,
+      htmlLocked: document.documentElement.classList.contains('booking-sheet-open'),
+      bodyLocked: document.body.classList.contains('booking-sheet-open'),
+      bodyPosition: getComputedStyle(document.body).position,
+      bodyOverflow: getComputedStyle(document.body).overflowY,
+      overlayPosition: getComputedStyle(overlay).position,
+      sheetBottomGap: Math.round(window.innerHeight - sheetRect.bottom),
+      footerBottomGap: Math.round(sheetRect.bottom - footerRect.bottom),
+    };
+  });
+  expect(fixedSheetState).toEqual({
+    portalParentIsBody: true,
+    htmlLocked: true,
+    bodyLocked: true,
+    bodyPosition: 'fixed',
+    bodyOverflow: 'hidden',
+    overlayPosition: 'fixed',
+    sheetBottomGap: 0,
+    footerBottomGap: 0,
+  });
+
+  const originalViewport = page.viewportSize();
+  const emailInput = dialog.getByTestId('booking-contact-email');
+  await emailInput.focus();
+  await page.setViewportSize({ width: originalViewport.width, height: 520 });
+  await emailInput.fill('test@example.test');
   const createButton = dialog.getByRole('button', { name: 'Создать бронь' });
   await expect(createButton).toBeEnabled();
+  await expect(createButton).toBeInViewport();
   await expect(dialog).toContainText(
     'Бронь появится в YCLIENTS без онлайн-оплаты.',
   );
-  await page.evaluate(() => window.scrollTo(0, 400));
+  const compactSheetState = await page.evaluate(() => {
+    const sheetRect = document.querySelector('.booking-sheet').getBoundingClientRect();
+    const footerRect = document.querySelector('.booking-sheet-footer').getBoundingClientRect();
+    const body = document.querySelector('.booking-sheet-body');
+    const input = document.querySelector('[data-testid="booking-contact-email"]');
+    return {
+      sheetBottomGap: Math.round(window.innerHeight - sheetRect.bottom),
+      footerBottomGap: Math.round(sheetRect.bottom - footerRect.bottom),
+      footerVisible: footerRect.top >= 0 && footerRect.bottom <= window.innerHeight,
+      bodyOverflow: getComputedStyle(body).overflowY,
+      inputFontSize: getComputedStyle(input).fontSize,
+    };
+  });
+  expect(compactSheetState).toEqual({
+    sheetBottomGap: 0,
+    footerBottomGap: 0,
+    footerVisible: true,
+    bodyOverflow: 'auto',
+    inputFontSize: '16px',
+  });
+
   await createButton.click();
+  await page.setViewportSize(originalViewport);
   await expect(root.getByTestId('booking-success-message')).toContainText(
     'Бронь создана в YCLIENTS без онлайн-оплаты.',
   );
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
+  await expect(dialog).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => ({
+    htmlLocked: document.documentElement.classList.contains('booking-sheet-open'),
+    bodyLocked: document.body.classList.contains('booking-sheet-open'),
+    bodyPosition: getComputedStyle(document.body).position,
+  }))).toEqual({
+    htmlLocked: false,
+    bodyLocked: false,
+    bodyPosition: 'static',
+  });
   const reservationCard = root.getByTestId('booking-reservation-card');
   await expect(reservationCard).toContainText('Статус: confirmed');
   await expect(reservationCard.getByRole('button', { name: /отмен|перенос/iu })).toHaveCount(0);

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { CalendarDays, Clock3, LockKeyhole, X } from 'lucide-react';
 import PullToRefresh from './PullToRefresh';
 import { BOOKING_DURATIONS, COURTS, WORKING_HOURS, checkAvailability, fromMin } from '../lib/booking';
@@ -211,6 +212,7 @@ export default function BookingScreen({
   const [successText, setSuccessText] = useState('');
   const [latestReservation, setLatestReservation] = useState(null);
   const [reservationReadStatus, setReservationReadStatus] = useState('idle');
+  const bookingSheetCloseScrollRef = useRef(null);
   const reservationRefreshInFlightRef = useRef(false);
   const servicesRequestRef = useRef(0);
   const [servicesState, setServicesState] = useState({
@@ -235,7 +237,7 @@ export default function BookingScreen({
   });
 
   const alignBookingScreenAfterCreate = useCallback(() => {
-    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+    bookingSheetCloseScrollRef.current = 0;
   }, []);
 
   useEffect(() => {
@@ -694,13 +696,34 @@ export default function BookingScreen({
     timesState.status,
   ]);
 
+  const isBookingSheetOpen = selectedSlot !== null;
+
   useEffect(() => {
-    document.body.classList.toggle('booking-sheet-open', Boolean(selectedSlot));
+    if (!isBookingSheetOpen) return undefined;
+
+    const scrollTop = Math.max(
+      0,
+      Number(window.scrollY) || 0,
+      Number(document.documentElement.scrollTop) || 0,
+      Number(document.body.scrollTop) || 0,
+    );
+    bookingSheetCloseScrollRef.current = null;
+    document.documentElement.classList.add('booking-sheet-open');
+    document.body.classList.add('booking-sheet-open');
+    document.body.style.setProperty(
+      '--booking-sheet-scroll-offset',
+      `${-scrollTop}px`,
+    );
 
     return () => {
+      document.documentElement.classList.remove('booking-sheet-open');
       document.body.classList.remove('booking-sheet-open');
+      document.body.style.removeProperty('--booking-sheet-scroll-offset');
+      const targetScroll = bookingSheetCloseScrollRef.current ?? scrollTop;
+      bookingSheetCloseScrollRef.current = null;
+      window.scrollTo({ top: targetScroll, left: 0, behavior: 'auto' });
     };
-  }, [selectedSlot]);
+  }, [isBookingSheetOpen]);
 
   const totalPrice = selectedSlot
     ? getTotalPrice(selectedSlot.time, duration, selectedSlot.court.type, selectedDateISO)
@@ -1188,7 +1211,7 @@ export default function BookingScreen({
         ))}
       </section>
 
-      {selectedSlot && (
+      {selectedSlot && createPortal(
         <div className="booking-sheet-overlay" role="presentation" onClick={handleCloseConfirm}>
           <div
             className="booking-sheet"
@@ -1266,7 +1289,7 @@ export default function BookingScreen({
                     autoComplete="email"
                     maxLength={320}
                     placeholder="name@example.com"
-                    className="mt-2 w-full rounded-xl border border-warm-white/12 bg-app-bg/70 px-3 py-3 text-sm text-warm-white outline-none"
+                    className="mt-2 w-full rounded-xl border border-warm-white/12 bg-app-bg/70 px-3 py-3 text-base text-warm-white outline-none"
                   />
                 </label>
               )}
@@ -1289,7 +1312,8 @@ export default function BookingScreen({
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
 
       {latestReservation && (
