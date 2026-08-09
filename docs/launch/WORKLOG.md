@@ -26,7 +26,7 @@
 | Этап | Статус | Ветка/commit | Проверки | Блокер/следующий шаг |
 |---|---|---|---|---|
 | D1 Backend-only/contracts | done | `main` / deployed `c04074459948d0bf545e865b885aea7a4e5fec3c` | frontend E2E PASS (82/1 skipped); focused fail-closed 2/2 PASS; frontend build PASS; backend all PASS; Selectel test smoke PASS | D1 закрыт; следующий отдельный этап — D2 |
-| D2 YCLIENTS reservation core | in_progress | `main` / Selectel test `ac5b4be4e88c6b45ec8d290a1c68e01a41dc635d` | migration 033 applied/verified; automated gates PASS; create/delete sync, admin-reschedule T1-T4, repeated-refresh no-churn and fully-bound test cleanup live smokes PASS | fully-bound test cleanup accepted: 3 cancelled / 0 active holds / absent from active UI; corrected exact eight-row legacy cleanup for the current 5 pending / 3 unknown split is prepared_for_review and must not execute before a new exact approval |
+| D2 YCLIENTS reservation core | done | closure history through exact cleanup source `4515549f58d714624a333fbb059dd4054b1e1439`; Selectel test runtime `ac5b4be4e88c6b45ec8d290a1c68e01a41dc635d` | migration 033 applied/verified; all automated gates PASS; create/delete sync, admin-reschedule T1-T4, repeated-refresh no-churn, fully-bound cleanup and eight-row legacy cleanup live acceptance PASS | D2 closed; next stage is D3 match ↔ reservation lifecycle; payment, webhook and production remain separate gates |
 | D3 Match ↔ reservation lifecycle | pending | — | — | reflect admin cancellation without provider DELETE, owner participant removal, match ↔ reservation binding |
 | D4 Payment Core | pending | — | — | payment provider, pricing/payment snapshot, чеки и возвраты |
 | D5 Settings/moderation/compliance | pending | — | — | standalone phone/email auth, verified backend email, approved club support/contact source and clickable action; затем schema review |
@@ -3382,3 +3382,48 @@
   not imported by application runtime. D2 remains `in_progress`; one-time
   execution still requires independent review, the exact correction commit and
   a new approval bound to that commit and SHA-256.
+
+### 2026-08-10 — D2 / cleanup execution and closure
+
+- Fully-bound cleanup remained accepted: the owner deleted the three exact D2
+  test records in YCLIENTS UI, one normal owner refresh reconciled all three to
+  `cancelled`, every active hold count became `0`, and the owner confirmed the
+  three cards disappeared from active Home bookings. No direct DB update was
+  used for provider-bound reservations.
+- The exact legacy artifact from source commit
+  `4515549f58d714624a333fbb059dd4054b1e1439`, SHA-256
+  `f6a9e06ea416198a248d586db604cf3a4e9eb3b8ef3a6c80be7b49e743eb8142`,
+  was delivered to a fresh root-owned layout and verified `0600`; its artifact
+  parent was root-owned `0700` and the atomic claim was absent. A bounded
+  read-only precheck again proved exactly `5` pending / `3` unknown, eight null
+  provider bindings and eight active holds.
+- The first temporary PostgreSQL client launch failed before connection because
+  Compose env names were not mapped into that client. It created no claim,
+  backup, container residue or DB effect; a bounded read-only no-effect check
+  proved the same `5 / 3 / 8` state. After a network-none credential-handoff
+  preflight, the exact SQL started once through a temporary PostgreSQL 14 client
+  and returned `D2_LEGACY_UNBOUND_CLEANUP_PASS|8|8`.
+- PostgreSQL 14 printed five `SHELL_ERROR` meta-command compatibility warnings:
+  those conditional branches were not portable even though each associated
+  shell command succeeded. No retry occurred. Independent postchecks, rather
+  than the PASS line alone, proved the durable outcome: root-owned `0700`
+  no-clobber claim, one non-empty root-owned `0600` backup line, eight rejected
+  reservations with null provider bindings, eight reconciled/rejected create
+  operations, eight released holds, zero active holds and the cancelled
+  negative control unchanged. The consumed claim remains; the script is
+  archived and must not be reused.
+- The owner performed one Home pull-to-refresh and confirmed all eight legacy
+  cards disappeared. A final bounded read-only DB check remained exactly
+  `8 rejected / 8 reconciled-rejected / 0 active holds / 8 released holds`.
+- Runtime and containers were not rebuilt or reconfigured. Selectel test stays
+  on exact `ac5b4be4e88c6b45ec8d290a1c68e01a41dc635d`; backend
+  `4a837f0226ad...`, frontend `29d0167f496d...`, nginx `e5b98b53a385...` and
+  PostgreSQL `5e36d4dc1a5c...` remained healthy with restart count `0`, health
+  returned `200`, and the final bounded two-minute critical-marker count was
+  `0` for all four containers. The earlier failed pre-connection launcher left
+  one classified PostgreSQL `FATAL role "-d" does not exist` line and no
+  runtime fault.
+- D2 is `done`. This closure is docs-only and deployment is `not_needed`:
+  accepted application runtime remains exact `ac5b4be...`, with containers
+  unchanged. No schema/migration, provider POST/PUT, payment-field, webhook,
+  production, runtime/config or application code change belongs to closure.

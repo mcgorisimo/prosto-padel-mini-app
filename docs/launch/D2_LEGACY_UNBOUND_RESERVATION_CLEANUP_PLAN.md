@@ -1,6 +1,7 @@
 # D2 legacy unbound reservation cleanup plan
 
-Status: `script_prepared_for_review`; the cleanup SQL has not been executed.
+Status: `applied_verified` on Selectel test; the one-time cleanup completed on
+2026-08-10 and must not be executed again.
 
 Prepared artifact:
 
@@ -15,6 +16,28 @@ migration-033 terminal shapes, forbidden
 hard-delete/schema/payment mutations and postcheck-before-commit ordering. It
 does not execute the script or make a database connection.
 
+Execution evidence:
+
+- exact source commit:
+  `4515549f58d714624a333fbb059dd4054b1e1439`;
+- exact script SHA-256:
+  `f6a9e06ea416198a248d586db604cf3a4e9eb3b8ef3a6c80be7b49e743eb8142`;
+- fixed result: `D2_LEGACY_UNBOUND_CLEANUP_PASS|8|8`;
+- independent read-only postcheck: eight rejected reservations, eight
+  reconciled/rejected operations, eight released holds, zero active holds and
+  unchanged cancelled negative control;
+- durable root-owned `0600` backup was created inside the atomic root-owned
+  `0700` claim. The claim remains and forbids a repeated invocation.
+
+The first temporary client launch failed before a PostgreSQL connection because
+the Compose env names were not mapped into the client. Claim absence and the
+unchanged `5 pending / 3 unknown / 8 holds` state were proved before the exact
+script was started. The successful PostgreSQL 14 client run emitted five
+`SHELL_ERROR` meta-command compatibility warnings even though all five shell
+commands succeeded. The fixed PASS plus independent artifact/DB postchecks
+prove this execution result; the consumed script must not be reused as a
+general PostgreSQL-14 runbook.
+
 ## Scope and evidence
 
 This is a one-time Selectel test data repair for eight reservations created
@@ -25,7 +48,7 @@ cannot obtain canonical deletion proof.
 
 Only these reservation IDs are in scope:
 
-| Reservation ID | Current reservation / create-operation status |
+| Reservation ID | Pre-execution reservation / create-operation status |
 | --- | --- |
 | `b286b04e-66af-4237-84fb-10bc2a9c99c9` | `unknown / unknown` |
 | `953f1810-9a65-4a1b-bee5-c2b9d9cd4f12` | `unknown / unknown` |
@@ -36,7 +59,7 @@ Only these reservation IDs are in scope:
 | `48c74dee-5248-4f75-8fc7-cfafc4a3223c` | `pending_confirmation / pending` |
 | `94105b19-c497-4ff3-816b-bc28691daab5` | `pending_confirmation / pending` |
 
-Every target currently has exactly one active `reservation` hold. Fully-bound
+Before execution, every target had exactly one active `reservation` hold. Fully-bound
 reservation `2cf39988-358d-4009-b64c-c017d3c1d0b5`, already proved
 `cancelled` with zero active holds, is an explicit negative control and must not
 be changed.
@@ -60,14 +83,14 @@ administratively resolved without a provider binding:
 This mirrors the domain path `pending -> unknown -> reconciled/rejected` and
 `unknown -> reconciled/rejected`. The UI already excludes `rejected` bookings.
 
-## Future execution precheck
+## Historical execution precheck
 
-Execution requires a new exact approval. It must use `ON_ERROR_STOP`,
+Execution required an exact approval. The reviewed script used `ON_ERROR_STOP`,
 `BEGIN ISOLATION LEVEL SERIALIZABLE`, a bounded `statement_timeout` and
 `lock_timeout`, and lock rows in this order: reservations, create operations,
 then active holds, each ordered by reservation ID.
 
-Before any mutation, fail closed unless all assertions hold simultaneously:
+Before mutation, the reviewed precheck required all assertions simultaneously:
 
 1. the target set equals the eight IDs above; no extra or missing row;
 2. each has exactly one create operation and no other active operation;
@@ -84,11 +107,11 @@ Before any mutation, fail closed unless all assertions hold simultaneously:
    artifact without printing owner IDs, ciphertext, digests or contact data;
    the artifact is not deleted by the cleanup gate.
 
-Any mismatch means `ROLLBACK` and STOP. Do not widen the target set.
+Any mismatch required `ROLLBACK` and STOP. The target set was not widened.
 
-## Future transaction order
+## Executed transaction order
 
-The reviewable execution script must use guarded `UPDATE ... WHERE` statements
+The reviewed execution script used guarded `UPDATE ... WHERE` statements
 with exact expected row counts:
 
 1. materialize the five pending reservation/operation pairs as `unknown`,
@@ -100,12 +123,12 @@ with exact expected row counts:
 4. run all postchecks below before `COMMIT`.
 
 No application endpoint, YCLIENTS read/write, provider retry, new migration,
-schema change, snapshot crypto destruction or runtime deployment belongs to
+schema change, snapshot crypto destruction or runtime deployment was part of
 this cleanup.
 
 ## Postcheck and rollback boundary
 
-Before commit, require exactly:
+Before commit, the postcheck required exactly:
 
 - eight `rejected` reservations with null provider binding;
 - eight `reconciled/rejected` create operations with the fixed reason;
@@ -114,8 +137,8 @@ Before commit, require exactly:
 - the negative control unchanged;
 - migration-033 constraint and trigger checks passing.
 
-After commit, a bounded owner refresh should hide all eight legacy cards.
-Health and PII-safe critical-log checks must remain clean.
+After commit, one bounded owner refresh hid all eight legacy cards. Health and
+PII-safe critical-log checks remained clean.
 
 Before `COMMIT`, any failure uses transaction rollback. After commit, do not
 blindly restore holds: a new booking may already occupy an interval. Any
@@ -124,15 +147,15 @@ overlap precheck and an exact restore plan.
 
 ## Remaining gates
 
-This plan does not authorize execution. The exact script and static contract
-tests are prepared but not run against PostgreSQL. Independent review must now
-confirm the script, record its exact Git commit and verify the SHA-256 digest
-above. Only then may the owner authorize a one-time Selectel test execution.
+The one-time execution gate is complete. Do not remove the claim and do not
+execute this script again. Any future data repair requires a new target-specific
+artifact, PostgreSQL-client compatibility tests, independent review and a new
+explicit approval.
 
-## Required approval for execution
+## Historical approval template
 
-Exact future wording after the script is reviewed; placeholders must be
-replaced with the actual reviewed values:
+The template below is retained as historical review evidence and no longer
+authorizes an execution:
 
 > Разрешаю исполнить exact cleanup script commit `<reviewed_commit>`, SHA-256
 > `<script_sha256>`, одноразово и только на Selectel
