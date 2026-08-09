@@ -2798,3 +2798,32 @@
   correction. Deployment impact is `pending_integration_rollout`: Selectel
   backend remains the previously built `743386c...` image until separate
   review and backend-only rollout approval.
+
+### 2026-08-09 — D2 / exact deleted record backend rollout and smoke
+
+- Git delivery PASS: reviewed checkpoint
+  `9bee483119a829de4ed74c20d94271ab740d6bcc` was pushed to the D2
+  branch, clean `main` fast-forwarded from `97e8b418...` to the same exact SHA
+  and both remote refs were verified without a merge commit.
+- Selectel test fetched and detached cleanly at exact `9bee483...`; the existing
+  two-file Compose configuration passed validation. Only the backend image was
+  rebuilt and only `prosto-padel-test-backend-1` was recreated, changing its ID
+  from `040cb8968cfe...` to `81dfc03e2f1e...`. Frontend remained
+  `0fd5cbb20a80...`, nginx `e5b98b53a385...` and PostgreSQL
+  `5e36d4dc1a5c...`; all four are healthy with restart count `0`.
+- Post-rollout checks PASS: root and health returned `200`, unauthenticated
+  bookings retained `401`, and bounded backend critical-log markers were zero.
+  The owner then used Telegram pull-to-refresh once; the previously deleted
+  fully-bound reservation `2cf39988-358d-4009-b64c-c017d3c1d0b5`
+  disappeared from the app. A bounded `BEGIN READ ONLY` postcheck proved local
+  status `cancelled`, reconciliation attempt `10` and active hold count `0`.
+- Read-only legacy inventory found eight older unbound local test reservations:
+  six remain `pending_confirmation/pending` and two `unknown/unknown`; none has
+  a reservation or operation YCLIENTS record binding and every one retains one
+  active local hold. They cannot receive canonical deleted-record proof and
+  therefore remain visible fail-closed. No cleanup or status/hold mutation was
+  performed; any archival/removal requires a separate exact DB cleanup gate.
+- No new booking, provider POST/PUT/DELETE, migration/schema/env/secret,
+  frontend/nginx/PostgreSQL rebuild or production change occurred. Selectel
+  test deployment is exact `9bee483...`; the deleted-record correction is
+  `applied_verified`, while legacy unbound cleanup remains separate D2 work.
