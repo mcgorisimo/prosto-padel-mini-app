@@ -3093,3 +3093,44 @@
   the exact correction is integrated and backend-only rolled out, then the
   owner refreshes Home and PostgreSQL proves the same reservation has the new
   target with the old hold released and exactly one new active hold.
+
+### 2026-08-09 — D2 / cross-date administrator-reschedule live contract correction
+
+- Exact backend correction `b52659299e1b8f8ed625b859a10afd551f4f48cd`
+  was integrated and backend-only rolled out to Selectel test before this
+  diagnosis. The owner then exercised T4 through the YCLIENTS CRM: date, time
+  and court were all changed on one fresh confirmed reservation.
+- Read-only PostgreSQL evidence proved one local confirmed reservation, the
+  original full terminal create binding, one active hold and no duplicate
+  create. The local target remained the old date/time/court after an owner
+  refresh. A single bounded, PII-safe exact provider read proved that YCLIENTS
+  preserved the same record ID and returned the new date/time/court,
+  `deleted=false`, the expected single service and duration.
+- The exact live blocker was `api_id`: this fresh record exposes a canonical
+  RFC 4122 UUID rather than the previously documented numeric/decimal-string
+  shape. The strict safe reader therefore returned `unknown` before the
+  already-reviewed exact-record/terminal-create binding proof could run. This
+  also explains the separate confirmed-plus-stale banner on the new booking;
+  it does not indicate a duplicate provider record.
+- The read client now accepts only a canonical RFC 4122 UUID as an opaque
+  provider `api_id`. Its value is not returned, logged or compared, and it
+  cannot satisfy numeric idempotency or bounded candidate matching. Malformed,
+  signed, padded, exponent, leading-zero and out-of-range values remain
+  fail-closed. Exact refresh still requires the persisted record ID and the
+  terminal confirmed create-operation binding before target/hold mutation.
+- Regressions prove an exact UUID record is safely parsed without exposing the
+  UUID and that UUID neighbors cannot become bounded-list candidates. Focused
+  backend tests PASS (`2 suites / 100 tests`); backend typecheck, unit (`132
+  suites / 3306 tests`), E2E (`2 suites / 4 tests`) and build PASS; root E2E
+  PASS (`89 passed / 1 skipped`) and root build PASS (`1617` modules; existing
+  CJS/chunk warnings only). `git diff --check` PASS (line-ending warnings only).
+- Independent read-only P0/P1 review is CLEAN. It confirmed that the UUID is
+  omitted from the safe projection, cannot satisfy numeric candidate or
+  idempotency equality, and that exact persisted-record plus terminal-create
+  binding and locked expected-version hold mutation remain unchanged.
+- No YCLIENTS/provider write, POST/PUT/DELETE, DB mutation/cleanup,
+  schema/migration, payment-field, webhook, app-originated cancel/reschedule or
+  production action was performed. This backend correction is
+  `pending_integration_rollout`; T4 must be repeated against the exact deployed
+  checkpoint and prove the DB target/new hold plus UI. T2 and T3 then remain
+  separate manual acceptance scenarios. D2 stays `in_progress`.

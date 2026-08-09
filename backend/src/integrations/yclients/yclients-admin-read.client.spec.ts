@@ -14,6 +14,7 @@ const RECORD_ID = 2_820_023;
 const RESOURCE_ID = 5_730_531;
 const SERVICE_ID = 30_539_679;
 const API_ID = 7_770_001;
+const OPAQUE_UUID_API_ID = 'c0a8012e-7d4b-4f6b-9f73-1f4a0e56ac21';
 
 class ImmediateClock implements YclientsRequestLimiterClock {
   private now = 0;
@@ -278,6 +279,32 @@ describe('YclientsAdminReadClient', () => {
       });
     });
 
+    it('accepts a canonical opaque UUID api_id without exposing it as a comparable id', async () => {
+      const fetch = fetchMock().mockResolvedValue(
+        jsonResponse(200, {
+          success: true,
+          data: providerRecord({ api_id: OPAQUE_UUID_API_ID }),
+        }),
+      );
+
+      const result = await client(fetch).getRecord(RECORD_ID);
+
+      expect(result).toEqual({
+        outcome: 'found',
+        record: {
+          recordId: RECORD_ID,
+          companyId: COMPANY_ID,
+          resourceId: RESOURCE_ID,
+          serviceIds: [SERVICE_ID],
+          datetime: '2026-08-05T16:30:00+03:00',
+          deleted: false,
+          lastChangeDate: '2026-08-05 15:00:00',
+        },
+      });
+      expect(JSON.stringify(result)).not.toContain(OPAQUE_UUID_API_ID);
+      expect(fetch).toHaveBeenCalledTimes(1);
+    });
+
     it('maps timeout/transport failure to unavailable without retry or fallback', async () => {
       const fetch = fetchMock().mockRejectedValue(
         new DOMException('opaque timeout', 'TimeoutError'),
@@ -370,16 +397,20 @@ describe('YclientsAdminReadClient', () => {
       expect(headers.authorization.includes(', User ')).toBe(true);
     });
 
-    it('loads the official meta shape and ignores an empty neighbor api_id during candidate scan', async () => {
+    it('ignores absent and opaque UUID neighbor api_id values during bounded candidate scan', async () => {
       const fetch = fetchMock().mockResolvedValue(
         jsonResponse(200, {
           success: true,
           data: [
             providerRecord({ id: RECORD_ID + 1, api_id: '' }),
             providerRecord({ id: RECORD_ID + 2, api_id: '   ' }),
+            providerRecord({
+              id: RECORD_ID + 3,
+              api_id: OPAQUE_UUID_API_ID,
+            }),
             providerRecord(),
           ],
-          meta: { page: 1, total_count: 3 },
+          meta: { page: 1, total_count: 4 },
         }),
       );
       const reader = client(fetch);

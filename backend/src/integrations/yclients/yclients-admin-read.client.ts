@@ -14,6 +14,8 @@ const DAY_MILLISECONDS = 86_400_000;
 const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/u;
 const ISO_DATETIME_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/u;
+const OPAQUE_UUID_API_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const YCLIENTS_ACCEPT = 'application/vnd.yclients.v2+json';
 
 export type YclientsSafeAdminRecord = Readonly<{
@@ -259,6 +261,13 @@ function readSafeAdminRecord(
     ? Number(value.seance_length)
     : undefined;
   const normalizedApiId = normalizeYclientsSystemApiId(value.api_id);
+  // Live exact reads can expose an opaque provider UUID in api_id even when
+  // the create command used our numeric reference. It is intentionally not
+  // projected as a comparable apiId; exact reconciliation remains bound to
+  // the already-persisted record and terminal create operation.
+  const opaqueUuidApiId =
+    typeof value.api_id === 'string' &&
+    OPAQUE_UUID_API_ID_PATTERN.test(value.api_id);
   const apiId =
     normalizedApiId.outcome === 'present' ? normalizedApiId.value : undefined;
   const lastChangeDate =
@@ -273,7 +282,7 @@ function readSafeAdminRecord(
     datetime === undefined ||
     (value.seance_length !== undefined && value.seance_length !== null && seanceLengthSeconds === undefined) ||
     typeof value.deleted !== 'boolean' ||
-    normalizedApiId.outcome === 'invalid' ||
+    (normalizedApiId.outcome === 'invalid' && !opaqueUuidApiId) ||
     (value.last_change_date !== undefined &&
       value.last_change_date !== null &&
       lastChangeDate === undefined)
