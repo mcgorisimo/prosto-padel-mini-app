@@ -3202,3 +3202,29 @@
   successful reads did create additional released hold history while retaining
   only one active hold; that separate freshness/hold-churn defect B remains
   explicitly open after the transfer matrix. D2 remains `in_progress`.
+
+### 2026-08-09 — D2 / T3 and administrator-reschedule matrix live acceptance
+
+- The owner moved the same bound record to a different date and different time
+  while preserving court 2, then refreshed Home. The owner confirmed Home
+  displays 17 August, 18:00, court 2.
+- One bounded exact provider GET through the deployed strict reader and one
+  bounded `BEGIN READ ONLY` PostgreSQL postcheck agreed on the same record ID,
+  service, 17 August 18:00 target, 90-minute duration and court resource. The
+  single local reservation and its single create operation remain `confirmed`.
+- The prior 18 August 08:45 / court 2 hold has active count `0`; exactly one
+  active hold matches the new target. One reservation remains bound to the
+  record and no duplicate create or second active hold exists. This closes T3.
+- The live administrator-reschedule matrix is now complete on Selectel test:
+  T1 same date/different time PASS; T2 different date/same time/same court PASS;
+  T3 different date/different time/same court PASS; T4 different date/time/court
+  PASS. Every cross-date case preserved the same provider record ID, one local
+  confirmed reservation and one active target hold while releasing the prior
+  hold; Home displayed only the new target after refresh.
+- No provider write, application-originated PUT/DELETE, DB write/cleanup,
+  runtime/config change, schema/migration, payment, webhook or production
+  action was performed by the verification. D2 remains `in_progress` because
+  defect B is separately proved: repeated successful exact refreshes of an
+  unchanged target currently release/reinsert the same hold and increment
+  reservation history/version. Only one hold remains active, but the redundant
+  churn requires a code-only correction and review before D2 closure.
