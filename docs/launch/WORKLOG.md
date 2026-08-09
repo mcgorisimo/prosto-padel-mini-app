@@ -26,7 +26,7 @@
 | Этап | Статус | Ветка/commit | Проверки | Блокер/следующий шаг |
 |---|---|---|---|---|
 | D1 Backend-only/contracts | done | `main` / deployed `c04074459948d0bf545e865b885aea7a4e5fec3c` | frontend E2E PASS (82/1 skipped); focused fail-closed 2/2 PASS; frontend build PASS; backend all PASS; Selectel test smoke PASS | D1 закрыт; следующий отдельный этап — D2 |
-| D2 YCLIENTS reservation core | in_progress | `main` / Selectel test `fa5eb38c6608d07c0140f39467dfebe3a058862b` | migration 033 applied/verified; backend/frontend runtime healthy; automated gates PASS; fresh-create business smoke STOP | newest strict provider create still failed local finalization: `confirm_binding/storage_failure` and fallback `storage_failure`, leaving pending/unbound/held; do not delete/retry; next gate is code-only diagnostic correction review |
+| D2 YCLIENTS reservation core | in_progress | `main` / Selectel test `9bee483119a829de4ed74c20d94271ab740d6bcc` | migration 033 applied/verified; automated gates PASS; fresh create confirmed/bound and admin-delete refresh smoke PASS | primary create → confirmed/bound → admin delete → pull-to-refresh → absent from active UI / DB cancelled / hold released chain is proved; legacy unbound cleanup is deferred and is not D2 acceptance; next gate is managing review and D2 closure decision |
 | D3 Match ↔ reservation lifecycle | pending | — | — | reflect admin cancellation without provider DELETE, owner participant removal, match ↔ reservation binding |
 | D4 Payment Core | pending | — | — | payment provider, pricing/payment snapshot, чеки и возвраты |
 | D5 Settings/moderation/compliance | pending | — | — | standalone phone/email auth, verified backend email, approved club support/contact source and clickable action; затем schema review |
@@ -41,7 +41,7 @@
 | Этап | Среда | Целевой commit | Статус | Проверка |
 |---|---|---|---|---|
 | D1 Backend-only/contracts | Selectel test | `c04074459948d0bf545e865b885aea7a4e5fec3c` | `test_deployed` | frontend healthy; HTTPS root/health и новый asset 200; TMA auth/profile/feed/details/booking availability PASS; bundle/log audit PASS |
-| D2 YCLIENTS reservation core | Selectel test | `fa5eb38c6608d07c0140f39467dfebe3a058862b` | `business_smoke_failed` | infrastructure/health/log gates PASS, but new create remained pending/unbound after provider success; admin delete/Home refresh smoke must not proceed until a reviewed correction is rolled out |
+| D2 YCLIENTS reservation core | Selectel test | `9bee483119a829de4ed74c20d94271ab740d6bcc` | `test_deployed` | health/log gates PASS; fresh create persisted confirmed with full binding; owner pull-to-refresh after admin deletion removed it from active UI; DB read-only proof: cancelled and hold released |
 | D2 persistence/privacy proposal | not applicable | docs-only checkpoint | `not_needed` | только Markdown; runtime, schema, containers и конфигурация не менялись |
 | D2 YCLIENTS contract matrix | not applicable | docs-only checkpoint поверх `3e8739b` | `not_needed` | только Markdown; API/DB/server/runtime не вызывались и не менялись |
 | D2 YCLIENTS controlled test plan | not applicable | `040773172a2fa556ffaaf1d12dac540095070976` + docs-only correction from that exact base | `not_needed` | plan only; provider/server/DB/runtime calls и writes не выполнялись |
@@ -2826,4 +2826,44 @@
 - No new booking, provider POST/PUT/DELETE, migration/schema/env/secret,
   frontend/nginx/PostgreSQL rebuild or production change occurred. Selectel
   test deployment is exact `9bee483...`; the deleted-record correction is
-  `applied_verified`, while legacy unbound cleanup remains separate D2 work.
+  `test_deployed` and verified, while legacy unbound cleanup remains separate
+  D2 work.
+
+### 2026-08-09 — D2 / create-finalization and active-list acceptance checkpoint
+
+- The eight legacy unbound reservations and `.env.test` ownership investigation
+  are explicitly deferred by the owner. Their reviewed cleanup artifacts remain
+  preserved in the separate `codex/week1-d2-reservation-core` branch and were
+  not executed, merged or included in this primary-flow branch.
+- The earlier `confirm_binding/storage_failure` root cause is proved and already
+  fixed in deployed history: PostgreSQL inferred the untyped
+  `provider_attempt_finished_at` `CASE` as text, producing SQLSTATE `42804`.
+  Commit `743386c7d0626cf253e92934f5bf5923e6ba1c26` made both branches explicit
+  `bigint`; the next fresh create persisted one complete encrypted provider
+  binding and atomically reached `confirmed`. No create retry or second YCLIENTS
+  record was used.
+- The deployed `9bee483119a829de4ed74c20d94271ab740d6bcc`
+  correction remains strict: only the same fully-bound terminal create record
+  may use exact `deleted=true` without provider `api_id`; an active missing-ID
+  record, different record, malformed result or ambiguous list stays stale and
+  held. The proved Selectel chain is: fresh app create → local confirmed/full
+  binding → administrator deletion in YCLIENTS → owner pull-to-refresh → booking
+  absent from active UI → persisted `cancelled` with zero active holds.
+- Added explicit regression names for the two acceptance boundaries: one strict
+  provider create finalizes exactly once with full appointment/record/hash
+  binding, and a refreshed `cancelled` reservation is excluded from active Home.
+  Existing regressions continue to cover exact deleted-without-API-ID, active
+  missing-ID fail-closed, foreign record mismatch, post-dispatch storage failure
+  fallback without duplicate POST and pull-to-refresh read-only behavior.
+- Focused PASS: backend booking service `1 suite / 28 tests`; root booking WebKit
+  `12/12`. Full PASS: backend typecheck, unit `132 suites / 3299 tests`, E2E
+  `2 suites / 4 tests`, build; root E2E `89 passed / 1 skipped`; root build
+  `1617` modules with existing CJS/chunk warnings only. The first direct
+  Playwright invocation had no owned Vite server and is not evidence; the exact
+  focused file then passed through the required owned-server `test:e2e` harness.
+- This checkpoint changes only tests and launch evidence; production runtime,
+  backend/frontend bundles, migration 033, schema, payment fields, webhook and
+  app-originated cancel/reschedule surfaces are unchanged. Deployment impact is
+  `not_needed` for this test/docs checkpoint. Selectel test remains exact
+  `9bee483...`; no YCLIENTS/API/DB/server call or write, push, merge, deploy or
+  production change occurred.

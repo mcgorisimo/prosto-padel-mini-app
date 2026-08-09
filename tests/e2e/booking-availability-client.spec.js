@@ -100,6 +100,35 @@ test('maps persisted owner bookings to truthful Home events', async ({ page }) =
   expect(summary.cancelled).toEqual({ label: 'Отменено', tone: 'cancelled' });
 });
 
+test('removes an admin-deleted reservation from active Home after refreshed state is loaded', async ({
+  page,
+}) => {
+  const summary = await page.evaluate(async () => {
+    const { selectBackendReservationsForHome } = await import(
+      '/src/lib/backendBookingHomeAdapter.js'
+    );
+    const confirmed = {
+      reservationId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+      status: 'confirmed',
+      serviceId: 30539748,
+      courtId: 5730531,
+      startsAt: '2035-08-12T20:30:00+03:00',
+      endsAt: '2035-08-12T22:00:00+03:00',
+      stale: false,
+    };
+    const now = Date.parse('2035-08-12T19:00:00+03:00');
+    return {
+      beforeRefresh: selectBackendReservationsForHome([confirmed], now),
+      afterRefresh: selectBackendReservationsForHome([
+        { ...confirmed, status: 'cancelled' },
+      ], now),
+    };
+  });
+
+  expect(summary.beforeRefresh).toHaveLength(1);
+  expect(summary.afterRefresh).toEqual([]);
+});
+
 test('reads services, courts, dates and times using only authenticated GET requests', async ({
   page,
 }) => {

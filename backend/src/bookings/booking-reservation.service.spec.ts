@@ -153,6 +153,39 @@ function harness() {
 }
 
 describe('BookingReservationService', () => {
+  it('finalizes one strict provider create as confirmed with the full binding', async () => {
+    const h = harness();
+
+    await expect(h.service.create(OWNER, {
+      requestKey: REQUEST_KEY,
+      serviceId: 11,
+      courtId: 22,
+      datetime: '2027-01-15T10:00:00+03:00',
+      email: PRIVATE_EMAIL,
+    })).resolves.toMatchObject({
+      outcome: 'created',
+      reservation: { status: 'confirmed', stale: false },
+    });
+
+    expect(h.providerDispatchCount()).toBe(1);
+    expect(h.reservations.finalizeStartedCreateOperation).toHaveBeenCalledTimes(1);
+    expect(h.reservations.finalizeStartedCreateOperation).toHaveBeenCalledWith(
+      expect.anything(),
+      OWNER,
+      expect.any(String),
+      expect.objectContaining({ status: 'pending', type: 'create' }),
+      expect.objectContaining({
+        type: 'confirm',
+        providerBinding: {
+          provider: 'yclients',
+          appointmentId: 33,
+          recordId: 44,
+          recordHash: 'private-hash',
+        },
+      }),
+    );
+  });
+
   it('sources name and phone from the backend profile and accepts only normalized booking email', async () => {
     const h = harness();
     const result = await h.service.create(OWNER, { requestKey: REQUEST_KEY, serviceId: 11, courtId: 22, datetime: '2027-01-15T10:00:00+03:00', email: '  PRIVATE.Owner@Example.Test  ' });
