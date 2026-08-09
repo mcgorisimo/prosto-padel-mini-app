@@ -26,7 +26,7 @@
 | Этап | Статус | Ветка/commit | Проверки | Блокер/следующий шаг |
 |---|---|---|---|---|
 | D1 Backend-only/contracts | done | `main` / deployed `c04074459948d0bf545e865b885aea7a4e5fec3c` | frontend E2E PASS (82/1 skipped); focused fail-closed 2/2 PASS; frontend build PASS; backend all PASS; Selectel test smoke PASS | D1 закрыт; следующий отдельный этап — D2 |
-| D2 YCLIENTS reservation core | in_progress | `main` / Selectel test `e55b9d8bd1af35b98fe4f7aae287aaef59413be9` | migration 033 applied/verified; automated gates PASS; fresh create confirmed/bound, admin-delete refresh and fixed-sheet/email-keyboard owner smokes PASS | primary data flow and current Telegram booking UI are proved on Selectel test; legacy unbound cleanup is deferred and is not D2 acceptance; next gate is managing D2 closure decision |
+| D2 YCLIENTS reservation core | in_progress | `main` / Selectel test `ac5b4be4e88c6b45ec8d290a1c68e01a41dc635d` | migration 033 applied/verified; automated gates PASS; create/delete sync, admin-reschedule T1-T4 and repeated-refresh no-churn live smokes PASS | core D2 acceptance is proved on Selectel test; legacy unbound cleanup remains deferred and is not acceptance; next gate is the managing D2 closure decision |
 | D3 Match ↔ reservation lifecycle | pending | — | — | reflect admin cancellation without provider DELETE, owner participant removal, match ↔ reservation binding |
 | D4 Payment Core | pending | — | — | payment provider, pricing/payment snapshot, чеки и возвраты |
 | D5 Settings/moderation/compliance | pending | — | — | standalone phone/email auth, verified backend email, approved club support/contact source and clickable action; затем schema review |
@@ -41,7 +41,7 @@
 | Этап | Среда | Целевой commit | Статус | Проверка |
 |---|---|---|---|---|
 | D1 Backend-only/contracts | Selectel test | `c04074459948d0bf545e865b885aea7a4e5fec3c` | `test_deployed` | frontend healthy; HTTPS root/health и новый asset 200; TMA auth/profile/feed/details/booking availability PASS; bundle/log audit PASS |
-| D2 YCLIENTS reservation core | Selectel test | `e55b9d8bd1af35b98fe4f7aae287aaef59413be9` | `test_deployed` | health/log/asset PASS; fresh create/delete reconciliation remains proved; owner confirmed fixed sheet, locked background and stable email keyboard UI in Telegram |
+| D2 YCLIENTS reservation core | Selectel test | `ac5b4be4e88c6b45ec8d290a1c68e01a41dc635d` | `test_deployed` | backend-only rollout health/log/auth PASS; create/delete and admin-reschedule matrix remain proved; three unchanged owner refreshes preserved reservation version and hold counts |
 | D2 persistence/privacy proposal | not applicable | docs-only checkpoint | `not_needed` | только Markdown; runtime, schema, containers и конфигурация не менялись |
 | D2 YCLIENTS contract matrix | not applicable | docs-only checkpoint поверх `3e8739b` | `not_needed` | только Markdown; API/DB/server/runtime не вызывались и не менялись |
 | D2 YCLIENTS controlled test plan | not applicable | `040773172a2fa556ffaaf1d12dac540095070976` + docs-only correction from that exact base | `not_needed` | plan only; provider/server/DB/runtime calls и writes не выполнялись |
@@ -3262,3 +3262,33 @@
   `fb02bf3f1959970cda7d2d9d9dbd01f0f00d6aad`. D2 remains `in_progress` until
   the exact correction is rolled out and repeated unchanged pull-to-refresh is
   proved to keep reservation version and total/active hold counts unchanged.
+
+### 2026-08-09 — D2 / exact-refresh no-churn Selectel acceptance
+
+- Git delivery PASS: exact reviewed checkpoint
+  `ac5b4be4e88c6b45ec8d290a1c68e01a41dc635d` was pushed to the D2 branch and
+  remote `main` fast-forwarded from `fb02bf3...` to the same SHA without a merge
+  commit; both remote refs were verified exact.
+- Selectel test precheck PASS at clean `fb02bf3...`; the server fetched and
+  detached cleanly at exact `ac5b4be...`. The root-owned deployment boundary
+  remained unchanged, the server-side Compose env file remained `0600`, and
+  the two-file Compose configuration validated without exposing values.
+- Only `prosto-padel-test-backend-1` was rebuilt/recreated, changing container
+  ID from `2a8a58f7f047...` to `4a837f0226ad...`. Frontend stayed
+  `29d0167f496d...`, nginx `e5b98b53a385...` and PostgreSQL
+  `5e36d4dc1a5c...`; all four remained healthy with restart count `0`.
+- HTTP/auth/log postchecks PASS: root and health returned `200`, unauthenticated
+  bookings returned `401`, and bounded critical-marker counts were `0` for the
+  backend, frontend, nginx and PostgreSQL.
+- Read-only PostgreSQL baseline for the fully-bound matrix reservation was
+  `confirmed`, reservation version `17`, with `15` total holds, exactly `1`
+  active hold and exactly `1` active hold matching the full current target.
+  The owner then performed three unchanged Home pull-to-refresh gestures.
+  The bounded read-only postcheck remained exactly version `17` and holds
+  `15 / 1 / 1`, proving no reservation version bump and no hold release/insert
+  churn while the expected reconciliation metadata continued separately.
+- No YCLIENTS/provider write, POST/PUT/DELETE, direct DB mutation/cleanup,
+  schema/migration, frontend/nginx/PostgreSQL rebuild, env/secret, payment,
+  webhook or production change was performed. Core D2 live acceptance is now
+  proved; D2 remains `in_progress` only until the separate managing closure
+  decision. Legacy unbound cleanup remains deferred and is not D2 acceptance.
