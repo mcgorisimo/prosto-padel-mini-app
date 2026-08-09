@@ -3228,3 +3228,37 @@
   unchanged target currently release/reinsert the same hold and increment
   reservation history/version. Only one hold remains active, but the redundant
   churn requires a code-only correction and review before D2 closure.
+
+### 2026-08-09 — D2 / exact-refresh hold-churn correction (defect B)
+
+- Root cause was the PostgreSQL exact-refresh persistence path: every canonical
+  active read updated the reservation version, released its current hold and
+  inserted an identical hold even when status and the complete target were
+  already current. Live matrix evidence showed total hold history grow
+  `7 -> 10 -> 13` while only one hold remained active.
+- Under the existing owner reservation row lock, an exact refresh is now a
+  reservation/hold no-op only when the persisted status and full target already
+  equal the canonical provider effect and the hold invariant is also exact:
+  one matching active hold for a confirmed record or zero active holds for an
+  already-cancelled record. Only allowlisted reconciliation metadata advances;
+  reservation version and hold history stay unchanged.
+- A concurrent identical refresh may therefore return fresh after observing the
+  already-applied locked state. A different target, active proof after local
+  cancellation, missing/mismatched hold or other inconsistent state remains
+  `binding_mismatch`/stale and cannot mutate or recreate a slot hold.
+- Focused repository/service tests PASS (`2 suites / 54 tests`). Backend
+  typecheck PASS; unit PASS (`132 suites / 3310 tests`); E2E PASS (`2 suites / 4
+  tests`); build PASS. Root E2E PASS (`89 passed / 1 skipped`) and root build
+  PASS (`1617` modules; existing CJS/chunk warnings only). `git diff --check`
+  PASS (line-ending warnings only).
+- Independent read-only P0/P1 review is CLEAN. It confirmed the owner row lock,
+  exact terminal create binding, full target and hold cardinality checks, safe
+  stale-version no-op, cancelled non-resurrection and fail-closed metadata
+  update without any mutation-path or runtime-surface regression.
+- No YCLIENTS/API/provider call or write, DB/server mutation, migration/schema,
+  frontend, payment-field, webhook, app-originated cancel/reschedule, push,
+  merge, deployment or production action was performed. This backend runtime
+  correction is `pending_integration_rollout`; Selectel test remains on exact
+  `fb02bf3f1959970cda7d2d9d9dbd01f0f00d6aad`. D2 remains `in_progress` until
+  the exact correction is rolled out and repeated unchanged pull-to-refresh is
+  proved to keep reservation version and total/active hold counts unchanged.

@@ -849,8 +849,7 @@ export class PostgresCourtReservationRepository implements CourtReservationRepos
       const reservation=hydrateReservation(selected.rows[0],this.crypto);
       if (
         input.companyId!==this.companyId ||
-        reservation.status!=='confirmed' ||
-        reservation.version!==input.expectedVersion ||
+        (reservation.status!=='confirmed' && reservation.status!=='cancelled') ||
         reservation.providerBinding?.recordId!==input.recordId
       ) return Object.freeze({outcome:'binding_mismatch'});
       const operation=await this.findOperation(transaction,`o.owner_account_id=$1 AND o.reservation_id=$2 AND o.operation_type='create' ORDER BY o.created_at DESC LIMIT 1`,[ownerAccountId,reservationId]);
@@ -864,6 +863,32 @@ export class PostgresCourtReservationRepository implements CourtReservationRepos
         )
       ) return Object.freeze({outcome:'binding_mismatch'});
       if (!isReservationTarget({ serviceId: input.serviceId, courtId: input.courtId, startsAt: input.startsAt, endsAt: input.endsAt })) return Object.freeze({outcome:'binding_mismatch'});
+      const targetAlreadyCurrent =
+        reservation.target.serviceId===input.serviceId &&
+        reservation.target.courtId===input.courtId &&
+        Date.parse(reservation.target.startsAt)===Date.parse(input.startsAt) &&
+        Date.parse(reservation.target.endsAt)===Date.parse(input.endsAt);
+      const effectAlreadyCurrent = targetAlreadyCurrent && (
+        (!input.deleted && reservation.status==='confirmed') ||
+        (input.deleted && reservation.status==='cancelled')
+      );
+      if (effectAlreadyCurrent) {
+        const activeHolds=await transaction.query<{active_count:string;matching_count:string}>(`SELECT COUNT(*)::text AS active_count,COUNT(*) FILTER (WHERE yclients_company_id=$3 AND target_service_id=$4 AND target_resource_id=$5 AND starts_at=$6::text::timestamptz AND ends_at=$7::text::timestamptz)::text AS matching_count FROM backend_reservation.reservation_slot_holds WHERE owner_account_id=$1 AND reservation_id=$2 AND hold_kind='reservation' AND released_at IS NULL`,[ownerAccountId,reservationId,this.companyId,input.serviceId,input.courtId,input.startsAt,input.endsAt]);
+        if(activeHolds.rowCount!==1) throw new CourtReservationPersistenceError('invalid_persisted_state');
+        const activeCount=Number(activeHolds.rows[0].active_count);
+        const matchingCount=Number(activeHolds.rows[0].matching_count);
+        const holdAlreadyCurrent=input.deleted
+          ? activeCount===0 && matchingCount===0
+          : activeCount===1 && matchingCount===1;
+        if(!holdAlreadyCurrent) return Object.freeze({outcome:'binding_mismatch'});
+        const reconciled=await transaction.query(`UPDATE backend_reservation.reservation_operations SET reconciliation_attempts=reconciliation_attempts+1,last_reconciliation_at=$3,updated_at=$3,version=version+1 WHERE owner_account_id=$1 AND operation_id=$2`,[ownerAccountId,operation.operationId,input.now]);
+        if(reconciled.rowCount!==1) throw new CourtReservationPersistenceError('transaction_conflict');
+        return Object.freeze({outcome:'updated',reservation});
+      }
+      if (
+        reservation.status!=='confirmed' ||
+        reservation.version!==input.expectedVersion
+      ) return Object.freeze({outcome:'binding_mismatch'});
       const nextStatus=input.deleted?'cancelled':'confirmed';
       const updated=await transaction.query(`UPDATE backend_reservation.court_reservations SET status=$3,target_service_id=$4,target_resource_id=$5,target_datetime=$6::text::timestamptz,target_datetime_text=$6::text,target_end_datetime=$7::text::timestamptz,target_end_datetime_text=$7::text,version=version+1,updated_at=$8,status_changed_at=CASE WHEN status<>$3 THEN $8 ELSE status_changed_at END,terminal_at=CASE WHEN $3='cancelled' THEN $8 ELSE NULL END WHERE owner_account_id=$1 AND reservation_id=$2`,[ownerAccountId,reservationId,nextStatus,input.serviceId,input.courtId,input.startsAt,input.endsAt,input.now]);
       if(updated.rowCount!==1) throw new CourtReservationPersistenceError('transaction_conflict');

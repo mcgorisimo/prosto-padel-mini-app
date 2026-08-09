@@ -571,7 +571,7 @@ describe('PostgresCourtReservationRepository SQL contract', () => {
     expect(repositorySource).not.toMatch(
       /target_(?:end_)?datetime=\$(\d+)::timestamptz,target_(?:end_)?datetime_text=\$\1/u,
     );
-    expect(repositorySource.match(/::text::timestamptz/gu)).toHaveLength(10);
+    expect(repositorySource.match(/::text::timestamptz/gu)).toHaveLength(12);
   });
 
   it('maps active interval overlap to a fail-closed transaction conflict', async () => {
@@ -604,6 +604,9 @@ describe('PostgresCourtReservationRepository SQL contract', () => {
       '2027-01-15T13:00:00.000Z',
       'confirmed',
       5,
+      true,
+      '3',
+      'confirmed',
     ],
     [
       'deleted record',
@@ -614,6 +617,35 @@ describe('PostgresCourtReservationRepository SQL contract', () => {
       '2027-01-15T11:00:00.000Z',
       'cancelled',
       4,
+      true,
+      '3',
+      'confirmed',
+    ],
+    [
+      'unchanged active record after a concurrent identical refresh',
+      false,
+      { kind: 'exact_active_record' },
+      22,
+      '2027-01-15T10:00:00+03:00',
+      '2027-01-15T11:00:00.000Z',
+      'confirmed',
+      3,
+      false,
+      '4',
+      'confirmed',
+    ],
+    [
+      'already-applied deleted record after a concurrent refresh',
+      true,
+      { kind: 'exact_deleted_record' },
+      22,
+      '2027-01-15T10:00:00+03:00',
+      '2027-01-15T11:00:00.000Z',
+      'cancelled',
+      3,
+      false,
+      '4',
+      'cancelled',
     ],
   ] as const)(
     'applies an exact %s without api_id against the persisted record binding',
@@ -626,6 +658,9 @@ describe('PostgresCourtReservationRepository SQL contract', () => {
       endsAt,
       status,
       expectedQueryCount,
+      mutatesReservation,
+      rowVersion,
+      rowStatus,
     ) => {
       const crypto = new ReservationSnapshotCrypto(Buffer.alloc(32, 17), 1);
       const target = Object.freeze({
@@ -679,7 +714,7 @@ describe('PostgresCourtReservationRepository SQL contract', () => {
     const reservationRow = {
       reservation_id: RESERVATION_ID,
       owner_account_id: OWNER,
-      status: 'confirmed',
+      status: rowStatus,
       target_service_id: '11',
       target_resource_id: '22',
       target_datetime_text: target.startsAt,
@@ -693,19 +728,28 @@ describe('PostgresCourtReservationRepository SQL contract', () => {
       yclients_record_hash_encryption_key_version: encryptedHash.keyVersion,
       yclients_record_hash_digest: encryptedHash.digest,
       yclients_record_hash_digest_key_version: encryptedHash.digestKeyVersion,
-      version: '3',
+      version: rowVersion,
       created_at: '1800000000',
       updated_at: '1800000001',
     };
     const query = jest.fn();
-    const queryResults = deleted
-      ? [result([reservationRow]), result([{}]), result([{}]), result([])]
+    const queryResults = mutatesReservation
+      ? deleted
+        ? [result([reservationRow]), result([{}]), result([{}]), result([])]
+        : [
+            result([reservationRow]),
+            result([{}]),
+            result([{}]),
+            result([{}]),
+            result([]),
+          ]
       : [
           result([reservationRow]),
+          result([{
+            active_count: deleted ? '0' : '1',
+            matching_count: deleted ? '0' : '1',
+          }]),
           result([{}]),
-          result([{}]),
-          result([{}]),
-          result([]),
         ];
     for (const queryResult of queryResults) {
       query.mockResolvedValueOnce(queryResult);
@@ -749,12 +793,30 @@ describe('PostgresCourtReservationRepository SQL contract', () => {
       reservation: { status, target: { courtId, startsAt, endsAt } },
     });
     expect(query).toHaveBeenCalledTimes(expectedQueryCount);
-    expect(query.mock.calls[1][1][2]).toBe(status);
-    expect(String(query.mock.calls[2][0])).toContain('released_at=$3');
-    if (!deleted) {
-      expect(String(query.mock.calls[3][0])).toContain(
-        'INSERT INTO backend_reservation.reservation_slot_holds',
+    if (mutatesReservation) {
+      expect(query.mock.calls[1][1][2]).toBe(status);
+      expect(String(query.mock.calls[2][0])).toContain('released_at=$3');
+      if (!deleted) {
+        expect(String(query.mock.calls[3][0])).toContain(
+          'INSERT INTO backend_reservation.reservation_slot_holds',
+        );
+      }
+    } else {
+      expect(String(query.mock.calls[1][0])).toContain(
+        'COUNT(*) FILTER',
       );
+      expect(String(query.mock.calls[2][0])).toContain(
+        'reconciliation_attempts=reconciliation_attempts+1',
+      );
+      expect(query.mock.calls.some(([sql]) =>
+        String(sql).includes('UPDATE backend_reservation.reservation_slot_holds'),
+      )).toBe(false);
+      expect(query.mock.calls.some(([sql]) =>
+        String(sql).includes('INSERT INTO backend_reservation.reservation_slot_holds'),
+      )).toBe(false);
+      expect(query.mock.calls.some(([sql]) =>
+        String(sql).includes('UPDATE backend_reservation.court_reservations'),
+      )).toBe(false);
     }
   });
 
@@ -773,10 +835,11 @@ describe('PostgresCourtReservationRepository SQL contract', () => {
     },
     { label: 'mismatched api id', deleted: true, proof: { kind: 'external_api_id', apiId: 78 } },
     {
-      label: 'stale active proof after a concurrent version update',
+      label: 'stale active proof after a concurrent different-target update',
       deleted: false,
       proof: { kind: 'exact_active_record' },
       rowVersion: '4',
+      inputCourtId: 55,
     },
     {
       label: 'active proof after a concurrent cancellation',
@@ -784,6 +847,21 @@ describe('PostgresCourtReservationRepository SQL contract', () => {
       proof: { kind: 'exact_active_record' },
       rowVersion: '4',
       rowStatus: 'cancelled',
+    },
+    {
+      label: 'unchanged active proof with a missing hold',
+      deleted: false,
+      proof: { kind: 'exact_active_record' },
+      rowVersion: '4',
+      activeHold: { active_count: '0', matching_count: '0' },
+    },
+    {
+      label: 'already-deleted proof with an active hold',
+      deleted: true,
+      proof: { kind: 'exact_deleted_record' },
+      rowVersion: '4',
+      rowStatus: 'cancelled',
+      activeHold: { active_count: '1', matching_count: '1' },
     },
   ] as const)(
     'rejects $label before reservation or hold mutation',
@@ -848,6 +926,9 @@ describe('PostgresCourtReservationRepository SQL contract', () => {
         terminalAt: unixEpochSeconds(1_800_000_001),
       });
       const query = jest.fn().mockResolvedValueOnce(result([reservationRow]));
+      if ('activeHold' in rowState && rowState.activeHold !== undefined) {
+        query.mockResolvedValueOnce(result([rowState.activeHold]));
+      }
       const repository = new PostgresCourtReservationRepository(
         crypto,
         2_079_564,
@@ -865,14 +946,18 @@ describe('PostgresCourtReservationRepository SQL contract', () => {
           recordId: 44,
           proof: proof as never,
           serviceId: 11,
-          courtId: 22,
+          courtId: 'inputCourtId' in rowState && typeof rowState.inputCourtId === 'number'
+            ? rowState.inputCourtId
+            : 22,
           startsAt: reservationRow.target_datetime_text,
           endsAt: reservationRow.target_end_datetime_text,
           deleted,
           now: 1_800_000_002,
         },
       )).resolves.toEqual({ outcome: 'binding_mismatch' });
-      expect(query).toHaveBeenCalledTimes(1);
+      expect(query).toHaveBeenCalledTimes(
+        'activeHold' in rowState && rowState.activeHold !== undefined ? 2 : 1,
+      );
     },
   );
 });
