@@ -26,7 +26,7 @@
 | Этап | Статус | Ветка/commit | Проверки | Блокер/следующий шаг |
 |---|---|---|---|---|
 | D1 Backend-only/contracts | done | `main` / deployed `c04074459948d0bf545e865b885aea7a4e5fec3c` | frontend E2E PASS (82/1 skipped); focused fail-closed 2/2 PASS; frontend build PASS; backend all PASS; Selectel test smoke PASS | D1 закрыт; следующий отдельный этап — D2 |
-| D2 YCLIENTS reservation core | in_progress | `main` / Selectel test `5daa2c0ba3884d0024f115bf6b4c1805e60f468d` | migration 033 applied/verified; automated gates PASS; fresh create confirmed/bound and admin-delete refresh smoke PASS; alignment rollout health/log PASS | primary data flow is proved; owner Telegram smoke found a fixed-sheet/keyboard regression and its local frontend correction awaits integration/rollout; legacy unbound cleanup is deferred and is not D2 acceptance |
+| D2 YCLIENTS reservation core | in_progress | `main` / Selectel test `e55b9d8bd1af35b98fe4f7aae287aaef59413be9` | migration 033 applied/verified; automated gates PASS; fresh create confirmed/bound and admin-delete refresh smoke PASS; fixed-sheet rollout health/log PASS | primary data flow is proved; owner Telegram no-write smoke of the fixed sheet and email keyboard remains before closure review; legacy unbound cleanup is deferred and is not D2 acceptance |
 | D3 Match ↔ reservation lifecycle | pending | — | — | reflect admin cancellation without provider DELETE, owner participant removal, match ↔ reservation binding |
 | D4 Payment Core | pending | — | — | payment provider, pricing/payment snapshot, чеки и возвраты |
 | D5 Settings/moderation/compliance | pending | — | — | standalone phone/email auth, verified backend email, approved club support/contact source and clickable action; затем schema review |
@@ -41,7 +41,7 @@
 | Этап | Среда | Целевой commit | Статус | Проверка |
 |---|---|---|---|---|
 | D1 Backend-only/contracts | Selectel test | `c04074459948d0bf545e865b885aea7a4e5fec3c` | `test_deployed` | frontend healthy; HTTPS root/health и новый asset 200; TMA auth/profile/feed/details/booking availability PASS; bundle/log audit PASS |
-| D2 YCLIENTS reservation core | Selectel test | `5daa2c0ba3884d0024f115bf6b4c1805e60f468d` | `test_deployed` | frontend-only rollout health/log/asset PASS; fresh create/delete reconciliation remains proved; manual smoke found the confirmation sheet scroll/keyboard regression now corrected locally |
+| D2 YCLIENTS reservation core | Selectel test | `e55b9d8bd1af35b98fe4f7aae287aaef59413be9` | `test_deployed` | frontend-only rollout health/log/asset PASS; fresh create/delete reconciliation remains proved; fixed sheet/email keyboard awaits owner no-write Telegram smoke |
 | D2 persistence/privacy proposal | not applicable | docs-only checkpoint | `not_needed` | только Markdown; runtime, schema, containers и конфигурация не менялись |
 | D2 YCLIENTS contract matrix | not applicable | docs-only checkpoint поверх `3e8739b` | `not_needed` | только Markdown; API/DB/server/runtime не вызывались и не менялись |
 | D2 YCLIENTS controlled test plan | not applicable | `040773172a2fa556ffaaf1d12dac540095070976` + docs-only correction from that exact base | `not_needed` | plan only; provider/server/DB/runtime calls и writes не выполнялись |
@@ -2958,3 +2958,31 @@
   clean and healthy on exact `5daa2c0...`; this correction has not been pushed,
   merged or deployed and requires a new frontend-only rollout plus owner
   Telegram keyboard smoke.
+
+### 2026-08-09 — D2 / fixed confirmation sheet frontend rollout
+
+- Git delivery PASS: exact checkpoint
+  `e55b9d8bd1af35b98fe4f7aae287aaef59413be9` was pushed to
+  `codex/week1-d2-create-delete-sync`; clean local `main` fast-forwarded from
+  `5daa2c0ba3884d0024f115bf6b4c1805e60f468d` to the same exact SHA and was
+  pushed without a merge commit.
+- Selectel test precheck PASS at clean exact `5daa2c0...`: Compose validation,
+  four healthy containers with restart count `0`, root/health `200` and
+  unauthenticated bookings `401` all matched the expected baseline.
+- The application checkout fetched and detached cleanly at exact `e55b9d8...`.
+  Only the frontend image was rebuilt and only
+  `prosto-padel-test-frontend-1` was recreated. Its ID changed from
+  `76839a2ae14c...` to `bc06ddc03c89...`; backend stayed
+  `81dfc03e2f1e...`, nginx `e5b98b53a385...` and PostgreSQL
+  `5e36d4dc1a5c...`. All four are healthy with restart count `0`.
+- Postcheck PASS: clean exact checkout; internal/HTTPS root and health `200`;
+  exact asset `assets/index-Dm40-sKH.js` `200`; unauthenticated bookings `401`;
+  bounded backend/frontend/nginx/PostgreSQL critical-marker counts all `0`.
+- No backend/nginx/PostgreSQL rebuild, YCLIENTS/API/provider or DB call/write,
+  schema/migration/env/secret, payment-field, cleanup or production action was
+  performed. Automated rollout is `test_deployed`.
+- Remaining manual gate is no-write only: in Telegram select an available slot,
+  confirm that the sheet stays fixed at the screen bottom and the background
+  cannot scroll, focus/type in the email field and confirm the keyboard causes
+  no zoom/split while the CTA remains visible, then close the sheet without
+  creating a booking and confirm the prior page position is restored.
