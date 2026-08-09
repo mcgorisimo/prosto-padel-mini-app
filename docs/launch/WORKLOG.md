@@ -3134,3 +3134,34 @@
   `pending_integration_rollout`; T4 must be repeated against the exact deployed
   checkpoint and prove the DB target/new hold plus UI. T2 and T3 then remain
   separate manual acceptance scenarios. D2 stays `in_progress`.
+
+### 2026-08-09 — D2 / opaque UUID read correction backend-only rollout
+
+- Git delivery PASS: exact reviewed checkpoint
+  `fb02bf3f1959970cda7d2d9d9dbd01f0f00d6aad` was pushed to the D2 branch;
+  remote `main` fast-forwarded from `b526592...` to the same SHA without a
+  merge commit. Both remote refs were verified exact.
+- Selectel precheck PASS at clean `b526592...`; `origin/main` was fetched and
+  verified as `fb02bf3...`, then the application checkout detached cleanly at
+  that exact commit. The existing two-file Compose configuration validated
+  without printing expanded configuration or secrets.
+- Only the backend image was rebuilt and only
+  `prosto-padel-test-backend-1` was recreated. Its container ID changed from
+  `d66ae14fd6de...` to `2a8a58f7f047...` (image `sha256:85877e520f3b...`).
+  Frontend remained `29d0167f496d...`, nginx `e5b98b53a385...` and PostgreSQL
+  `5e36d4dc1a5c...`; all four are healthy with restart count `0`.
+- Postcheck PASS: internal and public root/health returned `200`, unauthenticated
+  bookings retained `401`, and bounded critical-marker counts were `0` for all
+  four containers. A network-free mocked check of the compiled backend proved
+  that a canonical UUID `api_id` yields `found` while the opaque value is not
+  projected. The first synthetic invocation rejected an invalid test-only
+  limiter option before fetch; the corrected invocation passed and no provider
+  call occurred.
+- No YCLIENTS/API/provider call or write, DB mutation, schema/migration,
+  frontend/nginx/PostgreSQL rebuild, env/secret, payment, webhook or production
+  change was performed. Deployment is `pending_T4_owner_refresh`: the owner
+  must refresh the already-moved reservation without creating another booking.
+  Acceptance requires the same local reservation to remain confirmed, local
+  target to become 22 August 08:45 / court 2, the old hold to be released and
+  exactly one new active hold to remain. T2/T3 stay pending and D2 remains
+  `in_progress`.
