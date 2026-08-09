@@ -552,6 +552,7 @@ export class BookingReservationService {
           if (exactApiId === undefined) throw new Error('missing external id');
           const updated = await this.transactions.runInTransaction((tx) =>
             this.reservations.applyExactRefresh(tx, ownerAccountId, reservationId, {
+              expectedVersion: reservation.version,
               companyId: deleted.record.companyId,
               recordId: deleted.record.recordId,
               proof: { kind: 'external_api_id', apiId: exactApiId },
@@ -580,8 +581,7 @@ export class BookingReservationService {
       exact.outcome !== 'found' ||
       exact.record.recordId !== reservation.providerBinding.recordId ||
       exact.record.serviceIds.length !== 1 ||
-      exact.record.seanceLengthSeconds === undefined ||
-      (exact.record.apiId === undefined && !exact.record.deleted)
+      exact.record.seanceLengthSeconds === undefined
     ) {
       try { await this.transactions.runInTransaction((tx) => this.reservations.noteReconciliationAttempt(tx,ownerAccountId,reservationId,now(this.clock))); } catch { /* response stays stale */ }
       return Object.freeze({outcome:'found',reservation:view(reservation,true)});
@@ -590,15 +590,18 @@ export class BookingReservationService {
       const serviceId = exact.record.serviceIds[0];
       if (serviceId === undefined) return Object.freeze({outcome:'found',reservation:view(reservation,true)});
       const endsAt = new Date(Date.parse(exact.record.datetime) + exact.record.seanceLengthSeconds * 1_000).toISOString();
-      // YCLIENTS may omit api_id from a soft-deleted record. Only the exact
-      // record endpoint may use the already-persisted record binding instead.
+      // A CRM mutation may omit api_id from either an active or a soft-deleted
+      // record. Only the exact endpoint for the already-persisted terminal
+      // record binding may use recordId itself as the refresh proof.
       const proof = exact.record.apiId === undefined
-        ? Object.freeze({ kind: 'exact_deleted_record' as const })
+        ? exact.record.deleted
+          ? Object.freeze({ kind: 'exact_deleted_record' as const })
+          : Object.freeze({ kind: 'exact_active_record' as const })
         : Object.freeze({
             kind: 'external_api_id' as const,
             apiId: exact.record.apiId,
           });
-      const updated=await this.transactions.runInTransaction((tx)=>this.reservations.applyExactRefresh(tx,ownerAccountId,reservationId,{companyId:exact.record.companyId,recordId:exact.record.recordId,proof,serviceId,courtId:exact.record.resourceId,startsAt:exact.record.datetime,endsAt,deleted:exact.record.deleted,now:now(this.clock)}));
+      const updated=await this.transactions.runInTransaction((tx)=>this.reservations.applyExactRefresh(tx,ownerAccountId,reservationId,{expectedVersion:reservation.version,companyId:exact.record.companyId,recordId:exact.record.recordId,proof,serviceId,courtId:exact.record.resourceId,startsAt:exact.record.datetime,endsAt,deleted:exact.record.deleted,now:now(this.clock)}));
       return updated.outcome==='updated' ? Object.freeze({outcome:'found',reservation:view(updated.reservation,false)}) : Object.freeze({outcome:'found',reservation:view(reservation,true)});
     } catch { return Object.freeze({outcome:'found',reservation:view(reservation,true)}); }
   }

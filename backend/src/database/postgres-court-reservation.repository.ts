@@ -61,9 +61,11 @@ export type ReservationRefreshPersistenceResult =
 
 export type ReservationRefreshBindingProof =
   | Readonly<{ kind: 'external_api_id'; apiId: number }>
+  | Readonly<{ kind: 'exact_active_record' }>
   | Readonly<{ kind: 'exact_deleted_record' }>;
 
 export type ReservationRefreshInput = Readonly<{
+  expectedVersion: number;
   companyId: number;
   recordId: number;
   proof: ReservationRefreshBindingProof;
@@ -336,6 +338,9 @@ function matchesRefreshBindingProof(
       Number(candidate.apiId) > 0 &&
       candidate.apiId === operation.request.externalReference.apiId
     );
+  }
+  if (candidate.kind === 'exact_active_record') {
+    return Object.keys(candidate).length === 1 && !deleted;
   }
   return (
     candidate.kind === 'exact_deleted_record' &&
@@ -842,7 +847,12 @@ export class PostgresCourtReservationRepository implements CourtReservationRepos
       const selected = await transaction.query<ReservationRow>(`SELECT ${RESERVATION_COLUMNS} FROM backend_reservation.court_reservations WHERE owner_account_id=$1 AND reservation_id=$2 FOR UPDATE`, [ownerAccountId,reservationId]);
       if (selected.rowCount !== 1) return Object.freeze({ outcome:'not_found' });
       const reservation=hydrateReservation(selected.rows[0],this.crypto);
-      if (input.companyId!==this.companyId || reservation.providerBinding?.recordId!==input.recordId) return Object.freeze({outcome:'binding_mismatch'});
+      if (
+        input.companyId!==this.companyId ||
+        reservation.status!=='confirmed' ||
+        reservation.version!==input.expectedVersion ||
+        reservation.providerBinding?.recordId!==input.recordId
+      ) return Object.freeze({outcome:'binding_mismatch'});
       const operation=await this.findOperation(transaction,`o.owner_account_id=$1 AND o.reservation_id=$2 AND o.operation_type='create' ORDER BY o.created_at DESC LIMIT 1`,[ownerAccountId,reservationId]);
       if (
         operation===null ||

@@ -594,10 +594,42 @@ describe('PostgresCourtReservationRepository SQL contract', () => {
     expect(repositorySource).toContain('insert into backend_reservation.reservation_slot_holds');
   });
 
-  it('releases the hold for an exact deleted record even when YCLIENTS omits api_id', async () => {
-    const crypto = new ReservationSnapshotCrypto(Buffer.alloc(32, 17), 1);
-    const target = Object.freeze({
-      serviceId: 11,
+  it.each([
+    [
+      'active record after administrator reschedule',
+      false,
+      { kind: 'exact_active_record' },
+      55,
+      '2027-01-15T12:00:00+03:00',
+      '2027-01-15T13:00:00.000Z',
+      'confirmed',
+      5,
+    ],
+    [
+      'deleted record',
+      true,
+      { kind: 'exact_deleted_record' },
+      22,
+      '2027-01-15T10:00:00+03:00',
+      '2027-01-15T11:00:00.000Z',
+      'cancelled',
+      4,
+    ],
+  ] as const)(
+    'applies an exact %s without api_id against the persisted record binding',
+    async (
+      _label,
+      deleted,
+      proof,
+      courtId,
+      startsAt,
+      endsAt,
+      status,
+      expectedQueryCount,
+    ) => {
+      const crypto = new ReservationSnapshotCrypto(Buffer.alloc(32, 17), 1);
+      const target = Object.freeze({
+        serviceId: 11,
       courtId: 22,
       startsAt: '2027-01-15T10:00:00+03:00',
       endsAt: '2027-01-15T11:00:00.000Z',
@@ -665,11 +697,19 @@ describe('PostgresCourtReservationRepository SQL contract', () => {
       created_at: '1800000000',
       updated_at: '1800000001',
     };
-    const query = jest.fn()
-      .mockResolvedValueOnce(result([reservationRow]))
-      .mockResolvedValueOnce(result([{}]))
-      .mockResolvedValueOnce(result([{}]))
-      .mockResolvedValueOnce(result([]));
+    const query = jest.fn();
+    const queryResults = deleted
+      ? [result([reservationRow]), result([{}]), result([{}]), result([])]
+      : [
+          result([reservationRow]),
+          result([{}]),
+          result([{}]),
+          result([{}]),
+          result([]),
+        ];
+    for (const queryResult of queryResults) {
+      query.mockResolvedValueOnce(queryResult);
+    }
     const repository = new PostgresCourtReservationRepository(
       crypto,
       2_079_564,
@@ -678,7 +718,13 @@ describe('PostgresCourtReservationRepository SQL contract', () => {
       .mockResolvedValue(confirmed.operation as never);
     jest.spyOn(repository, 'findById').mockResolvedValue(Object.freeze({
       ...confirmed.reservation,
-      status: 'cancelled' as const,
+      status,
+      target: Object.freeze({
+        ...confirmed.reservation.target,
+        courtId,
+        startsAt,
+        endsAt,
+      }),
       version: confirmed.reservation.version + 1,
     }));
 
@@ -687,42 +733,67 @@ describe('PostgresCourtReservationRepository SQL contract', () => {
       OWNER,
       RESERVATION_ID,
       {
+        expectedVersion: confirmed.reservation.version,
         companyId: 2_079_564,
         recordId: 44,
-        proof: { kind: 'exact_deleted_record' },
+        proof,
         serviceId: 11,
-        courtId: 22,
-        startsAt: target.startsAt,
-        endsAt: target.endsAt,
-        deleted: true,
+        courtId,
+        startsAt,
+        endsAt,
+        deleted,
         now: 1_800_000_002,
       },
     )).resolves.toMatchObject({
       outcome: 'updated',
-      reservation: { status: 'cancelled' },
+      reservation: { status, target: { courtId, startsAt, endsAt } },
     });
-    expect(query).toHaveBeenCalledTimes(4);
-    expect(query.mock.calls[1][1][2]).toBe('cancelled');
+    expect(query).toHaveBeenCalledTimes(expectedQueryCount);
+    expect(query.mock.calls[1][1][2]).toBe(status);
     expect(String(query.mock.calls[2][0])).toContain('released_at=$3');
+    if (!deleted) {
+      expect(String(query.mock.calls[3][0])).toContain(
+        'INSERT INTO backend_reservation.reservation_slot_holds',
+      );
+    }
   });
 
   it.each([
-    ['active record', false, { kind: 'exact_deleted_record' }],
-    [
-      'extra proof field',
-      true,
-      { kind: 'exact_deleted_record', apiId: 77 },
-    ],
-    ['mismatched api id', true, { kind: 'external_api_id', apiId: 78 }],
+    { label: 'active record', deleted: false, proof: { kind: 'exact_deleted_record' } },
+    { label: 'deleted record', deleted: true, proof: { kind: 'exact_active_record' } },
+    {
+      label: 'extra active proof field',
+      deleted: false,
+      proof: { kind: 'exact_active_record', apiId: 77 },
+    },
+    {
+      label: 'extra proof field',
+      deleted: true,
+      proof: { kind: 'exact_deleted_record', apiId: 77 },
+    },
+    { label: 'mismatched api id', deleted: true, proof: { kind: 'external_api_id', apiId: 78 } },
+    {
+      label: 'stale active proof after a concurrent version update',
+      deleted: false,
+      proof: { kind: 'exact_active_record' },
+      rowVersion: '4',
+    },
+    {
+      label: 'active proof after a concurrent cancellation',
+      deleted: false,
+      proof: { kind: 'exact_active_record' },
+      rowVersion: '4',
+      rowStatus: 'cancelled',
+    },
   ] as const)(
-    'rejects %s before reservation or hold mutation',
-    async (_label, deleted, proof) => {
+    'rejects $label before reservation or hold mutation',
+    async ({ deleted, proof, ...rowState }) => {
       const crypto = new ReservationSnapshotCrypto(Buffer.alloc(32, 19), 1);
       const encryptedHash = crypto.encryptRecordHash('private-hash');
       const reservationRow = {
         reservation_id: RESERVATION_ID,
         owner_account_id: OWNER,
-        status: 'confirmed',
+        status: 'rowStatus' in rowState ? rowState.rowStatus : 'confirmed',
         target_service_id: '11',
         target_resource_id: '22',
         target_datetime_text: '2027-01-15T10:00:00+03:00',
@@ -736,7 +807,7 @@ describe('PostgresCourtReservationRepository SQL contract', () => {
         yclients_record_hash_encryption_key_version: encryptedHash.keyVersion,
         yclients_record_hash_digest: encryptedHash.digest,
         yclients_record_hash_digest_key_version: encryptedHash.digestKeyVersion,
-        version: '3',
+        version: 'rowVersion' in rowState ? rowState.rowVersion : '3',
         created_at: '1800000000',
         updated_at: '1800000001',
       };
@@ -789,6 +860,7 @@ describe('PostgresCourtReservationRepository SQL contract', () => {
         OWNER,
         RESERVATION_ID,
         {
+          expectedVersion: 3,
           companyId: 2_079_564,
           recordId: 44,
           proof: proof as never,

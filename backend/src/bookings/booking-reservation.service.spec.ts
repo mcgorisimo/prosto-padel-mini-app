@@ -460,8 +460,68 @@ describe('BookingReservationService', () => {
     expect(h.adminRead.listRecords).not.toHaveBeenCalled();
   });
 
+  it('accepts an exact active administrator reschedule without api_id after record binding', async () => {
+    const h = harness();
+    const reservation = confirmedReservation();
+    const startsAt = '2027-01-15T12:30:00+03:00';
+    const endsAt = '2027-01-15T10:30:00.000Z';
+    h.setStored(reservation, confirmedCreateOperation(reservation));
+    h.adminRead.getRecord.mockResolvedValueOnce({
+      outcome: 'found',
+      record: {
+        recordId: 44,
+        companyId: 2_079_564,
+        resourceId: 55,
+        serviceIds: [11],
+        datetime: startsAt,
+        seanceLengthSeconds: 3600,
+        deleted: false,
+      },
+    });
+    h.reservations.applyExactRefresh.mockResolvedValueOnce({
+      outcome: 'updated',
+      reservation: confirmedReservation({
+        target: {
+          ...reservation.target,
+          courtId: 55,
+          startsAt,
+          endsAt,
+        },
+      }),
+    });
+
+    await expect(
+      h.service.read(OWNER, reservation.reservationId),
+    ).resolves.toMatchObject({
+      outcome: 'found',
+      reservation: {
+        status: 'confirmed',
+        courtId: 55,
+        startsAt,
+        endsAt,
+        stale: false,
+      },
+    });
+    expect(h.reservations.applyExactRefresh).toHaveBeenCalledWith(
+      expect.anything(),
+      OWNER,
+      reservation.reservationId,
+      expect.objectContaining({
+        expectedVersion: reservation.version,
+        companyId: 2_079_564,
+        recordId: 44,
+        proof: { kind: 'exact_active_record' },
+        courtId: 55,
+        startsAt,
+        endsAt,
+        deleted: false,
+      }),
+    );
+    expect(h.adminRead.listRecords).not.toHaveBeenCalled();
+  });
+
   it.each([
-    ['active record', false, 44],
+    ['different active record', false, 45],
     ['different deleted record', true, 45],
   ] as const)(
     'keeps %s without provider api_id stale',

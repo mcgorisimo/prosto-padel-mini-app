@@ -3041,3 +3041,55 @@
   server, schema/migration, payment-field, webhook or production write was
   performed by this correction. D2 remains `in_progress` until exact frontend
   rollout and owner smoke prove Home shows the moved target.
+
+### 2026-08-09 — D2 / Home reschedule refresh rollout and live contract correction
+
+- Git delivery and frontend-only Selectel rollout of exact
+  `abc5985a3436476a1b98c50f6640ba9f0d67ec6b` completed successfully. The
+  branch and `main` were fast-forwarded/pushed to the same SHA; the application
+  checkout is clean at that SHA. Only the frontend container was recreated
+  (`29d0167f...`, image `sha256:1117b890...`); backend remained
+  `81dfc03e...`, nginx `e5b98b...` and PostgreSQL `5e36d4...`. All containers
+  were healthy with restart count `0`; root/health returned `200`, the exact
+  frontend asset `assets/index-D8k40S5E.js` returned `200`, unauthenticated
+  bookings returned `401`, and bounded critical log marker counts were `0`.
+- The owner reopened/refreshed Home, but the moved booking still showed its old
+  court/time. Read-only PostgreSQL evidence proved that Home had invoked exact
+  reconciliation repeatedly (`reconciliation_attempts=14`) while the same
+  confirmed reservation, terminal create binding and active hold retained the
+  old target. This excludes a missing frontend refresh as the remaining cause.
+- One explicitly bounded, read-only exact YCLIENTS GET through the already
+  deployed strict admin-read client returned the same persisted record and
+  company, active `deleted=false`, one expected service, the new court/time and
+  provider duration, but no `api_id`. No raw body, PII, token or record hash was
+  read into evidence or logged. The live contract therefore proves that a
+  manual CRM reschedule can preserve `recordId` while clearing/omitting
+  `api_id`.
+- The backend correction remains fail-closed but accepts this one exact shape:
+  an active record without `api_id` may update the target only when the strict
+  exact GET record matches both the reservation's encrypted persisted binding
+  and the terminal confirmed/reconciled-confirmed create operation record ID.
+  Company, record, single service, datetime and duration parsing remain strict.
+  A foreign record, deleted/active proof mismatch, extra proof field, malformed
+  body, 404, list candidate or ambiguous response stays stale. The locked row
+  must still be the same expected `confirmed` version, so a stale active
+  response cannot resurrect a concurrently cancelled reservation. The old hold
+  is released and exactly one replacement hold is inserted atomically under
+  the existing migration 033 exclusion constraint.
+- Regression coverage PASS: focused backend repository/service `2 suites / 50
+  tests`; backend typecheck, unit `132 suites / 3305 tests`, E2E `2 suites / 4
+  tests` and build; root E2E `89 passed / 1 skipped` with one owned Vite worker;
+  root build PASS (`1617` modules, existing CJS/chunk warnings only);
+  `git diff --check` PASS (line-ending warnings only).
+- Independent read-only P0/P1 review is CLEAN. It verified that the locked
+  expected-version/status gate closes stale-active resurrection, while exact
+  binding, parser, atomic hold replacement and no-write boundaries remain
+  intact.
+- No provider write, POST/PUT/DELETE, blind retry, DB mutation/cleanup,
+  schema/migration, payment-field, webhook, app-originated cancel/reschedule or
+  production action was performed. This correction changes backend runtime and
+  is `pending_integration_rollout`; Selectel test remains on exact
+  `abc5985a3436476a1b98c50f6640ba9f0d67ec6b`. D2 remains `in_progress` until
+  the exact correction is integrated and backend-only rolled out, then the
+  owner refreshes Home and PostgreSQL proves the same reservation has the new
+  target with the old hold released and exactly one new active hold.
