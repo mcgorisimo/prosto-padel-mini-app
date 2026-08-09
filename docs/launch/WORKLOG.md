@@ -26,7 +26,7 @@
 | Этап | Статус | Ветка/commit | Проверки | Блокер/следующий шаг |
 |---|---|---|---|---|
 | D1 Backend-only/contracts | done | `main` / deployed `c04074459948d0bf545e865b885aea7a4e5fec3c` | frontend E2E PASS (82/1 skipped); focused fail-closed 2/2 PASS; frontend build PASS; backend all PASS; Selectel test smoke PASS | D1 закрыт; следующий отдельный этап — D2 |
-| D2 YCLIENTS reservation core | in_progress | `main` / Selectel test `9bee483119a829de4ed74c20d94271ab740d6bcc` | migration 033 applied/verified; automated gates PASS; fresh create confirmed/bound and admin-delete refresh smoke PASS | primary create → confirmed/bound → admin delete → pull-to-refresh → absent from active UI / DB cancelled / hold released chain is proved; legacy unbound cleanup is deferred and is not D2 acceptance; next gate is managing review and D2 closure decision |
+| D2 YCLIENTS reservation core | in_progress | `main` / Selectel test `5daa2c0ba3884d0024f115bf6b4c1805e60f468d` | migration 033 applied/verified; automated gates PASS; fresh create confirmed/bound and admin-delete refresh smoke PASS; alignment rollout health/log PASS | primary data flow is proved; owner manual Telegram smoke of the aligned post-create screen remains before closure review; legacy unbound cleanup is deferred and is not D2 acceptance |
 | D3 Match ↔ reservation lifecycle | pending | — | — | reflect admin cancellation without provider DELETE, owner participant removal, match ↔ reservation binding |
 | D4 Payment Core | pending | — | — | payment provider, pricing/payment snapshot, чеки и возвраты |
 | D5 Settings/moderation/compliance | pending | — | — | standalone phone/email auth, verified backend email, approved club support/contact source and clickable action; затем schema review |
@@ -41,7 +41,7 @@
 | Этап | Среда | Целевой commit | Статус | Проверка |
 |---|---|---|---|---|
 | D1 Backend-only/contracts | Selectel test | `c04074459948d0bf545e865b885aea7a4e5fec3c` | `test_deployed` | frontend healthy; HTTPS root/health и новый asset 200; TMA auth/profile/feed/details/booking availability PASS; bundle/log audit PASS |
-| D2 YCLIENTS reservation core | Selectel test | `9bee483119a829de4ed74c20d94271ab740d6bcc` | `test_deployed` | health/log gates PASS; fresh create persisted confirmed with full binding; owner pull-to-refresh after admin deletion removed it from active UI; DB read-only proof: cancelled and hold released |
+| D2 YCLIENTS reservation core | Selectel test | `5daa2c0ba3884d0024f115bf6b4c1805e60f468d` | `test_deployed` | frontend-only rollout health/log/asset PASS; fresh create/delete reconciliation remains proved; aligned post-create screen awaits owner Telegram smoke |
 | D2 persistence/privacy proposal | not applicable | docs-only checkpoint | `not_needed` | только Markdown; runtime, schema, containers и конфигурация не менялись |
 | D2 YCLIENTS contract matrix | not applicable | docs-only checkpoint поверх `3e8739b` | `not_needed` | только Markdown; API/DB/server/runtime не вызывались и не менялись |
 | D2 YCLIENTS controlled test plan | not applicable | `040773172a2fa556ffaaf1d12dac540095070976` + docs-only correction from that exact base | `not_needed` | plan only; provider/server/DB/runtime calls и writes не выполнялись |
@@ -2897,3 +2897,31 @@
   frontend-only Selectel test rollout. Selectel test remains on exact runtime
   `9bee483119a829de4ed74c20d94271ab740d6bcc`; no server, container, YCLIENTS,
   database or production action was performed by this checkpoint.
+
+### 2026-08-09 — D2 / booking-screen alignment frontend rollout
+
+- Git delivery PASS: exact checkpoint
+  `5daa2c0ba3884d0024f115bf6b4c1805e60f468d` was pushed to
+  `codex/week1-d2-create-delete-sync`; clean local `main` fast-forwarded from
+  `9bee483119a829de4ed74c20d94271ab740d6bcc` to the same SHA and `main` was
+  pushed without a merge commit.
+- Selectel test precheck PASS at clean detached `9bee483...`: the two-file
+  Compose configuration was valid, all four containers were healthy with
+  restart count `0`, internal root/health returned `200` and unauthenticated
+  bookings retained `401`.
+- The application checkout fetched and detached cleanly at exact `5daa2c0...`.
+  Only the frontend image was rebuilt and only
+  `prosto-padel-test-frontend-1` was recreated. Its ID changed from
+  `0fd5cbb20a80...` to `76839a2ae14c...`; backend remained
+  `81dfc03e2f1e...`, nginx `e5b98b53a385...` and PostgreSQL
+  `5e36d4dc1a5c...`. Every container is healthy with restart count `0`.
+- Postcheck PASS: internal and HTTPS root/health returned `200`, exact frontend
+  asset `assets/index-CPjKRAcu.js` returned `200`, unauthenticated bookings
+  returned `401`, and bounded critical-marker counts were `0` for backend,
+  frontend, nginx and PostgreSQL. The server checkout is clean and exact
+  `5daa2c0...`.
+- No backend, nginx or PostgreSQL rebuild, DB/schema/migration/env/secret,
+  YCLIENTS/API/provider call or write, payment-field, production or cleanup
+  action occurred. Automated rollout is `test_deployed`; the remaining gate is
+  one owner Telegram Mini App smoke confirming the booking screen stays aligned
+  and the inline success message does not cover the date/court controls.
