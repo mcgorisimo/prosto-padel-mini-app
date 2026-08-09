@@ -27,7 +27,7 @@
 |---|---|---|---|---|
 | D1 Backend-only/contracts | done | `main` / deployed `c04074459948d0bf545e865b885aea7a4e5fec3c` | frontend E2E PASS (82/1 skipped); focused fail-closed 2/2 PASS; frontend build PASS; backend all PASS; Selectel test smoke PASS | D1 закрыт; следующий отдельный этап — D2 |
 | D2 YCLIENTS reservation core | done | closure history through exact cleanup source `4515549f58d714624a333fbb059dd4054b1e1439`; Selectel test runtime `ac5b4be4e88c6b45ec8d290a1c68e01a41dc635d` | migration 033 applied/verified; all automated gates PASS; create/delete sync, admin-reschedule T1-T4, repeated-refresh no-churn, fully-bound cleanup and eight-row legacy cleanup live acceptance PASS | D2 closed; next stage is D3 match ↔ reservation lifecycle; payment, webhook and production remain separate gates |
-| D3 Match ↔ reservation lifecycle | in_progress | `codex/week1-d3-match-reservation` / local docs checkpoint | read-only audit complete; `git diff --check` PASS | review D3 persistence proposal; then code-only link/projection domain slice; SQL requires separate approval |
+| D3 Match ↔ reservation lifecycle | in_progress | `codex/week1-d3-match-reservation` / local code checkpoint | focused 25/25; backend typecheck/unit 134/3344/E2E 2/4/build PASS; root E2E 89/1 skipped and build PASS | review pure domain checkpoint and persistence contract; migration SQL requires separate approval |
 | D4 Payment Core | pending | — | — | payment provider, pricing/payment snapshot, чеки и возвраты |
 | D5 Settings/moderation/compliance | pending | — | — | standalone phone/email auth, verified backend email, approved club support/contact source and clickable action; затем schema review |
 | D6 Selectel readiness/load | pending | — | — | backend staging fixture, live concurrency и Selectel production readiness |
@@ -3474,3 +3474,38 @@
   because runtime source and schema did not change. Deployment is `not_needed`;
   no API, YCLIENTS, PostgreSQL, SSH, server, container, secret, payment, webhook
   or production action was performed.
+
+### 2026-08-10 — D3 / runtime-disabled link and projection domain
+
+- Added pure, runtime-disconnected match ↔ reservation types and state machine.
+  A link can activate only for the same owner, a non-terminal match, exact
+  expected match/reservation versions and a D2 `confirmed` reservation with a
+  complete YCLIENTS appointment/record/hash binding. Link state stores no PII
+  or record hash.
+- The activation transition rejects another active reservation for the match,
+  another active match for the reservation, stale versions and provider record
+  rebinding. Final persistence uniqueness remains assigned to the proposed
+  partial unique indexes; no repository or schema was added in this slice.
+- Canonical unchanged refresh has no link/match/event churn. All four move
+  shapes (same-day time, different-day same-time, different-day/time and
+  different-day/time/court) produce one `court_moved` seed. Canonical
+  cancellation releases the link and produces `court_cancelled` without
+  changing the match to a terminal state. Unknown/stale/unavailable refresh
+  preserves the last confirmed link and produces no event.
+- The pure court projection has only explicit `unbooked` and `confirmed`
+  outcomes. It does not accept scenario or payment fields as inputs. Missing or
+  mismatched current confirmed provider proof fails closed to `unbooked`;
+  uncertain provider knowledge preserves the previous confirmation as stale.
+- Focused state-machine suite PASS: `1 suite / 25 tests`. Backend typecheck
+  PASS; full unit PASS (`134 suites / 3344 tests`); E2E PASS (`2 suites / 4
+  tests`); build PASS. Root E2E PASS (`89 passed / 1 skipped`) and root build
+  PASS (`1617` modules; existing CJS/chunk warnings only).
+- Runtime-boundary review: the new domain is imported only by its focused spec
+  and its own type/state-machine files; Nest modules/controllers, match/D2
+  repositories and frontend are unchanged. `git diff --check` PASS.
+- No SQL/migration, DB/API/YCLIENTS/SSH call, provider write, runtime wiring,
+  payment field, webhook, push, merge, deployment or production action was
+  performed. Deployment is `not_needed` for this disconnected code-only slice;
+  Selectel test remains on accepted D2 runtime `ac5b4be4...`. The next gate is
+  review of this checkpoint and explicit approval before preparing migration
+  SQL for review.

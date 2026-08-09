@@ -1,10 +1,10 @@
 # D3 Match ↔ Reservation — audit and persistence proposal
 
-Status: `proposed_for_review`
+Status: `code_slice_complete`, persistence remains `proposed_for_review`
 
 SQL/migration: `not_prepared`, `not_applied`
 
-Runtime wiring: `not_started`
+Runtime wiring: `not_started`; the pure domain files are not imported by Nest
 
 ## Scope and fixed product rules
 
@@ -133,6 +133,8 @@ Conceptual fields:
 - immutable `link_id`;
 - `match_id`, `reservation_id`, `owner_account_id`;
 - state `active | released`;
+- immutable YCLIENTS appointment/record identity observed at activation (no
+  client PII or record hash duplication);
 - reservation version observed at link/projection time;
 - created/updated/released timestamps and a bounded release reason;
 - version for optimistic concurrency.
@@ -223,8 +225,9 @@ App-originated provider PUT/DELETE remains absent in every branch.
 
 ## Slice plan and gates
 
-1. Code-only pure link/projection types and state-machine tests, runtime
-   disabled. Prove full-binding, ownership, stale-version and unknown cases.
+1. **Complete:** code-only pure link/projection types and state-machine tests,
+   runtime disabled. Full-binding, ownership, stale-version, all four move
+   shapes, canonical cancellation and unknown/stale preservation are covered.
 2. After explicit approval, prepare migration SQL, PRE/POSTCHECK, rollback and
    static contract tests for review only. Do not apply it.
 3. After a separate apply approval, add repository/coordinator and owner link
