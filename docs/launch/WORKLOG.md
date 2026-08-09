@@ -2867,3 +2867,33 @@
   `not_needed` for this test/docs checkpoint. Selectel test remains exact
   `9bee483...`; no YCLIENTS/API/DB/server call or write, push, merge, deploy or
   production change occurred.
+
+### 2026-08-09 — D2 / booking-screen alignment correction
+
+- The owner confirmed the primary acceptance flow on Selectel test: an
+  administrator-deleted YCLIENTS booking disappears from the booking section
+  after application refresh, and the read-only synchronization is working.
+  This checkpoint changes only the visual post-create behavior reported in the
+  same Telegram smoke; it does not alter that reconciliation contract.
+- The booking date and court horizontal strips now remain inside their parent
+  bounds with symmetric edge spacing. After a successful create, the page
+  returns to its top, the success confirmation is shown once as an inline
+  status below availability, and the duplicate global success toast no longer
+  covers the date controls. Error and unknown-outcome notifications are
+  unchanged.
+- The focused WebKit regression proves symmetric strip bounds, one inline
+  success status, no global success toast and scroll position `0`: `1/1` PASS.
+  Final full root E2E PASS: `89 passed / 1 skipped` with one worker. The first
+  default-parallel run produced three unrelated 30-second timeouts
+  (`86 passed / 1 skipped`); all three passed in a focused single-worker rerun,
+  and the complete single-worker rerun then passed. Root build PASS (`1617`
+  modules; existing CJS/chunk warnings only). `git diff --check` PASS.
+- Read-only P0/P1 review found no actionable issue. The diff contains no
+  backend, API, DB, migration, payment-field, provider write, cancellation or
+  reschedule change. Backend suites were not needed for this frontend-only
+  correction.
+- Deployment impact is `pending_integration_rollout`: the frontend bundle is
+  changed locally and still requires an explicit push/fast-forward and
+  frontend-only Selectel test rollout. Selectel test remains on exact runtime
+  `9bee483119a829de4ed74c20d94271ab740d6bcc`; no server, container, YCLIENTS,
+  database or production action was performed by this checkpoint.

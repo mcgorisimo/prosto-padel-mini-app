@@ -582,8 +582,9 @@ textarea {
   background: rgba(15, 42, 31, 0.66); box-shadow: 0 16px 42px rgba(0, 0, 0, 0.16);
 }
 .booking-horizontal-scroll {
-  display: flex; gap: 8px; margin-right: -16px; margin-left: -16px;
-  padding: 2px 16px 7px; overflow-x: auto; scroll-snap-type: x proximity;
+  display: flex; gap: 8px; width: 100%; min-width: 0;
+  margin: 0; padding: 2px 0 7px; overflow-x: auto;
+  scroll-padding-inline: 0; scroll-snap-type: x proximity;
 }
 .booking-horizontal-scroll::-webkit-scrollbar,
 .booking-court-strip::-webkit-scrollbar { display: none; }
@@ -608,7 +609,10 @@ textarea {
   transition: color 180ms ease, background-color 180ms ease, box-shadow 180ms ease;
 }
 .booking-duration-option.is-active { background: #f5f1e8; box-shadow: 0 8px 22px rgba(0, 0, 0, 0.28); }
-.booking-court-strip { margin-right: -14px; padding-right: 14px; padding-bottom: 2px; }
+.booking-court-strip {
+  width: 100%; min-width: 0; margin: 0; padding: 0 0 2px;
+  scroll-padding-inline: 0;
+}
 .booking-court-chip {
   min-height: 40px; border: 1px solid rgba(245, 241, 232, 0.08); border-radius: 999px;
   background: rgba(245, 241, 232, 0.04);

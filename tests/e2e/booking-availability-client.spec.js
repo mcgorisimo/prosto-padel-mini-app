@@ -670,6 +670,7 @@ test('creates a backend booking from the availability confirmation', async ({ pa
     );
 
     const calls = [];
+    const notifications = [];
     let writes = 0;
     const login = {
       sessionReady: true,
@@ -763,8 +764,15 @@ test('creates a backend booking from the availability confirmation', async ({ pa
       onBookSlot() {
         writes += 100;
       },
+      showToast(message, variant) {
+        notifications.push({ message, variant });
+      },
     }));
-    window.__bookingReadOnlySummary = { calls, get writes() { return writes; } };
+    window.__bookingReadOnlySummary = {
+      calls,
+      notifications,
+      get writes() { return writes; },
+    };
 
     return {
       actionsFrozen: Object.isFrozen(availabilityActions),
@@ -786,6 +794,26 @@ test('creates a backend booking from the availability confirmation', async ({ pa
   await expect(root.getByRole('button', { name: '1,5 ч' })).toBeEnabled();
   await expect(root.getByRole('button', { name: '2,5 ч' })).toBeDisabled();
 
+  const alignment = await root.evaluate((container) => {
+    const screen = container.querySelector('.booking-screen').getBoundingClientRect();
+    const dateStrip = container.querySelector('.booking-date-strip').getBoundingClientRect();
+    const courtPanel = container.querySelectorAll('.booking-control-panel')[1]
+      .getBoundingClientRect();
+    const courtStrip = container.querySelector('.booking-court-strip').getBoundingClientRect();
+    return {
+      dateLeft: Math.round(dateStrip.left - screen.left),
+      dateRight: Math.round(screen.right - dateStrip.right),
+      courtLeft: Math.round(courtStrip.left - courtPanel.left),
+      courtRight: Math.round(courtPanel.right - courtStrip.right),
+    };
+  });
+  expect(alignment).toEqual({
+    dateLeft: 16,
+    dateRight: 16,
+    courtLeft: 15,
+    courtRight: 15,
+  });
+
   const primeTime = root.getByRole('button', {
     name: '17:00 Свободно',
   });
@@ -801,10 +829,12 @@ test('creates a backend booking from the availability confirmation', async ({ pa
   await expect(dialog).toContainText(
     'Бронь появится в YCLIENTS без онлайн-оплаты.',
   );
+  await page.evaluate(() => window.scrollTo(0, 400));
   await createButton.click();
-  await expect(root).toContainText(
+  await expect(root.getByTestId('booking-success-message')).toContainText(
     'Бронь создана в YCLIENTS без онлайн-оплаты.',
   );
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
   const reservationCard = root.getByTestId('booking-reservation-card');
   await expect(reservationCard).toContainText('Статус: confirmed');
   await expect(reservationCard.getByRole('button', { name: /отмен|перенос/iu })).toHaveCount(0);
@@ -834,9 +864,11 @@ test('creates a backend booking from the availability confirmation', async ({ pa
 
   const summary = await page.evaluate(() => ({
     calls: window.__bookingReadOnlySummary.calls,
+    notifications: window.__bookingReadOnlySummary.notifications,
     writes: window.__bookingReadOnlySummary.writes,
   }));
   expect(summary.writes).toBe(1);
+  expect(summary.notifications).toEqual([]);
   expect(callsBeforeRefresh.slice(0, -1)).toEqual([
     { operation: 'services' },
     { operation: 'courts', serviceId: 30539694 },

@@ -234,6 +234,10 @@ export default function BookingScreen({
     partial: false,
   });
 
+  const alignBookingScreenAfterCreate = useCallback(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+  }, []);
+
   useEffect(() => {
     const canReadExact =
       typeof initialReservationId === 'string' &&
@@ -760,7 +764,6 @@ export default function BookingScreen({
             'Бронь создана в YCLIENTS без онлайн-оплаты. Оплату подтвердит администратор клуба.';
           setSuccessText(message);
           setLatestReservation(result.reservation);
-          showToast?.(message, 'success');
           setTimesState((current) => ({
             ...current,
             slots: current.slots.filter((slot) =>
@@ -770,6 +773,7 @@ export default function BookingScreen({
               )),
           }));
           setSelectedSlot(null);
+          alignBookingScreenAfterCreate();
           return;
         }
         if (result?.outcome === 'booking_unknown') {
@@ -830,8 +834,8 @@ export default function BookingScreen({
 
       const message = 'Бронь создана. Оплата сейчас подтверждается через администратора клуба.';
       setSuccessText(message);
-      showToast?.(message, 'success');
       setSelectedSlot(null);
+      alignBookingScreenAfterCreate();
     } catch (error) {
       console.error(error);
     } finally {
@@ -858,6 +862,7 @@ export default function BookingScreen({
       );
       if (result?.outcome === 'booking_loaded') {
         setLatestReservation(result.reservation);
+        if (result.reservation.status === 'cancelled') setSuccessText('');
         setReservationReadStatus('ready');
         return;
       }
@@ -1021,6 +1026,16 @@ export default function BookingScreen({
           className="mb-4 rounded-2xl bg-warm-white/6 px-4 py-3 text-xs leading-relaxed text-warm-white/58"
         >
           {availabilityStatusText}
+        </div>
+      )}
+
+      {successText && (
+        <div
+          data-testid="booking-success-message"
+          role="status"
+          className="booking-success mb-4 p-4 text-sm font-semibold leading-relaxed text-accent-light"
+        >
+          {successText}
         </div>
       )}
 
@@ -1274,12 +1289,6 @@ export default function BookingScreen({
               </button>
             </div>
           </div>
-        </div>
-      )}
-
-      {successText && (
-        <div className="booking-success p-4 text-sm font-semibold leading-relaxed text-accent-light">
-          {successText}
         </div>
       )}
 
