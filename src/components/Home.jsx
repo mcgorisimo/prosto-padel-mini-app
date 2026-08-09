@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { CalendarDays, Dumbbell, LayoutGrid, RefreshCw, Swords } from 'lucide-react';
+import { CalendarDays, Dumbbell, LayoutGrid, Swords } from 'lucide-react';
 import PadelButton from './ui/PadelButton';
 import PadelCard from './ui/PadelCard';
 import TrainingModal from './TrainingModal';
@@ -197,8 +197,6 @@ export default function Home({
   user,
   onOpenMatches,
   onOpenRating,
-  onRefreshBookings,
-  bookingsRefreshing = false,
 }) {
   const [actionMatch, setActionMatch] = useState(null);
   const [trainingSetupMatch, setTrainingSetupMatch] = useState(null);
@@ -322,26 +320,7 @@ export default function Home({
               Брони, матчи и тренировки в одном месте
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            {onRefreshBookings && (
-              <button
-                type="button"
-                onClick={onRefreshBookings}
-                disabled={bookingsRefreshing}
-                className="flex items-center gap-1.5 rounded-xl border border-warm-white/10 px-3 py-2 text-xs font-bold text-warm-white/68 disabled:opacity-50"
-                aria-label="Обновить мои брони"
-              >
-                <RefreshCw
-                  size={14}
-                  strokeWidth={2}
-                  aria-hidden="true"
-                  className={bookingsRefreshing ? 'animate-spin' : ''}
-                />
-                {bookingsRefreshing ? 'Обновляем' : 'Обновить'}
-              </button>
-            )}
-            <Dumbbell size={20} strokeWidth={1.8} className="mb-1 text-accent-light/70" />
-          </div>
+          <Dumbbell size={20} strokeWidth={1.8} className="mb-1 text-accent-light/70" />
         </div>
 
         <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>

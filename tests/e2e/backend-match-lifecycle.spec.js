@@ -3764,7 +3764,7 @@ test.describe('backend match credential lifecycle', () => {
         async readBooking(reservationId) {
           window.__backendBookingCalls.read += 1;
           window.__backendBookingCalls.lastReadReservationId = reservationId;
-          if (window.__backendBookingCalls.read > 1) {
+          if (window.__backendBookingCalls.read > 2) {
             window.__backendBookingDeleted = true;
           }
           return reservationId === persistedBooking.reservationId
@@ -3884,6 +3884,9 @@ test.describe('backend match credential lifecycle', () => {
     await expect(reservationDetails.getByRole('button', {
       name: 'Создать бронь',
     })).toHaveCount(0);
+    await expect(reservationDetails.getByRole('button', {
+      name: /Обновить/u,
+    })).toHaveCount(0);
     await expect.poll(() => page.evaluate(
       () => window.__backendBookingCalls.read,
     )).toBe(1);
@@ -3900,17 +3903,49 @@ test.describe('backend match credential lifecycle', () => {
       () => window.__backendBookingCalls.availability,
     )).toBe(0);
 
+    await page.evaluate(() => {
+      window.scrollTo(0, 0);
+      const target = document.querySelector(
+        '[data-testid="pull-to-refresh-booking-details"]',
+      );
+      const dispatch = (type, touches) => {
+        const event = new Event(type, { bubbles: true, cancelable: true });
+        Object.defineProperty(event, 'touches', { value: touches });
+        target.dispatchEvent(event);
+      };
+      dispatch('touchstart', [{ clientX: 120, clientY: 12 }]);
+      dispatch('touchmove', [{ clientX: 120, clientY: 152 }]);
+      dispatch('touchend', []);
+    });
+    await expect.poll(() => page.evaluate(
+      () => window.__backendBookingCalls.read,
+    )).toBe(2);
+
     await reservationDetails.getByRole('button', {
       name: /Назад к моим броням/u,
     }).click();
     await expect(harness.getByText('Корт №1').first()).toBeVisible();
+    await expect(harness.getByRole('button', {
+      name: 'Обновить мои брони',
+    })).toHaveCount(0);
 
     const bookingCallsBeforeRefresh = await page.evaluate(
       () => ({ ...window.__backendBookingCalls }),
     );
-    await harness.getByRole('button', {
-      name: 'Обновить мои брони',
-    }).click();
+    await page.evaluate(() => {
+      window.scrollTo(0, 0);
+      const target = document.querySelector(
+        '[data-testid="pull-to-refresh-home"]',
+      );
+      const dispatch = (type, touches) => {
+        const event = new Event(type, { bubbles: true, cancelable: true });
+        Object.defineProperty(event, 'touches', { value: touches });
+        target.dispatchEvent(event);
+      };
+      dispatch('touchstart', [{ clientX: 120, clientY: 12 }]);
+      dispatch('touchmove', [{ clientX: 120, clientY: 152 }]);
+      dispatch('touchend', []);
+    });
     await expect.poll(() => page.evaluate(
       () => window.__backendBookingCalls.read,
     )).toBe(bookingCallsBeforeRefresh.read + 1);

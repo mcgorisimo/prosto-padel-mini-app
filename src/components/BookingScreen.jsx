@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CalendarDays, Clock3, LockKeyhole, X } from 'lucide-react';
+import PullToRefresh from './PullToRefresh';
 import { BOOKING_DURATIONS, COURTS, WORKING_HOURS, checkAvailability, fromMin } from '../lib/booking';
 import { getBackendBookingStatusPresentation } from '../lib/backendBookingHomeAdapter';
 import { getMoscowDateRange, hasMoscowSlotStarted } from '../lib/moscowDateTime';
@@ -210,7 +211,8 @@ export default function BookingScreen({
   const [successText, setSuccessText] = useState('');
   const [latestReservation, setLatestReservation] = useState(null);
   const [reservationReadStatus, setReservationReadStatus] = useState('idle');
-  const [isRefreshingReservation, setIsRefreshingReservation] = useState(false);
+  const reservationRefreshInFlightRef = useRef(false);
+  const servicesRequestRef = useRef(0);
   const [servicesState, setServicesState] = useState({
     status: 'idle',
     groups: [],
@@ -283,13 +285,15 @@ export default function BookingScreen({
   }, [availabilityActions, initialReservationId, isReservationDetailsMode]);
   const isSavingRef = useRef(false);
 
-  useEffect(() => {
-    if (!usesBackendAvailability || isReservationDetailsMode) return undefined;
-    let active = true;
+  const loadServices = useCallback(async () => {
+    if (!usesBackendAvailability || isReservationDetailsMode) return;
+    const requestId = servicesRequestRef.current + 1;
+    servicesRequestRef.current = requestId;
     setServicesState({ status: 'loading', groups: [] });
 
-    void availabilityActions.listServices().then((result) => {
-      if (!active) return;
+    try {
+      const result = await availabilityActions.listServices();
+      if (servicesRequestRef.current !== requestId) return;
       if (result?.outcome !== 'services_loaded') {
         setServicesState({ status: 'error', groups: [] });
         return;
@@ -299,14 +303,19 @@ export default function BookingScreen({
         status: groups.length > 0 ? 'ready' : 'error',
         groups,
       });
-    }).catch(() => {
-      if (active) setServicesState({ status: 'error', groups: [] });
-    });
-
-    return () => {
-      active = false;
-    };
+    } catch {
+      if (servicesRequestRef.current === requestId) {
+        setServicesState({ status: 'error', groups: [] });
+      }
+    }
   }, [availabilityActions, isReservationDetailsMode, usesBackendAvailability]);
+
+  useEffect(() => {
+    void loadServices();
+    return () => {
+      servicesRequestRef.current += 1;
+    };
+  }, [loadServices]);
 
   useEffect(() => {
     if (isReservationDetailsMode) return;
@@ -831,26 +840,57 @@ export default function BookingScreen({
     }
   };
 
-  const handleRefreshReservation = async () => {
+  const handleRefreshReservation = useCallback(async () => {
+    const reservationId = typeof latestReservation?.reservationId === 'string'
+      ? latestReservation.reservationId
+      : isReservationDetailsMode && typeof initialReservationId === 'string'
+        ? initialReservationId
+        : null;
     if (
-      isRefreshingReservation ||
-      typeof latestReservation?.reservationId !== 'string' ||
+      reservationRefreshInFlightRef.current ||
+      reservationId === null ||
       typeof availabilityActions?.readBooking !== 'function'
     ) return;
-    setIsRefreshingReservation(true);
+    reservationRefreshInFlightRef.current = true;
     try {
       const result = await availabilityActions.readBooking(
-        latestReservation.reservationId,
+        reservationId,
       );
       if (result?.outcome === 'booking_loaded') {
         setLatestReservation(result.reservation);
+        setReservationReadStatus('ready');
         return;
       }
+      if (isReservationDetailsMode) setReservationReadStatus('error');
       showToast?.('Не удалось обновить бронь. Попробуйте позже.', 'error');
     } finally {
-      setIsRefreshingReservation(false);
+      reservationRefreshInFlightRef.current = false;
     }
-  };
+  }, [
+    availabilityActions,
+    initialReservationId,
+    isReservationDetailsMode,
+    latestReservation?.reservationId,
+    showToast,
+  ]);
+
+  const handleBookingPullRefresh = useCallback(async () => {
+    const refreshes = [];
+    if (!isReservationDetailsMode) refreshes.push(loadServices());
+    if (
+      typeof latestReservation?.reservationId === 'string' ||
+      (isReservationDetailsMode && typeof initialReservationId === 'string')
+    ) {
+      refreshes.push(handleRefreshReservation());
+    }
+    await Promise.allSettled(refreshes);
+  }, [
+    handleRefreshReservation,
+    initialReservationId,
+    isReservationDetailsMode,
+    latestReservation?.reservationId,
+    loadServices,
+  ]);
 
   if (isReservationDetailsMode) {
     const statusPresentation = latestReservation
@@ -858,6 +898,10 @@ export default function BookingScreen({
       : null;
 
     return (
+      <PullToRefresh
+        onRefresh={handleBookingPullRefresh}
+        testId="pull-to-refresh-booking-details"
+      >
       <div
         data-testid="booking-reservation-details"
         className="booking-screen min-h-screen bg-app-bg px-4 text-warm-white"
@@ -945,25 +989,21 @@ export default function BookingScreen({
               </div>
             )}
 
-            <button
-              type="button"
-              onClick={handleRefreshReservation}
-              disabled={isRefreshingReservation}
-              className="mt-4 w-full rounded-xl bg-warm-white/10 px-3 py-3 font-bold"
-            >
-              {isRefreshingReservation ? 'Обновляем…' : 'Обновить данные'}
-            </button>
-
             <div className="mt-3 rounded-xl bg-warm-white/10 px-3 py-3 text-sm">
               Для отмены или переноса обратитесь к администратору клуба. Прямая ссылка появится после подключения официального контакта клуба.
             </div>
           </section>
         )}
       </div>
+      </PullToRefresh>
     );
   }
 
   return (
+    <PullToRefresh
+      onRefresh={handleBookingPullRefresh}
+      testId="pull-to-refresh-booking"
+    >
     <div className="booking-screen min-h-screen bg-app-bg px-4 text-warm-white">
       <header className="booking-hero">
         <div className="booking-hero-icon flex items-center justify-center text-coral">
@@ -1253,9 +1293,6 @@ export default function BookingScreen({
             <div className="mt-2 text-amber-200">Данные YCLIENTS временно не подтверждены.</div>
           )}
           <div className="mt-3 flex flex-wrap gap-2">
-            <button type="button" onClick={handleRefreshReservation} disabled={isRefreshingReservation} className="rounded-xl bg-warm-white/10 px-3 py-2 font-bold">
-              {isRefreshingReservation ? 'Обновляем…' : 'Обновить бронь'}
-            </button>
             <div className="rounded-xl bg-warm-white/10 px-3 py-2 text-sm">
               Для отмены или переноса свяжитесь с администратором клуба. Прямая ссылка появится после подключения официального контакта клуба.
             </div>
@@ -1263,5 +1300,6 @@ export default function BookingScreen({
         </section>
       )}
     </div>
+    </PullToRefresh>
   );
 }

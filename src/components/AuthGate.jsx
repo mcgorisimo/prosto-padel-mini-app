@@ -151,6 +151,28 @@ export default function AuthGate() {
     backendProfileRequestRef.current += 1;
   }, []);
 
+  const handleBackendProfileRefresh = useCallback(async () => {
+    if (!telegramBackendLogin.sessionReady) {
+      return Object.freeze({ outcome: 'rejected' });
+    }
+    const requestToken = backendProfileRequestRef.current + 1;
+    backendProfileRequestRef.current = requestToken;
+    try {
+      const result = await telegramBackendLogin.loadOwnProfile();
+      if (backendProfileRequestRef.current !== requestToken) return result;
+      if (result.outcome === 'profile_loaded') {
+        setBackendProfile(result.profile);
+        setBackendProfileStatus('ready');
+      }
+      return result;
+    } catch {
+      return Object.freeze({ outcome: 'rejected' });
+    }
+  }, [
+    telegramBackendLogin.loadOwnProfile,
+    telegramBackendLogin.sessionReady,
+  ]);
+
   const handleAppLogout = useCallback(async () => {
     backendProfileRequestRef.current += 1;
     setBackendProfile(null);
@@ -318,6 +340,7 @@ export default function AuthGate() {
         backendProfileStatus={effectiveBackendProfileStatus}
         backendMatchActions={backendMatchActions}
         backendBookingAvailabilityActions={backendBookingAvailabilityActions}
+        onBackendProfileRefresh={handleBackendProfileRefresh}
         onBackendProfileSave={handleBackendProfileSave}
         onBackendProfilePhotoUpload={handleBackendProfilePhotoUpload}
         onBackendProfilePhotoDelete={handleBackendProfilePhotoDelete}

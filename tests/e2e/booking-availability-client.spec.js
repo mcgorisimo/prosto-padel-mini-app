@@ -779,7 +779,24 @@ test('creates a backend booking from the availability confirmation', async ({ pa
   const reservationCard = root.getByTestId('booking-reservation-card');
   await expect(reservationCard).toContainText('Статус: confirmed');
   await expect(reservationCard.getByRole('button', { name: /отмен|перенос/iu })).toHaveCount(0);
-  await reservationCard.getByRole('button', { name: 'Обновить бронь' }).click();
+  await expect(reservationCard.getByRole('button', { name: /Обновить/u })).toHaveCount(0);
+  const callsBeforeRefresh = await page.evaluate(
+    () => [...window.__bookingReadOnlySummary.calls],
+  );
+  await page.evaluate(() => {
+    window.scrollTo(0, 0);
+    const target = document.querySelector(
+      '[data-testid="pull-to-refresh-booking"]',
+    );
+    const dispatch = (type, touches) => {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.defineProperty(event, 'touches', { value: touches });
+      target.dispatchEvent(event);
+    };
+    dispatch('touchstart', [{ clientX: 120, clientY: 12 }]);
+    dispatch('touchmove', [{ clientX: 120, clientY: 152 }]);
+    dispatch('touchend', []);
+  });
   await expect(reservationCard).toContainText('Статус: cancelled');
   await expect(reservationCard).toContainText('Корт №2');
   await expect(reservationCard).toContainText(
@@ -791,7 +808,7 @@ test('creates a backend booking from the availability confirmation', async ({ pa
     writes: window.__bookingReadOnlySummary.writes,
   }));
   expect(summary.writes).toBe(1);
-  expect(summary.calls.slice(0, -2)).toEqual([
+  expect(callsBeforeRefresh.slice(0, -1)).toEqual([
     { operation: 'services' },
     { operation: 'courts', serviceId: 30539694 },
     { operation: 'courts', serviceId: 30539748 },
@@ -822,7 +839,7 @@ test('creates a backend booking from the availability confirmation', async ({ pa
       date: '2026-08-05',
     },
   ]);
-  expect(summary.calls.at(-2)).toMatchObject({
+  expect(callsBeforeRefresh.at(-1)).toMatchObject({
     operation: 'create',
     command: {
       serviceId: 30539748,
@@ -831,14 +848,14 @@ test('creates a backend booking from the availability confirmation', async ({ pa
       email: 'test@example.test',
     },
   });
-  expect(summary.calls.at(-2).command.requestKey).toMatch(
+  expect(callsBeforeRefresh.at(-1).command.requestKey).toMatch(
     /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
   );
-  expect(summary.calls.at(-2).command).not.toHaveProperty('paymentStatus');
-  expect(summary.calls.at(-1)).toEqual({
+  expect(callsBeforeRefresh.at(-1).command).not.toHaveProperty('paymentStatus');
+  expect(summary.calls.filter((call) => call.operation === 'read')).toEqual([{
     operation: 'read',
     reservationId: '55555555-5555-4555-8555-555555555555',
-  });
+  }]);
 });
 
 test('preserves a future date across duration changes and only falls forward', async ({

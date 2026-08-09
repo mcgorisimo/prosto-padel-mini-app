@@ -2713,3 +2713,42 @@
   now submit exactly one new previously unused slot through Telegram Mini App.
   Existing pending reservations must not be resubmitted or deleted during this
   smoke; the fresh result must first be proved `confirmed` locally.
+
+### 2026-08-09 — D2 / primary-tab pull-to-refresh checkpoint
+
+- The post-rollout create smoke for exact `743386c...` reached the intended
+  terminal state: reservation `2cf39988-358d-4009-b64c-c017d3c1d0b5` and its
+  create operation were persisted `confirmed`, with the complete encrypted
+  YCLIENTS binding and both provider-attempt timestamps. The owner then deleted
+  the bound record in YCLIENTS and used the existing explicit refresh. Access
+  logs prove the owner exact-read route was called, but PostgreSQL remained
+  `confirmed` with one active hold and seven reconciliation attempts. This
+  narrows the remaining defect to fail-closed deleted-record classification;
+  the frontend gesture in this checkpoint does not relax that proof boundary.
+- By owner decision, normal refresh UX is now pull-to-refresh rather than a
+  button. A shared touch component runs only from the top of the current page,
+  requires a vertical threshold, ignores horizontal/short/multitouch gestures,
+  rejects a second refresh while one is active and shows an accessible loading
+  indicator. Reduced-motion is respected and no dependency was added.
+- All five primary bottom-navigation sections are covered. Home refreshes the
+  bounded owner booking set, account matches and backend profile; Matches
+  refreshes the backend feed; Booking refreshes availability and, when present,
+  the exact owner reservation; Rating refreshes account/profile data; Profile
+  refreshes profile, account matches, invitations and notifications. Home and
+  both booking views no longer expose ordinary refresh buttons. Existing error
+  retry actions are unchanged.
+- The booking refresh remains read-only and bounded: at most the existing three
+  owner reservations are reconciled sequentially, and no POST/PUT/DELETE,
+  cancel/reschedule route, payment field, schema, migration, secret or provider
+  write was introduced. Backend source is unchanged, so backend suites were not
+  required for this frontend-only slice.
+- Focused WebKit PASS: pull gesture `3/3`; affected booking/Home suites `32/32`.
+  Final full root E2E PASS: `88 passed / 1 skipped` with one worker. Root build
+  PASS (`1617` modules; existing chunk/CJS warnings only). `git diff --check`
+  PASS. Read-only P0/P1 review found no actionable issue in gesture gating,
+  bounded refresh mapping, credential handling or write boundaries.
+- Deployment impact is `pending_integration_rollout`: the frontend bundle and
+  AuthGate/App runtime changed locally and are not yet pushed, merged or
+  deployed. Selectel test remains healthy on exact `743386c...`; its containers,
+  DB, env and production were not changed by this checkpoint. The outstanding
+  deleted-record reconciliation defect remains a separate backend correction.

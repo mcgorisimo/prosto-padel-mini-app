@@ -103,6 +103,49 @@ textarea {
   overflow-y: visible;
 }
 
+.pull-to-refresh {
+  position: relative;
+  min-height: inherit;
+  overflow-x: clip;
+}
+
+.pull-to-refresh__content {
+  min-height: inherit;
+  transform: translate3d(0, var(--pull-distance, 0px), 0);
+  transition: transform 180ms ease-out;
+  will-change: transform;
+}
+
+.pull-to-refresh__indicator {
+  position: absolute;
+  top: calc(8px + env(safe-area-inset-top, 0px));
+  left: 50%;
+  z-index: 20;
+  display: flex;
+  min-height: 36px;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 13px;
+  border: 1px solid rgba(216, 243, 74, 0.22);
+  border-radius: 999px;
+  background: rgba(7, 31, 22, 0.94);
+  color: rgba(245, 241, 232, 0.78);
+  font-size: 12px;
+  font-weight: 800;
+  opacity: min(1, calc(var(--pull-distance, 0px) / 36px));
+  pointer-events: none;
+  transform: translate3d(-50%, calc(var(--pull-distance, 0px) - 52px), 0);
+  transition: opacity 140ms ease-out, transform 180ms ease-out;
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pull-to-refresh__content,
+  .pull-to-refresh__indicator {
+    transition-duration: 0.01ms;
+  }
+}
+
 .min-h-screen {
   min-height: 100dvh !important;
 }

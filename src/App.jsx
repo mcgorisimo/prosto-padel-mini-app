@@ -7,6 +7,7 @@ import MatchFeed from './components/MatchFeed';
 import Home from './components/Home';
 import EditProfileScreen from './components/EditProfileScreen';
 import BookingScreen from './components/BookingScreen';
+import PullToRefresh from './components/PullToRefresh';
 import AdminScreen from './components/AdminScreen';
 import BallLoader from './components/BallLoader';
 import { supabase } from './lib/supabaseClient';
@@ -341,6 +342,7 @@ export default function App({
   backendProfileStatus = backendProfile ? 'ready' : 'inactive',
   backendMatchActions = null,
   backendBookingAvailabilityActions = null,
+  onBackendProfileRefresh = null,
   onBackendProfileSave = null,
   onBackendProfilePhotoUpload = null,
   onBackendProfilePhotoDelete = null,
@@ -371,7 +373,6 @@ export default function App({
   const [backendFeedError, setBackendFeedError] = useState('');
   const [backendAccountMatches, setBackendAccountMatches] = useState([]);
   const [backendReservations, setBackendReservations] = useState([]);
-  const [backendReservationsRefreshing, setBackendReservationsRefreshing] = useState(false);
   const [backendCourtNamesById, setBackendCourtNamesById] = useState({});
   const [backendMatchNow, setBackendMatchNow] = useState(
     () => Math.floor(Date.now() / 1_000),
@@ -594,7 +595,6 @@ export default function App({
     ) return;
 
     backendReservationRefreshInFlightRef.current = true;
-    setBackendReservationsRefreshing(true);
     try {
       const listed = await loadBackendReservations();
       const targets = selectBackendReservationsForExplicitRefresh(listed);
@@ -610,7 +610,6 @@ export default function App({
       await loadBackendReservations();
     } finally {
       backendReservationRefreshInFlightRef.current = false;
-      setBackendReservationsRefreshing(false);
     }
   }, [
     backendBookingAvailabilityActions,
@@ -822,6 +821,48 @@ export default function App({
     ME_ID,
     backendMatchActions,
     backendMatchesReady,
+    usesBackendMatches,
+  ]);
+
+  const refreshActiveTab = useCallback(async () => {
+    if (activeTab === 'home') {
+      await Promise.allSettled([
+        refreshBackendReservations(),
+        loadBackendAccountMatches(),
+        Promise.resolve().then(() => onBackendProfileRefresh?.()),
+      ]);
+      return;
+    }
+
+    if (activeTab === 'matches') {
+      if (usesBackendMatches) await loadBackendMatchFeed();
+      return;
+    }
+
+    if (activeTab === 'profile') {
+      await Promise.allSettled([
+        loadBackendAccountMatches(),
+        loadInvitations(),
+        loadNotifications(),
+        Promise.resolve().then(() => onBackendProfileRefresh?.()),
+      ]);
+      return;
+    }
+
+    if (activeTab === 'leaderboard') {
+      await Promise.allSettled([
+        loadBackendAccountMatches(),
+        Promise.resolve().then(() => onBackendProfileRefresh?.()),
+      ]);
+    }
+  }, [
+    activeTab,
+    loadBackendAccountMatches,
+    loadBackendMatchFeed,
+    loadInvitations,
+    loadNotifications,
+    onBackendProfileRefresh,
+    refreshBackendReservations,
     usesBackendMatches,
   ]);
 
@@ -3009,6 +3050,12 @@ const handleBookSlot = async (booking) => {
       )}
 
       <main className="content">
+        <PullToRefresh
+          key={activeTab}
+          onRefresh={activeTab === 'booking' ? null : refreshActiveTab}
+          disabled={activeTab === 'booking'}
+          testId={`pull-to-refresh-${activeTab}`}
+        >
         {activeTab === 'home' && (
           <Home
             upcomingMatches={homeUpcomingEvents}
@@ -3022,8 +3069,6 @@ const handleBookSlot = async (booking) => {
               setSelectedBookingReservationId(reservationId);
               setActiveTab('booking');
             }}
-            onRefreshBookings={refreshBackendReservations}
-            bookingsRefreshing={backendReservationsRefreshing}
             onSetupTraining={handleSetupTraining}
             onConvertToPublic={handleConvertToPublic} // This needs showToast
             user={currentUser}
@@ -3136,6 +3181,7 @@ const handleBookSlot = async (booking) => {
             showToast={showToast}
           />
         )}
+        </PullToRefresh>
       </main>
 
       <BottomNav
