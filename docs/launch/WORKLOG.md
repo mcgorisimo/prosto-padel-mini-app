@@ -26,7 +26,7 @@
 | Этап | Статус | Ветка/commit | Проверки | Блокер/следующий шаг |
 |---|---|---|---|---|
 | D1 Backend-only/contracts | done | `main` / deployed `c04074459948d0bf545e865b885aea7a4e5fec3c` | frontend E2E PASS (82/1 skipped); focused fail-closed 2/2 PASS; frontend build PASS; backend all PASS; Selectel test smoke PASS | D1 закрыт; следующий отдельный этап — D2 |
-| D2 YCLIENTS reservation core | in_progress | `main` / Selectel test `ac5b4be4e88c6b45ec8d290a1c68e01a41dc635d` | migration 033 applied/verified; automated gates PASS; create/delete sync, admin-reschedule T1-T4 and repeated-refresh no-churn live smokes PASS | closure cleanup stopped fail-closed: the first controlled test-record DELETE was unauthorized/no-effect and the reviewed legacy script no longer matches one row's expected status; owner CRM deletion + one refresh and a separately reviewed legacy-script correction are required |
+| D2 YCLIENTS reservation core | in_progress | `main` / Selectel test `ac5b4be4e88c6b45ec8d290a1c68e01a41dc635d` | migration 033 applied/verified; automated gates PASS; create/delete sync, admin-reschedule T1-T4, repeated-refresh no-churn and fully-bound test cleanup live smokes PASS | fully-bound test cleanup accepted: 3 cancelled / 0 active holds / absent from active UI; remaining closure blocker is a separately reviewed correction and execution of the exact eight-row legacy cleanup for the current 5 pending / 3 unknown split |
 | D3 Match ↔ reservation lifecycle | pending | — | — | reflect admin cancellation without provider DELETE, owner participant removal, match ↔ reservation binding |
 | D4 Payment Core | pending | — | — | payment provider, pricing/payment snapshot, чеки и возвраты |
 | D5 Settings/moderation/compliance | pending | — | — | standalone phone/email auth, verified backend email, approved club support/contact source and clickable action; затем schema review |
@@ -3331,3 +3331,19 @@
 - D2 remains `in_progress`. Closure commit, D2/main push, fast-forward and
   deployment were not performed. This is a docs-only factual STOP handoff;
   application tests were not run because no runtime source changed.
+
+### 2026-08-10 — D2 / fully-bound test-booking cleanup accepted
+
+- The owner deleted the three exact proven D2 test records in YCLIENTS UI and
+  then performed one pull-to-refresh in `Home -> My bookings`. No automated
+  retry, alternate DELETE, direct DB update or provider write was performed by
+  Codex after the earlier unauthorized/no-effect request.
+- Bounded read-only PostgreSQL postcheck PASS: provider records `1896181131`,
+  `1896208857` and `1896396891` now map to the same three local reservations in
+  status `cancelled`, with exactly `0` active holds for each. The owner
+  confirmed all three disappeared from the active Home bookings UI.
+- Fully-bound cleanup is complete through the normal canonical reconciliation
+  path. The remaining closure blocker is only the exact eight-row legacy
+  unbound cleanup: its current `5` pending / `3` unknown split does not match
+  the reviewed script's `6` / `2` PRECHECK. D2 therefore remains
+  `in_progress`; no closure push, main fast-forward or deployment was done.
