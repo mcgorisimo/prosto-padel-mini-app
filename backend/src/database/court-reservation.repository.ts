@@ -58,6 +58,7 @@ export type CourtReservationPersistenceCause =
   | 'check_violation'
   | 'not_null_violation'
   | 'invalid_text_representation'
+  | 'datatype_mismatch'
   | 'object_not_in_prerequisite_state'
   | 'unknown_postgres_error';
 

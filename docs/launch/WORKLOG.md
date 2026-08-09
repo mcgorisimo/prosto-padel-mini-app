@@ -2645,3 +2645,45 @@
   next step is exactly one new Telegram Mini App booking, which must persist as
   `confirmed` before any manual YCLIENTS deletion/read-only refresh check.
   Existing pending reservations must not be resubmitted.
+
+### 2026-08-09 — D2 / provider-finish bigint SQL correction
+
+- The owner created the single permitted fresh smoke booking after rollout
+  `59c2b9499116642f441772be41bc77a6d7c85900`; the corresponding record appeared
+  in YCLIENTS, but the app remained `pending_confirmation`. Read-only diagnosis
+  confirmed reservation `b286b04e-66af-4237-84fb-10bc2a9c99c9` and operation
+  `7f1be31c-998d-4cd1-8564-c476fdcade94` stayed unbound/pending with exactly one
+  started and unfinished provider attempt. The slot hold remains active.
+- The new diagnostic allowlist reported both `confirm_binding` and the single
+  `persist_unknown_fallback` as `storage_failure / operation_update /
+  unknown_postgres_error`. A bounded PostgreSQL log check read only the `ERROR`
+  header in the exact failure minute, excluding DETAIL/STATEMENT/parameters:
+  PostgreSQL reported that `provider_attempt_finished_at` is `bigint` while the
+  `CASE` expression was inferred as `text`. This occurred twice, matching the
+  confirm transaction and fail-closed unknown fallback. No PII, token,
+  ciphertext, record hash or raw provider body was read or printed.
+- Root cause is exact: `CASE WHEN provider_attempt_started_at IS NULL THEN NULL
+  ELSE $14 END` did not provide PostgreSQL a numeric type for either branch.
+  The repository now uses `NULL::bigint` and `$14::bigint`; no migration/schema
+  change is needed. The previously added monotonic effective timestamp remains
+  unchanged and its live ordering was valid.
+- Reservation-local error classification now maps SQLSTATE `42804` only to the
+  fixed semantic cause `datatype_mismatch`. The shared PostgreSQL classifier
+  and unrelated repositories remain unchanged. Raw code/message/statement and
+  arbitrary metadata still cannot cross the booking diagnostic boundary.
+- Regression coverage asserts the exact typed SQL fragment, the
+  `operation_update / datatype_mismatch` projection, discarded raw error text,
+  unchanged fresh unknown fallback and migration-033 time invariants. Focused
+  PASS: backend typecheck and `5 suites / 77 tests`. Full PASS: backend
+  typecheck, unit `132 suites / 3291 tests`, E2E `2 suites / 4 tests`, build;
+  root E2E `85 passed / 1 skipped` with one worker and root build (`1616`
+  modules, existing warnings only). `git diff --check` PASS.
+- Independent read-only review is CLEAN with no actionable P0/P1. It confirmed
+  the explicit casts close the observed `42804`, the mapping is reservation-
+  local, atomic confirm/unknown and one-dispatch safety are unchanged, and raw
+  database/provider/contact data cannot cross the diagnostic boundary.
+- This correction is code-only and local. No DB/YCLIENTS/provider/server call
+  occurred after the read-only diagnosis; no existing reservation/hold was
+  changed, retried or cleaned. Selectel test remains exact `59c2b94...` and
+  deployment is `pending_integration_rollout`. A new booking is forbidden until
+  this checkpoint passes independent review and a separate backend-only rollout.

@@ -339,6 +339,10 @@ describe('PostgresCourtReservationRepository SQL contract', () => {
     expect(query.mock.calls[2][1][17]).toBe(1_800_000_001);
     expect(query.mock.calls[3][1][13]).toBe(1_800_000_001);
     expect(query.mock.calls[3][1][15]).toBe(1_800_000_001);
+    const operationSql = String(query.mock.calls[3][0]).replace(/\s+/gu, ' ');
+    expect(operationSql).toContain(
+      'provider_attempt_finished_at=CASE WHEN provider_attempt_started_at IS NULL THEN NULL::bigint ELSE $14::bigint END',
+    );
     const serializedQueries = JSON.stringify(query.mock.calls);
     expect(serializedQueries).not.toContain('Private Player');
     expect(serializedQueries).not.toContain('private.owner@example.test');
@@ -397,6 +401,33 @@ describe('PostgresCourtReservationRepository SQL contract', () => {
     expect(JSON.stringify(caught)).not.toContain('private_check_name');
     expect(JSON.stringify(caught)).not.toContain('private.owner@example.test');
     expect(JSON.stringify(caught)).not.toContain('private-hash');
+
+    const datatypeMismatch = await repository.finalizeStartedCreateOperation(
+      { query: jest.fn()
+        .mockResolvedValueOnce(result([reservationRow]))
+        .mockResolvedValueOnce(result([controlRow]))
+        .mockResolvedValueOnce(result([{}]))
+        .mockRejectedValueOnce({
+          code: '42804',
+          message: 'private provider/contact diagnostic',
+        }) } as never,
+      OWNER,
+      RESERVATION_ID,
+      started.operation,
+      {
+        type: 'mark_unknown',
+        actorAccountId: OWNER,
+        now: unixEpochSeconds(1_800_000_000),
+      },
+    ).catch((error: unknown) => error);
+    expect(datatypeMismatch).toMatchObject({
+      reason: 'storage_failure',
+      stage: 'operation_update',
+      cause: 'datatype_mismatch',
+    });
+    expect(JSON.stringify(datatypeMismatch)).not.toContain(
+      'private provider/contact diagnostic',
+    );
   });
 
   it('fails closed before updates when the persisted control row differs from the started operation', async () => {

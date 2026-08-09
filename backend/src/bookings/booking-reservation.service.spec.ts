@@ -278,8 +278,8 @@ describe('BookingReservationService', () => {
     h.reservations.finalizeStartedCreateOperation
       .mockRejectedValueOnce(new CourtReservationPersistenceError(
         'storage_failure',
-        'reservation_update',
-        'operation_time_constraint',
+        'operation_update',
+        'datatype_mismatch',
       ));
 
     const result = await h.service.create(OWNER, {
@@ -309,8 +309,8 @@ describe('BookingReservationService', () => {
       expect.objectContaining({
         stage: 'confirm_binding',
         outcome: 'storage_failure',
-        persistenceStage: 'reservation_update',
-        persistenceCause: 'operation_time_constraint',
+        persistenceStage: 'operation_update',
+        persistenceCause: 'datatype_mismatch',
       }),
     );
     expect(h.diagnostics.record).toHaveBeenNthCalledWith(
