@@ -3509,3 +3509,37 @@
   Selectel test remains on accepted D2 runtime `ac5b4be4...`. The next gate is
   review of this checkpoint and explicit approval before preparing migration
   SQL for review.
+
+### 2026-08-10 — D3 / migration 034 review package
+
+- Owner approved preparation for review only. Added migration 034,
+  read-only PRECHECK/POSTCHECK, fail-closed rollback, runbook and a static
+  contract suite. Migration status is `prepared_for_review`, `not_applied`;
+  runtime remains disconnected.
+- The proposed storage adds an append/history match-reservation link, immutable
+  PII-free lifecycle events and per-recipient read state. Composite ownership
+  FKs, partial unique active-match/active-reservation indexes and deferred
+  cross-domain triggers reject false confirmation, duplicate active links,
+  stale reservation versions and partial move/cancellation transactions.
+- Migration 034 removes `matches_no_active_court_overlap`: planned/unbooked
+  match values no longer act as a court hold. The existing D2
+  `reservation_slot_holds_no_overlap` remains the only canonical database court
+  collision authority. Match cancellation/completion can release only with the
+  bounded storage reason `match_terminal`; canonical reservation cancellation
+  keeps the match alive and releases only its court guarantee.
+- Runtime ACL is column-scoped. Provider appointment/record identity and link
+  ownership are immutable; link/event/recipient history cannot be deleted or
+  truncated; events contain no PII, record hash, payment or provider secret.
+- Final static migration contract PASS (`1 suite / 8 tests`); backend typecheck
+  PASS; full unit PASS (`135 suites / 3352 tests`), E2E PASS (`2 suites / 4
+  tests`) and build PASS. Root E2E PASS (`89 passed / 1 skipped`) and build PASS
+  (`1617` modules; existing CJS/chunk warnings only).
+- No PostgreSQL/YCLIENTS/API/SSH/server call was made. Migration 034 was not
+  executed, PRECHECK/POSTCHECK/rollback were not run, and no database row,
+  schema, container, secret, payment field, webhook or production resource was
+  changed. Selectel test remains on accepted D2 runtime `ac5b4be4...`.
+- Deployment is `not_needed`: only review-only SQL/docs and a static contract
+  spec changed; none is imported by Nest/frontend runtime. The next gate is
+  independent review of the exact checkpoint, then a separate owner approval
+  before backup -> PRECHECK -> migration -> POSTCHECK. Runtime wiring remains a
+  later, separately approved slice.

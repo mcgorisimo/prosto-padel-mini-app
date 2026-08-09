@@ -1,8 +1,8 @@
 # D3 Match ↔ Reservation — audit and persistence proposal
 
-Status: `code_slice_complete`, persistence remains `proposed_for_review`
+Status: `migration_review_checkpoint_prepared`
 
-SQL/migration: `not_prepared`, `not_applied`
+SQL/migration: `034 prepared_for_review`, `not_applied`
 
 Runtime wiring: `not_started`; the pure domain files are not imported by Nest
 
@@ -136,7 +136,8 @@ Conceptual fields:
 - immutable YCLIENTS appointment/record identity observed at activation (no
   client PII or record hash duplication);
 - reservation version observed at link/projection time;
-- created/updated/released timestamps and a bounded release reason;
+- created/updated/released timestamps and a bounded release reason
+  (`canonical_reservation_cancelled | match_terminal`);
 - version for optimistic concurrency.
 
 Required database invariants:
@@ -228,8 +229,9 @@ App-originated provider PUT/DELETE remains absent in every branch.
 1. **Complete:** code-only pure link/projection types and state-machine tests,
    runtime disabled. Full-binding, ownership, stale-version, all four move
    shapes, canonical cancellation and unknown/stale preservation are covered.
-2. After explicit approval, prepare migration SQL, PRE/POSTCHECK, rollback and
-   static contract tests for review only. Do not apply it.
+2. **Complete for review:** migration 034 SQL, read-only PRE/POSTCHECK,
+   fail-closed rollback, runbook and static contract tests are prepared. The
+   migration is not applied and runtime remains disconnected.
 3. After a separate apply approval, add repository/coordinator and owner link
    endpoint; integrate with D2 exact refresh transaction.
 4. Update strict match response adapters and minimally change creation,
