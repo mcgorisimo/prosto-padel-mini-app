@@ -26,7 +26,7 @@
 | Этап | Статус | Ветка/commit | Проверки | Блокер/следующий шаг |
 |---|---|---|---|---|
 | D1 Backend-only/contracts | done | `main` / deployed `c04074459948d0bf545e865b885aea7a4e5fec3c` | frontend E2E PASS (82/1 skipped); focused fail-closed 2/2 PASS; frontend build PASS; backend all PASS; Selectel test smoke PASS | D1 закрыт; следующий отдельный этап — D2 |
-| D2 YCLIENTS reservation core | in_progress | `main` / Selectel test `ac5b4be4e88c6b45ec8d290a1c68e01a41dc635d` | migration 033 applied/verified; automated gates PASS; create/delete sync, admin-reschedule T1-T4, repeated-refresh no-churn and fully-bound test cleanup live smokes PASS | fully-bound test cleanup accepted: 3 cancelled / 0 active holds / absent from active UI; remaining closure blocker is a separately reviewed correction and execution of the exact eight-row legacy cleanup for the current 5 pending / 3 unknown split |
+| D2 YCLIENTS reservation core | in_progress | `main` / Selectel test `ac5b4be4e88c6b45ec8d290a1c68e01a41dc635d` | migration 033 applied/verified; automated gates PASS; create/delete sync, admin-reschedule T1-T4, repeated-refresh no-churn and fully-bound test cleanup live smokes PASS | fully-bound test cleanup accepted: 3 cancelled / 0 active holds / absent from active UI; corrected exact eight-row legacy cleanup for the current 5 pending / 3 unknown split is prepared_for_review and must not execute before a new exact approval |
 | D3 Match ↔ reservation lifecycle | pending | — | — | reflect admin cancellation without provider DELETE, owner participant removal, match ↔ reservation binding |
 | D4 Payment Core | pending | — | — | payment provider, pricing/payment snapshot, чеки и возвраты |
 | D5 Settings/moderation/compliance | pending | — | — | standalone phone/email auth, verified backend email, approved club support/contact source and clickable action; затем schema review |
@@ -3347,3 +3347,38 @@
   unbound cleanup: its current `5` pending / `3` unknown split does not match
   the reviewed script's `6` / `2` PRECHECK. D2 therefore remains
   `in_progress`; no closure push, main fast-forward or deployment was done.
+
+### 2026-08-10 — D2 / legacy cleanup 5-pending / 3-unknown correction
+
+- From clean local base `0f5355c231e5d2050143210061792c31139d5886`,
+  the exact reviewed legacy cleanup artifact was restored into the current D2
+  branch and corrected only for the previously proved current status split.
+  Reservation `3d49b170-61a6-4b77-b497-ad62b4f414f6` moved from both pending
+  declarations to both unknown declarations; its exact status projection is
+  now unknown/unknown, and the two guarded pending update counts changed from
+  `6` to `5`. The eight-ID target set, negative control, backup/no-clobber
+  boundary, SERIALIZABLE transaction, lock/update order, terminal result,
+  release count and postcheck remain unchanged.
+- Corrected exact script SHA-256 is
+  `f6a9e06ea416198a248d586db604cf3a4e9eb3b8ef3a6c80be7b49e743eb8142`.
+  The static contract now separately pins the five pending IDs and three
+  unknown IDs in both script declarations, rejects the former six-row count,
+  and still pins the exact script bytes and all original safety invariants.
+- Focused static contract PASS: `1 suite / 9 tests`. Backend typecheck PASS;
+  full unit PASS (`133 suites / 3319 tests`), E2E PASS (`2 suites / 4 tests`)
+  and build PASS. Root E2E PASS (`89 passed / 1 skipped`) and build PASS
+  (`1617` modules; existing CJS/chunk warnings only). `git diff --check` PASS.
+- Independent byte-level P0/P1 review is CLEAN. It proved the corrected SQL
+  differs from reviewed `f6f93a...` only by moving `3d49...` into both unknown
+  sets/projection and changing the two guarded counts from `6` to `5`; target
+  set, negative control, backup claim, locks, transaction, terminal updates
+  and postcheck are unchanged. The Russian approval template is byte-identical
+  to the reviewed base; an initial PowerShell display-encoding false positive
+  was explicitly rechecked and withdrawn.
+- No PostgreSQL connection, YCLIENTS/API/SSH/server call, cleanup execution,
+  backup/approval artifact, DB/provider write, runtime/schema/migration,
+  payment, webhook, push, merge, deployment or production action occurred.
+- Deployment is `not_needed`: this review-only SQL artifact and static test are
+  not imported by application runtime. D2 remains `in_progress`; one-time
+  execution still requires independent review, the exact correction commit and
+  a new approval bound to that commit and SHA-256.
