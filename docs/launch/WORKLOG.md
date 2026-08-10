@@ -4078,7 +4078,24 @@
   root E2E run PASS: `91 passed / 1 skipped`; root production build PASS:
   `1618` modules. Backend gates were not run because backend source did not
   change. `git diff --check` PASS.
-- This changes the frontend bundle and is `pending_integration_rollout`.
-  Selectel test remains exact runtime
-  `78a1cef68f74854a9d6e316ffd235ffbd42b38f8`; no server, container, DB,
-  YCLIENTS, payment/provider, secret or production action was performed.
+- Git delivery PASS: the pre-existing technical specification was isolated in
+  docs-only commit `03d7fe56174078b20d5cde4257de99be0cdc27f7`; the runtime correction is exact
+  commit `b0a500cac7cf1b5b7a2cf2adcc5be6a7eb9c135d`. Both were pushed to clean
+  `main = origin/main` without a merge commit.
+- Frontend-only Selectel test rollout PASS at exact clean detached runtime
+  `b0a500c...`. Only `prosto-padel-test-frontend-1` changed, from container/image
+  `dbeb04aea1bb...` / `sha256:387a55f227b...` to
+  `036764a2510a...` / `sha256:1034adca3dc4...`. Backend, nginx and PostgreSQL
+  retained their exact container/image IDs. All four containers are
+  `running/healthy`, restart count `0`; internal and HTTPS root/health returned
+  `200`; exact asset `/assets/index-DNzg8ZT1.js` returned `200` with `605894`
+  bytes.
+- Bounded logs since `2026-08-10T20:55:21Z` contain no application error,
+  fatal, unhandled or HTTP 5xx. Direct-browser boundary smoke PASS with the
+  expected Telegram-only login message and no browser errors; the sole warning
+  is the existing Telegram WebApp 6.0 swipe warning. The focused mobile
+  Playwright profile-photo flow is the business regression; owner-authenticated
+  TMA click confirmation remains the final visual acceptance.
+- Deployment status: `test_deployed_pending_owner_tma_smoke`. No backend, DB,
+  schema/migration, YCLIENTS, payment/provider, secret or production change
+  occurred.
