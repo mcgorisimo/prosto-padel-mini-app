@@ -3887,3 +3887,27 @@
   still runs backend hotfix `e686cf18d2f911c9e1d83cce521c93e230f1108c`
   with the prior D3 frontend container. Next gate is review/integration and a
   frontend-only Selectel test rollout, then health, TMA copy smoke and logs.
+
+### 2026-08-10 — D3 / truthful planned-court frontend rollout
+
+- Git delivery PASS: reviewed checkpoint
+  `48edb417ec65e729cf01d42777522b138e5cbfed` fast-forwarded clean `main`
+  without a merge commit and was pushed to exact `origin/main`.
+- Selectel test preflight PASS at clean detached backend-hotfix runtime
+  `e686cf18...`: fetched `origin/main` matched the approved checkpoint, Compose
+  validation passed, all containers were healthy/restart `0` and root/health
+  returned `200`. Checkout then moved cleanly to exact `48edb417...`.
+- Frontend alone was rebuilt/recreated. Its container/image changed from
+  `82391a277c2a...` / `cc2011b6b849...` to `374ad9821962...` /
+  `31f4cdf2eeb4...`. Backend remained `7ca6956f77fb...`, nginx remained
+  `e5b98b53a385...` and PostgreSQL remained `5e36d4dc1a5c...`.
+- Automated postcheck PASS: every container is healthy with restart count `0`;
+  internal and HTTPS root/health returned `200`; exact asset
+  `/assets/index-Dm36BHlZ.js` returned `200` with `605199` bytes. The new
+  `Court planned` marker is present and the old `Confirmed & Reserved` marker
+  is absent. Bounded backend critical markers and nginx 5xx are both `0`.
+- No backend/schema/migration/DB/YCLIENTS/provider/payment/env/secret,
+  nginx/PostgreSQL rebuild or production action occurred. Automated deployment
+  is `test_deployed`; D3 remains `in_progress` for owner TMA copy smoke and the
+  later real D2 reservation-link smoke. No new match or booking is required for
+  the copy check.
