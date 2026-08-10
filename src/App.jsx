@@ -38,7 +38,7 @@ import {
   selectMissingBookingCourtServiceIds,
 } from './lib/backendBookingHomeAdapter';
 import {
-  PAYKEEPER_COURT_CHECKOUT_PENDING_MESSAGE,
+  YOOKASSA_COURT_CHECKOUT_PENDING_MESSAGE,
   resolvePaidCourtCheckoutEntry,
 } from './lib/paidCourtCheckout';
 import { getMyProfile, getPublicPlayerProfiles } from './lib/profileApi';
@@ -2236,7 +2236,7 @@ const handleBookSlot = async (booking) => {
     const checkoutEntry = resolvePaidCourtCheckoutEntry(match);
     if (!checkoutEntry.visible) return;
     if (!checkoutEntry.canStart) {
-      showToast?.(PAYKEEPER_COURT_CHECKOUT_PENDING_MESSAGE, 'info');
+      showToast?.(YOOKASSA_COURT_CHECKOUT_PENDING_MESSAGE, 'info');
       return;
     }
     backendDetailRequestRef.current += 1;

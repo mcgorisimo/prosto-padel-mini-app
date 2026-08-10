@@ -49,21 +49,30 @@ Codex. Текущий фактический статус хранится в `W
   источником истины о реальной брони или платеже.
 - Для первого платёжного MVP один плательщик — организатор, полная стоимость
   корта. Split payments отложены.
-- Owner decision 2026-08-10: PayKeeper является платёжным провайдером. Есть два
+- Owner correction 2026-08-10: ЮKassa является платёжным провайдером; ранее
+  записанный PayKeeper ошибочен и не должен использоваться. Есть два
   входа в один обязательный paid-court checkout: создание нового матча с кортом
   и кнопка «Забронировать корт» внутри уже созданного unbooked-матча. Новый
   матч без корта по-прежнему создаётся сразу; матч с кортом не публикуется как
   booked до подтверждённых payment и YCLIENTS reservation.
 - До готовности D4 paid-court entrypoints работают fail-closed: кнопка внутри
   unbooked-матча остаётся видимой, но не может вызвать D2 create без оплаты;
-  создание матча с кортом недоступно. Browser/user redirect PayKeeper не
+  создание матча с кортом недоступно. Browser/user redirect ЮKassa не
   является доказательством оплаты — authority принадлежит verified callback и
   canonical backend reconciliation.
-- Предпочтительная D4 saga — PayKeeper authorization/hold → YCLIENTS create и
-  canonical confirmation → PayKeeper capture. Она разрешается только после
-  подтверждения, что холдирование включено для конкретного кабинета/договора.
-  Если capability отсутствует, альтернативная payment → YCLIENTS → automatic
-  refund compensation требует отдельного review из-за риска потери слота.
+- Предпочтительный для review D4-вариант — двухстадийный платёж ЮKassa
+  (`capture=false`) → canonical `waiting_for_capture` → YCLIENTS create и
+  confirmation → ЮKassa capture. Он разрешается только после проверки, что
+  выбранные в конкретном магазине способы оплаты поддерживают холдирование и
+  дают достаточный `expires_at`. Если capability отсутствует, альтернативная
+  saga succeeded payment → YCLIENTS → idempotent refund compensation требует
+  отдельного review из-за риска потери слота.
+- Для POST/DELETE ЮKassa используется provider `Idempotence-Key`; его гарантия
+  ограничена 24 часами, поэтому собственные order/operation ledger и digest
+  обязательны. Redirect клиента не меняет локальный статус. Webhook сначала
+  сохраняется идемпотентно, а актуальный payment/refund status подтверждается
+  backend GET к ЮKassa; `payment.waiting_for_capture`, `payment.succeeded`,
+  `payment.canceled` и `refund.succeeded` обрабатываются повторно безопасно.
 - Неизвестный результат внешнего write-запроса не считается отказом или
   успехом: состояние `unknown` разрешается reconciliation-процессом.
 - Слот освобождается только после подтверждённой отмены YCLIENTS.

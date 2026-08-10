@@ -27,7 +27,7 @@
 |---|---|---|---|---|
 | D1 Backend-only/contracts | done | `main` / deployed `c04074459948d0bf545e865b885aea7a4e5fec3c` | frontend E2E PASS (82/1 skipped); focused fail-closed 2/2 PASS; frontend build PASS; backend all PASS; Selectel test smoke PASS | D1 закрыт; следующий отдельный этап — D2 |
 | D2 YCLIENTS reservation core | done | closure history through exact cleanup source `4515549f58d714624a333fbb059dd4054b1e1439`; Selectel test runtime `ac5b4be4e88c6b45ec8d290a1c68e01a41dc635d` | migration 033 applied/verified; all automated gates PASS; create/delete sync, admin-reschedule T1-T4, repeated-refresh no-churn, fully-bound cleanup and eight-row legacy cleanup live acceptance PASS | D2 closed; next stage is D3 match ↔ reservation lifecycle; payment, webhook and production remain separate gates |
-| D3 Match ↔ reservation lifecycle | in_progress | Selectel test runtime `b3c6b7fdc081ff70c2fcec34f4a8882790643015` | migration 034 `applied_verified`; match feed hotfix and truthful booked/unbooked projection live; PayKeeper transition gate root E2E 91/1 skipped and build PASS; Selectel health/assets/logs PASS | owner TMA smoke: paid-court creation remains visible but disabled; existing unbooked match keeps «Забронировать корт», which must fail closed until D4 |
+| D3 Match ↔ reservation lifecycle | in_progress | local ЮKassa correction pending; Selectel test runtime `b3c6b7fdc081ff70c2fcec34f4a8882790643015` | migration 034 `applied_verified`; match feed hotfix and truthful booked/unbooked projection live; current server still contains the incorrect PayKeeper label | finish YooKassa naming regression, then separate frontend-only Selectel rollout; paid-court entrypoints stay fail-closed until D4 |
 | D4 Payment Core | pending | — | — | payment provider, pricing/payment snapshot, чеки и возвраты |
 | D5 Settings/moderation/compliance | pending | — | — | standalone phone/email auth, verified backend email, approved club support/contact source and clickable action; затем schema review |
 | D6 Selectel readiness/load | pending | — | — | backend staging fixture, live concurrency и Selectel production readiness |
@@ -42,7 +42,7 @@
 |---|---|---|---|---|
 | D1 Backend-only/contracts | Selectel test | `c04074459948d0bf545e865b885aea7a4e5fec3c` | `test_deployed` | frontend healthy; HTTPS root/health и новый asset 200; TMA auth/profile/feed/details/booking availability PASS; bundle/log audit PASS |
 | D2 YCLIENTS reservation core | Selectel test | `ac5b4be4e88c6b45ec8d290a1c68e01a41dc635d` | `test_deployed` | backend-only rollout health/log/auth PASS; create/delete and admin-reschedule matrix remain proved; three unchanged owner refreshes preserved reservation version and hold counts |
-| D3 Match ↔ reservation lifecycle | Selectel test | `b3c6b7fdc081ff70c2fcec34f4a8882790643015` | `test_deployed` | frontend-only PayKeeper transition gate deployed; all containers healthy/restart 0; HTTPS root/health and exact asset 200; bundle marker and bounded logs PASS; owner TMA transition smoke pending |
+| D3 Match ↔ reservation lifecycle | Selectel test | `b3c6b7fdc081ff70c2fcec34f4a8882790643015` | `pending` | previous frontend gate is healthy but names the wrong provider PayKeeper; local ЮKassa correction requires integration and frontend-only rollout before TMA smoke |
 | D2 persistence/privacy proposal | not applicable | docs-only checkpoint | `not_needed` | только Markdown; runtime, schema, containers и конфигурация не менялись |
 | D2 YCLIENTS contract matrix | not applicable | docs-only checkpoint поверх `3e8739b` | `not_needed` | только Markdown; API/DB/server/runtime не вызывались и не менялись |
 | D2 YCLIENTS controlled test plan | not applicable | `040773172a2fa556ffaaf1d12dac540095070976` + docs-only correction from that exact base | `not_needed` | plan only; provider/server/DB/runtime calls и writes не выполнялись |
@@ -3964,3 +3964,30 @@
   `test_deployed`; D3 remains `in_progress` only for the owner Telegram Mini App
   transition smoke. No booking, payment or YCLIENTS write is required for this
   smoke.
+
+### 2026-08-10 — D3 / payment provider correction to ЮKassa
+
+- Owner corrected the provider decision: ЮKassa is the selected payment
+  provider; PayKeeper was recorded in error. No PayKeeper backend integration,
+  credential, payment, webhook, schema or provider call had been implemented.
+- The local fail-closed UI/config regression now uses ЮKassa naming and a
+  provider-specific `yookassa_pending` reason. The product contract is
+  unchanged: a no-court match can be created immediately; both «new match with
+  court» and the existing unbooked-match «Забронировать корт» action enter the
+  same future full-court checkout and cannot create a YCLIENTS reservation
+  before payment orchestration is enabled.
+- Official ЮKassa documentation confirms 24-hour provider idempotency for
+  POST/DELETE, two-stage payments with `capture=false` and
+  `waiting_for_capture`, capture/cancel, payment/refund status GET, webhook
+  events and refunds. Hold support and expiry depend on the selected payment
+  method, so the exact D4 saga remains subject to store capability review.
+- Verification PASS: focused YooKassa fail-closed UI regression `1/1`; full
+  root E2E `91 passed / 1 skipped`; root production build PASS (`1618`
+  modules); production bundle contains the ЮKassa marker and no PayKeeper
+  marker; `git diff --check` PASS. Backend tests were not repeated because no
+  backend source or image changed.
+- This correction changes the frontend bundle and is
+  `pending_integration_rollout`. Selectel test remains exact
+  `b3c6b7fdc081ff70c2fcec34f4a8882790643015`, which still displays the wrong
+  PayKeeper label. No DB/YCLIENTS/payment/provider/secret/production action was
+  performed.

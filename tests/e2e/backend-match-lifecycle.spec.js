@@ -4262,7 +4262,7 @@ test.describe('backend match credential lifecycle', () => {
         isPrivateMatchCreationEnabled,
       } = await import('/src/components/MatchCreationScreen.jsx');
       const {
-        PAYKEEPER_COURT_CHECKOUT_PENDING_MESSAGE,
+        YOOKASSA_COURT_CHECKOUT_PENDING_MESSAGE,
         resolvePaidCourtCheckoutEntry,
       } = await import('/src/lib/paidCourtCheckout.js');
       const {
@@ -4733,7 +4733,7 @@ test.describe('backend match credential lifecycle', () => {
             checkoutEnabled: true,
           }),
           hiddenForConfirmed: resolvePaidCourtCheckoutEntry(confirmedMatch),
-          message: PAYKEEPER_COURT_CHECKOUT_PENDING_MESSAGE,
+          message: YOOKASSA_COURT_CHECKOUT_PENDING_MESSAGE,
         },
          legacyExtensions: {
            backendPinnedMessageHidden:
@@ -4926,24 +4926,24 @@ test.describe('backend match credential lifecycle', () => {
     });
     expect(summary.socialCreationDisclosure).toEqual({
       title: 'Матч с кортом',
-      badge: 'PayKeeper checkout',
+      badge: 'ЮKassa checkout',
       desc: 'Организатор выбирает дату, время и корт, затем оплачивает полную стоимость корта.',
       pros: ['Матч создаётся после оплаты и подтверждения YCLIENTS'],
-      warn: 'Временно недоступно до подключения PayKeeper',
+      warn: 'Временно недоступно до подключения ЮKassa',
       disabled: true,
     });
     expect(summary.socialConfirmationCopy).toEqual({
       title: 'Оплата корта',
       priceLabel: 'Полная стоимость корта',
       noticeTitle: 'Оплата обязательна',
-      noticeBody: 'Матч с кортом будет создан только после подтверждённой оплаты PayKeeper и подтверждённой брони YCLIENTS.',
+      noticeBody: 'Матч с кортом будет создан только после подтверждённой оплаты ЮKassa и подтверждённой брони YCLIENTS.',
       confirmLabel: 'Перейти к оплате',
     });
     expect(summary.paidCourtCheckoutGate).toEqual({
       pending: {
         visible: true,
         canStart: false,
-        reason: 'paykeeper_pending',
+        reason: 'yookassa_pending',
       },
       enabled: {
         visible: true,
@@ -4955,7 +4955,7 @@ test.describe('backend match credential lifecycle', () => {
         canStart: false,
         reason: null,
       },
-      message: 'Оплата корта через PayKeeper подключается. Бронь без оплаты не создаётся.',
+      message: 'Оплата корта через ЮKassa подключается. Бронь без оплаты не создаётся.',
     });
     expect(summary.legacyExtensions).toEqual({
       backendPinnedMessageHidden: true,
@@ -4966,7 +4966,7 @@ test.describe('backend match credential lifecycle', () => {
     expect(summary.sensitiveAbsent).toBe(true);
   });
 
-  test('keeps the paid-court match entry visible but fail-closed until PayKeeper is ready', async ({
+  test('keeps the paid-court match entry visible but fail-closed until YooKassa is ready', async ({
     page,
   }) => {
     await page.goto('/');

@@ -3,8 +3,8 @@ import { COURTS, HOURS, WORKING_HOURS, checkAvailability, generateDates } from '
 import { formatMoscowDateISO, getMoscowDateISO, hasMoscowSlotStarted } from '../lib/moscowDateTime';
 import { getTotalPrice, isPrimeTime, fmtPrice as fmtPriceLib } from '../lib/pricing';
 import {
-  PAYKEEPER_COURT_CHECKOUT_ENABLED,
-  PAYKEEPER_COURT_CHECKOUT_PENDING_MESSAGE,
+  YOOKASSA_COURT_CHECKOUT_ENABLED,
+  YOOKASSA_COURT_CHECKOUT_PENDING_MESSAGE,
 } from '../lib/paidCourtCheckout';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -86,11 +86,11 @@ export const MATCH_SCENARIO_DEFS = [
     id: 'social',
     mark: '02',
     title: 'Матч с кортом',
-    badge: 'PayKeeper checkout',
+    badge: 'ЮKassa checkout',
     desc: 'Организатор выбирает дату, время и корт, затем оплачивает полную стоимость корта.',
     pros: ['Матч создаётся после оплаты и подтверждения YCLIENTS'],
-    warn: 'Временно недоступно до подключения PayKeeper',
-    disabled: !PAYKEEPER_COURT_CHECKOUT_ENABLED,
+    warn: 'Временно недоступно до подключения ЮKassa',
+    disabled: !YOOKASSA_COURT_CHECKOUT_ENABLED,
     color: T.gold,
     bg: 'rgba(216,243,74,0.08)',
     border: 'rgba(216,243,74,0.22)',
@@ -101,7 +101,7 @@ export const SOCIAL_MATCH_CONFIRMATION_COPY = Object.freeze({
   title: 'Оплата корта',
   priceLabel: 'Полная стоимость корта',
   noticeTitle: 'Оплата обязательна',
-  noticeBody: 'Матч с кортом будет создан только после подтверждённой оплаты PayKeeper и подтверждённой брони YCLIENTS.',
+  noticeBody: 'Матч с кортом будет создан только после подтверждённой оплаты ЮKassa и подтверждённой брони YCLIENTS.',
   confirmLabel: 'Перейти к оплате',
 });
 
@@ -538,8 +538,8 @@ export default function MatchCreationScreen({
   };
 
   const handleScenarioSelect = (s) => {
-    if (s === 'social' && !PAYKEEPER_COURT_CHECKOUT_ENABLED) {
-      showToast?.(PAYKEEPER_COURT_CHECKOUT_PENDING_MESSAGE, 'info');
+    if (s === 'social' && !YOOKASSA_COURT_CHECKOUT_ENABLED) {
+      showToast?.(YOOKASSA_COURT_CHECKOUT_PENDING_MESSAGE, 'info');
       return;
     }
     if (s === 'community') setIsPrivate(false);
