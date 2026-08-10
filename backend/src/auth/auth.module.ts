@@ -24,6 +24,7 @@ import { PostgresMatchLineupRepository } from '../database/postgres-match-lineup
 import { PostgresMatchNotificationRepository } from '../database/postgres-match-notification.repository';
 import { PostgresMatchResultRepository } from '../database/postgres-match-result.repository';
 import { PostgresMatchRepository } from '../database/postgres-match.repository';
+import { PostgresMatchReservationRepository } from '../database/postgres-match-reservation.repository';
 import { PostgresMatchInvitationRepository } from '../database/postgres-match-invitation.repository';
 import { PostgresMatchWaitlistRepository } from '../database/postgres-match-waitlist.repository';
 import { PostgresPlayerAccountProvisioningRepository } from '../database/postgres-player-account-provisioning.repository';
@@ -42,6 +43,8 @@ import { MatchApiService } from '../matches/match-api.service';
 import { MatchChatController } from '../matches/match-chat.controller';
 import { MatchChatService } from '../matches/match-chat.service';
 import { MatchController } from '../matches/match.controller';
+import { MatchReservationController } from '../matches/match-reservation.controller';
+import { MatchReservationApiService } from '../matches/match-reservation-api.service';
 import { MatchInvitationController } from '../matches/match-invitation.controller';
 import { MatchInvitationService } from '../matches/match-invitation.service';
 import { MatchLineupController } from '../matches/match-lineup.controller';
@@ -300,6 +303,7 @@ function createPublicPlayerProfileService(
 function createMatchApiService(
   transactions: PostgresTransactionExecutorAdapter,
   matches: PostgresMatchRepository,
+  matchReservations: PostgresMatchReservationRepository,
   publicProfiles: PostgresPublicPlayerProfileSearchRepository,
   waitlist: MatchWaitlistService,
   lineups: MatchLineupService,
@@ -308,9 +312,22 @@ function createMatchApiService(
   return new MatchApiService({
     transactions,
     matches,
+    matchReservations,
     publicProfiles,
     waitlist,
     lineups,
+    clock,
+  });
+}
+
+function createMatchReservationApiService(
+  transactions: PostgresTransactionExecutorAdapter,
+  matchReservations: PostgresMatchReservationRepository,
+  clock: SessionAuthenticationClock,
+): MatchReservationApiService {
+  return new MatchReservationApiService({
+    transactions,
+    matchReservations,
     clock,
   });
 }
@@ -441,6 +458,7 @@ function createPlayerProfilePhotoService(
     PlayerProfileController,
     PublicPlayerProfileController,
     MatchController,
+    MatchReservationController,
     MatchInvitationController,
     MatchChatController,
     MatchWaitlistController,
@@ -544,10 +562,20 @@ function createPlayerProfilePhotoService(
       useFactory: createMatchInvitationService,
     },
     {
+      provide: MatchReservationApiService,
+      inject: [
+        PostgresTransactionExecutorAdapter,
+        PostgresMatchReservationRepository,
+        SESSION_AUTHENTICATION_CLOCK,
+      ],
+      useFactory: createMatchReservationApiService,
+    },
+    {
       provide: MatchApiService,
       inject: [
         PostgresTransactionExecutorAdapter,
         PostgresMatchRepository,
+        PostgresMatchReservationRepository,
         PostgresPublicPlayerProfileSearchRepository,
         MatchWaitlistService,
         MatchLineupService,
@@ -616,6 +644,7 @@ function createPlayerProfilePhotoService(
     PlayerProfilePhotoService,
     PublicPlayerProfileService,
     MatchApiService,
+    MatchReservationApiService,
     MatchInvitationService,
     MatchChatService,
     MatchWaitlistService,

@@ -139,13 +139,16 @@ function harness() {
   }) };
   const adminRead = { getRecord: jest.fn(), listRecords: jest.fn() };
   const diagnostics = { record: jest.fn() };
+  const matchReservations = {
+    synchronizeCanonicalRefresh: jest.fn(async () => ({ outcome: 'not_linked' })),
+  };
   const service = new BookingReservationService(
-    transactions as never, reservations as never, profiles as never,
+    transactions as never, reservations as never, matchReservations as never, profiles as never,
     availability as never, booking as never, adminRead as never,
     { nowEpochSeconds: () => currentNow },
     diagnostics,
   );
-  return { service, transactions, reservations, profiles, availability, booking, adminRead, diagnostics,
+  return { service, transactions, reservations, matchReservations, profiles, availability, booking, adminRead, diagnostics,
     setStored(reservation: CourtReservation, operation?: ReservationOperation) { storedReservation = reservation; storedOperation = operation ?? null; },
     setNow(value: number) { currentNow = value; },
     setAttemptStartedAt(value: number | undefined) { attemptStartedAt = value; },
@@ -418,6 +421,14 @@ describe('BookingReservationService', () => {
     const result = await h.service.read(OWNER, reservation.reservationId);
     expect(result).toMatchObject({ outcome: 'found', reservation: { status, courtId, stale: false } });
     expect(h.adminRead.getRecord).toHaveBeenCalledTimes(1);
+    expect(h.matchReservations.synchronizeCanonicalRefresh).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        reservationId: reservation.reservationId,
+        status,
+        target: expect.objectContaining({ courtId, startsAt }),
+      }),
+    );
   });
 
   it('accepts an exact deleted record without provider api_id after record binding', async () => {
@@ -455,6 +466,13 @@ describe('BookingReservationService', () => {
         recordId: 44,
         proof: { kind: 'exact_deleted_record' },
         deleted: true,
+      }),
+    );
+    expect(h.matchReservations.synchronizeCanonicalRefresh).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        reservationId: reservation.reservationId,
+        status: 'cancelled',
       }),
     );
     expect(h.adminRead.listRecords).not.toHaveBeenCalled();
@@ -515,6 +533,14 @@ describe('BookingReservationService', () => {
         startsAt,
         endsAt,
         deleted: false,
+      }),
+    );
+    expect(h.matchReservations.synchronizeCanonicalRefresh).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        reservationId: reservation.reservationId,
+        status: 'confirmed',
+        target: expect.objectContaining({ courtId: 55, startsAt, endsAt }),
       }),
     );
     expect(h.adminRead.listRecords).not.toHaveBeenCalled();
@@ -603,6 +629,13 @@ describe('BookingReservationService', () => {
         recordId: 44,
         proof: { kind: 'external_api_id', apiId: 77 },
         deleted: true,
+      }),
+    );
+    expect(h.matchReservations.synchronizeCanonicalRefresh).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        reservationId: reservation.reservationId,
+        status: 'cancelled',
       }),
     );
   });

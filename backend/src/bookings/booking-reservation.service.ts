@@ -9,6 +9,7 @@ import {
   CourtReservationPersistenceStage,
 } from '../database/court-reservation.repository';
 import { PostgresCourtReservationRepository } from '../database/postgres-court-reservation.repository';
+import { PostgresMatchReservationRepository } from '../database/postgres-match-reservation.repository';
 import { PostgresPlayerProfileReader } from '../database/postgres-player-profile-reader';
 import { PostgresTransactionRunner } from '../database/postgres-transaction';
 import { YclientsAdminReadClient } from '../integrations/yclients/yclients-admin-read.client';
@@ -142,6 +143,7 @@ export class BookingReservationService {
   constructor(
     private readonly transactions: PostgresTransactionRunner,
     private readonly reservations: PostgresCourtReservationRepository,
+    private readonly matchReservations: PostgresMatchReservationRepository,
     private readonly profiles: PostgresPlayerProfileReader,
     private readonly availability: YclientsAvailabilityService,
     private readonly booking: YclientsBookingService,
@@ -550,8 +552,8 @@ export class BookingReservationService {
         ) {
           const exactApiId = deleted.record.apiId;
           if (exactApiId === undefined) throw new Error('missing external id');
-          const updated = await this.transactions.runInTransaction((tx) =>
-            this.reservations.applyExactRefresh(tx, ownerAccountId, reservationId, {
+          const updated = await this.transactions.runInTransaction(async (tx) => {
+            const result = await this.reservations.applyExactRefresh(tx, ownerAccountId, reservationId, {
               expectedVersion: reservation.version,
               companyId: deleted.record.companyId,
               recordId: deleted.record.recordId,
@@ -562,8 +564,15 @@ export class BookingReservationService {
               endsAt: reservation.target.endsAt,
               deleted: true,
               now: now(this.clock),
-            }),
-          );
+            });
+            if (result.outcome === 'updated') {
+              await this.matchReservations.synchronizeCanonicalRefresh(
+                tx,
+                result.reservation,
+              );
+            }
+            return result;
+          });
           if (updated.outcome === 'updated') {
             return Object.freeze({
               outcome: 'found',
@@ -601,9 +610,47 @@ export class BookingReservationService {
             kind: 'external_api_id' as const,
             apiId: exact.record.apiId,
           });
-      const updated=await this.transactions.runInTransaction((tx)=>this.reservations.applyExactRefresh(tx,ownerAccountId,reservationId,{expectedVersion:reservation.version,companyId:exact.record.companyId,recordId:exact.record.recordId,proof,serviceId,courtId:exact.record.resourceId,startsAt:exact.record.datetime,endsAt,deleted:exact.record.deleted,now:now(this.clock)}));
-      return updated.outcome==='updated' ? Object.freeze({outcome:'found',reservation:view(updated.reservation,false)}) : Object.freeze({outcome:'found',reservation:view(reservation,true)});
-    } catch { return Object.freeze({outcome:'found',reservation:view(reservation,true)}); }
+      const updated = await this.transactions.runInTransaction(async (tx) => {
+        const result = await this.reservations.applyExactRefresh(
+          tx,
+          ownerAccountId,
+          reservationId,
+          {
+            expectedVersion: reservation.version,
+            companyId: exact.record.companyId,
+            recordId: exact.record.recordId,
+            proof,
+            serviceId,
+            courtId: exact.record.resourceId,
+            startsAt: exact.record.datetime,
+            endsAt,
+            deleted: exact.record.deleted,
+            now: now(this.clock),
+          },
+        );
+        if (result.outcome === 'updated') {
+          await this.matchReservations.synchronizeCanonicalRefresh(
+            tx,
+            result.reservation,
+          );
+        }
+        return result;
+      });
+      return updated.outcome === 'updated'
+        ? Object.freeze({
+            outcome: 'found',
+            reservation: view(updated.reservation, false),
+          })
+        : Object.freeze({
+            outcome: 'found',
+            reservation: view(reservation, true),
+          });
+    } catch {
+      return Object.freeze({
+        outcome: 'found',
+        reservation: view(reservation, true),
+      });
+    }
   }
 
   async readByRequestKey(

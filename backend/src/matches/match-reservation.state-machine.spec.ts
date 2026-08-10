@@ -276,6 +276,19 @@ describe('D3 match reservation lifecycle', () => {
     });
   });
 
+  it('accepts a same-binding retry with a fresh transport request key', () => {
+    const existing = activeLink();
+    expect(activate({
+      linkId: OTHER_LINK,
+      activeMatchLink: existing,
+      activeReservationLink: existing,
+    })).toEqual({
+      outcome: 'idempotent_retry',
+      link: existing,
+      matchVersion: 7,
+    });
+  });
+
   it('does not churn an unchanged exact confirmed refresh', () => {
     const link = activeLink();
     const result = transitionMatchReservationRefresh(link, {

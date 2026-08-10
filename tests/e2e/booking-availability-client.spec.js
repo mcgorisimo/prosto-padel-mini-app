@@ -756,6 +756,16 @@ test('creates a backend booking from the availability confirmation', async ({ pa
     document.body.append(container);
     createRoot(container).render(React.createElement(BookingScreen, {
       availabilityActions,
+      matchIdToLink: '33333333-3333-4333-8333-333333333333',
+      async onLinkMatchReservation(matchId, reservationId) {
+        calls.push({ operation: 'link', matchId, reservationId });
+        return {
+          outcome: 'match_reservation_linked',
+          courtBookingStatus: 'confirmed',
+          courtBookingStale: false,
+          courtReservationId: reservationId,
+        };
+      },
       bookingClient: {
         fullName: 'Test Player',
         phone: '+7 900 000-00-00',
@@ -886,7 +896,7 @@ test('creates a backend booking from the availability confirmation', async ({ pa
   await createButton.click();
   await page.setViewportSize(originalViewport);
   await expect(root.getByTestId('booking-success-message')).toContainText(
-    'Бронь создана в YCLIENTS без онлайн-оплаты.',
+    'Корт забронирован и подтверждён для матча.',
   );
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
   await expect(dialog).toHaveCount(0);
@@ -933,7 +943,7 @@ test('creates a backend booking from the availability confirmation', async ({ pa
   }));
   expect(summary.writes).toBe(1);
   expect(summary.notifications).toEqual([]);
-  expect(callsBeforeRefresh.slice(0, -1)).toEqual([
+  expect(callsBeforeRefresh.slice(0, -2)).toEqual([
     { operation: 'services' },
     { operation: 'courts', serviceId: 30539694 },
     { operation: 'courts', serviceId: 30539748 },
@@ -964,7 +974,7 @@ test('creates a backend booking from the availability confirmation', async ({ pa
       date: '2026-08-05',
     },
   ]);
-  expect(callsBeforeRefresh.at(-1)).toMatchObject({
+  expect(callsBeforeRefresh.at(-2)).toMatchObject({
     operation: 'create',
     command: {
       serviceId: 30539748,
@@ -973,10 +983,15 @@ test('creates a backend booking from the availability confirmation', async ({ pa
       email: 'test@example.test',
     },
   });
-  expect(callsBeforeRefresh.at(-1).command.requestKey).toMatch(
+  expect(callsBeforeRefresh.at(-2).command.requestKey).toMatch(
     /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
   );
-  expect(callsBeforeRefresh.at(-1).command).not.toHaveProperty('paymentStatus');
+  expect(callsBeforeRefresh.at(-2).command).not.toHaveProperty('paymentStatus');
+  expect(callsBeforeRefresh.at(-1)).toEqual({
+    operation: 'link',
+    matchId: '33333333-3333-4333-8333-333333333333',
+    reservationId: '55555555-5555-4555-8555-555555555555',
+  });
   expect(summary.calls.filter((call) => call.operation === 'read')).toEqual([{
     operation: 'read',
     reservationId: '55555555-5555-4555-8555-555555555555',

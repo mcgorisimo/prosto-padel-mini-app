@@ -41,6 +41,7 @@ import { PostgresYclientsWebhookSignalRepository } from './postgres-yclients-web
 import { PostgresTransactionRunner } from './postgres-transaction';
 import { PostgresTransactionExecutorAdapter } from './postgres-transaction-executor.adapter';
 import { PostgresCourtReservationRepository } from './postgres-court-reservation.repository';
+import { PostgresMatchReservationRepository } from './postgres-match-reservation.repository';
 
 const DATABASE_WORKFLOW_PROVIDERS: Provider[] = [
   {
@@ -69,6 +70,14 @@ const DATABASE_WORKFLOW_PROVIDERS: Provider[] = [
         crypto,
         config.get<number>(YCLIENTS_API_CONFIG_KEYS.companyId) ?? 0,
       ),
+  },
+  {
+    provide: PostgresMatchReservationRepository,
+    inject: [PostgresCourtReservationRepository],
+    useFactory: (
+      reservations: PostgresCourtReservationRepository,
+    ): PostgresMatchReservationRepository =>
+      new PostgresMatchReservationRepository(reservations),
   },
   PostgresAdminPlayerRatingRepository,
   PostgresSecurityAuditRepository,
@@ -191,6 +200,7 @@ const DATABASE_WORKFLOW_PROVIDERS: Provider[] = [
 
 const DATABASE_WORKFLOW_EXPORTS = [
   PostgresCourtReservationRepository,
+  PostgresMatchReservationRepository,
   PostgresTransactionRunner,
   PostgresTransactionExecutorAdapter,
   PostgresAdminPlayerRatingRepository,

@@ -98,6 +98,12 @@ function response(
     ...(notification.readAt === undefined
       ? {}
       : { readAt: notification.readAt }),
+    ...(notification.previousTarget === undefined
+      ? {}
+      : { previousTarget: notification.previousTarget }),
+    ...(notification.currentTarget === undefined
+      ? {}
+      : { currentTarget: notification.currentTarget }),
   });
 }
 

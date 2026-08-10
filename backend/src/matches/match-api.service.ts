@@ -21,6 +21,10 @@ import {
 } from '../database/match.repository';
 import { MatchWaitlistPersistenceError } from '../database/match-waitlist.repository';
 import { MatchLineupPersistenceError } from '../database/match-lineup.repository';
+import {
+  MatchReservationPersistenceError,
+  MatchReservationRepository,
+} from '../database/match-reservation.repository';
 import { PostgresTransaction } from '../database/postgres-transaction';
 import {
   PublicPlayerProfileSearchPersistenceError,
@@ -60,6 +64,8 @@ import {
 } from './match-api.http';
 import { MatchWaitlistService } from './match-waitlist.service';
 import { MatchLineupService } from './match-lineup.service';
+import { courtBookingResponse } from './match-reservation-api.service';
+import { MatchCourtBookingProjection } from './match-reservation.types';
 
 const UUID_URL_NAMESPACE = '6ba7b811-9dad-11d1-80b4-00c04fd430c8';
 const BINDING_DOMAINS = Object.freeze({
@@ -100,6 +106,7 @@ export interface MatchApiServiceDependencies {
     'promoteAvailable' | 'closeForParticipant'
   >;
   readonly lineups: Pick<MatchLineupService, 'releaseForParticipantLeave'>;
+  readonly matchReservations: Pick<MatchReservationRepository, 'readCourtBookings'>;
   readonly clock: {
     nowEpochSeconds(): import('../auth/auth.types').UnixEpochSeconds;
   };
@@ -185,6 +192,12 @@ function mapRepositoryRejection(
 }
 
 function mapPersistenceFailure(error: unknown): MatchApiRejection {
+  if (error instanceof MatchReservationPersistenceError) {
+    return error.reason === 'database_unavailable' ||
+      error.reason === 'transaction_conflict'
+      ? 'temporary_unavailable'
+      : 'internal_failure';
+  }
   if (error instanceof MatchLineupPersistenceError) {
     return error.reason === 'database_unavailable' ||
       error.reason === 'transaction_conflict'
@@ -413,6 +426,7 @@ async function readPublicPlayers(
 function enrichDetail(
   record: MatchDetailRecord,
   players: ReadonlyMap<AccountId, MatchPublicPlayerResponse>,
+  courtBooking: MatchCourtBookingProjection,
 ): MatchDetailResponse {
   const { title: _retiredTitle, ...publicRecord } = record;
   const owner = players.get(record.ownerAccountId);
@@ -431,6 +445,7 @@ function enrichDetail(
   }
   return Object.freeze({
     ...publicRecord,
+    ...courtBookingResponse(courtBooking),
     owner,
     participants: Object.freeze(participants),
   });
@@ -439,6 +454,7 @@ function enrichDetail(
 function enrichFeed(
   record: MatchFeedRecord,
   players: ReadonlyMap<AccountId, MatchPublicPlayerResponse>,
+  courtBooking: MatchCourtBookingProjection,
 ): MatchFeedResponse {
   const { title: _retiredTitle, ...publicRecord } = record;
   const owner = players.get(record.ownerAccountId);
@@ -457,6 +473,7 @@ function enrichFeed(
   }
   return Object.freeze({
     ...publicRecord,
+    ...courtBookingResponse(courtBooking),
     owner,
     participants: Object.freeze(participants),
   });
@@ -788,9 +805,17 @@ export class MatchApiService {
             transaction,
             [record],
           );
+          const courtBookings = await this.dependencies.matchReservations.readCourtBookings(
+            transaction,
+            [record.matchId],
+          );
           return Object.freeze({
             result,
-            match: enrichDetail(record, players),
+            match: enrichDetail(
+              record,
+              players,
+              courtBookings.get(record.matchId) ?? Object.freeze({ status: 'unbooked', stale: false }),
+            ),
           });
         },
       );
@@ -865,8 +890,16 @@ export class MatchApiService {
             transaction,
             typedRecords,
           );
+          const courtBookings = await this.dependencies.matchReservations.readCourtBookings(
+            transaction,
+            typedRecords.map((record) => record.matchId),
+          );
           return Object.freeze(
-            typedRecords.map((record) => enrichFeed(record, players)),
+            typedRecords.map((record) => enrichFeed(
+              record,
+              players,
+              courtBookings.get(record.matchId) ?? Object.freeze({ status: 'unbooked', stale: false }),
+            )),
           );
         },
       );
@@ -942,8 +975,16 @@ export class MatchApiService {
             transaction,
             typedRecords,
           );
+          const courtBookings = await this.dependencies.matchReservations.readCourtBookings(
+            transaction,
+            typedRecords.map((record) => record.matchId),
+          );
           return Object.freeze(
-            typedRecords.map((record) => enrichFeed(record, players)),
+            typedRecords.map((record) => enrichFeed(
+              record,
+              players,
+              courtBookings.get(record.matchId) ?? Object.freeze({ status: 'unbooked', stale: false }),
+            )),
           );
         },
       );
@@ -987,7 +1028,15 @@ export class MatchApiService {
             transaction,
             [safeRecord],
           );
-          return enrichDetail(safeRecord, players);
+          const courtBookings = await this.dependencies.matchReservations.readCourtBookings(
+            transaction,
+            [safeRecord.matchId],
+          );
+          return enrichDetail(
+            safeRecord,
+            players,
+            courtBookings.get(safeRecord.matchId) ?? Object.freeze({ status: 'unbooked', stale: false }),
+          );
         },
       );
       if (match === null) {

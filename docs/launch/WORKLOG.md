@@ -3737,3 +3737,38 @@
 - Next D3 gate is runtime implementation/wiring review against the verified
   schema, followed later by integration into `main` and a separately approved
   Selectel test rollout with health, business smoke and log checks.
+
+### 2026-08-10 — D3 / local match ↔ reservation runtime slice
+
+- Migration 034 remains `applied_verified`. The verified schema is now wired
+  locally to a bearer-protected owner flow that links a match only to the
+  owner's canonically confirmed D2 reservation with complete YCLIENTS binding.
+  Match and reservation uniqueness, ownership, transaction locking and exact
+  same-binding retries remain fail-closed.
+- Backend match feed/detail responses now expose explicit `unbooked` or
+  `confirmed` court-booking state. Planned date/time/court never imply a booked
+  court. Confirmed projection reads are bounded to one joined PostgreSQL query
+  for up to 50 matches; participant commands use the active reservation time.
+- The D2 exact read-only refresh updates the D3 link in the same transaction:
+  an admin move changes the effective match court/date/time and appends one
+  `court_moved` event; an admin cancellation releases the court guarantee,
+  appends `court_cancelled` and leaves the match itself intact. The refresh lock
+  order was reviewed and corrected to avoid reservation/advisory deadlock.
+- Lifecycle events are included in the existing recipient-scoped notification
+  feed and mark-read boundary. The frontend shows truthful booked/unbooked
+  state, lets only the backend match organizer open D2 create, links only a
+  `booking_created` confirmation, and offers a safe retry if the booking was
+  created but the link response failed.
+- No app-originated reservation cancel/reschedule, provider PUT/DELETE, new
+  migration, database/Selectel/YCLIENTS write, payment-field change, Supabase
+  dependency or production action was added.
+- Verification PASS: backend typecheck; backend unit `138 suites / 3366 tests`;
+  backend E2E `2 suites / 4 tests`; backend build; root E2E `90 passed / 1
+  skipped`; root build `1617 modules`; `git diff --check`.
+- Read-only local P0/P1 review: no open finding. D3 remains `in_progress`.
+  Deployment is `deployment_deferred_by_user`; Selectel test application
+  runtime remains D2 commit `ac5b4be4...`, with no container/health/smoke/log
+  action in this local gate.
+- Next gate: review the local checkpoint, then separately approve integration
+  into `main` and a coordinated Selectel test rollout (backend before frontend)
+  followed by health, TMA business smoke and log checks.

@@ -6,6 +6,7 @@ import {
   MatchNotificationType,
 } from './match-notification.types';
 import { MatchId } from './match.types';
+import { ReservationTarget } from '../reservations/reservation.types';
 
 export interface ListMatchNotificationsRequest {
   readonly limit: number;
@@ -33,6 +34,8 @@ export interface MatchNotificationResponse {
   readonly notificationType: MatchNotificationType;
   readonly createdAt: UnixEpochSeconds;
   readonly readAt?: UnixEpochSeconds;
+  readonly previousTarget?: ReservationTarget;
+  readonly currentTarget?: ReservationTarget;
 }
 
 export type MatchNotificationApiRejection =

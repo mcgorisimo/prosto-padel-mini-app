@@ -250,7 +250,12 @@ export function mapBackendMatchNotificationToApp(notification) {
   if (
     typeof notification.notificationId !== 'string' ||
     typeof notification.matchId !== 'string' ||
-    notification.notificationType !== 'waitlist_promoted' ||
+    ![
+      'waitlist_promoted',
+      'court_confirmed',
+      'court_moved',
+      'court_cancelled',
+    ].includes(notification.notificationType) ||
     !Number.isSafeInteger(createdAt) ||
     createdAt < 0 ||
     !Number.isFinite(createdAtDate.getTime()) ||
@@ -261,7 +266,25 @@ export function mapBackendMatchNotificationToApp(notification) {
   ) {
     return null;
   }
-  return Object.freeze({
+  const presentation = {
+    waitlist_promoted: {
+      title: 'Вы в матче',
+      body: 'Освободилось место — вы автоматически добавлены в состав.',
+    },
+    court_confirmed: {
+      title: 'Корт забронирован',
+      body: 'Организатор подтвердил бронь корта для матча.',
+    },
+    court_moved: {
+      title: 'Бронь матча перенесена',
+      body: 'Администратор клуба изменил корт, дату или время матча.',
+    },
+    court_cancelled: {
+      title: 'Бронь корта отменена',
+      body: 'Матч сохранён, но корт больше не забронирован.',
+    },
+  }[notification.notificationType];
+  const mapped = {
     notification_id: notification.notificationId,
     notification_type: notification.notificationType,
     match_id: notification.matchId,
@@ -273,6 +296,11 @@ export function mapBackendMatchNotificationToApp(notification) {
     body: 'Освободилось место — вы автоматически добавлены в состав.',
     notification_provider: 'backend',
     backendOwned: true,
+  };
+  return Object.freeze({
+    ...mapped,
+    title: presentation.title,
+    body: presentation.body,
   });
 }
 
@@ -511,10 +539,28 @@ export function createBackendMatchDraft(value) {
   return Object.freeze(draft);
 }
 
-export function mapBackendMatchToApp(record, profile = null) {
+export function mapBackendMatchToApp(
+  record,
+  profile = null,
+  courtNamesById = {},
+) {
   if (!record || typeof record !== 'object') return null;
-  const dateTime = moscowDateTime(record.startsAt);
+  const confirmedTarget = record.courtBookingStatus === 'confirmed'
+    ? record.courtBookingTarget
+    : null;
+  const effectiveStartsAt = confirmedTarget === null
+    ? record.startsAt
+    : Math.floor(Date.parse(confirmedTarget.startsAt) / 1_000);
+  const effectiveDurationMinutes = confirmedTarget === null
+    ? record.durationMinutes
+    : (Date.parse(confirmedTarget.endsAt) -
+        Date.parse(confirmedTarget.startsAt)) / 60_000;
+  const dateTime = moscowDateTime(effectiveStartsAt);
   if (!dateTime) return null;
+  if (!Number.isInteger(effectiveDurationMinutes)) return null;
+  const providerCourtName = confirmedTarget === null
+    ? null
+    : courtNamesById?.[confirmedTarget.courtId];
 
   const owner = profilePlayer(
     profile,
@@ -548,14 +594,20 @@ export function mapBackendMatchToApp(record, profile = null) {
     ownerId: record.ownerAccountId,
     owner_id: record.ownerAccountId,
     ownerName: owner.firstName,
-    startsAt: record.startsAt,
+    startsAt: effectiveStartsAt,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
     dateISO: dateTime.dateISO,
     time: dateTime.time,
-    duration: record.durationMinutes / 60,
-    courtId: record.courtId,
-    courtName: record.courtName,
+    duration: effectiveDurationMinutes / 60,
+    courtId: confirmedTarget === null
+      ? record.courtId
+      : `yclients:${confirmedTarget.courtId}`,
+    courtName: confirmedTarget === null
+      ? record.courtName
+      : typeof providerCourtName === 'string' && providerCourtName.trim()
+        ? providerCourtName.trim()
+        : 'Корт',
     courtType: record.courtType,
     kind: record.kind ?? 'match',
     type: record.kind ?? 'match',
@@ -579,5 +631,13 @@ export function mapBackendMatchToApp(record, profile = null) {
     version: record.version,
     terminalAt: record.terminalAt,
     backendOwned: true,
+    courtBookingStatus: record.courtBookingStatus,
+    courtBookingStale: record.courtBookingStale,
+    courtReservationId: record.courtReservationId,
+    courtBookingTarget: confirmedTarget,
+    plannedStartsAt: record.startsAt,
+    plannedDurationMinutes: record.durationMinutes,
+    plannedCourtId: record.courtId,
+    plannedCourtName: record.courtName,
   });
 }

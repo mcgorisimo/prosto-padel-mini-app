@@ -83,7 +83,14 @@ const MATCH_INVITATION_STATUSES = Object.freeze([
   'declined',
   'cancelled',
 ]);
-const MATCH_NOTIFICATION_TYPES = Object.freeze(['waitlist_promoted']);
+const MATCH_NOTIFICATION_TYPES = Object.freeze([
+  'waitlist_promoted',
+  'court_confirmed',
+  'court_moved',
+  'court_cancelled',
+]);
+const OFFSET_DATE_TIME_PATTERN =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/u;
 const MATCH_CHAT_MAX_BODY_CODE_POINTS = 2_000;
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f-\u009f]/u;
 const LEGACY_PROFILE_KEYS = Object.freeze([
@@ -471,6 +478,43 @@ function isBackendMatchParticipantIdentity(value) {
   );
 }
 
+function isBackendReservationTarget(value) {
+  return (
+    isPlainObject(value) &&
+    hasExactKeys(
+      Object.keys(value).sort(),
+      ['courtId', 'endsAt', 'serviceId', 'startsAt'],
+    ) &&
+    Number.isSafeInteger(value.serviceId) &&
+    value.serviceId > 0 &&
+    Number.isSafeInteger(value.courtId) &&
+    value.courtId > 0 &&
+    typeof value.startsAt === 'string' &&
+    OFFSET_DATE_TIME_PATTERN.test(value.startsAt) &&
+    typeof value.endsAt === 'string' &&
+    OFFSET_DATE_TIME_PATTERN.test(value.endsAt) &&
+    Number.isFinite(Date.parse(value.startsAt)) &&
+    Number.isFinite(Date.parse(value.endsAt)) &&
+    Date.parse(value.endsAt) > Date.parse(value.startsAt)
+  );
+}
+
+function isBackendMatchCourtBooking(value) {
+  if (
+    value.courtBookingStatus === 'unbooked' &&
+    value.courtBookingStale === false
+  ) {
+    return value.courtReservationId === undefined &&
+      value.courtBookingTarget === undefined;
+  }
+  return (
+    value.courtBookingStatus === 'confirmed' &&
+    typeof value.courtBookingStale === 'boolean' &&
+    isMatchId(value.courtReservationId) &&
+    isBackendReservationTarget(value.courtBookingTarget)
+  );
+}
+
 export function isBackendMatchFeedRecord(value) {
   if (
     !(
@@ -493,11 +537,15 @@ export function isBackendMatchFeedRecord(value) {
           'isRatingMatch',
           'occupiedSlots',
           'version',
+          'courtBookingStatus',
+          'courtBookingStale',
         ],
         [
           'pricePerPersonSnapshot',
           'owner',
           'participants',
+          'courtReservationId',
+          'courtBookingTarget',
         ],
       ) &&
       isMatchId(value.matchId) &&
@@ -521,7 +569,8 @@ export function isBackendMatchFeedRecord(value) {
       value.occupiedSlots >= 1 &&
       value.occupiedSlots <= 4 &&
       Number.isSafeInteger(value.version) &&
-      value.version >= 1
+      value.version >= 1 &&
+      isBackendMatchCourtBooking(value)
     )
   ) {
     return false;
@@ -579,6 +628,8 @@ export function isBackendMatchDetailRecord(value) {
         'isRatingMatch',
         'version',
         'participants',
+        'courtBookingStatus',
+        'courtBookingStale',
       ],
       [
         'ratingMin',
@@ -586,6 +637,8 @@ export function isBackendMatchDetailRecord(value) {
         'pricePerPersonSnapshot',
         'terminalAt',
         'owner',
+        'courtReservationId',
+        'courtBookingTarget',
       ],
     ) ||
     !isMatchId(value.matchId) ||
@@ -611,6 +664,7 @@ export function isBackendMatchDetailRecord(value) {
       !isUnixEpochSeconds(value.terminalAt)) ||
     !Array.isArray(value.participants) ||
     value.participants.length > 3
+    || !isBackendMatchCourtBooking(value)
   ) {
     return false;
   }
@@ -1158,6 +1212,13 @@ function freezeBackendMatchRecord(match) {
               Object.freeze({ ...participant })),
           ),
         }),
+    ...(match.courtBookingTarget === undefined
+      ? {}
+      : {
+          courtBookingTarget: Object.freeze({
+            ...match.courtBookingTarget,
+          }),
+        }),
   });
 }
 
@@ -1510,19 +1571,36 @@ function matchWaitlistMutationSuccess(
 }
 
 function isBackendMatchNotification(value) {
+  const optionalTargetKeys = value?.notificationType === 'court_moved'
+    ? ['previousTarget', 'currentTarget', 'readAt']
+    : value?.notificationType === 'court_confirmed'
+      ? ['currentTarget', 'readAt']
+      : value?.notificationType === 'court_cancelled'
+        ? ['previousTarget', 'readAt']
+        : ['readAt'];
   return (
     isPlainObject(value) &&
     hasOnlyAllowedKeys(
       value,
       ['notificationId', 'matchId', 'notificationType', 'createdAt'],
-      ['readAt'],
+      optionalTargetKeys,
     ) &&
     isMatchId(value.notificationId) &&
     isMatchId(value.matchId) &&
     MATCH_NOTIFICATION_TYPES.includes(value.notificationType) &&
     isUnixEpochSeconds(value.createdAt) &&
     (value.readAt === undefined ||
-      (isUnixEpochSeconds(value.readAt) && value.readAt >= value.createdAt))
+      (isUnixEpochSeconds(value.readAt) && value.readAt >= value.createdAt)) &&
+    (value.notificationType === 'waitlist_promoted'
+      ? value.previousTarget === undefined && value.currentTarget === undefined
+      : value.notificationType === 'court_confirmed'
+        ? value.previousTarget === undefined &&
+          isBackendReservationTarget(value.currentTarget)
+        : value.notificationType === 'court_moved'
+          ? isBackendReservationTarget(value.previousTarget) &&
+            isBackendReservationTarget(value.currentTarget)
+          : isBackendReservationTarget(value.previousTarget) &&
+            value.currentTarget === undefined)
   );
 }
 
@@ -1539,7 +1617,15 @@ function isBackendMatchNotificationCursor(value) {
 }
 
 function freezeBackendMatchNotification(notification) {
-  return Object.freeze({ ...notification });
+  return Object.freeze({
+    ...notification,
+    ...(notification.previousTarget === undefined
+      ? {}
+      : { previousTarget: Object.freeze({ ...notification.previousTarget }) }),
+    ...(notification.currentTarget === undefined
+      ? {}
+      : { currentTarget: Object.freeze({ ...notification.currentTarget }) }),
+  });
 }
 
 function matchNotificationListSuccess(body, maximumLength = 50) {
@@ -1907,6 +1993,34 @@ function matchDescriptionUpdateSuccess(body, expectedMatchId) {
   });
 }
 
+function matchReservationLinkSuccess(body) {
+  if (
+    !isPlainObject(body) ||
+    !hasExactKeys(
+      Object.keys(body).sort(),
+      [
+        'courtBookingStale',
+        'courtBookingStatus',
+        'courtBookingTarget',
+        'courtReservationId',
+        'persistence',
+      ],
+    ) ||
+    !['applied', 'idempotent_retry'].includes(body.persistence) ||
+    !isBackendMatchCourtBooking(body) ||
+    body.courtBookingStatus !== 'confirmed'
+  ) {
+    return null;
+  }
+  return frozen('match_reservation_linked', {
+    persistence: body.persistence,
+    courtBookingStatus: body.courtBookingStatus,
+    courtBookingStale: body.courtBookingStale,
+    courtReservationId: body.courtReservationId,
+    courtBookingTarget: Object.freeze({ ...body.courtBookingTarget }),
+  });
+}
+
 function classifyRefresh(status, body) {
   const code = exactPublicCode(body);
   if (status === 401 && code === 'session_expired') {
@@ -1981,6 +2095,17 @@ function classifyMatch(status, body) {
     match_participant_not_active: 'participant_not_active',
     match_request_conflict: 'request_conflict',
     match_conflict: 'match_conflict',
+    match_reservation_invalid_request: 'invalid_request',
+    match_reservation_forbidden: 'forbidden',
+    match_reservation_not_found: 'reservation_not_found',
+    match_reservation_match_terminal: 'match_closed',
+    match_reservation_not_confirmed: 'reservation_not_confirmed',
+    match_reservation_binding_missing: 'provider_binding_missing',
+    match_reservation_match_already_linked: 'match_already_linked',
+    match_reservation_already_linked: 'reservation_already_linked',
+    match_reservation_duration_unsupported: 'unsupported_duration',
+    match_reservation_conflict: 'match_conflict',
+    match_reservation_service_unavailable: 'temporary_unavailable',
   });
   return frozen('rejected', {
     reason: reasons[code] ?? 'internal_error',
@@ -2363,6 +2488,8 @@ export function createBackendSessionClient(dependencies = {}) {
                       ? `${MATCHES_PATH}/${encodeURIComponent(matchId)}/invitations?limit=${operationPayload.limit}`
                 : operation === 'match_detail'
                   ? `${MATCHES_PATH}/${encodeURIComponent(matchId)}`
+                  : operation === 'match_reservation_link'
+                    ? `${MATCHES_PATH}/${encodeURIComponent(matchId)}/reservation-link`
                   : operation === 'match_update_description'
                     ? `${MATCHES_PATH}/${encodeURIComponent(matchId)}`
                   : operation === 'match_create'
@@ -2444,6 +2571,11 @@ export function createBackendSessionClient(dependencies = {}) {
                         }
                     : operation === 'match_create'
                       ? { ...operationPayload, requestKey }
+                      : operation === 'match_reservation_link'
+                        ? {
+                            requestKey,
+                            reservationId: operationPayload.reservationId,
+                          }
                       : operation === 'match_invitation_create'
                         ? {
                             requestKey,
@@ -2774,6 +2906,15 @@ export function createBackendSessionClient(dependencies = {}) {
           ? frozen('success', { result })
           : frozen('malformed_response');
       }
+      if (
+        operation === 'match_reservation_link' &&
+        response.status === 200
+      ) {
+        const result = matchReservationLinkSuccess(body);
+        return result
+          ? frozen('success', { result })
+          : frozen('malformed_response');
+      }
       if (operation === 'match_join' && response.status === 200) {
         const result = matchParticipantSuccess(
           body,
@@ -2916,6 +3057,9 @@ export function createBackendSessionClient(dependencies = {}) {
         operation === 'match_join' ||
         operation === 'match_leave') &&
         !isMatchId(operationPayload?.matchId)) ||
+      (operation === 'match_reservation_link' &&
+        (!isMatchId(operationPayload?.matchId) ||
+          !isMatchId(operationPayload?.reservationId))) ||
       (operation === 'match_create' &&
         !isBackendCreateMatchDraft(operationPayload)) ||
       (operation === 'match_update_description' &&
@@ -3046,6 +3190,7 @@ export function createBackendSessionClient(dependencies = {}) {
       operation === 'match_update_description' ||
       operation === 'match_join' ||
       operation === 'match_leave' ||
+      operation === 'match_reservation_link' ||
       operation === 'match_invitation_create' ||
       operation === 'match_invitation_accept' ||
       operation === 'match_invitation_decline' ||
@@ -3163,6 +3308,13 @@ export function createBackendSessionClient(dependencies = {}) {
       execute('match_join', credential, options, { matchId }),
     leaveMatch: (credential, matchId, options) =>
       execute('match_leave', credential, options, { matchId }),
+    linkMatchReservation: (credential, matchId, reservationId, options) =>
+      execute(
+        'match_reservation_link',
+        credential,
+        options,
+        { matchId, reservationId },
+      ),
     searchPlayers: (credential, query, limit = 8, options) =>
       execute('player_search', credential, options, { query, limit }),
     listIncomingMatchInvitations: (credential, limit = 20, options) =>

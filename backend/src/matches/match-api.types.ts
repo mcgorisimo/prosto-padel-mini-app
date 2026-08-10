@@ -10,6 +10,7 @@ import {
   MatchScenario,
   MatchSlotNumber,
 } from './match.types';
+import { MatchCourtBookingResponse } from './match-reservation-api.types';
 
 export interface CreateMatchRequest {
   readonly requestKey: string;
@@ -91,17 +92,19 @@ export interface MatchPublicParticipantResponse
   readonly slotNumber: MatchSlotNumber;
 }
 
-export interface MatchFeedResponse
-  extends Omit<MatchFeedRecord, 'participants' | 'title'> {
+export type MatchFeedResponse =
+  Omit<MatchFeedRecord, 'participants' | 'title'> &
+  MatchCourtBookingResponse & Readonly<{
   readonly owner: MatchPublicPlayerResponse;
   readonly participants: readonly MatchPublicParticipantResponse[];
-}
+}>;
 
-export interface MatchDetailResponse
-  extends Omit<MatchDetailRecord, 'participants' | 'title'> {
+export type MatchDetailResponse =
+  Omit<MatchDetailRecord, 'participants' | 'title'> &
+  MatchCourtBookingResponse & Readonly<{
   readonly owner: MatchPublicPlayerResponse;
   readonly participants: readonly MatchPublicParticipantResponse[];
-}
+}>;
 
 export type MatchApiRejection =
   | 'invalid_request'

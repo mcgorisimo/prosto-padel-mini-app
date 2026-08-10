@@ -84,6 +84,14 @@ function notificationRow(
     created_at: String(NOW),
     read_at: null,
     version: '1',
+    previous_service_id: null,
+    previous_resource_id: null,
+    previous_datetime_text: null,
+    previous_end_datetime_text: null,
+    current_service_id: null,
+    current_resource_id: null,
+    current_datetime_text: null,
+    current_end_datetime_text: null,
     ...overrides,
   };
 }
@@ -231,7 +239,7 @@ describe('PostgresMatchNotificationRepository', () => {
   });
 
   it('hides an absent or foreign notification as not found', async () => {
-    const transaction = new FakeTransaction([result([])]);
+    const transaction = new FakeTransaction([result([]), result([])]);
     await expect(
       new PostgresMatchNotificationRepository().markRead(transaction, {
         notificationId: NOTIFICATION_ID,
@@ -241,6 +249,50 @@ describe('PostgresMatchNotificationRepository', () => {
     ).resolves.toEqual({
       outcome: 'rejected',
       reason: 'notification_not_found',
+    });
+  });
+
+  it('lists and marks a court move lifecycle notification for one recipient', async () => {
+    const lifecycleRow = notificationRow({
+      id: OLDER_NOTIFICATION_ID,
+      waitlist_entry_id: null,
+      notification_type: 'court_moved',
+      previous_service_id: '11',
+      previous_resource_id: '22',
+      previous_datetime_text: '2027-01-17T10:00:00+03:00',
+      previous_end_datetime_text: '2027-01-17T11:30:00+03:00',
+      current_service_id: '11',
+      current_resource_id: '55',
+      current_datetime_text: '2027-01-18T12:00:00+03:00',
+      current_end_datetime_text: '2027-01-18T13:30:00+03:00',
+      unread_count: '1',
+    });
+    const listed = new FakeTransaction([result([lifecycleRow])]);
+    const marked = new FakeTransaction([
+      result([]),
+      result([{ ...lifecycleRow, read_at: String(NOW), version: '2', was_updated: true }]),
+    ]);
+    const repository = new PostgresMatchNotificationRepository();
+
+    await expect(repository.list(listed, {
+      recipientAccountId: RECIPIENT_ID,
+      limit: 50,
+    })).resolves.toMatchObject({
+      notifications: [{
+        notificationType: 'court_moved',
+        previousTarget: { courtId: 22 },
+        currentTarget: { courtId: 55 },
+      }],
+      unreadCount: 1,
+    });
+    await expect(repository.markRead(marked, {
+      notificationId: OLDER_NOTIFICATION_ID,
+      recipientAccountId: RECIPIENT_ID,
+      now: NOW,
+    })).resolves.toMatchObject({
+      outcome: 'notification_read',
+      persistence: 'applied',
+      notification: { notificationType: 'court_moved', readAt: NOW },
     });
   });
 

@@ -113,6 +113,8 @@ test.describe('backend match credential lifecycle', () => {
         isRatingMatch: false,
         pricePerPersonSnapshot: 750,
         version: 1,
+        courtBookingStatus: 'unbooked',
+        courtBookingStale: false,
         owner: {
           playerId: parameters.accountId,
           firstName: 'Synthetic',
@@ -148,6 +150,8 @@ test.describe('backend match credential lifecycle', () => {
         pricePerPersonSnapshot: detail.pricePerPersonSnapshot,
         occupiedSlots: 2,
         version: detail.version,
+        courtBookingStatus: detail.courtBookingStatus,
+        courtBookingStale: detail.courtBookingStale,
         owner: detail.owner,
         participants: detail.participants,
       };
@@ -447,6 +451,85 @@ test.describe('backend match credential lifecycle', () => {
         exactCreateBody: true,
       },
     ]);
+  });
+
+  test('links a confirmed reservation to a match through one exact bearer contract', async ({
+    page,
+  }) => {
+    await page.goto('/');
+
+    const summary = await page.evaluate(async (parameters) => {
+      const { createBackendSessionClient } = await import(
+        '/src/lib/backendSessionClient.js'
+      );
+      let contract = null;
+      const client = createBackendSessionClient({
+        cryptoImpl: { randomUUID: () => parameters.requestKey },
+        fetchImpl: async (url, options) => {
+          contract = {
+            url,
+            method: options.method,
+            authorization: options.headers.Authorization,
+            contentType: options.headers['Content-Type'],
+            cache: options.cache,
+            credentials: options.credentials,
+            redirect: options.redirect,
+            body: JSON.parse(options.body),
+          };
+          return new Response(JSON.stringify({
+            persistence: 'applied',
+            courtBookingStatus: 'confirmed',
+            courtBookingStale: false,
+            courtReservationId: parameters.reservationId,
+            courtBookingTarget: {
+              serviceId: 30539679,
+              courtId: 5762241,
+              startsAt: '2030-01-03T12:30:00+03:00',
+              endsAt: '2030-01-03T14:00:00+03:00',
+            },
+          }), { status: 200 });
+        },
+      });
+
+      const result = await client.linkMatchReservation(
+        parameters.credential,
+        parameters.matchId,
+        parameters.reservationId,
+      );
+      return {
+        contract,
+        result,
+        frozen: Object.isFrozen(result) &&
+          Object.isFrozen(result.courtBookingTarget),
+      };
+    }, {
+      credential: SYNTHETIC_CREDENTIAL,
+      matchId: MATCH_ID,
+      reservationId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+      requestKey: REQUEST_KEY,
+    });
+
+    expect(summary.contract).toEqual({
+      url: `/api/v1/matches/${MATCH_ID}/reservation-link`,
+      method: 'POST',
+      authorization: `Bearer ${SYNTHETIC_CREDENTIAL}`,
+      contentType: 'application/json',
+      cache: 'no-store',
+      credentials: 'omit',
+      redirect: 'error',
+      body: {
+        requestKey: REQUEST_KEY,
+        reservationId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+      },
+    });
+    expect(summary.result).toMatchObject({
+      outcome: 'match_reservation_linked',
+      persistence: 'applied',
+      courtBookingStatus: 'confirmed',
+      courtBookingStale: false,
+      courtReservationId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+    });
+    expect(summary.frozen).toBe(true);
   });
 
   test('maps bearer join eligibility rejections without a legacy fallback', async ({
@@ -1194,6 +1277,24 @@ test.describe('backend match credential lifecycle', () => {
         notificationType: 'waitlist_promoted',
         createdAt: 1_900_000_000,
       };
+      const movedNotification = {
+        notificationId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+        matchId: parameters.matchId,
+        notificationType: 'court_moved',
+        createdAt: 1_900_000_001,
+        previousTarget: {
+          serviceId: 30539679,
+          courtId: 5730531,
+          startsAt: '2030-01-02T10:30:00+03:00',
+          endsAt: '2030-01-02T12:00:00+03:00',
+        },
+        currentTarget: {
+          serviceId: 30539679,
+          courtId: 5762241,
+          startsAt: '2030-01-03T12:30:00+03:00',
+          endsAt: '2030-01-03T14:00:00+03:00',
+        },
+      };
       const client = createBackendSessionClient({
         fetchImpl: async (url, options) => {
           contracts.push({
@@ -1216,8 +1317,8 @@ test.describe('backend match credential lifecycle', () => {
             }), { status: 200 });
           }
           return new Response(JSON.stringify({
-            notifications: [notification],
-            unreadCount: 1,
+            notifications: [movedNotification, notification],
+            unreadCount: 2,
           }), { status: 200 });
         },
       });
@@ -1241,6 +1342,9 @@ test.describe('backend match credential lifecycle', () => {
         }), { status: 200 }),
       }).listMatchNotifications(parameters.credential, 50);
       const mapped = mapBackendMatchNotificationToApp(
+        listed.notifications[1],
+      );
+      const mappedMoved = mapBackendMatchNotificationToApp(
         listed.notifications[0],
       );
       const mappedInvalidDate = mapBackendMatchNotificationToApp({
@@ -1255,6 +1359,7 @@ test.describe('backend match credential lifecycle', () => {
         invalid,
         malformed,
         mapped,
+        mappedMoved,
         mappedInvalidDate,
         publicResultsHideCredential:
           !JSON.stringify([listed, marked]).includes(parameters.credential),
@@ -1305,6 +1410,16 @@ test.describe('backend match credential lifecycle', () => {
       notification_type: 'waitlist_promoted',
       match_id: MATCH_ID,
       read_at: null,
+      notification_provider: 'backend',
+      backendOwned: true,
+    });
+    expect(summary.mappedMoved).toMatchObject({
+      notification_id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+      notification_type: 'court_moved',
+      match_id: MATCH_ID,
+      read_at: null,
+      title: 'Бронь матча перенесена',
+      body: 'Администратор клуба изменил корт, дату или время матча.',
       notification_provider: 'backend',
       backendOwned: true,
     });
@@ -2319,6 +2434,8 @@ test.describe('backend match credential lifecycle', () => {
         isRatingMatch: false,
         pricePerPersonSnapshot: 750,
         version: 2,
+        courtBookingStatus: 'unbooked',
+        courtBookingStale: false,
         owner,
         participants: [{
           ...invitedPlayer,
@@ -4136,6 +4253,9 @@ test.describe('backend match credential lifecycle', () => {
         shouldApplyBackendMatchDetail,
         shouldApplyBackendMatchFeedResponse,
       } = await import('/src/lib/backendMatchAdapter.js');
+      const { getMatchBookingStatus } = await import(
+        '/src/lib/matchBookingStatus.js'
+      );
       const {
         isPrivateMatchCreationEnabled,
       } = await import('/src/components/MatchCreationScreen.jsx');
@@ -4178,6 +4298,8 @@ test.describe('backend match credential lifecycle', () => {
         isRatingMatch: true,
         pricePerPersonSnapshot: 750,
         version: 2,
+        courtBookingStatus: 'unbooked',
+        courtBookingStale: false,
         owner: {
           playerId: parameters.accountId,
           firstName: 'Synthetic',
@@ -4206,6 +4328,32 @@ test.describe('backend match credential lifecycle', () => {
         rating: 3,
         isVerified: true,
       });
+      const confirmedMatch = mapBackendMatchToApp(
+        {
+          ...detailRecord,
+          courtBookingStatus: 'confirmed',
+          courtBookingStale: true,
+          courtReservationId:
+            'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+          courtBookingTarget: {
+            serviceId: 30539679,
+            courtId: 5762241,
+            startsAt: '2030-01-03T12:30:00+03:00',
+            endsAt: '2030-01-03T14:00:00+03:00',
+          },
+        },
+        {
+          accountId: parameters.accountId,
+          firstName: 'Synthetic',
+          lastName: 'Owner',
+          username: 'synthetic_owner',
+          photoUrl: null,
+          sidePreference: 'Both',
+          rating: 3,
+          isVerified: true,
+        },
+        { 5762241: 'Court 2' },
+      );
       const matchForOtherViewer = mapBackendMatchToApp(
         detailRecord,
         {
@@ -4317,6 +4465,8 @@ test.describe('backend match credential lifecycle', () => {
         isRatingMatch: true,
         pricePerPersonSnapshot: 750,
         version: 2,
+        courtBookingStatus: 'unbooked',
+        courtBookingStale: false,
         owner: {
           playerId: parameters.accountId,
           firstName: 'Synthetic',
@@ -4595,6 +4745,19 @@ test.describe('backend match credential lifecycle', () => {
             .filter(Boolean)
             .map((player) => player.sidePreference),
         },
+        courtBooking: {
+          unbooked: getMatchBookingStatus(match),
+          confirmed: getMatchBookingStatus(confirmedMatch),
+          confirmedProjection: {
+            dateISO: confirmedMatch.dateISO,
+            time: confirmedMatch.time,
+            duration: confirmedMatch.duration,
+            courtId: confirmedMatch.courtId,
+            courtName: confirmedMatch.courtName,
+            plannedStartsAt: confirmedMatch.plannedStartsAt,
+            plannedCourtId: confirmedMatch.plannedCourtId,
+          },
+        },
         crossViewerPublicNames:
           matchForOtherViewer.filledSlots
             .filter(Boolean)
@@ -4647,6 +4810,27 @@ test.describe('backend match credential lifecycle', () => {
       slotRatings: [3, 4.25],
       slotVerification: [true, true],
       slotSides: ['Both', null],
+    });
+    expect(summary.courtBooking).toEqual({
+      unbooked: {
+        isBooked: false,
+        stale: false,
+        label: 'Корт не забронирован',
+      },
+      confirmed: {
+        isBooked: true,
+        stale: true,
+        label: 'Корт забронирован',
+      },
+      confirmedProjection: {
+        dateISO: '2030-01-03',
+        time: '12:30',
+        duration: 1.5,
+        courtId: 'yclients:5762241',
+        courtName: 'Court 2',
+        plannedStartsAt: 1893569400,
+        plannedCourtId: 'court-1',
+      },
     });
     expect(summary.crossViewerPublicNames).toEqual([
       'Synthetic',
@@ -5292,6 +5476,8 @@ test.describe('backend match credential lifecycle', () => {
         isRatingMatch: false,
         pricePerPersonSnapshot: 750,
         version: 2,
+        courtBookingStatus: 'unbooked',
+        courtBookingStale: false,
         owner,
         participants: [{ ...currentPlayer, slotNumber: 2 }],
       };

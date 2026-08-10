@@ -54,6 +54,8 @@ function match() {
     ratingMax: 4,
     isRatingMatch: true,
     version: 1,
+    courtBookingStatus: 'unbooked' as const,
+    courtBookingStale: false as const,
     owner: {
       playerId: ACCOUNT_ID,
       firstName: 'Synthetic',

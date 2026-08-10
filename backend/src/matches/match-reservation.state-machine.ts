@@ -290,7 +290,6 @@ function sameLinkIdentity(
   input: ActivateConfirmedMatchReservationInput,
 ): boolean {
   return (
-    link.linkId === input.linkId &&
     link.matchId === input.match.matchId &&
     link.reservationId === input.reservation.reservationId &&
     link.ownerAccountId === input.match.ownerAccountId

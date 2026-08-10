@@ -68,13 +68,25 @@ type QueuedQuery =
 
 class FakeTransaction implements PostgresTransaction {
   readonly calls: QueryCall[] = [];
+  readonly reservationTargetCalls: QueryCall[] = [];
 
-  constructor(private readonly queued: QueuedQuery[]) {}
+  constructor(
+    private readonly queued: QueuedQuery[],
+    private readonly reservationTarget: QueryResult<QueryResultRow> =
+      queryResult([]),
+  ) {}
 
   async query<Row extends QueryResultRow = QueryResultRow>(
     text: string,
     values: readonly unknown[] = [],
   ): Promise<QueryResult<Row>> {
+    if (
+      text.includes('FROM backend_match.match_reservation_links') &&
+      text.includes('FOR SHARE')
+    ) {
+      this.reservationTargetCalls.push({ text, values });
+      return this.reservationTarget as QueryResult<Row>;
+    }
     this.calls.push({ text, values });
     const next = this.queued.shift();
     if (next === undefined) {
@@ -772,7 +784,8 @@ describe('PostgresMatchRepository', () => {
     expect(sql.toLowerCase()).toContain(
       'array_agg( participants.slot_number order by participants.slot_number )',
     );
-    expect(sql).toContain('matches.starts_at > $1');
+    expect(sql).toContain('reservation_links.target_datetime');
+    expect(sql).toContain('matches.starts_at ) > $1');
     expect(sql).not.toContain('matches.starts_at >= $1');
     expect(transaction.calls[0].values).toEqual([1_800_000_000, 20]);
   });
@@ -850,7 +863,8 @@ describe('PostgresMatchRepository', () => {
       participants: [{ playerId: PLAYER_ID, slotNumber: 2 }],
     });
     const sql = normalizeSql(transaction.calls[0].text);
-    expect(sql).toContain('matches.starts_at > $1');
+    expect(sql).toContain('reservation_links.target_datetime');
+    expect(sql).toContain('matches.starts_at ) > $1');
     expect(sql).toContain('matches.owner_account_id = $2');
     expect(sql).toContain(
       'account_participants.account_id = $2',
@@ -1097,6 +1111,34 @@ describe('PostgresMatchRepository', () => {
       'open',
       1,
     ]);
+  });
+
+  it('uses the active reservation target when deciding whether a join is still open', async () => {
+    const startsAt = new Date(1_800_000_100 * 1_000).toISOString();
+    const endsAt = new Date((1_800_000_100 + 5_400) * 1_000).toISOString();
+    const transaction = new FakeTransaction(
+      [
+        queryResult([matchRow()]),
+        queryResult([]),
+        queryResult([commandRow()]),
+        queryResult([]),
+        actorRatingResult(),
+      ],
+      queryResult([{
+        target_datetime_text: startsAt,
+        target_end_datetime_text: endsAt,
+      }]),
+    );
+
+    await expect(repository().join(
+      transaction,
+      joinCommand({ now: unixEpochSeconds(1_800_000_100) }),
+    )).resolves.toEqual({ outcome: 'rejected', reason: 'match_started' });
+    expect(transaction.reservationTargetCalls).toHaveLength(1);
+    expect(transaction.calls.some(({ text }) => {
+      const sql = normalizeSql(text).toLowerCase();
+      return sql.startsWith('insert ') || sql.startsWith('update ');
+    })).toBe(false);
   });
 
   it('reserves pending invitation slots from ordinary joins', async () => {

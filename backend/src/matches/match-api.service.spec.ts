@@ -58,6 +58,7 @@ interface Harness {
   readonly promoteAvailable: jest.Mock;
   readonly closeForParticipant: jest.Mock;
   readonly releaseLineupForParticipant: jest.Mock;
+  readonly readCourtBookings: jest.Mock;
 }
 
 function request(
@@ -163,6 +164,7 @@ function createHarness(): Harness {
   const promoteAvailable = jest.fn().mockResolvedValue(0);
   const closeForParticipant = jest.fn().mockResolvedValue(false);
   const releaseLineupForParticipant = jest.fn().mockResolvedValue(false);
+  const readCourtBookings = jest.fn(async () => new Map());
   const service = new MatchApiService({
     transactions: {
       run: <T>(
@@ -183,6 +185,7 @@ function createHarness(): Harness {
     publicProfiles: { findByPlayerIds },
     waitlist: { promoteAvailable, closeForParticipant },
     lineups: { releaseForParticipantLeave: releaseLineupForParticipant },
+    matchReservations: { readCourtBookings },
     clock: { nowEpochSeconds: clockNow },
   });
   return {
@@ -200,6 +203,7 @@ function createHarness(): Harness {
     promoteAvailable,
     closeForParticipant,
     releaseLineupForParticipant,
+    readCourtBookings,
   };
 }
 
@@ -486,6 +490,23 @@ describe('MatchApiService', () => {
         slotNumber: 2 as const,
       }),
     ]);
+    const linkedReservationId = deterministicUuid('d3-match-api-reservation');
+    const linkedTarget = Object.freeze({
+      serviceId: 11,
+      courtId: 55,
+      startsAt: '2027-01-18T12:00:00+03:00',
+      endsAt: '2027-01-18T13:30:00+03:00',
+    });
+    harness.readCourtBookings.mockImplementation(
+      async (_transaction, matchIds: readonly MatchId[]) => new Map(
+        matchIds.map((matchId) => [matchId, Object.freeze({
+          status: 'confirmed' as const,
+          stale: false,
+          reservationId: linkedReservationId,
+          target: linkedTarget,
+        })]),
+      ),
+    );
     const feedRecord = {
       ...detail(),
       scenario: 'social' as const,
@@ -521,6 +542,10 @@ describe('MatchApiService', () => {
       outcome: 'found',
       matches: [
         {
+          courtBookingStatus: 'confirmed',
+          courtBookingStale: false,
+          courtReservationId: linkedReservationId,
+          courtBookingTarget: linkedTarget,
           owner: {
             playerId: ACCOUNT_ID,
             firstName: 'Synthetic',
@@ -550,6 +575,10 @@ describe('MatchApiService', () => {
     expect(found).toMatchObject({
       outcome: 'found',
       match: {
+        courtBookingStatus: 'confirmed',
+        courtBookingStale: false,
+        courtReservationId: linkedReservationId,
+        courtBookingTarget: linkedTarget,
         owner: {
           playerId: ACCOUNT_ID,
           firstName: 'Synthetic',
@@ -579,6 +608,10 @@ describe('MatchApiService', () => {
       outcome: 'found',
       matches: [
         {
+          courtBookingStatus: 'confirmed',
+          courtBookingStale: false,
+          courtReservationId: linkedReservationId,
+          courtBookingTarget: linkedTarget,
           owner: {
             playerId: ACCOUNT_ID,
             firstName: 'Synthetic',

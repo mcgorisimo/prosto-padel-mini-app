@@ -388,6 +388,7 @@ export default function App({
   const [toast, setToast]            = useState(null);
   const [selectedMatch, setSelected] = useState(null);
   const [selectedBookingReservationId, setSelectedBookingReservationId] = useState(null);
+  const [selectedBookingMatchId, setSelectedBookingMatchId] = useState(null);
   const [screen, setScreen] = useState(null);
   const backendDetailRequestRef = useRef(0);
   const backendFeedRequestRef = useRef(0);
@@ -499,7 +500,11 @@ export default function App({
         throw new Error('BACKEND_MATCH_FEED_REJECTED');
       }
       const matches = result.matches
-        .map((record) => mapBackendMatchToApp(record, backendProfile))
+        .map((record) => mapBackendMatchToApp(
+          record,
+          backendProfile,
+          backendCourtNamesById,
+        ))
         .filter(Boolean);
       setBackendMatchNow(Math.floor(Date.now() / 1_000));
       setBackendFeedMatches(matches);
@@ -525,6 +530,7 @@ export default function App({
     backendMatchActions,
     backendMatchMode,
     backendMatchesReady,
+    backendCourtNamesById,
     backendProfile,
     usesBackendMatches,
   ]);
@@ -549,7 +555,11 @@ export default function App({
         throw new Error('BACKEND_ACCOUNT_MATCHES_REJECTED');
       }
       const matches = result.matches
-        .map((record) => mapBackendMatchToApp(record, backendProfile))
+        .map((record) => mapBackendMatchToApp(
+          record,
+          backendProfile,
+          backendCourtNamesById,
+        ))
         .filter(Boolean);
       setBackendMatchNow(Math.floor(Date.now() / 1_000));
       setBackendAccountMatches(matches);
@@ -560,6 +570,7 @@ export default function App({
   }, [
     backendMatchActions,
     backendMatchesReady,
+    backendCourtNamesById,
     backendProfile,
     usesBackendMatches,
   ]);
@@ -2192,6 +2203,7 @@ const handleBookSlot = async (booking) => {
         const detailedMatch = mapBackendMatchToApp(
           result.match,
           backendProfile,
+          backendCourtNamesById,
         );
         if (!detailedMatch) return;
         storeBackendMatch(detailedMatch);
@@ -2214,6 +2226,41 @@ const handleBookSlot = async (booking) => {
     setOutgoingInvitations([]);
     setSelected(null);
     setScreen(null);
+  };
+
+  const openCourtBookingForMatch = (match) => {
+    if (!isBackendOwnedMatch(match)) return;
+    backendDetailRequestRef.current += 1;
+    setSelectedBookingReservationId(null);
+    setSelectedBookingMatchId(match.id);
+    setSelected(null);
+    setScreen(null);
+    setActiveTab('booking');
+  };
+
+  const linkCreatedReservationToMatch = async (matchId, reservationId) => {
+    if (
+      !backendMatchesReady ||
+      typeof backendMatchActions?.linkMatchReservation !== 'function'
+    ) {
+      return Object.freeze({ outcome: 'rejected', reason: 'unavailable' });
+    }
+    const result = await backendMatchActions.linkMatchReservation(
+      matchId,
+      reservationId,
+    );
+    if (result?.outcome !== 'match_reservation_linked') return result;
+    setSelectedBookingMatchId(null);
+    const refreshed = await backendMatchActions.loadMatch(matchId);
+    if (refreshed?.outcome === 'match_loaded') {
+      const match = mapBackendMatchToApp(
+        refreshed.match,
+        backendProfile,
+        backendCourtNamesById,
+      );
+      if (match) storeBackendMatch(match);
+    }
+    return result;
   };
 
   const beginInvitationAction = (key) => {
@@ -2249,6 +2296,7 @@ const handleBookSlot = async (booking) => {
       const updatedMatch = mapBackendMatchToApp(
         result.match,
         backendProfile,
+        backendCourtNamesById,
       );
       if (!updatedMatch) return null;
       const acceptedMatch = preferConfirmedBackendMatchMutation(
@@ -2350,7 +2398,11 @@ const handleBookSlot = async (booking) => {
           if (result.outcome !== 'match_loaded') {
             throw new Error('BACKEND_NOTIFICATION_MATCH_UNAVAILABLE');
           }
-          match = mapBackendMatchToApp(result.match, backendProfile);
+          match = mapBackendMatchToApp(
+            result.match,
+            backendProfile,
+            backendCourtNamesById,
+          );
           if (!match) {
             throw new Error('BACKEND_NOTIFICATION_MATCH_INVALID');
           }
@@ -2705,6 +2757,7 @@ const handleBookSlot = async (booking) => {
       const createdMatch = mapBackendMatchToApp(
         result.match,
         backendProfile,
+        backendCourtNamesById,
       );
       if (!createdMatch) {
         const malformedMatch = new Error('match_response_invalid');
@@ -2900,6 +2953,7 @@ const handleBookSlot = async (booking) => {
         onJoinMatch={handleJoinMatch}
         onLeaveMatch={handleLeaveMatch}
         onRefreshMatch={handleRefreshMatch}
+        onBookCourt={openCourtBookingForMatch}
         onLoadWaitlist={
           isBackendOwnedMatch(selectedMatch)
             ? backendMatchActions?.listMatchWaitlist
@@ -3069,6 +3123,7 @@ const handleBookSlot = async (booking) => {
             onViewDetails={openMatchDetails}
             onBookCourt={() => {
               setSelectedBookingReservationId(null);
+              setSelectedBookingMatchId(null);
               setActiveTab('booking');
             }}
             onOpenBooking={(reservationId) => {
@@ -3170,8 +3225,11 @@ const handleBookSlot = async (booking) => {
             allMatches={allMatches}
             availabilityActions={backendBookingAvailabilityActions}
             initialReservationId={selectedBookingReservationId}
+            matchIdToLink={selectedBookingMatchId}
+            onLinkMatchReservation={linkCreatedReservationToMatch}
             onCloseReservation={() => {
               setSelectedBookingReservationId(null);
+              setSelectedBookingMatchId(null);
               setActiveTab('home');
             }}
             courtNamesById={backendCourtNamesById}
@@ -3193,7 +3251,10 @@ const handleBookSlot = async (booking) => {
       <BottomNav
         active={activeTab}
         setActive={(nextTab) => {
-          if (nextTab === 'booking') setSelectedBookingReservationId(null);
+          if (nextTab === 'booking') {
+            setSelectedBookingReservationId(null);
+            setSelectedBookingMatchId(null);
+          }
           setActiveTab(nextTab);
         }}
         isAdmin={isAdmin}

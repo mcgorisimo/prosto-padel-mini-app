@@ -1,6 +1,17 @@
 const BOOKED_STATUSES = new Set(['booked', 'confirmed', 'reserved', 'paid']);
 
 export function getMatchBookingStatus(match = {}) {
+  if (
+    match.backendOwned === true ||
+    match.courtBookingStatus !== undefined
+  ) {
+    const isBooked = match.courtBookingStatus === 'confirmed';
+    return {
+      isBooked,
+      stale: isBooked && match.courtBookingStale === true,
+      label: isBooked ? 'Корт забронирован' : 'Корт не забронирован',
+    };
+  }
   const scenario = match.scenario;
   const bookingStatus = match.bookingStatus ?? match.booking_status;
   const isPrivate = match.isPrivate === true || match.is_private === true || scenario === 'private';

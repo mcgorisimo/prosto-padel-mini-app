@@ -6,8 +6,12 @@ import {
   isMatchNotificationId,
   isMatchNotificationType,
 } from '../matches/match-notification.types';
-import { isMatchWaitlistEntryId } from '../matches/match-waitlist.types';
+import {
+  MatchWaitlistEntryId,
+  isMatchWaitlistEntryId,
+} from '../matches/match-waitlist.types';
 import { isMatchId } from '../matches/match.types';
+import { ReservationTarget, isReservationTarget } from '../reservations/reservation.types';
 import {
   CreateWaitlistPromotionNotificationInput,
   CreateWaitlistPromotionNotificationResult,
@@ -25,7 +29,7 @@ import { PostgresTransaction } from './postgres-transaction';
 const MAX_LIST_LIMIT = 50;
 
 const SELECT_NOTIFICATION_PAGE_SQL = `
-  WITH paged_notifications AS MATERIALIZED (
+  WITH all_notifications AS MATERIALIZED (
     SELECT
       notifications.id,
       notifications.waitlist_entry_id,
@@ -34,10 +38,44 @@ const SELECT_NOTIFICATION_PAGE_SQL = `
       notifications.notification_type,
       notifications.created_at,
       notifications.read_at,
-      notifications.version
+      notifications.version,
+      NULL::bigint AS previous_service_id,
+      NULL::bigint AS previous_resource_id,
+      NULL::text AS previous_datetime_text,
+      NULL::text AS previous_end_datetime_text,
+      NULL::bigint AS current_service_id,
+      NULL::bigint AS current_resource_id,
+      NULL::text AS current_datetime_text,
+      NULL::text AS current_end_datetime_text
     FROM backend_match.match_notifications AS notifications
     WHERE notifications.recipient_account_id = $1
-      AND (
+    UNION ALL
+    SELECT
+      events.event_id AS id,
+      NULL::uuid AS waitlist_entry_id,
+      events.match_id,
+      recipients.recipient_account_id,
+      events.event_type AS notification_type,
+      recipients.created_at,
+      recipients.read_at,
+      recipients.version,
+      events.previous_service_id,
+      events.previous_resource_id,
+      events.previous_datetime_text,
+      events.previous_end_datetime_text,
+      events.current_service_id,
+      events.current_resource_id,
+      events.current_datetime_text,
+      events.current_end_datetime_text
+    FROM backend_match.match_reservation_event_recipients AS recipients
+    JOIN backend_match.match_reservation_events AS events
+      ON events.event_id = recipients.event_id
+    WHERE recipients.recipient_account_id = $1
+  ),
+  paged_notifications AS MATERIALIZED (
+    SELECT *
+    FROM all_notifications AS notifications
+    WHERE (
         $2::bigint IS NULL
         OR (notifications.created_at, notifications.id)
           < ($2::bigint, $3::uuid)
@@ -47,9 +85,8 @@ const SELECT_NOTIFICATION_PAGE_SQL = `
   ),
   unread_notifications AS MATERIALIZED (
     SELECT pg_catalog.count(*) AS unread_count
-    FROM backend_match.match_notifications AS notifications
-    WHERE notifications.recipient_account_id = $1
-      AND notifications.read_at IS NULL
+    FROM all_notifications AS notifications
+    WHERE notifications.read_at IS NULL
   )
   SELECT
     paged_notifications.id,
@@ -60,12 +97,67 @@ const SELECT_NOTIFICATION_PAGE_SQL = `
     paged_notifications.created_at,
     paged_notifications.read_at,
     paged_notifications.version,
+    paged_notifications.previous_service_id,
+    paged_notifications.previous_resource_id,
+    paged_notifications.previous_datetime_text,
+    paged_notifications.previous_end_datetime_text,
+    paged_notifications.current_service_id,
+    paged_notifications.current_resource_id,
+    paged_notifications.current_datetime_text,
+    paged_notifications.current_end_datetime_text,
     unread_notifications.unread_count
   FROM unread_notifications
   LEFT JOIN paged_notifications ON true
   ORDER BY
     paged_notifications.created_at DESC NULLS LAST,
     paged_notifications.id DESC NULLS LAST
+`;
+
+const MARK_LIFECYCLE_NOTIFICATION_READ_SQL = `
+  WITH updated_recipient AS MATERIALIZED (
+    UPDATE backend_match.match_reservation_event_recipients AS recipients
+    SET read_at = $3, version = 2
+    WHERE recipients.event_id = $1
+      AND recipients.recipient_account_id = $2
+      AND recipients.read_at IS NULL
+      AND recipients.version = 1
+      AND recipients.created_at <= $3
+    RETURNING recipients.event_id, recipients.recipient_account_id,
+      recipients.created_at, recipients.read_at, recipients.version
+  ), selected_recipient AS MATERIALIZED (
+    SELECT updated_recipient.*, true AS was_updated
+    FROM updated_recipient
+    UNION ALL
+    SELECT recipients.event_id, recipients.recipient_account_id,
+      recipients.created_at, recipients.read_at, recipients.version,
+      false AS was_updated
+    FROM backend_match.match_reservation_event_recipients AS recipients
+    WHERE recipients.event_id = $1
+      AND recipients.recipient_account_id = $2
+      AND NOT EXISTS (SELECT 1 FROM updated_recipient)
+    LIMIT 1
+  )
+  SELECT
+    events.event_id AS id,
+    NULL::uuid AS waitlist_entry_id,
+    events.match_id,
+    selected_recipient.recipient_account_id,
+    events.event_type AS notification_type,
+    selected_recipient.created_at,
+    selected_recipient.read_at,
+    selected_recipient.version,
+    events.previous_service_id,
+    events.previous_resource_id,
+    events.previous_datetime_text,
+    events.previous_end_datetime_text,
+    events.current_service_id,
+    events.current_resource_id,
+    events.current_datetime_text,
+    events.current_end_datetime_text,
+    selected_recipient.was_updated
+  FROM selected_recipient
+  JOIN backend_match.match_reservation_events AS events
+    ON events.event_id = selected_recipient.event_id
 `;
 
 const MARK_NOTIFICATION_READ_SQL = `
@@ -157,6 +249,14 @@ interface NotificationRow extends QueryResultRow {
   readonly created_at: unknown;
   readonly read_at: unknown;
   readonly version: unknown;
+  readonly previous_service_id: unknown;
+  readonly previous_resource_id: unknown;
+  readonly previous_datetime_text: unknown;
+  readonly previous_end_datetime_text: unknown;
+  readonly current_service_id: unknown;
+  readonly current_resource_id: unknown;
+  readonly current_datetime_text: unknown;
+  readonly current_end_datetime_text: unknown;
 }
 
 interface NotificationPageRow extends NotificationRow {
@@ -203,13 +303,68 @@ function hydrateNotification(
 ): MatchNotificationRecord {
   if (
     !isMatchNotificationId(row.id) ||
-    !isMatchWaitlistEntryId(row.waitlist_entry_id) ||
     !isMatchId(row.match_id) ||
     !isAccountId(row.recipient_account_id) ||
     !isMatchNotificationType(row.notification_type)
   ) {
     throw invalidState();
   }
+  let waitlistEntryId: MatchWaitlistEntryId | undefined;
+  if (row.waitlist_entry_id !== null && row.waitlist_entry_id !== undefined) {
+    if (!isMatchWaitlistEntryId(row.waitlist_entry_id)) throw invalidState();
+    waitlistEntryId = row.waitlist_entry_id;
+  }
+  if (
+    (row.notification_type === 'waitlist_promoted' &&
+      !isMatchWaitlistEntryId(waitlistEntryId)) ||
+    (row.notification_type !== 'waitlist_promoted' &&
+      waitlistEntryId !== undefined)
+  ) {
+    throw invalidState();
+  }
+  const target = (
+    serviceId: unknown,
+    courtId: unknown,
+    startsAt: unknown,
+    endsAt: unknown,
+  ): ReservationTarget | undefined => {
+    if (
+      serviceId == null &&
+      courtId == null &&
+      startsAt == null &&
+      endsAt == null
+    ) return undefined;
+    const candidate = Object.freeze({
+      serviceId: readSafeInteger(serviceId),
+      courtId: readSafeInteger(courtId),
+      startsAt,
+      endsAt,
+    });
+    if (!isReservationTarget(candidate)) throw invalidState();
+    return candidate;
+  };
+  const previousTarget = target(
+    row.previous_service_id,
+    row.previous_resource_id,
+    row.previous_datetime_text,
+    row.previous_end_datetime_text,
+  );
+  const currentTarget = target(
+    row.current_service_id,
+    row.current_resource_id,
+    row.current_datetime_text,
+    row.current_end_datetime_text,
+  );
+  const targetShapeValid =
+    (row.notification_type === 'waitlist_promoted' &&
+      previousTarget === undefined && currentTarget === undefined) ||
+    (row.notification_type === 'court_confirmed' &&
+      previousTarget === undefined && currentTarget !== undefined) ||
+    (row.notification_type === 'court_moved' &&
+      previousTarget !== undefined && currentTarget !== undefined) ||
+    (row.notification_type === 'court_cancelled' &&
+      previousTarget !== undefined && currentTarget === undefined);
+  if (!targetShapeValid) throw invalidState();
   const createdAt = readEpoch(row.created_at);
   const version = readSafeInteger(row.version);
   const readAt = row.read_at === null ? undefined : readEpoch(row.read_at);
@@ -221,12 +376,14 @@ function hydrateNotification(
   }
   return Object.freeze({
     notificationId: row.id,
-    waitlistEntryId: row.waitlist_entry_id,
+    ...(waitlistEntryId === undefined ? {} : { waitlistEntryId }),
     matchId: row.match_id,
     recipientAccountId: row.recipient_account_id,
     notificationType: row.notification_type,
     createdAt,
     ...(readAt === undefined ? {} : { readAt }),
+    ...(previousTarget === undefined ? {} : { previousTarget }),
+    ...(currentTarget === undefined ? {} : { currentTarget }),
   });
 }
 
@@ -460,9 +617,37 @@ export class PostgresMatchNotificationRepository
         throw invalidState();
       }
       if (selected.rows.length === 0) {
+        const lifecycle = await transaction.query<MarkNotificationRow>(
+          MARK_LIFECYCLE_NOTIFICATION_READ_SQL,
+          [
+            validated.notificationId,
+            validated.recipientAccountId,
+            validated.now,
+          ],
+        );
+        if (
+          lifecycle.rowCount !== lifecycle.rows.length ||
+          lifecycle.rows.length > 1
+        ) throw invalidState();
+        if (lifecycle.rows.length === 0) {
+          return Object.freeze({
+            outcome: 'rejected',
+            reason: 'notification_not_found',
+          });
+        }
+        const row = lifecycle.rows[0];
+        if (typeof row.was_updated !== 'boolean') throw invalidState();
+        const notification = hydrateNotification(row);
+        if (
+          notification.notificationId !== validated.notificationId ||
+          notification.recipientAccountId !== validated.recipientAccountId ||
+          notification.readAt === undefined ||
+          (row.was_updated && notification.readAt !== validated.now)
+        ) throw invalidState();
         return Object.freeze({
-          outcome: 'rejected',
-          reason: 'notification_not_found',
+          outcome: 'notification_read',
+          persistence: row.was_updated ? 'applied' : 'idempotent_retry',
+          notification,
         });
       }
       const row = selected.rows[0];

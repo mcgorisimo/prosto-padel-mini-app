@@ -188,6 +188,8 @@ export default function BookingScreen({
   availabilityActions = null,
   bookingClient = null,
   initialReservationId = null,
+  matchIdToLink = null,
+  onLinkMatchReservation = null,
   onCloseReservation = null,
   courtNamesById = {},
   onCourtCatalogChange = null,
@@ -211,6 +213,7 @@ export default function BookingScreen({
   const [isSaving, setIsSaving] = useState(false);
   const [successText, setSuccessText] = useState('');
   const [latestReservation, setLatestReservation] = useState(null);
+  const [matchLinkStatus, setMatchLinkStatus] = useState('idle');
   const [reservationReadStatus, setReservationReadStatus] = useState('idle');
   const bookingSheetCloseScrollRef = useRef(null);
   const reservationRefreshInFlightRef = useRef(false);
@@ -239,6 +242,39 @@ export default function BookingScreen({
   const alignBookingScreenAfterCreate = useCallback(() => {
     bookingSheetCloseScrollRef.current = 0;
   }, []);
+
+  const linkReservationToMatch = useCallback(async (reservation) => {
+    if (
+      typeof matchIdToLink !== 'string' ||
+      typeof reservation?.reservationId !== 'string' ||
+      typeof onLinkMatchReservation !== 'function'
+    ) return true;
+    setMatchLinkStatus('linking');
+    try {
+      const result = await onLinkMatchReservation(
+        matchIdToLink,
+        reservation.reservationId,
+      );
+      if (result?.outcome !== 'match_reservation_linked') {
+        setMatchLinkStatus('failed');
+        showToast?.(
+          'Бронь создана, но пока не связана с матчем. Повторите привязку в карточке брони.',
+          'error',
+        );
+        return false;
+      }
+      setMatchLinkStatus('linked');
+      setSuccessText('Корт забронирован и подтверждён для матча.');
+      return true;
+    } catch {
+      setMatchLinkStatus('failed');
+      showToast?.(
+        'Бронь создана, но пока не связана с матчем. Повторите привязку в карточке брони.',
+        'error',
+      );
+      return false;
+    }
+  }, [matchIdToLink, onLinkMatchReservation, showToast]);
 
   useEffect(() => {
     const canReadExact =
@@ -797,6 +833,7 @@ export default function BookingScreen({
           }));
           setSelectedSlot(null);
           alignBookingScreenAfterCreate();
+          await linkReservationToMatch(result.reservation);
           return;
         }
         if (result?.outcome === 'booking_unknown') {
@@ -1062,6 +1099,12 @@ export default function BookingScreen({
         </div>
       )}
 
+      {matchLinkStatus === 'linking' && (
+        <div className="booking-success mb-4 p-4 text-sm font-semibold">
+          Связываем подтверждённую бронь с матчем…
+        </div>
+      )}
+
       <section className="booking-section booking-section-dates">
         <div className="booking-section-label">
           Дата
@@ -1324,6 +1367,16 @@ export default function BookingScreen({
           </div>
           {latestReservation.stale && (
             <div className="mt-2 text-amber-200">Данные YCLIENTS временно не подтверждены.</div>
+          )}
+          {matchLinkStatus === 'failed' && (
+            <button
+              type="button"
+              data-testid="booking-retry-match-link"
+              className="mt-3 rounded-xl bg-accent-light px-3 py-2 font-black text-app-bg"
+              onClick={() => linkReservationToMatch(latestReservation)}
+            >
+              Связать бронь с матчем
+            </button>
           )}
           <div className="mt-3 flex flex-wrap gap-2">
             <div className="rounded-xl bg-warm-white/10 px-3 py-2 text-sm">

@@ -1287,6 +1287,22 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
     );
   }
 
+  function linkMatchReservation(matchId, reservationId) {
+    return runMatchOperation(
+      (credential, signal) =>
+        matches.linkMatchReservation(
+          credential,
+          matchId,
+          reservationId,
+          { signal },
+        ),
+      (result) =>
+        result?.outcome === 'match_reservation_linked' &&
+        result.courtReservationId === reservationId &&
+        result.courtBookingStatus === 'confirmed',
+    );
+  }
+
   function moderateText(text) {
     return runMatchOperation(
       (credential, signal) =>
@@ -1748,6 +1764,7 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
     loadMatch,
     createMatch,
     updateMatchDescription,
+    linkMatchReservation,
     moderateText,
     joinMatch,
     leaveMatch,
@@ -1975,6 +1992,19 @@ export function useTelegramBackendLogin() {
     return telegramBackendLoginLifecycle.updateMatchDescription(
       matchId,
       description,
+    );
+  }, []);
+
+  const linkMatchReservation = useCallback((matchId, reservationId) => {
+    if (!FEATURE_ENABLED) {
+      return Promise.resolve(Object.freeze({
+        outcome: 'rejected',
+        reason: 'not_authenticated',
+      }));
+    }
+    return telegramBackendLoginLifecycle.linkMatchReservation(
+      matchId,
+      reservationId,
     );
   }, []);
 
@@ -2312,6 +2342,7 @@ export function useTelegramBackendLogin() {
     loadMatch,
     createMatch,
     updateMatchDescription,
+    linkMatchReservation,
     moderateText,
     joinMatch,
     leaveMatch,

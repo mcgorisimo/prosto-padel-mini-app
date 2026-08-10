@@ -160,6 +160,13 @@ const SELECT_COMMANDS_SQL = `
   ORDER BY command_sequence
 `;
 
+const SELECT_ACTIVE_RESERVATION_TARGET_FOR_SHARE_SQL = `
+  SELECT target_datetime_text, target_end_datetime_text
+  FROM backend_match.match_reservation_links
+  WHERE match_id = $1 AND state = 'active'
+  FOR SHARE
+`;
+
 const SELECT_ACTOR_RATING_SQL = `
   SELECT rating, is_verified
   FROM backend_auth.player_rating_states
@@ -309,6 +316,9 @@ const SELECT_PUBLIC_FEED_SQL = `
       ARRAY[]::smallint[]
     ) AS participant_slot_numbers
   FROM backend_match.matches AS matches
+  LEFT JOIN backend_match.match_reservation_links AS reservation_links
+    ON reservation_links.match_id = matches.id
+   AND reservation_links.state = 'active'
   LEFT JOIN backend_match.match_participants AS participants
     ON participants.match_id = matches.id
    AND participants.status = 'active'
@@ -317,9 +327,15 @@ const SELECT_PUBLIC_FEED_SQL = `
     AND matches.status = ANY (
       ARRAY['open', 'searching', 'confirmed', 'upcoming']::text[]
     )
-    AND matches.starts_at > $1
-  GROUP BY matches.id
-  ORDER BY matches.starts_at, matches.id
+    AND COALESCE(
+      pg_catalog.extract(epoch FROM reservation_links.target_datetime)::bigint,
+      matches.starts_at
+    ) > $1
+  GROUP BY matches.id, reservation_links.link_id
+  ORDER BY COALESCE(
+    pg_catalog.extract(epoch FROM reservation_links.target_datetime)::bigint,
+    matches.starts_at
+  ), matches.id
   LIMIT $2::integer
 `;
 
@@ -358,6 +374,9 @@ const SELECT_ACCOUNT_FEED_SQL = `
       ARRAY[]::smallint[]
     ) AS participant_slot_numbers
   FROM backend_match.matches AS matches
+  LEFT JOIN backend_match.match_reservation_links AS reservation_links
+    ON reservation_links.match_id = matches.id
+   AND reservation_links.state = 'active'
   LEFT JOIN backend_match.match_participants AS participants
     ON participants.match_id = matches.id
    AND participants.status = 'active'
@@ -366,7 +385,10 @@ const SELECT_ACCOUNT_FEED_SQL = `
     AND matches.status = ANY (
       ARRAY['open', 'searching', 'confirmed', 'upcoming']::text[]
     )
-    AND matches.starts_at > $1
+    AND COALESCE(
+      pg_catalog.extract(epoch FROM reservation_links.target_datetime)::bigint,
+      matches.starts_at
+    ) > $1
     AND (
       matches.owner_account_id = $2
       OR EXISTS (
@@ -377,8 +399,11 @@ const SELECT_ACCOUNT_FEED_SQL = `
           AND account_participants.status = 'active'
       )
     )
-  GROUP BY matches.id
-  ORDER BY matches.starts_at, matches.id
+  GROUP BY matches.id, reservation_links.link_id
+  ORDER BY COALESCE(
+    pg_catalog.extract(epoch FROM reservation_links.target_datetime)::bigint,
+    matches.starts_at
+  ), matches.id
   LIMIT $3::integer
 `;
 
@@ -494,6 +519,11 @@ interface PendingInvitationRow extends QueryResultRow {
   readonly id: unknown;
   readonly invited_account_id: unknown;
   readonly slot_number: unknown;
+}
+
+interface ActiveReservationTargetRow extends QueryResultRow {
+  readonly target_datetime_text: unknown;
+  readonly target_end_datetime_text: unknown;
 }
 
 interface VisibleMatchRow extends MatchRow {
@@ -1395,11 +1425,45 @@ export class PostgresMatchRepository implements MatchRepository {
     ) {
       throw invalidPersistedState();
     }
-    return hydrateAggregate(
+    const state = hydrateAggregate(
       match.rows[0],
       participants.rows,
       commands.rows,
     );
+    const reservationTarget =
+      await transaction.query<ActiveReservationTargetRow>(
+        SELECT_ACTIVE_RESERVATION_TARGET_FOR_SHARE_SQL,
+        [matchId],
+      );
+    if (
+      reservationTarget.rowCount !== reservationTarget.rows.length ||
+      reservationTarget.rows.length > 1
+    ) {
+      throw invalidPersistedState();
+    }
+    if (reservationTarget.rows.length === 0) return state;
+    const startsAtText = reservationTarget.rows[0].target_datetime_text;
+    const endsAtText = reservationTarget.rows[0].target_end_datetime_text;
+    if (typeof startsAtText !== 'string' || typeof endsAtText !== 'string') {
+      throw invalidPersistedState();
+    }
+    const startsAtMilliseconds = Date.parse(startsAtText);
+    const endsAtMilliseconds = Date.parse(endsAtText);
+    const durationMinutes =
+      (endsAtMilliseconds - startsAtMilliseconds) / 60_000;
+    const effectiveStartsAt = startsAtMilliseconds / 1_000;
+    if (
+      !Number.isInteger(effectiveStartsAt) ||
+      !isUnixEpochSeconds(effectiveStartsAt) ||
+      ![60, 90, 120, 150].includes(durationMinutes)
+    ) {
+      throw invalidPersistedState();
+    }
+    return Object.freeze({
+      ...state,
+      startsAt: effectiveStartsAt,
+      durationMinutes: durationMinutes as MatchDurationMinutes,
+    });
   }
 
   async create(

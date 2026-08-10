@@ -3,11 +3,15 @@ import { UnixEpochSeconds } from '../auth/auth.types';
 import { InternalUuid, isInternalUuid } from '../common/internal-uuid';
 import { MatchWaitlistEntryId } from './match-waitlist.types';
 import { MatchId } from './match.types';
+import { ReservationTarget } from '../reservations/reservation.types';
 
 declare const matchNotificationIdBrand: unique symbol;
 
 export const MATCH_NOTIFICATION_TYPES = [
   'waitlist_promoted',
+  'court_confirmed',
+  'court_moved',
+  'court_cancelled',
 ] as const;
 
 export type MatchNotificationType =
@@ -19,12 +23,14 @@ export type MatchNotificationId = InternalUuid & {
 
 export interface MatchNotificationRecord {
   readonly notificationId: MatchNotificationId;
-  readonly waitlistEntryId: MatchWaitlistEntryId;
+  readonly waitlistEntryId?: MatchWaitlistEntryId;
   readonly matchId: MatchId;
   readonly recipientAccountId: AccountId;
   readonly notificationType: MatchNotificationType;
   readonly createdAt: UnixEpochSeconds;
   readonly readAt?: UnixEpochSeconds;
+  readonly previousTarget?: ReservationTarget;
+  readonly currentTarget?: ReservationTarget;
 }
 
 export interface MatchNotificationCursor {
