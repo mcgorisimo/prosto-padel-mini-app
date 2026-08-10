@@ -27,7 +27,7 @@
 |---|---|---|---|---|
 | D1 Backend-only/contracts | done | `main` / deployed `c04074459948d0bf545e865b885aea7a4e5fec3c` | frontend E2E PASS (82/1 skipped); focused fail-closed 2/2 PASS; frontend build PASS; backend all PASS; Selectel test smoke PASS | D1 закрыт; следующий отдельный этап — D2 |
 | D2 YCLIENTS reservation core | done | closure history through exact cleanup source `4515549f58d714624a333fbb059dd4054b1e1439`; Selectel test runtime `ac5b4be4e88c6b45ec8d290a1c68e01a41dc635d` | migration 033 applied/verified; all automated gates PASS; create/delete sync, admin-reschedule T1-T4, repeated-refresh no-churn, fully-bound cleanup and eight-row legacy cleanup live acceptance PASS | D2 closed; next stage is D3 match ↔ reservation lifecycle; payment, webhook and production remain separate gates |
-| D3 Match ↔ reservation lifecycle | in_progress | local ЮKassa correction pending; Selectel test runtime `b3c6b7fdc081ff70c2fcec34f4a8882790643015` | migration 034 `applied_verified`; match feed hotfix and truthful booked/unbooked projection live; current server still contains the incorrect PayKeeper label | finish YooKassa naming regression, then separate frontend-only Selectel rollout; paid-court entrypoints stay fail-closed until D4 |
+| D3 Match ↔ reservation lifecycle | in_progress | Selectel test runtime `78a1cef68f74854a9d6e316ffd235ffbd42b38f8` | migration 034 `applied_verified`; ЮKassa naming correction deployed; root E2E 91/1 skipped, build and Selectel health/assets/logs PASS | owner authenticated TMA smoke: paid-court creation visible/disabled and existing unbooked-match action visible/fail-closed until D4 |
 | D4 Payment Core | pending | — | — | payment provider, pricing/payment snapshot, чеки и возвраты |
 | D5 Settings/moderation/compliance | pending | — | — | standalone phone/email auth, verified backend email, approved club support/contact source and clickable action; затем schema review |
 | D6 Selectel readiness/load | pending | — | — | backend staging fixture, live concurrency и Selectel production readiness |
@@ -42,7 +42,7 @@
 |---|---|---|---|---|
 | D1 Backend-only/contracts | Selectel test | `c04074459948d0bf545e865b885aea7a4e5fec3c` | `test_deployed` | frontend healthy; HTTPS root/health и новый asset 200; TMA auth/profile/feed/details/booking availability PASS; bundle/log audit PASS |
 | D2 YCLIENTS reservation core | Selectel test | `ac5b4be4e88c6b45ec8d290a1c68e01a41dc635d` | `test_deployed` | backend-only rollout health/log/auth PASS; create/delete and admin-reschedule matrix remain proved; three unchanged owner refreshes preserved reservation version and hold counts |
-| D3 Match ↔ reservation lifecycle | Selectel test | `b3c6b7fdc081ff70c2fcec34f4a8882790643015` | `pending` | previous frontend gate is healthy but names the wrong provider PayKeeper; local ЮKassa correction requires integration and frontend-only rollout before TMA smoke |
+| D3 Match ↔ reservation lifecycle | Selectel test | `78a1cef68f74854a9d6e316ffd235ffbd42b38f8` | `pending` | frontend-only ЮKassa correction live; all containers healthy/restart 0, HTTPS root/health and exact asset 200, marker/log checks PASS; authenticated owner TMA click-smoke pending |
 | D2 persistence/privacy proposal | not applicable | docs-only checkpoint | `not_needed` | только Markdown; runtime, schema, containers и конфигурация не менялись |
 | D2 YCLIENTS contract matrix | not applicable | docs-only checkpoint поверх `3e8739b` | `not_needed` | только Markdown; API/DB/server/runtime не вызывались и не менялись |
 | D2 YCLIENTS controlled test plan | not applicable | `040773172a2fa556ffaaf1d12dac540095070976` + docs-only correction from that exact base | `not_needed` | plan only; provider/server/DB/runtime calls и writes не выполнялись |
@@ -3991,3 +3991,38 @@
   `b3c6b7fdc081ff70c2fcec34f4a8882790643015`, which still displays the wrong
   PayKeeper label. No DB/YCLIENTS/payment/provider/secret/production action was
   performed.
+
+### 2026-08-10 — D3 / ЮKassa correction frontend-only Selectel rollout
+
+- Git delivery PASS: exact reviewed checkpoint
+  `78a1cef68f74854a9d6e316ffd235ffbd42b38f8` fast-forwarded clean `main`
+  without a merge commit and was pushed; local `main`, `origin/main` and the
+  final clean detached Selectel checkout matched that exact SHA.
+- Selectel preflight PASS at clean `b3c6b7f...`: two-file persistent-runtime
+  Compose validation succeeded; all four containers were healthy with restart
+  count `0`; internal root/health returned `200`. No change was made before the
+  exact target and clean checkout were verified.
+- Only frontend was rebuilt/recreated. Frontend container/image changed from
+  `c6b8c69a14951086b54de6e9dcfc98e24b4d4006e77a4ed8fc9cc8d43e839211` /
+  `sha256:493801a7c6b26a95bf1d2b05f5535d0268f7a9785f775dfce102315fcf7edfab`
+  to `dbeb04aea1bbc657f6a681b5e9840e07b5eb2a41af12892f64b49c3d14390ae6` /
+  `sha256:387a55f227b0d109f49bc83c44653becd18ac7b0537951f6bf2989a679680cab`.
+  Backend stayed `7ca6956f77fb...`, nginx `e5b98b53a385...` and PostgreSQL
+  `5e36d4dc1a5c...`.
+- Automated postcheck PASS: all containers are `running/healthy` with restart
+  count `0`; internal and HTTPS root/health returned `200`; exact asset
+  `/assets/index-DRfmeOuD.js` returned `200` with `605749` bytes. The bundle has
+  one `ЮKassa checkout` marker and zero `PayKeeper checkout` markers. Bounded
+  logs since `2026-08-10T13:11:47Z` have backend/frontend/nginx critical count
+  `0` and nginx 5xx count `0`.
+- Direct-browser boundary smoke PASS: the page rendered the expected Telegram-
+  only login boundary and had no browser console errors; one non-blocking
+  Telegram WebApp version warning came from the official Telegram script.
+  No authenticated Telegram browser/Desktop surface was available to the
+  operator, so synthetic `initData` was not used.
+- No backend/DB/schema/migration/YCLIENTS/payment/provider/env/secret,
+  nginx/PostgreSQL or production change occurred. Deployment remains `pending`
+  only for the owner authenticated TMA click-smoke: verify that «Матч с кортом»
+  is visible but disabled with ЮKassa copy, and that «Забронировать корт» in an
+  existing unbooked match remains visible but shows the fail-closed notice
+  without opening booking or creating a provider record.
