@@ -3712,3 +3712,28 @@
 - Next gate: review the exact correction checkpoint, then separately authorize
   transfer of only the corrected POSTCHECK and one read-only POSTCHECK run.
   Migration 034 must not be applied again.
+
+### 2026-08-10 — D3 / Selectel test migration 034 applied and verified
+
+- Owner approved transfer of only the corrected POSTCHECK from checkpoint
+  `f4bcee2244ba6d9bb5d72cb2f75db0dde53c17dc` and one exact read-only run.
+  The corrected artifact was preserved separately as
+  `034_backend_match_reservation_links_POSTCHECK.f4bcee2.sql`; its remote
+  SHA-256 exactly matched
+  `2c033eb939f7e1ad0149f18ef17280b7a2fce674996a3640883f9d26ad097b10`.
+- The single corrected POSTCHECK exited `0` with empty stderr and returned
+  `verified=true`, `new_tables_empty=true`, `runtime_connected=false`,
+  `match_overlap_removed=true` and `d2_slot_hold_authority_preserved=true`.
+  Its read-only transaction ended with `ROLLBACK` as designed.
+- Evidence is root-owned in
+  `/root/prosto-padel-migration-audit/034-e210bb8-20260810T092127Z-db5a0307-0d74-4170-9bb1-40f3bfa21d3d/POSTCHECK.corrected-f4bcee2.output.txt`
+  with the adjacent zero-byte stderr file. Migration 034 status is now
+  `applied_verified`; it must not be applied again.
+- No migration write, rollback migration, runtime wiring, application
+  deployment, container change, YCLIENTS write or production action occurred
+  in this verification gate. Selectel test application runtime remains the D2
+  deployment `ac5b4be4...`; deployment is `not_needed` for the corrected
+  read-only checker.
+- Next D3 gate is runtime implementation/wiring review against the verified
+  schema, followed later by integration into `main` and a separately approved
+  Selectel test rollout with health, business smoke and log checks.
