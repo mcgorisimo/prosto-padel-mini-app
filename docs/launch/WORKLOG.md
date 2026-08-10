@@ -3640,3 +3640,24 @@
 - Next gate requires a new explicit owner decision. The SQL checkpoint itself
   has not failed this attempt; no retry or database write is authorized by this
   handoff.
+
+### 2026-08-10 — D3 / migration 034 approved continuation STOP before apply
+
+- The owner approved continuation from the already verified backup/PRECHECK for
+  checkpoint `e210bb8542f4e521e797e4efacd292caa96d6fdd`, with one apply followed
+  by exact read-only POSTCHECK and an immediate-stop rule on any error.
+- Local worktree was clean; HEAD was the descendant docs-only handoff commit
+  `c813847...`, and the approved checkpoint remained an ancestor. Remote
+  artifact verification again returned the exact reviewed SHA-256 values for
+  migration `8ec5d52f...` and POSTCHECK `4584ffdb...`.
+- A supplementary read-only shell assertion against the saved PRECHECK output
+  exited `1` because its strict `grep` pattern did not match the psql-rendered
+  JSON spacing/quoting. This was an evidence-command defect, not a PostgreSQL,
+  migration or PRECHECK failure.
+- Per the explicit immediate-stop rule, migration apply, POSTCHECK and rollback
+  were not run. PostgreSQL/schema, runtime, containers, env/secrets, YCLIENTS,
+  production and payment fields remain unchanged. Migration 034 remains
+  `not_applied`; the authorization for one apply was not exercised.
+- A future continuation should execute the already approved SQL directly, with
+  no additional ad-hoc preflight assertions; it requires a new explicit owner
+  instruction because this continuation was stopped on a command error.
