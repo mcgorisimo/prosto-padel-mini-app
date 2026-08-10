@@ -29,6 +29,8 @@ begin
         ]::text[],
         array[
           'match_reservation_links_binding_key',
+          'match_reservation_links_consistency',
+          'match_reservation_links_event_consistency',
           'match_reservation_links_match_owner_fkey',
           'match_reservation_links_observed_version_check',
           'match_reservation_links_pkey',
@@ -66,6 +68,7 @@ begin
           'match_reservation_events_link_binding_fkey',
           'match_reservation_events_pkey',
           'match_reservation_events_recipient_count_check',
+          'match_reservation_events_recipient_count_consistency',
           'match_reservation_events_snapshot_shape_check',
           'match_reservation_events_snapshot_value_check',
           'match_reservation_events_time_check',
@@ -89,7 +92,8 @@ begin
           'match_reservation_event_recipients_event_fkey',
           'match_reservation_event_recipients_pkey',
           'match_reservation_event_recipients_read_shape_check',
-          'match_reservation_event_recipients_time_check'
+          'match_reservation_event_recipients_time_check',
+          'match_reservation_recipients_count_consistency'
         ]::text[],
         array[
           'match_reservation_event_recipients_feed_idx',

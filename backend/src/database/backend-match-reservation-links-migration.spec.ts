@@ -32,6 +32,23 @@ function tableDefinition(
   );
 }
 
+function postcheckExpectedTableTuple(
+  postcheck: string,
+  table: string,
+  nextTable?: string,
+): string {
+  const start = postcheck.indexOf(`( '${table}',`);
+  const end = nextTable
+    ? postcheck.indexOf(`( '${nextTable}',`, start)
+    : postcheck.indexOf(') expected(table_name, columns, constraints, indexes)', start);
+
+  if (start < 0 || end < 0) {
+    throw new Error(`Expected POSTCHECK tuple for ${table}`);
+  }
+
+  return postcheck.slice(start, end);
+}
+
 describe('migration 034 backend match reservation links contract', () => {
   it('creates only the approved PII-free D3 storage and leaves runtime disconnected', () => {
     const sql = compact(MIGRATION);
@@ -263,6 +280,51 @@ describe('migration 034 backend match reservation links contract', () => {
       'add constraint matches_no_active_court_overlap',
     );
     expect(rollback).not.toContain('cascade');
+  });
+
+  it('includes constraint-trigger catalog rows in exact POSTCHECK constraint sets', () => {
+    const migration = compact(MIGRATION);
+    const postcheck = compact(POSTCHECK);
+    const expectedByTable = new Map<string, string[]>([
+      [
+        'match_reservation_links',
+        [
+          'match_reservation_links_consistency',
+          'match_reservation_links_event_consistency',
+        ],
+      ],
+      [
+        'match_reservation_events',
+        ['match_reservation_events_recipient_count_consistency'],
+      ],
+      [
+        'match_reservation_event_recipients',
+        ['match_reservation_recipients_count_consistency'],
+      ],
+    ]);
+    const nextTableByTable = new Map<string, string | undefined>([
+      ['match_reservation_links', 'match_reservation_events'],
+      ['match_reservation_events', 'match_reservation_event_recipients'],
+      ['match_reservation_event_recipients', undefined],
+    ]);
+
+    for (const [table, triggerNames] of expectedByTable) {
+      const tuple = postcheckExpectedTableTuple(
+        postcheck,
+        table,
+        nextTableByTable.get(table),
+      );
+
+      for (const triggerName of triggerNames) {
+        expect(migration).toMatch(
+          new RegExp(
+            `create constraint trigger ${triggerName} after [^;]+ on backend_match\\.${table} deferrable initially deferred`,
+            'u',
+          ),
+        );
+        expect(tuple).toContain(`'${triggerName}'`);
+      }
+    }
   });
 
   it('documents review-only ordering, backup, and a separate runtime gate', () => {

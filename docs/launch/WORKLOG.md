@@ -3687,3 +3687,28 @@
   production and payment fields were not changed. The next safe gate is a
   code-only review of the POSTCHECK expectation plus a contract regression;
   migration 034 must not be applied again.
+
+### 2026-08-10 — D3 / migration 034 POSTCHECK constraint-trigger correction
+
+- Under explicit code-only approval, the failed exact constraint sets were
+  corrected to include PostgreSQL `pg_constraint` rows with `contype = 't'`
+  created by `CREATE CONSTRAINT TRIGGER`: two rows for
+  `match_reservation_links`, one for `match_reservation_events` and one for
+  `match_reservation_event_recipients`.
+- Added a static regression that binds each of those four trigger names to its
+  migration target table and requires the same name inside that table's exact
+  POSTCHECK constraint tuple. Migration 034 itself was not changed and retains
+  SHA-256 `8ec5d52f9735001d140581956068367b7e7b33189e9874200f34a6b2d964dd35`.
+  Corrected POSTCHECK SHA-256 is
+  `2c033eb939f7e1ad0149f18ef17280b7a2fce674996a3640883f9d26ad097b10`.
+- Focused migration contract PASS (`1 suite / 10 tests`); backend typecheck
+  PASS; full backend unit PASS (`135 suites / 3354 tests`); backend E2E PASS
+  (`2 suites / 4 tests`); backend build PASS. Root E2E PASS (`89 passed / 1
+  skipped`); root build PASS (`1617` modules); `git diff --check` PASS.
+- PostgreSQL, Selectel/SSH, migration apply, rollback, runtime wiring,
+  deployment, YCLIENTS and production were not invoked or changed. Deployment
+  is `not_needed` for this checker/test-only correction. Migration status
+  remains `applied_not_verified`.
+- Next gate: review the exact correction checkpoint, then separately authorize
+  transfer of only the corrected POSTCHECK and one read-only POSTCHECK run.
+  Migration 034 must not be applied again.
