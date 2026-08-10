@@ -3610,3 +3610,33 @@
 - PostgreSQL, Selectel/SSH, PRECHECK/POSTCHECK, migration apply, rollback,
   runtime, containers, YCLIENTS and production were not invoked or changed in
   this correction. Deployment is `not_needed`.
+
+### 2026-08-10 — D3 / Selectel test migration 034 second attempt STOP before apply
+
+- Exact approved checkpoint was
+  `e210bb8542f4e521e797e4efacd292caa96d6fdd`; local branch/worktree was clean.
+  Application `main`/`origin/main` remained `6b369553...`. Exact remote
+  SHA-256 matched the reviewed artifacts: migration `8ec5d52f...`, PRECHECK
+  `73582827...`, POSTCHECK `4584ffdb...` and rollback `ff896ec7...`.
+- Selectel test read-only preflight PASS: the application checkout remained
+  clean at D2 runtime `ac5b4be4...`; backend/frontend/nginx/PostgreSQL were
+  healthy/running with restart count `0`.
+- A new root-owned backup set was created and verified at
+  `/root/prosto-padel-migration-audit/034-e210bb8-20260810T092127Z-db5a0307-0d74-4170-9bb1-40f3bfa21d3d`.
+  The directory is `0700`; `database.dump` (`608647` bytes), `globals.sql`
+  (`1195` bytes), `database.list`, manifest and checksum files are `0600`.
+  `pg_restore --list` and `sha256sum -c` both PASS.
+- Exact read-only PRECHECK itself PASS with exit `0` and empty stderr:
+  `ready=true`, `target_absent=true`, canonical D2 slot-hold authority present,
+  legacy match overlap present, `12` matches and `0` confirmed reservations.
+- The subsequent read-only evidence-formatting command exited `1` because its
+  `stat -c` format was incorrectly quoted and shell pipes were interpreted.
+  It had already displayed the complete successful PRECHECK result and zero-byte
+  stderr, but the owner rule required an immediate stop on any error.
+- Migration apply, POSTCHECK and rollback were therefore not run. Migration 034
+  remains `not_applied`, confirmed by this attempt's `target_absent=true`.
+  Runtime wiring, application deployment, containers, env/secrets, YCLIENTS,
+  production and payment fields were not changed.
+- Next gate requires a new explicit owner decision. The SQL checkpoint itself
+  has not failed this attempt; no retry or database write is authorized by this
+  handoff.
