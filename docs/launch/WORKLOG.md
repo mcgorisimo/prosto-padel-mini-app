@@ -4047,3 +4047,19 @@
   paid YCLIENTS create/link business smoke, receipts/refunds and external-write
   compensation are D4 scope. No backend/DB/YCLIENTS/payment/provider/secret or
   production action occurred during this acceptance.
+
+### 2026-08-10 — project technical SPEC handoff
+
+- Added root `SPEC.md` from clean `main = origin/main = 5e41ab70146a7ae555f6e8935fa426ab110a5c7c`.
+  It records the factual frontend/backend stack, Selectel test topology,
+  domain invariants, API/database boundaries, deployment discipline, D4–D7 and
+  mobile gaps, prioritized technical debt and the 300–400-user readiness list.
+- The first root E2E run on the default 9 workers had two resource-timeout
+  flakes after `89 passed / 1 skipped`; neither touched an assertion. The
+  controlled complete rerun on 4 workers PASS: `91 passed / 1 skipped`.
+  Root production build PASS: `1618` modules; existing large-chunk and Vite CJS
+  warnings remain. Backend gates were not run because no backend/runtime source
+  changed. Markdown diff check is PASS.
+- Deployment is `not_needed`: documentation only. Selectel test remains exact
+  runtime `78a1cef68f74854a9d6e316ffd235ffbd42b38f8`; containers, DB, YCLIENTS,
+  ЮKassa, secrets and production were not contacted or changed.
