@@ -27,7 +27,7 @@
 |---|---|---|---|---|
 | D1 Backend-only/contracts | done | `main` / deployed `c04074459948d0bf545e865b885aea7a4e5fec3c` | frontend E2E PASS (82/1 skipped); focused fail-closed 2/2 PASS; frontend build PASS; backend all PASS; Selectel test smoke PASS | D1 закрыт; следующий отдельный этап — D2 |
 | D2 YCLIENTS reservation core | done | closure history through exact cleanup source `4515549f58d714624a333fbb059dd4054b1e1439`; Selectel test runtime `ac5b4be4e88c6b45ec8d290a1c68e01a41dc635d` | migration 033 applied/verified; all automated gates PASS; create/delete sync, admin-reschedule T1-T4, repeated-refresh no-churn, fully-bound cleanup and eight-row legacy cleanup live acceptance PASS | D2 closed; next stage is D3 match ↔ reservation lifecycle; payment, webhook and production remain separate gates |
-| D3 Match ↔ reservation lifecycle | in_progress | `main` / runtime checkpoint `646ed7f4878a16557f0a40951e2d617203bd59ae`; Selectel test same SHA | migration 034 `applied_verified`; backend typecheck/unit 138/3366/E2E 2/4/build PASS; root E2E 90/1 skipped and build PASS; rollout health/HTTP/log gates PASS | owner manual Telegram Mini App business smoke remains before D3 can be marked done |
+| D3 Match ↔ reservation lifecycle | in_progress | Selectel test runtime `646ed7f4878a16557f0a40951e2d617203bd59ae`; feed SQL hotfix prepared locally | migration 034 `applied_verified`; hotfix backend typecheck/unit 138/3366/E2E 2/4/build PASS; root E2E 90/1 skipped and build PASS | live TMA smoke found public/mine feed 500; integrate and deploy the reviewed backend-only hotfix before repeating smoke |
 | D4 Payment Core | pending | — | — | payment provider, pricing/payment snapshot, чеки и возвраты |
 | D5 Settings/moderation/compliance | pending | — | — | standalone phone/email auth, verified backend email, approved club support/contact source and clickable action; затем schema review |
 | D6 Selectel readiness/load | pending | — | — | backend staging fixture, live concurrency и Selectel production readiness |
@@ -42,7 +42,7 @@
 |---|---|---|---|---|
 | D1 Backend-only/contracts | Selectel test | `c04074459948d0bf545e865b885aea7a4e5fec3c` | `test_deployed` | frontend healthy; HTTPS root/health и новый asset 200; TMA auth/profile/feed/details/booking availability PASS; bundle/log audit PASS |
 | D2 YCLIENTS reservation core | Selectel test | `ac5b4be4e88c6b45ec8d290a1c68e01a41dc635d` | `test_deployed` | backend-only rollout health/log/auth PASS; create/delete and admin-reschedule matrix remain proved; three unchanged owner refreshes preserved reservation version and hold counts |
-| D3 Match ↔ reservation lifecycle | Selectel test | `646ed7f4878a16557f0a40951e2d617203bd59ae` | `pending` | backend then frontend rollout PASS; all containers healthy/restart 0; internal/HTTPS root and health 200; exact asset 200; unauth matches/bookings 401; critical logs and nginx 5xx zero; manual TMA smoke pending |
+| D3 Match ↔ reservation lifecycle | Selectel test | `646ed7f4878a16557f0a40951e2d617203bd59ae` | `pending` | infrastructure health remained green, but owner smoke proved authenticated public/mine feeds return 500 because of invalid EXTRACT syntax; backend-only hotfix rollout pending |
 | D2 persistence/privacy proposal | not applicable | docs-only checkpoint | `not_needed` | только Markdown; runtime, schema, containers и конфигурация не менялись |
 | D2 YCLIENTS contract matrix | not applicable | docs-only checkpoint поверх `3e8739b` | `not_needed` | только Markdown; API/DB/server/runtime не вызывались и не менялись |
 | D2 YCLIENTS controlled test plan | not applicable | `040773172a2fa556ffaaf1d12dac540095070976` + docs-only correction from that exact base | `not_needed` | plan only; provider/server/DB/runtime calls и writes не выполнялись |
@@ -3813,3 +3813,32 @@
   owner opens the exact Selectel Mini App in Telegram and confirms the D3
   read-only business smoke. After that smoke, repeat the bounded health/log
   check and record the final D3 closure separately.
+
+### 2026-08-10 — D3 / live feed SQL hotfix checkpoint
+
+- The owner created two public future matches in the Selectel Telegram Mini
+  App, one intended without a booking and one through the booking path. Both
+  `POST /api/v1/matches` requests returned `201` and bounded read-only database
+  evidence confirmed two `match_created` rows. Neither match had an active
+  reservation link at diagnosis time. Public and owner feed requests then
+  consistently returned `500`, so D3 remains `in_progress` and the live smoke
+  is failed, not accepted.
+- Exact read-only reproduction under runtime role `backend_auth_app` proved the
+  cause before any runtime change: the new feed SQL used invalid PostgreSQL
+  syntax `pg_catalog.extract(epoch FROM ...)`. PostgreSQL stopped at that token,
+  while fake-transaction unit tests had not parsed the SQL.
+- The code-only hotfix replaces all four public/owner feed occurrences with
+  canonical `EXTRACT(EPOCH FROM ...)`. The regression now inspects both feed
+  queries and rejects reintroduction of the invalid qualified form. No schema,
+  migration, reservation state, YCLIENTS/provider operation, payment field or
+  frontend behavior changed.
+- Corrected SQL was executed separately inside a bounded read-only transaction
+  under `backend_auth_app`; it returned a public-feed count of `3` and ended in
+  `ROLLBACK`. Verification PASS: focused repository `52/52`; backend typecheck;
+  backend unit `138 suites / 3366 tests`; backend E2E `2 suites / 4 tests`;
+  backend build; root E2E `90 passed / 1 skipped`; root build `1617` modules;
+  `git diff --check`.
+- Deployment is `pending`: Selectel test still runs application checkpoint
+  `646ed7f4878a16557f0a40951e2d617203bd59ae`. The next gate is exact hotfix
+  integration and backend-only test rollout, followed by feed/mine HTTP smoke,
+  owner TMA recheck and bounded logs. Existing match rows must not be recreated.

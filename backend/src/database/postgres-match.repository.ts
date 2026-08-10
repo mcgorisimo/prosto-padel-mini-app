@@ -328,12 +328,12 @@ const SELECT_PUBLIC_FEED_SQL = `
       ARRAY['open', 'searching', 'confirmed', 'upcoming']::text[]
     )
     AND COALESCE(
-      pg_catalog.extract(epoch FROM reservation_links.target_datetime)::bigint,
+      EXTRACT(EPOCH FROM reservation_links.target_datetime)::bigint,
       matches.starts_at
     ) > $1
   GROUP BY matches.id, reservation_links.link_id
   ORDER BY COALESCE(
-    pg_catalog.extract(epoch FROM reservation_links.target_datetime)::bigint,
+    EXTRACT(EPOCH FROM reservation_links.target_datetime)::bigint,
     matches.starts_at
   ), matches.id
   LIMIT $2::integer
@@ -386,7 +386,7 @@ const SELECT_ACCOUNT_FEED_SQL = `
       ARRAY['open', 'searching', 'confirmed', 'upcoming']::text[]
     )
     AND COALESCE(
-      pg_catalog.extract(epoch FROM reservation_links.target_datetime)::bigint,
+      EXTRACT(EPOCH FROM reservation_links.target_datetime)::bigint,
       matches.starts_at
     ) > $1
     AND (
@@ -401,7 +401,7 @@ const SELECT_ACCOUNT_FEED_SQL = `
     )
   GROUP BY matches.id, reservation_links.link_id
   ORDER BY COALESCE(
-    pg_catalog.extract(epoch FROM reservation_links.target_datetime)::bigint,
+    EXTRACT(EPOCH FROM reservation_links.target_datetime)::bigint,
     matches.starts_at
   ), matches.id
   LIMIT $3::integer

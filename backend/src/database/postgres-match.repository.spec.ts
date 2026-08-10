@@ -1487,23 +1487,37 @@ describe('PostgresMatchRepository', () => {
   });
 
   it('uses static parameterized backend_match SQL without secret or payment state fields', async () => {
-    const transaction = new FakeTransaction([queryResult([])]);
+    const transaction = new FakeTransaction([
+      queryResult([]),
+      queryResult([]),
+    ]);
     await repository().listPublicFeed(transaction, {
       now: unixEpochSeconds(1),
       limit: 20,
     });
-    const sql = normalizeSql(transaction.calls[0].text);
-    expect(sql).toContain('backend_match.matches');
-    expect(sql).not.toContain('public.matches');
-    expect(sql).not.toContain(PRIVATE_MARKER);
-    for (const forbidden of [
-      'paymentStatus',
-      'ownerPaid',
-      'holdAmount',
-      'credential',
-      'telegram',
-    ]) {
-      expect(sql).not.toContain(forbidden);
+    await repository().listAccountFeed(transaction, {
+      accountId: VIEWER_ID,
+      now: unixEpochSeconds(1),
+      limit: 20,
+    });
+    for (const call of transaction.calls) {
+      const sql = normalizeSql(call.text);
+      expect(sql).toContain('backend_match.matches');
+      expect(sql).toContain(
+        'EXTRACT(EPOCH FROM reservation_links.target_datetime)::bigint',
+      );
+      expect(sql).not.toContain('pg_catalog.extract');
+      expect(sql).not.toContain('public.matches');
+      expect(sql).not.toContain(PRIVATE_MARKER);
+      for (const forbidden of [
+        'paymentStatus',
+        'ownerPaid',
+        'holdAmount',
+        'credential',
+        'telegram',
+      ]) {
+        expect(sql).not.toContain(forbidden);
+      }
     }
   });
 });
