@@ -114,6 +114,21 @@ describe('migration 034 backend match reservation links contract', () => {
     expect(sql.match(/deferrable initially deferred/gu)).toHaveLength(6);
   });
 
+  it('keeps scalar and composite PL/pgSQL SELECT INTO targets separate', () => {
+    const sql = compact(MIGRATION);
+
+    expect(sql).toContain(
+      'select match_row.status into v_match_status from backend_match.matches match_row where match_row.id = new.match_id and match_row.owner_account_id = new.owner_account_id',
+    );
+    expect(sql).toContain(
+      'select reservation_row.* into v_reservation from backend_reservation.court_reservations reservation_row where reservation_row.reservation_id = new.reservation_id and reservation_row.owner_account_id = new.owner_account_id',
+    );
+    expect(sql).not.toContain('into v_match_status, v_reservation');
+    expect(
+      sql.match(/backend_match_reservation_link_owner_binding_invalid/gu),
+    ).toHaveLength(2);
+  });
+
   it('keeps provider identity immutable and releases only from canonical bounded proof', () => {
     const sql = compact(MIGRATION);
     const links = tableDefinition(

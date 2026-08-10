@@ -554,14 +554,21 @@ begin
       message = 'BACKEND_MATCH_RESERVATION_LINK_OPERATION_INVALID';
   end if;
 
-  select match_row.status, reservation_row
-    into v_match_status, v_reservation
+  select match_row.status into v_match_status
   from backend_match.matches match_row
-  join backend_reservation.court_reservations reservation_row
-    on reservation_row.reservation_id = new.reservation_id
-   and reservation_row.owner_account_id = new.owner_account_id
   where match_row.id = new.match_id
     and match_row.owner_account_id = new.owner_account_id;
+
+  if not found then
+    raise exception using
+      errcode = '23503',
+      message = 'BACKEND_MATCH_RESERVATION_LINK_OWNER_BINDING_INVALID';
+  end if;
+
+  select reservation_row.* into v_reservation
+  from backend_reservation.court_reservations reservation_row
+  where reservation_row.reservation_id = new.reservation_id
+    and reservation_row.owner_account_id = new.owner_account_id;
 
   if not found then
     raise exception using

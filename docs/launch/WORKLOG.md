@@ -3591,3 +3591,22 @@
   composite assignment, add a static regression, review and commit a new exact
   checkpoint. Any future database attempt requires a new explicit approval and
   fresh backup/PRECHECK; the failed checkpoint must not be retried.
+
+### 2026-08-10 — D3 / migration 034 composite-target correction
+
+- Under explicit code-only approval, the invalid mixed PL/pgSQL target
+  `into v_match_status, v_reservation` was replaced by two owner-scoped
+  statements: one scalar `SELECT INTO` for match status and one rowtype
+  `SELECT ... .* INTO` for the D2 reservation. Each lookup has its own
+  fail-closed `FOUND`/ownership error gate.
+- The static contract now requires both valid forms, forbids the failed mixed
+  form and pins both owner-binding guards. A targeted audit found no other
+  mixed scalar/rowtype target in migration 034; the remaining two-target
+  assignment contains scalar UUID/bigint variables only.
+- Focused migration contract PASS (`1 suite / 9 tests`), backend typecheck PASS
+  and full backend unit PASS (`135 suites / 3353 tests`). `git diff --check`
+  PASS. Backend/root E2E and builds were not rerun because only review-only SQL,
+  its static spec and WORKLOG changed; no runtime source/import changed.
+- PostgreSQL, Selectel/SSH, PRECHECK/POSTCHECK, migration apply, rollback,
+  runtime, containers, YCLIENTS and production were not invoked or changed in
+  this correction. Deployment is `not_needed`.
