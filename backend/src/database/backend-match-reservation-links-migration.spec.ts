@@ -123,7 +123,10 @@ describe('migration 034 backend match reservation links contract', () => {
     );
 
     expect(links).toContain(
-      "release_reason = any (array[ 'canonical_reservation_cancelled', 'match_terminal' ]::text[])",
+      "release_reason is not null and release_reason = any (array[ 'canonical_reservation_cancelled', 'match_terminal' ]::text[])",
+    );
+    expect(sql).toContain(
+      'new.released_at is null or new.release_reason is null',
     );
     expect(sql).toContain(
       'backend_match_reservation_link_identity_immutable',

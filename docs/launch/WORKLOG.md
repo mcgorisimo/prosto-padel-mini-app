@@ -3543,3 +3543,18 @@
   independent review of the exact checkpoint, then a separate owner approval
   before backup -> PRECHECK -> migration -> POSTCHECK. Runtime wiring remains a
   later, separately approved slice.
+
+### 2026-08-10 — D3 / migration 034 release-reason review correction
+
+- Exact checkpoint review found one P1 in the review-only SQL: PostgreSQL CHECK
+  constraints accept `NULL`, so a released link with a null `release_reason`
+  could satisfy the previous release-shape expression and skip both canonical
+  proof branches in the transition trigger.
+- Migration 034 now requires `release_reason is not null` in both the table
+  constraint and transition guard. The static contract pins both protections.
+- Focused migration contract PASS (`1 suite / 8 tests`), backend typecheck PASS
+  and `git diff --check` PASS. The earlier full application gates remain green;
+  runtime source did not change in this correction.
+- Migration remains `not_applied`; PRECHECK/POSTCHECK/rollback, PostgreSQL,
+  YCLIENTS, SSH, server, containers and runtime were not invoked or changed.
+  Deployment remains `not_needed` for this review-only correction.

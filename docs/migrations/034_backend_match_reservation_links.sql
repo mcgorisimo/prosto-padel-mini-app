@@ -205,6 +205,7 @@ create table backend_match.match_reservation_links (
     or (
       state = 'released'
       and released_at is not null
+      and release_reason is not null
       and release_reason = any (array[
         'canonical_reservation_cancelled',
         'match_terminal'
@@ -534,6 +535,7 @@ begin
     elsif new.state = 'released'
        and (
          new.released_at is null
+         or new.release_reason is null
          or new.released_at <> new.updated_at
          or new.target_service_id is distinct from old.target_service_id
          or new.target_resource_id is distinct from old.target_resource_id
