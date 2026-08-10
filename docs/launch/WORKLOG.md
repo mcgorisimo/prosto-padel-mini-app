@@ -3661,3 +3661,29 @@
 - A future continuation should execute the already approved SQL directly, with
   no additional ad-hoc preflight assertions; it requires a new explicit owner
   instruction because this continuation was stopped on a command error.
+
+### 2026-08-10 — D3 / Selectel test migration 034 applied, POSTCHECK STOP
+
+- Under explicit owner approval, the exact reviewed migration 034 from
+  `/root/prosto-padel-migration-audit/034-e210bb8-20260810T092127Z-db5a0307-0d74-4170-9bb1-40f3bfa21d3d`
+  was applied exactly once to Selectel test with
+  `psql -X --set=ON_ERROR_STOP=1`. Apply exit was `0`, stderr was empty and the
+  saved output contains `COMMIT`.
+- The exact read-only POSTCHECK then exited `1` and the operation stopped
+  immediately. Saved failure:
+  `POSTCHECK_FAILED: backend_match.match_reservation_links constraints differ`
+  at the POSTCHECK inline block constraint comparison. No repeat apply,
+  rollback or further PostgreSQL query was run.
+- Migration status is `applied_not_verified`. The POSTCHECK transaction was
+  read-only and did not commit any data change. Apply and POSTCHECK evidence is
+  preserved as `APPLY.output.txt`, `APPLY.stderr.txt`,
+  `POSTCHECK.output.txt` and `POSTCHECK.stderr.txt` in the same root-only audit
+  directory.
+- Local static inspection points to a checker expectation gap: the exact
+  constraint-name array for `match_reservation_links` does not include the
+  constraint-trigger bindings created later by the migration. This is a
+  hypothesis only; it was not tested against PostgreSQL after the stop rule.
+- Runtime wiring, application deployment, containers, env/secrets, YCLIENTS,
+  production and payment fields were not changed. The next safe gate is a
+  code-only review of the POSTCHECK expectation plus a contract regression;
+  migration 034 must not be applied again.
