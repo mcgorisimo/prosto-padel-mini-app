@@ -27,7 +27,7 @@
 |---|---|---|---|---|
 | D1 Backend-only/contracts | done | `main` / deployed `c04074459948d0bf545e865b885aea7a4e5fec3c` | frontend E2E PASS (82/1 skipped); focused fail-closed 2/2 PASS; frontend build PASS; backend all PASS; Selectel test smoke PASS | D1 закрыт; следующий отдельный этап — D2 |
 | D2 YCLIENTS reservation core | done | closure history through exact cleanup source `4515549f58d714624a333fbb059dd4054b1e1439`; Selectel test runtime `ac5b4be4e88c6b45ec8d290a1c68e01a41dc635d` | migration 033 applied/verified; all automated gates PASS; create/delete sync, admin-reschedule T1-T4, repeated-refresh no-churn, fully-bound cleanup and eight-row legacy cleanup live acceptance PASS | D2 closed; next stage is D3 match ↔ reservation lifecycle; payment, webhook and production remain separate gates |
-| D3 Match ↔ reservation lifecycle | in_progress | Selectel test runtime hotfix `e686cf18d2f911c9e1d83cce521c93e230f1108c` | migration 034 `applied_verified`; hotfix backend typecheck/unit 138/3366/E2E 2/4/build PASS; root E2E 90/1 skipped and build PASS; backend-only health/log rollout PASS | owner must reopen the TMA and verify the two already-created matches appear; do not recreate them |
+| D3 Match ↔ reservation lifecycle | in_progress | Selectel test runtime `b3c6b7fdc081ff70c2fcec34f4a8882790643015` | migration 034 `applied_verified`; match feed hotfix and truthful booked/unbooked projection live; PayKeeper transition gate root E2E 91/1 skipped and build PASS; Selectel health/assets/logs PASS | owner TMA smoke: paid-court creation remains visible but disabled; existing unbooked match keeps «Забронировать корт», which must fail closed until D4 |
 | D4 Payment Core | pending | — | — | payment provider, pricing/payment snapshot, чеки и возвраты |
 | D5 Settings/moderation/compliance | pending | — | — | standalone phone/email auth, verified backend email, approved club support/contact source and clickable action; затем schema review |
 | D6 Selectel readiness/load | pending | — | — | backend staging fixture, live concurrency и Selectel production readiness |
@@ -42,7 +42,7 @@
 |---|---|---|---|---|
 | D1 Backend-only/contracts | Selectel test | `c04074459948d0bf545e865b885aea7a4e5fec3c` | `test_deployed` | frontend healthy; HTTPS root/health и новый asset 200; TMA auth/profile/feed/details/booking availability PASS; bundle/log audit PASS |
 | D2 YCLIENTS reservation core | Selectel test | `ac5b4be4e88c6b45ec8d290a1c68e01a41dc635d` | `test_deployed` | backend-only rollout health/log/auth PASS; create/delete and admin-reschedule matrix remain proved; three unchanged owner refreshes preserved reservation version and hold counts |
-| D3 Match ↔ reservation lifecycle | Selectel test | `e686cf18d2f911c9e1d83cce521c93e230f1108c` | `pending` | backend-only SQL hotfix deployed; all containers healthy/restart 0; health 200, unauth matches 401, post-rollout critical/5xx counts zero; owner authenticated TMA feed recheck pending |
+| D3 Match ↔ reservation lifecycle | Selectel test | `b3c6b7fdc081ff70c2fcec34f4a8882790643015` | `test_deployed` | frontend-only PayKeeper transition gate deployed; all containers healthy/restart 0; HTTPS root/health and exact asset 200; bundle marker and bounded logs PASS; owner TMA transition smoke pending |
 | D2 persistence/privacy proposal | not applicable | docs-only checkpoint | `not_needed` | только Markdown; runtime, schema, containers и конфигурация не менялись |
 | D2 YCLIENTS contract matrix | not applicable | docs-only checkpoint поверх `3e8739b` | `not_needed` | только Markdown; API/DB/server/runtime не вызывались и не менялись |
 | D2 YCLIENTS controlled test plan | not applicable | `040773172a2fa556ffaaf1d12dac540095070976` + docs-only correction from that exact base | `not_needed` | plan only; provider/server/DB/runtime calls и writes не выполнялись |
@@ -3939,3 +3939,28 @@
   BookingScreen click, whose focused rerun passed `1/1`; controlled full rerun
   with four workers passed `91 / 1 skipped`. Root build PASS (`1618` modules)
   and `git diff --check` PASS.
+
+### 2026-08-10 — D3 / PayKeeper transition gate Selectel test rollout
+
+- Git delivery PASS: reviewed checkpoint
+  `b3c6b7fdc081ff70c2fcec34f4a8882790643015` was fast-forwarded into clean
+  `main` and pushed; local `main`, `origin/main` and the clean Selectel test
+  checkout matched that exact SHA.
+- Frontend alone was rebuilt and recreated. Frontend container/image changed
+  from `374ad98219623e699cc4cff230a0b6f883d78b270345c7b181f0fb9b2cd9a1ca` /
+  `sha256:31f4cdf2eeb4caf5d4ea1ca14371596ed46e90d9f6a63b84387e76964c4c1e6c`
+  to `c6b8c69a14951086b54de6e9dcfc98e24b4d4006e77a4ed8fc9cc8d43e839211` /
+  `sha256:493801a7c6b26a95bf1d2b05f5535d0268f7a9785f775dfce102315fcf7edfab`.
+  Backend remained `7ca6956f77fb...`, nginx `e5b98b53a385...` and PostgreSQL
+  `5e36d4dc1a5c...`.
+- Automated postcheck PASS: all four containers are healthy with restart count
+  `0`; internal and HTTPS root/health returned `200`; exact asset
+  `/assets/index-Do_BVi4B.js` returned `200` with `605758` bytes. The new
+  `PayKeeper checkout` marker is present and the obsolete `Court planned`
+  marker is absent. Since `2026-08-10T12:52:39Z`, backend critical markers and
+  nginx 5xx counts are both `0`.
+- No backend/schema/migration/DB/YCLIENTS/provider/payment-field/env/secret,
+  nginx/PostgreSQL or production change occurred. Deployment is
+  `test_deployed`; D3 remains `in_progress` only for the owner Telegram Mini App
+  transition smoke. No booking, payment or YCLIENTS write is required for this
+  smoke.
