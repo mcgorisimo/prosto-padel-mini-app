@@ -27,7 +27,7 @@
 |---|---|---|---|---|
 | D1 Backend-only/contracts | done | `main` / deployed `c04074459948d0bf545e865b885aea7a4e5fec3c` | frontend E2E PASS (82/1 skipped); focused fail-closed 2/2 PASS; frontend build PASS; backend all PASS; Selectel test smoke PASS | D1 закрыт; следующий отдельный этап — D2 |
 | D2 YCLIENTS reservation core | done | closure history through exact cleanup source `4515549f58d714624a333fbb059dd4054b1e1439`; Selectel test runtime `ac5b4be4e88c6b45ec8d290a1c68e01a41dc635d` | migration 033 applied/verified; all automated gates PASS; create/delete sync, admin-reschedule T1-T4, repeated-refresh no-churn, fully-bound cleanup and eight-row legacy cleanup live acceptance PASS | D2 closed; next stage is D3 match ↔ reservation lifecycle; payment, webhook and production remain separate gates |
-| D3 Match ↔ reservation lifecycle | in_progress | `codex/week1-d3-match-reservation` / local code checkpoint | focused 25/25; backend typecheck/unit 134/3344/E2E 2/4/build PASS; root E2E 89/1 skipped and build PASS | review pure domain checkpoint and persistence contract; migration SQL requires separate approval |
+| D3 Match ↔ reservation lifecycle | in_progress | `main` / runtime checkpoint `646ed7f4878a16557f0a40951e2d617203bd59ae`; Selectel test same SHA | migration 034 `applied_verified`; backend typecheck/unit 138/3366/E2E 2/4/build PASS; root E2E 90/1 skipped and build PASS; rollout health/HTTP/log gates PASS | owner manual Telegram Mini App business smoke remains before D3 can be marked done |
 | D4 Payment Core | pending | — | — | payment provider, pricing/payment snapshot, чеки и возвраты |
 | D5 Settings/moderation/compliance | pending | — | — | standalone phone/email auth, verified backend email, approved club support/contact source and clickable action; затем schema review |
 | D6 Selectel readiness/load | pending | — | — | backend staging fixture, live concurrency и Selectel production readiness |
@@ -42,6 +42,7 @@
 |---|---|---|---|---|
 | D1 Backend-only/contracts | Selectel test | `c04074459948d0bf545e865b885aea7a4e5fec3c` | `test_deployed` | frontend healthy; HTTPS root/health и новый asset 200; TMA auth/profile/feed/details/booking availability PASS; bundle/log audit PASS |
 | D2 YCLIENTS reservation core | Selectel test | `ac5b4be4e88c6b45ec8d290a1c68e01a41dc635d` | `test_deployed` | backend-only rollout health/log/auth PASS; create/delete and admin-reschedule matrix remain proved; three unchanged owner refreshes preserved reservation version and hold counts |
+| D3 Match ↔ reservation lifecycle | Selectel test | `646ed7f4878a16557f0a40951e2d617203bd59ae` | `pending` | backend then frontend rollout PASS; all containers healthy/restart 0; internal/HTTPS root and health 200; exact asset 200; unauth matches/bookings 401; critical logs and nginx 5xx zero; manual TMA smoke pending |
 | D2 persistence/privacy proposal | not applicable | docs-only checkpoint | `not_needed` | только Markdown; runtime, schema, containers и конфигурация не менялись |
 | D2 YCLIENTS contract matrix | not applicable | docs-only checkpoint поверх `3e8739b` | `not_needed` | только Markdown; API/DB/server/runtime не вызывались и не менялись |
 | D2 YCLIENTS controlled test plan | not applicable | `040773172a2fa556ffaaf1d12dac540095070976` + docs-only correction from that exact base | `not_needed` | plan only; provider/server/DB/runtime calls и writes не выполнялись |
@@ -3772,3 +3773,43 @@
 - Next gate: review the local checkpoint, then separately approve integration
   into `main` and a coordinated Selectel test rollout (backend before frontend)
   followed by health, TMA business smoke and log checks.
+
+### 2026-08-10 — D3 / Selectel test rollout, manual TMA smoke pending
+
+- Git delivery PASS: clean local `main` was fast-forwarded from
+  `6b369553d2c96d7487710ae1712d435b9d7825d2` to reviewed runtime checkpoint
+  `646ed7f4878a16557f0a40951e2d617203bd59ae` without a merge commit and pushed;
+  `main` and `origin/main` matched that SHA before rollout.
+- Selectel test preflight PASS at clean detached D2 runtime `ac5b4be4...`:
+  the fetched `origin/main` matched the approved SHA, the two-file Compose
+  configuration was valid, all four containers were healthy with restart count
+  `0`, internal root/health returned `200` and unauthenticated bookings returned
+  the expected fail-closed `401`. The checkout then moved cleanly to exact
+  detached `646ed7f...`.
+- Rollout order was backend first, frontend second. Only those two images and
+  containers changed:
+  - backend container `4a837f0226ad...` / image `37ff7ad80388...` became
+    `576a9da1a35b...` / image `84c1d6e53543...`;
+  - frontend container `29d0167f496d...` / image `1117b8904190...` became
+    `82391a277c2a...` / image `cc2011b6b849...`;
+  - nginx remained `e5b98b53a385...`; PostgreSQL remained
+    `5e36d4dc1a5c...`.
+- Automated postcheck PASS: every container is `healthy` with restart count
+  `0`; internal and HTTPS root/health returned `200`; exact frontend asset
+  `/assets/index-DzE6qk8k.js` returned `200` with `604575` bytes; unauthenticated
+  matches and bookings each returned `401`. Bounded 30-minute log counts were
+  backend/frontend/nginx/PostgreSQL critical markers `0` and nginx 5xx `0`.
+  The server checkout is clean and exact `646ed7f...`.
+- Direct-browser boundary smoke PASS: the production page loaded the expected
+  title, showed the fail-closed message that Telegram login is available only
+  inside Mini App and emitted zero browser-console errors. This is not accepted
+  as Telegram authentication evidence. The available automation surface had no
+  controllable authenticated Telegram Desktop or Telegram Web session, so no
+  synthetic `initData` was used.
+- No migration/schema/DB operation, YCLIENTS/provider call or write, booking,
+  app-originated cancel/reschedule, payment-field, env/secret, nginx/PostgreSQL
+  rebuild, production or rollback action occurred during this rollout.
+- D3 remains `in_progress` and deployment status remains `pending` until the
+  owner opens the exact Selectel Mini App in Telegram and confirms the D3
+  read-only business smoke. After that smoke, repeat the bounded health/log
+  check and record the final D3 closure separately.
