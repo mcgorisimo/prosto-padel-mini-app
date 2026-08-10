@@ -49,6 +49,21 @@ Codex. Текущий фактический статус хранится в `W
   источником истины о реальной брони или платеже.
 - Для первого платёжного MVP один плательщик — организатор, полная стоимость
   корта. Split payments отложены.
+- Owner decision 2026-08-10: PayKeeper является платёжным провайдером. Есть два
+  входа в один обязательный paid-court checkout: создание нового матча с кортом
+  и кнопка «Забронировать корт» внутри уже созданного unbooked-матча. Новый
+  матч без корта по-прежнему создаётся сразу; матч с кортом не публикуется как
+  booked до подтверждённых payment и YCLIENTS reservation.
+- До готовности D4 paid-court entrypoints работают fail-closed: кнопка внутри
+  unbooked-матча остаётся видимой, но не может вызвать D2 create без оплаты;
+  создание матча с кортом недоступно. Browser/user redirect PayKeeper не
+  является доказательством оплаты — authority принадлежит verified callback и
+  canonical backend reconciliation.
+- Предпочтительная D4 saga — PayKeeper authorization/hold → YCLIENTS create и
+  canonical confirmation → PayKeeper capture. Она разрешается только после
+  подтверждения, что холдирование включено для конкретного кабинета/договора.
+  Если capability отсутствует, альтернативная payment → YCLIENTS → automatic
+  refund compensation требует отдельного review из-за риска потери слота.
 - Неизвестный результат внешнего write-запроса не считается отказом или
   успехом: состояние `unknown` разрешается reconciliation-процессом.
 - Слот освобождается только после подтверждённой отмены YCLIENTS.

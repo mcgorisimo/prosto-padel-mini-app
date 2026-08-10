@@ -3911,3 +3911,31 @@
   is `test_deployed`; D3 remains `in_progress` for owner TMA copy smoke and the
   later real D2 reservation-link smoke. No new match or booking is required for
   the copy check.
+
+### 2026-08-10 — D3 / PayKeeper transition gate checkpoint
+
+- Owner rejected the temporary planned-court-without-payment product flow and
+  selected PayKeeper. Final contract: a no-court match is created immediately;
+  both «new match with court» and «Забронировать корт» on an existing unbooked
+  match enter the same checkout where the organizer pays the full court price.
+  A paid-court match is not considered booked until both PayKeeper payment and
+  the YCLIENTS reservation are canonically confirmed.
+- Official PayKeeper documentation confirms signed POST payment callbacks with
+  retries, payment status lookup, asynchronous full/partial reverse, receipts,
+  and optional authorization/hold with later capture. Account-specific hold
+  capability, sandbox/cabinet URL, callback secret, API credentials and fiscal
+  settings remain D4 gates; no secret value was requested or stored.
+- Transitional frontend is fail-closed: the paid-court creation card remains
+  visible but disabled, and the existing unbooked-match button remains visible
+  but cannot navigate to D2 create before PayKeeper is enabled. Standalone
+  no-court match creation remains available. This prevents new unpaid
+  match-linked YCLIENTS writes while D4 is pending.
+- Scope is frontend/config/docs/tests only; backend, schema/migrations, DB,
+  YCLIENTS, provider calls, payment fields, secrets and production are
+  unchanged. Deployment is `pending` until the exact checkpoint is integrated
+  and the Selectel test frontend is rolled out with health, TMA and log checks.
+- Verification PASS: focused paid-court regressions `2/2`; first full root E2E
+  run had `90 passed / 1 skipped` plus one resource timeout at an unchanged
+  BookingScreen click, whose focused rerun passed `1/1`; controlled full rerun
+  with four workers passed `91 / 1 skipped`. Root build PASS (`1618` modules)
+  and `git diff --check` PASS.

@@ -4262,6 +4262,10 @@ test.describe('backend match credential lifecycle', () => {
         isPrivateMatchCreationEnabled,
       } = await import('/src/components/MatchCreationScreen.jsx');
       const {
+        PAYKEEPER_COURT_CHECKOUT_PENDING_MESSAGE,
+        resolvePaidCourtCheckoutEntry,
+      } = await import('/src/lib/paidCourtCheckout.js');
+      const {
          refreshLegacyMatchWaitlist,
          supportsMatchChat,
          tryBeginMatchAction,
@@ -4719,9 +4723,18 @@ test.describe('backend match credential lifecycle', () => {
             desc: socialScenario?.desc,
             pros: socialScenario?.pros,
             warn: socialScenario?.warn,
+            disabled: socialScenario?.disabled,
           };
         })(),
         socialConfirmationCopy: SOCIAL_MATCH_CONFIRMATION_COPY,
+        paidCourtCheckoutGate: {
+          pending: resolvePaidCourtCheckoutEntry(match),
+          enabled: resolvePaidCourtCheckoutEntry(match, {
+            checkoutEnabled: true,
+          }),
+          hiddenForConfirmed: resolvePaidCourtCheckoutEntry(confirmedMatch),
+          message: PAYKEEPER_COURT_CHECKOUT_PENDING_MESSAGE,
+        },
          legacyExtensions: {
            backendPinnedMessageHidden:
              !supportsLegacyMatchExtensions(match),
@@ -4912,18 +4925,37 @@ test.describe('backend match credential lifecycle', () => {
       legacyRequestPreserved: true,
     });
     expect(summary.socialCreationDisclosure).toEqual({
-      title: 'Корт + Сбор',
-      badge: 'Court planned',
-      desc: 'Организатор выбирает планируемые дату, время и корт. Сам матч создаётся без брони.',
-      pros: ['План игры сразу виден участникам'],
-      warn: 'Корт не гарантирован до отдельного подтверждения YCLIENTS',
+      title: 'Матч с кортом',
+      badge: 'PayKeeper checkout',
+      desc: 'Организатор выбирает дату, время и корт, затем оплачивает полную стоимость корта.',
+      pros: ['Матч создаётся после оплаты и подтверждения YCLIENTS'],
+      warn: 'Временно недоступно до подключения PayKeeper',
+      disabled: true,
     });
     expect(summary.socialConfirmationCopy).toEqual({
-      title: 'Создание матча',
-      priceLabel: 'Ориентировочная стоимость корта',
-      noticeTitle: 'Корт ещё не забронирован',
-      noticeBody: 'Сейчас будет создан матч с выбранным кортом и временем. Чтобы гарантировать корт, после создания откройте матч и нажмите «Забронировать корт».',
-      confirmLabel: 'Создать матч без брони',
+      title: 'Оплата корта',
+      priceLabel: 'Полная стоимость корта',
+      noticeTitle: 'Оплата обязательна',
+      noticeBody: 'Матч с кортом будет создан только после подтверждённой оплаты PayKeeper и подтверждённой брони YCLIENTS.',
+      confirmLabel: 'Перейти к оплате',
+    });
+    expect(summary.paidCourtCheckoutGate).toEqual({
+      pending: {
+        visible: true,
+        canStart: false,
+        reason: 'paykeeper_pending',
+      },
+      enabled: {
+        visible: true,
+        canStart: true,
+        reason: null,
+      },
+      hiddenForConfirmed: {
+        visible: false,
+        canStart: false,
+        reason: null,
+      },
+      message: 'Оплата корта через PayKeeper подключается. Бронь без оплаты не создаётся.',
     });
     expect(summary.legacyExtensions).toEqual({
       backendPinnedMessageHidden: true,
@@ -4932,6 +4964,51 @@ test.describe('backend match credential lifecycle', () => {
       backendChatFailsClosedWithoutBoundary: true,
     });
     expect(summary.sensitiveAbsent).toBe(true);
+  });
+
+  test('keeps the paid-court match entry visible but fail-closed until PayKeeper is ready', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await isolateComponentHarness(page);
+
+    await page.evaluate(async () => {
+      const reactModule = await import('/@id/react');
+      const React = reactModule.default ?? reactModule;
+      const reactDomClientModule = await import('/@id/react-dom/client');
+      const { createRoot } =
+        reactDomClientModule.default ?? reactDomClientModule;
+      const { default: MatchCreationScreen } =
+        await import('/src/components/MatchCreationScreen.jsx');
+
+      const container = document.createElement('div');
+      container.dataset.testid = 'paid-court-entry-test-root';
+      document.body.append(container);
+      const root = createRoot(container);
+      root.render(React.createElement(MatchCreationScreen, {
+        onBack() {},
+        onSuccess() {},
+        user: { isVerified: true },
+        allMatches: [],
+        showToast() {},
+      }));
+      window.__paidCourtEntryUiUnmount = () => {
+        root.unmount();
+        container.remove();
+      };
+    });
+
+    const harness = page.getByTestId('paid-court-entry-test-root');
+    await expect(harness.getByTestId('match-scenario-community')).toBeEnabled();
+    await expect(harness.getByTestId('match-scenario-social')).toBeDisabled();
+    await expect(harness.getByTestId('match-scenario-social')).toContainText(
+      'Оплата подключается',
+    );
+    await expect(harness).toContainText(
+      'Матч создаётся после оплаты и подтверждения YCLIENTS',
+    );
+
+    await page.evaluate(() => window.__paidCourtEntryUiUnmount?.());
   });
 
   test('renders independent match avatar badges and mini-profile rating', async ({

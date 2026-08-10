@@ -2,6 +2,10 @@ import React, { useState, useEffect, useRef } from 'react';
 import { COURTS, HOURS, WORKING_HOURS, checkAvailability, generateDates } from '../lib/booking';
 import { formatMoscowDateISO, getMoscowDateISO, hasMoscowSlotStarted } from '../lib/moscowDateTime';
 import { getTotalPrice, isPrimeTime, fmtPrice as fmtPriceLib } from '../lib/pricing';
+import {
+  PAYKEEPER_COURT_CHECKOUT_ENABLED,
+  PAYKEEPER_COURT_CHECKOUT_PENDING_MESSAGE,
+} from '../lib/paidCourtCheckout';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -81,11 +85,12 @@ export const MATCH_SCENARIO_DEFS = [
   {
     id: 'social',
     mark: '02',
-    title: 'Корт + Сбор',
-    badge: 'Court planned',
-    desc: 'Организатор выбирает планируемые дату, время и корт. Сам матч создаётся без брони.',
-    pros: ['План игры сразу виден участникам'],
-    warn: 'Корт не гарантирован до отдельного подтверждения YCLIENTS',
+    title: 'Матч с кортом',
+    badge: 'PayKeeper checkout',
+    desc: 'Организатор выбирает дату, время и корт, затем оплачивает полную стоимость корта.',
+    pros: ['Матч создаётся после оплаты и подтверждения YCLIENTS'],
+    warn: 'Временно недоступно до подключения PayKeeper',
+    disabled: !PAYKEEPER_COURT_CHECKOUT_ENABLED,
     color: T.gold,
     bg: 'rgba(216,243,74,0.08)',
     border: 'rgba(216,243,74,0.22)',
@@ -93,11 +98,11 @@ export const MATCH_SCENARIO_DEFS = [
 ];
 
 export const SOCIAL_MATCH_CONFIRMATION_COPY = Object.freeze({
-  title: 'Создание матча',
-  priceLabel: 'Ориентировочная стоимость корта',
-  noticeTitle: 'Корт ещё не забронирован',
-  noticeBody: 'Сейчас будет создан матч с выбранным кортом и временем. Чтобы гарантировать корт, после создания откройте матч и нажмите «Забронировать корт».',
-  confirmLabel: 'Создать матч без брони',
+  title: 'Оплата корта',
+  priceLabel: 'Полная стоимость корта',
+  noticeTitle: 'Оплата обязательна',
+  noticeBody: 'Матч с кортом будет создан только после подтверждённой оплаты PayKeeper и подтверждённой брони YCLIENTS.',
+  confirmLabel: 'Перейти к оплате',
 });
 
 function ScenarioSelector({ onSelect }) {
@@ -107,11 +112,13 @@ function ScenarioSelector({ onSelect }) {
         Выберите способ организации игры
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-        {MATCH_SCENARIO_DEFS.map(({ id, mark, title, badge, desc, pros, warn, color, bg, border }) => (
+        {MATCH_SCENARIO_DEFS.map(({ id, mark, title, badge, desc, pros, warn, color, bg, border, disabled = false }) => (
           <button
             key={id}
-            onClick={() => onSelect(id)}
-            style={{ display: 'block', width: '100%', textAlign: 'left', background: bg, borderRadius: '16px', border: `1px solid ${border}`, padding: '20px', cursor: 'pointer' }}
+            data-testid={`match-scenario-${id}`}
+            disabled={disabled}
+            onClick={() => !disabled && onSelect(id)}
+            style={{ display: 'block', width: '100%', textAlign: 'left', background: bg, borderRadius: '16px', border: `1px solid ${border}`, padding: '20px', cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.58 : 1 }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '10px' }}>
               <span style={{ color, fontSize: '12px', fontWeight: 900, letterSpacing: '0.12em', lineHeight: 1 }}>{mark}</span>
@@ -134,7 +141,9 @@ function ScenarioSelector({ onSelect }) {
               </div>
             </div>
             <div style={{ marginTop: '14px', textAlign: 'right' }}>
-              <span style={{ color, fontSize: '13px', fontWeight: 700 }}>Выбрать</span>
+              <span style={{ color, fontSize: '13px', fontWeight: 700 }}>
+                {disabled ? 'Оплата подключается' : 'Выбрать'}
+              </span>
             </div>
           </button>
         ))}
@@ -529,6 +538,10 @@ export default function MatchCreationScreen({
   };
 
   const handleScenarioSelect = (s) => {
+    if (s === 'social' && !PAYKEEPER_COURT_CHECKOUT_ENABLED) {
+      showToast?.(PAYKEEPER_COURT_CHECKOUT_PENDING_MESSAGE, 'info');
+      return;
+    }
     if (s === 'community') setIsPrivate(false);
     setScenario(s);
     setStep(1);

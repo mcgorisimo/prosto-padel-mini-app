@@ -37,6 +37,10 @@ import {
   selectBackendReservationsForHome,
   selectMissingBookingCourtServiceIds,
 } from './lib/backendBookingHomeAdapter';
+import {
+  PAYKEEPER_COURT_CHECKOUT_PENDING_MESSAGE,
+  resolvePaidCourtCheckoutEntry,
+} from './lib/paidCourtCheckout';
 import { getMyProfile, getPublicPlayerProfiles } from './lib/profileApi';
 import {
   acceptMatchInvitation,
@@ -2229,7 +2233,12 @@ const handleBookSlot = async (booking) => {
   };
 
   const openCourtBookingForMatch = (match) => {
-    if (!isBackendOwnedMatch(match)) return;
+    const checkoutEntry = resolvePaidCourtCheckoutEntry(match);
+    if (!checkoutEntry.visible) return;
+    if (!checkoutEntry.canStart) {
+      showToast?.(PAYKEEPER_COURT_CHECKOUT_PENDING_MESSAGE, 'info');
+      return;
+    }
     backendDetailRequestRef.current += 1;
     setSelectedBookingReservationId(null);
     setSelectedBookingMatchId(match.id);
