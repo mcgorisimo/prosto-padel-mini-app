@@ -1109,6 +1109,8 @@ test.describe('backend session credential lifecycle', () => {
       window.__profilePhotoUiCalls = calls;
       window.confirm = () => true;
       document.body.innerHTML = '<div id="profile-root"></div>';
+      document.getElementById('profile-root').style.transform =
+        'translate3d(0, 0, 0)';
       const root = createRoot(document.getElementById('profile-root'));
       const renderProfile = (activeAccountId) => root.render(
         React.createElement(PlayerProfile, {
@@ -1168,6 +1170,27 @@ test.describe('backend session credential lifecycle', () => {
     await avatar.click();
     const photoActions = page.getByTestId('profile-photo-actions');
     await expect(photoActions).toBeVisible();
+    const actionsViewport = await photoActions.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      return {
+        parentIsBody: element.parentElement === document.body,
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom,
+        left: rect.left,
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+      };
+    });
+    expect(actionsViewport.parentIsBody).toBe(true);
+    expect(Math.abs(actionsViewport.top)).toBeLessThan(1);
+    expect(Math.abs(actionsViewport.left)).toBeLessThan(1);
+    expect(
+      Math.abs(actionsViewport.right - actionsViewport.viewportWidth),
+    ).toBeLessThan(1);
+    expect(
+      Math.abs(actionsViewport.bottom - actionsViewport.viewportHeight),
+    ).toBeLessThan(1);
     await expect(photoActions.getByTestId('profile-photo-select')).toHaveText(
       'Заменить фото',
     );
@@ -1175,6 +1198,11 @@ test.describe('backend session credential lifecycle', () => {
     await photoActions.getByTestId('profile-photo-preview').click();
     const lightbox = page.getByTestId('profile-photo-lightbox');
     await expect(lightbox).toBeVisible();
+    expect(
+      await lightbox.evaluate(
+        (element) => element.parentElement === document.body,
+      ),
+    ).toBe(true);
     await expect(lightbox.locator('img')).toHaveAttribute(
       'src',
       'https://photos.example.test/player/full.webp',

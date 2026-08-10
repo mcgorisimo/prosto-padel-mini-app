@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Settings as SettingsIcon } from 'lucide-react';
 import RatingChart from './RatingChart';
 import PadelButton from './ui/PadelButton';
@@ -794,6 +795,7 @@ export function ProfilePhotoManager({
   const [photoCropZoom, setPhotoCropZoom] = useState(1);
   const displayName = [user?.firstName, user?.lastName].filter(Boolean).join(' ') || 'Игрок';
   const modalOpen = showPhotoActions || showFullPhoto || Boolean(photoCrop);
+  const modalPortalTarget = globalThis.document?.body ?? null;
 
   useEffect(() => {
     const objectUrl = photoCrop?.objectUrl;
@@ -922,14 +924,15 @@ export function ProfilePhotoManager({
         style={{ display: 'none' }}
       />
       {typeof renderLauncher === 'function' && renderLauncher({ open, busy: photoBusy })}
-      {showFullPhoto && (
+      {showFullPhoto && modalPortalTarget && createPortal(
         <FullProfilePhoto
           src={user?.full_photo_url || user?.photo_url}
           name={displayName}
           onClose={() => setShowFullPhoto(false)}
-        />
+        />,
+        modalPortalTarget,
       )}
-      {showPhotoActions && (
+      {showPhotoActions && modalPortalTarget && createPortal(
         <ProfilePhotoActions
           user={user}
           name={displayName}
@@ -948,9 +951,10 @@ export function ProfilePhotoManager({
           onClose={() => {
             if (!photoBusy) setShowPhotoActions(false);
           }}
-        />
+        />,
+        modalPortalTarget,
       )}
-      {photoCrop && (
+      {photoCrop && modalPortalTarget && createPortal(
         <ProfilePhotoCropper
           source={photoCrop.objectUrl}
           imageSize={photoCropSize}
@@ -967,7 +971,8 @@ export function ProfilePhotoManager({
             setPhotoCrop(null);
             setPhotoCropSize(null);
           }}
-        />
+        />,
+        modalPortalTarget,
       )}
     </>
   );

@@ -4063,3 +4063,22 @@
 - Deployment is `not_needed`: documentation only. Selectel test remains exact
   runtime `78a1cef68f74854a9d6e316ffd235ffbd42b38f8`; containers, DB, YCLIENTS,
   ЮKassa, secrets and production were not contacted or changed.
+
+### 2026-08-10 — profile photo viewport overlay correction
+
+- Root cause confirmed: `ProfilePhotoManager` was rendered below the always-
+  transformed `.pull-to-refresh__content`. That transform became the containing
+  block for the photo overlays' `position: fixed`, so the actions, full-photo
+  view and cropper were positioned against the long profile page instead of the
+  phone viewport and could require scrolling to find.
+- `PlayerProfile.jsx` now portals all three photo overlays directly into
+  `document.body`. No visual design, profile API or backend behavior changed.
+- The focused Playwright regression reproduced the bug before the fix at the
+  new body/viewport assertion and PASS after the fix. The complete controlled
+  root E2E run PASS: `91 passed / 1 skipped`; root production build PASS:
+  `1618` modules. Backend gates were not run because backend source did not
+  change. `git diff --check` PASS.
+- This changes the frontend bundle and is `pending_integration_rollout`.
+  Selectel test remains exact runtime
+  `78a1cef68f74854a9d6e316ffd235ffbd42b38f8`; no server, container, DB,
+  YCLIENTS, payment/provider, secret or production action was performed.
