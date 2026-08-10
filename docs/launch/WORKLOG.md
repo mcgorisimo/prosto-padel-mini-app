@@ -3558,3 +3558,36 @@
 - Migration remains `not_applied`; PRECHECK/POSTCHECK/rollback, PostgreSQL,
   YCLIENTS, SSH, server, containers and runtime were not invoked or changed.
   Deployment remains `not_needed` for this review-only correction.
+
+### 2026-08-10 — D3 / Selectel test migration 034 apply STOP
+
+- Exact approved checkpoint:
+  `a7fc8858ce2a3908beb8ec3d5dec18a414cb8174`. Local branch/worktree was clean;
+  application `main`/`origin/main` remained `6b369553...` and were not changed.
+  Exact remote SQL SHA-256 matched local artifacts: migration `cbb6040b...`,
+  PRECHECK `73582827...`, POSTCHECK `4584ffdb...`, rollback `ff896ec7...`.
+- Selectel test preflight PASS: application checkout was clean at accepted D2
+  runtime `ac5b4be4...`; backend/frontend/nginx/PostgreSQL were running and
+  healthy with restart count `0`.
+- Root-owned backup set PASS at
+  `/root/prosto-padel-migration-audit/034-a7fc885-20260810T085632Z-433b27b4-c138-4ebd-86e5-8c98d2713b32`:
+  directory `0700`; `database.dump` (`608647` bytes), `globals.sql` (`1195`
+  bytes), `database.list`, manifest and checksum files were `0600`.
+  `pg_restore --list` and SHA-256 verification PASS.
+- Read-only PRECHECK PASS with empty stderr: `ready=true`, target absent,
+  canonical D2 slot-hold authority present, legacy match overlap present,
+  `12` matches and `0` confirmed reservations.
+- Exact migration ran once with `psql -X --set=ON_ERROR_STOP=1` and STOPPED
+  non-zero while compiling `guard_match_reservation_link_transition()`:
+  `ERROR: "v_reservation" is not a scalar variable` at
+  `into v_match_status, v_reservation`. Output contains `BEGIN` and no
+  `COMMIT`; the failed open transaction was rolled back when the psql session
+  closed. Per owner stop-rule, no retry or independent DB verification was
+  run, so migration status remains `not_applied_unverified_after_failed_apply`.
+- POSTCHECK and rollback were not run. Runtime wiring, application checkout,
+  containers, env/secrets, YCLIENTS, production and payment fields were not
+  changed. No push, merge or application deployment occurred.
+- Next safe gate requires separate approval: correct only the invalid PL/pgSQL
+  composite assignment, add a static regression, review and commit a new exact
+  checkpoint. Any future database attempt requires a new explicit approval and
+  fresh backup/PRECHECK; the failed checkpoint must not be retried.
