@@ -65,7 +65,7 @@ function Section({ title, children }) {
 
 // ─── Scenario Selector (Step 0) ───────────────────────────────────────────────
 
-const SCENARIO_DEFS = [
+export const MATCH_SCENARIO_DEFS = [
   {
     id: 'community',
     mark: '01',
@@ -81,16 +81,24 @@ const SCENARIO_DEFS = [
   {
     id: 'social',
     mark: '02',
-    title: 'Бронь + Сбор',
-    badge: 'Confirmed & Reserved',
-    desc: 'Организатор выбирает время. Сейчас бронь подтверждается без онлайн-оплаты.',
-    pros: ['Корт гарантирован за вами'],
-    warn: 'Онлайн-оплата будет доступна позже',
+    title: 'Корт + Сбор',
+    badge: 'Court planned',
+    desc: 'Организатор выбирает планируемые дату, время и корт. Сам матч создаётся без брони.',
+    pros: ['План игры сразу виден участникам'],
+    warn: 'Корт не гарантирован до отдельного подтверждения YCLIENTS',
     color: T.gold,
     bg: 'rgba(216,243,74,0.08)',
     border: 'rgba(216,243,74,0.22)',
   },
 ];
+
+export const SOCIAL_MATCH_CONFIRMATION_COPY = Object.freeze({
+  title: 'Создание матча',
+  priceLabel: 'Ориентировочная стоимость корта',
+  noticeTitle: 'Корт ещё не забронирован',
+  noticeBody: 'Сейчас будет создан матч с выбранным кортом и временем. Чтобы гарантировать корт, после создания откройте матч и нажмите «Забронировать корт».',
+  confirmLabel: 'Создать матч без брони',
+});
 
 function ScenarioSelector({ onSelect }) {
   return (
@@ -99,7 +107,7 @@ function ScenarioSelector({ onSelect }) {
         Выберите способ организации игры
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-        {SCENARIO_DEFS.map(({ id, mark, title, badge, desc, pros, warn, color, bg, border }) => (
+        {MATCH_SCENARIO_DEFS.map(({ id, mark, title, badge, desc, pros, warn, color, bg, border }) => (
           <button
             key={id}
             onClick={() => onSelect(id)}
@@ -340,9 +348,9 @@ function CourtSelector({ courtType, selectedDate, time, duration, allMatches, se
   );
 }
 
-// ─── Social Payment Sheet ─────────────────────────────────────────────────────
+// ─── Social Match Confirmation ────────────────────────────────────────────────
 
-function SocialPaymentSheet({ time, duration, courtType, dateISO, onConfirm, onClose }) {
+function SocialMatchConfirmationSheet({ time, duration, courtType, dateISO, onConfirm, onClose }) {
   const isP       = isPrime(time, dateISO);
   const total     = courtTotal(time, duration, courtType, dateISO);
 
@@ -362,7 +370,7 @@ function SocialPaymentSheet({ time, duration, courtType, dateISO, onConfirm, onC
         </div>
 
         <div style={{ textAlign: 'center', marginBottom: '20px' }}>
-          <div style={{ color: '#fff', fontSize: '18px', fontWeight: 700 }}>Подтверждение брони</div>
+          <div style={{ color: '#fff', fontSize: '18px', fontWeight: 700 }}>{SOCIAL_MATCH_CONFIRMATION_COPY.title}</div>
           <div style={{ color: T.muted, fontSize: '12px', marginTop: '4px' }}>
             {courtType === 'panoramic' ? 'Ультрапанорамный корт' : 'Корт'} · {time} · {duration}ч
           </div>
@@ -372,7 +380,7 @@ function SocialPaymentSheet({ time, duration, courtType, dateISO, onConfirm, onC
         <div style={{ background: T.surface, borderRadius: '14px', padding: '16px', marginBottom: '16px', border: `1px solid ${T.border}` }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>
-              <div style={{ color: T.muted, fontSize: '12px' }}>Стоимость брони</div>
+              <div style={{ color: T.muted, fontSize: '12px' }}>{SOCIAL_MATCH_CONFIRMATION_COPY.priceLabel}</div>
             </div>
             <div style={{ color: '#fff', fontSize: '20px', fontWeight: 800 }}>{fmtPrice(total)}</div>
           </div>
@@ -380,10 +388,10 @@ function SocialPaymentSheet({ time, duration, courtType, dateISO, onConfirm, onC
 
         <div style={{ background: 'rgba(216,243,74,0.06)', borderRadius: '16px', padding: '14px', border: '1px solid rgba(216,243,74,0.18)', marginBottom: '20px' }}>
           <div style={{ color: T.accentL, fontWeight: 700, fontSize: '13px', marginBottom: '8px' }}>
-            Гарантированная бронь
+            {SOCIAL_MATCH_CONFIRMATION_COPY.noticeTitle}
           </div>
           <div style={{ color: T.muted, fontSize: '12px', lineHeight: 1.7 }}>
-            Сейчас бронь подтверждается без онлайн-оплаты. Онлайн-оплата будет доступна позже.
+            {SOCIAL_MATCH_CONFIRMATION_COPY.noticeBody}
           </div>
         </div>
 
@@ -395,7 +403,7 @@ function SocialPaymentSheet({ time, duration, courtType, dateISO, onConfirm, onC
             color: T.accent, border: '1px solid rgba(216,243,74,0.32)', borderRadius: '16px', fontSize: '15px', fontWeight: 800, cursor: 'pointer',
           }}
         >
-          Подтвердить бронь
+          {SOCIAL_MATCH_CONFIRMATION_COPY.confirmLabel}
         </button>
         <button onClick={onClose} style={{ width: '100%', padding: '14px', background: 'transparent', color: T.muted, border: `1px solid ${T.border}`, borderRadius: '16px', fontSize: '15px', cursor: 'pointer' }}>
           Отмена
@@ -609,7 +617,7 @@ export default function MatchCreationScreen({
 
   const isP       = isPrime(time, selectedDate.dateISO);
   const total     = courtTotal(time, duration, courtType, selectedDate.dateISO);
-  const scenarioDef = SCENARIO_DEFS.find(s => s.id === scenario);
+  const scenarioDef = MATCH_SCENARIO_DEFS.find(s => s.id === scenario);
   const canBook = (scenario === 'social' ? !!selectedCourtId : true) && !timeError;
 
   return (
@@ -727,7 +735,7 @@ export default function MatchCreationScreen({
             </div>
           )}
 
-          {/* Social price preview */}
+          {/* Social planned-court preview */}
           {scenario === 'social' && (
             <div style={{
               margin: '0 16px 16px',
@@ -736,8 +744,11 @@ export default function MatchCreationScreen({
               border: '1px solid rgba(216,243,74,0.18)',
             }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ color: T.muted, fontSize: '12px' }}>Предварительная стоимость</span>
+                <span style={{ color: T.muted, fontSize: '12px' }}>Ориентировочная стоимость корта</span>
                 <span style={{ color: isP ? T.gold : T.accentL, fontWeight: 800, fontSize: '18px' }}>{fmtPrice(total)}</span>
+              </div>
+              <div style={{ color: T.gold, fontSize: '12px', lineHeight: 1.55, marginTop: '8px' }}>
+                Корт не забронирован. После создания матча подтвердите бронь отдельно в его деталях.
               </div>
             </div>
           )}
@@ -775,7 +786,7 @@ export default function MatchCreationScreen({
                 : scenario === 'community'
                 ? 'Создать матч'
                 : canBook
-                  ? 'Создать матч'
+                  ? 'Продолжить'
                   : 'Выберите свободный корт'
               }
             </button>
@@ -784,7 +795,7 @@ export default function MatchCreationScreen({
       )}
 
       {showSocial && (
-        <SocialPaymentSheet
+        <SocialMatchConfirmationSheet
           time={time}
           duration={duration}
           courtType={courtType}

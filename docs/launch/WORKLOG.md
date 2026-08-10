@@ -3865,3 +3865,25 @@
   action occurred. D3 remains `in_progress` only for the authenticated owner TMA
   recheck: fully reopen the app and confirm the two existing matches now appear
   in public/account views without recreating them.
+
+### 2026-08-10 — D3 / truthful planned-court creation checkpoint
+
+- Owner TMA smoke for the backend feed hotfix PASS: both previously created
+  matches appeared without recreation. Recent authenticated public/account feed
+  requests returned `200`; backend critical markers and nginx 5xx remained `0`.
+- Bounded read-only persistence evidence showed that the match created through
+  the old «Бронь + Сбор» screen had no D2 reservation and no YCLIENTS binding.
+  The legacy frontend nevertheless claimed a guaranteed/confirmed booking,
+  which was a product-truthfulness P1 rather than a provider failure.
+- The social creation path now describes the selected date/time/court as a plan,
+  explicitly says that the court is not booked, and directs the organizer to the
+  existing separate «Забронировать корт» action after match creation. The
+  underlying D3 two-stage flow, match payload and payment fields were not
+  changed; no reservation/provider operation was executed.
+- Verification PASS: focused disclosure regression `1/1`; root E2E `90 passed /
+  1 skipped`; root build `1617` modules; `git diff --check` PASS. Backend source,
+  schema/migrations, DB, YCLIENTS and production were not changed.
+- Deployment is `pending` because the frontend bundle changes. Selectel test
+  still runs backend hotfix `e686cf18d2f911c9e1d83cce521c93e230f1108c`
+  with the prior D3 frontend container. Next gate is review/integration and a
+  frontend-only Selectel test rollout, then health, TMA copy smoke and logs.

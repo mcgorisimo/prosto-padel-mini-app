@@ -4257,6 +4257,8 @@ test.describe('backend match credential lifecycle', () => {
         '/src/lib/matchBookingStatus.js'
       );
       const {
+        MATCH_SCENARIO_DEFS,
+        SOCIAL_MATCH_CONFIRMATION_COPY,
         isPrivateMatchCreationEnabled,
       } = await import('/src/components/MatchCreationScreen.jsx');
       const {
@@ -4707,6 +4709,19 @@ test.describe('backend match credential lifecycle', () => {
           legacyRequestPreserved:
             isPrivateMatchCreationEnabled(true, true),
         },
+        socialCreationDisclosure: (() => {
+          const socialScenario = MATCH_SCENARIO_DEFS.find(
+            ({ id }) => id === 'social',
+          );
+          return {
+            title: socialScenario?.title,
+            badge: socialScenario?.badge,
+            desc: socialScenario?.desc,
+            pros: socialScenario?.pros,
+            warn: socialScenario?.warn,
+          };
+        })(),
+        socialConfirmationCopy: SOCIAL_MATCH_CONFIRMATION_COPY,
          legacyExtensions: {
            backendPinnedMessageHidden:
              !supportsLegacyMatchExtensions(match),
@@ -4895,6 +4910,20 @@ test.describe('backend match credential lifecycle', () => {
       backendCapability: false,
       backendRequestRejected: true,
       legacyRequestPreserved: true,
+    });
+    expect(summary.socialCreationDisclosure).toEqual({
+      title: 'Корт + Сбор',
+      badge: 'Court planned',
+      desc: 'Организатор выбирает планируемые дату, время и корт. Сам матч создаётся без брони.',
+      pros: ['План игры сразу виден участникам'],
+      warn: 'Корт не гарантирован до отдельного подтверждения YCLIENTS',
+    });
+    expect(summary.socialConfirmationCopy).toEqual({
+      title: 'Создание матча',
+      priceLabel: 'Ориентировочная стоимость корта',
+      noticeTitle: 'Корт ещё не забронирован',
+      noticeBody: 'Сейчас будет создан матч с выбранным кортом и временем. Чтобы гарантировать корт, после создания откройте матч и нажмите «Забронировать корт».',
+      confirmLabel: 'Создать матч без брони',
     });
     expect(summary.legacyExtensions).toEqual({
       backendPinnedMessageHidden: true,
