@@ -27,7 +27,7 @@
 |---|---|---|---|---|
 | D1 Backend-only/contracts | done | `main` / deployed `c04074459948d0bf545e865b885aea7a4e5fec3c` | frontend E2E PASS (82/1 skipped); focused fail-closed 2/2 PASS; frontend build PASS; backend all PASS; Selectel test smoke PASS | D1 закрыт; следующий отдельный этап — D2 |
 | D2 YCLIENTS reservation core | done | closure history through exact cleanup source `4515549f58d714624a333fbb059dd4054b1e1439`; Selectel test runtime `ac5b4be4e88c6b45ec8d290a1c68e01a41dc635d` | migration 033 applied/verified; all automated gates PASS; create/delete sync, admin-reschedule T1-T4, repeated-refresh no-churn, fully-bound cleanup and eight-row legacy cleanup live acceptance PASS | D2 closed; next stage is D3 match ↔ reservation lifecycle; payment, webhook and production remain separate gates |
-| D3 Match ↔ reservation lifecycle | in_progress | Selectel test runtime `78a1cef68f74854a9d6e316ffd235ffbd42b38f8` | migration 034 `applied_verified`; ЮKassa naming correction deployed; root E2E 91/1 skipped, build and Selectel health/assets/logs PASS | owner authenticated TMA smoke: paid-court creation visible/disabled and existing unbooked-match action visible/fail-closed until D4 |
+| D3 Match ↔ reservation lifecycle | done | Selectel test runtime `78a1cef68f74854a9d6e316ffd235ffbd42b38f8` | migration 034 `applied_verified`; root E2E 91/1 skipped and build PASS; owner TMA unbooked/ЮKassa fail-closed smoke, health/assets/exact logs PASS | D3 closed; real ЮKassa payment, paid YCLIENTS create/link and compensation belong to D4 |
 | D4 Payment Core | pending | — | — | payment provider, pricing/payment snapshot, чеки и возвраты |
 | D5 Settings/moderation/compliance | pending | — | — | standalone phone/email auth, verified backend email, approved club support/contact source and clickable action; затем schema review |
 | D6 Selectel readiness/load | pending | — | — | backend staging fixture, live concurrency и Selectel production readiness |
@@ -42,7 +42,7 @@
 |---|---|---|---|---|
 | D1 Backend-only/contracts | Selectel test | `c04074459948d0bf545e865b885aea7a4e5fec3c` | `test_deployed` | frontend healthy; HTTPS root/health и новый asset 200; TMA auth/profile/feed/details/booking availability PASS; bundle/log audit PASS |
 | D2 YCLIENTS reservation core | Selectel test | `ac5b4be4e88c6b45ec8d290a1c68e01a41dc635d` | `test_deployed` | backend-only rollout health/log/auth PASS; create/delete and admin-reschedule matrix remain proved; three unchanged owner refreshes preserved reservation version and hold counts |
-| D3 Match ↔ reservation lifecycle | Selectel test | `78a1cef68f74854a9d6e316ffd235ffbd42b38f8` | `pending` | frontend-only ЮKassa correction live; all containers healthy/restart 0, HTTPS root/health and exact asset 200, marker/log checks PASS; authenticated owner TMA click-smoke pending |
+| D3 Match ↔ reservation lifecycle | Selectel test | `78a1cef68f74854a9d6e316ffd235ffbd42b38f8` | `test_deployed` | all containers healthy/restart 0; HTTPS root/health and exact asset 200; owner TMA proved paid-court entry disabled and existing unbooked-match action visible/fail-closed; booking POST 0; exact nginx 5xx 0 |
 | D2 persistence/privacy proposal | not applicable | docs-only checkpoint | `not_needed` | только Markdown; runtime, schema, containers и конфигурация не менялись |
 | D2 YCLIENTS contract matrix | not applicable | docs-only checkpoint поверх `3e8739b` | `not_needed` | только Markdown; API/DB/server/runtime не вызывались и не менялись |
 | D2 YCLIENTS controlled test plan | not applicable | `040773172a2fa556ffaaf1d12dac540095070976` + docs-only correction from that exact base | `not_needed` | plan only; provider/server/DB/runtime calls и writes не выполнялись |
@@ -4026,3 +4026,24 @@
   is visible but disabled with ЮKassa copy, and that «Забронировать корт» in an
   existing unbooked match remains visible but shows the fail-closed notice
   without opening booking or creating a provider record.
+
+### 2026-08-10 — D3 / owner TMA acceptance and closure
+
+- Owner authenticated Telegram Mini App evidence PASS. The create-match screen
+  shows «Матч с кортом» with the ЮKassa checkout label, full-court payment copy
+  and a disabled «Оплата подключается» action. The no-court match entry remains
+  available independently.
+- Existing unbooked-match detail evidence PASS: the match is explicitly marked
+  «Корт НЕ забронирован», the «Забронировать корт» action remains visible, and
+  pressing it shows «Оплата корта через ЮKassa подключается. Бронь без оплаты
+  не создаётся.» without navigating to D2 booking.
+- Final bounded Selectel postcheck PASS at clean exact runtime
+  `78a1cef68f74854a9d6e316ffd235ffbd42b38f8`: all four containers remain
+  `running/healthy` with restart count `0`; HTTPS root/health are `200`;
+  backend/frontend critical counts are `0`; exact nginx HTTP status-field 5xx
+  count is `0`. There were zero `POST /api/v1/bookings` requests after rollout,
+  proving the fail-closed click did not submit a booking.
+- D3 is `done` and `test_deployed`. Real ЮKassa payment orchestration, the
+  paid YCLIENTS create/link business smoke, receipts/refunds and external-write
+  compensation are D4 scope. No backend/DB/YCLIENTS/payment/provider/secret or
+  production action occurred during this acceptance.
