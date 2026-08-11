@@ -1,8 +1,34 @@
 <!doctype html>
 <html lang="ru">
   <head>
-    <script>window.onerror = function(m, u, l) { alert("Ошибка: " + m + "\\nСтрока: " + l); };</script>
     <meta charset="UTF-8" />
+    <script>
+      (() => {
+        const marker = '[prosto-padel] client error details suppressed';
+        const writeMarker = console.error.bind(console);
+        const sanitizedConsoleError = () => writeMarker(marker);
+        console.error = sanitizedConsoleError;
+        const suppressRawWindowError = (event) => {
+          if (event.target !== window) return;
+          event.preventDefault();
+          event.stopPropagation();
+          event.stopImmediatePropagation();
+          sanitizedConsoleError();
+        };
+        const suppressRawRejection = (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          event.stopImmediatePropagation();
+          sanitizedConsoleError();
+        };
+        window.addEventListener('error', suppressRawWindowError, true);
+        window.addEventListener(
+          'unhandledrejection',
+          suppressRawRejection,
+          true,
+        );
+      })();
+    </script>
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     
     <!-- Мета-тег для корректного масштабирования на мобильных устройствах -->

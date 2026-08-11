@@ -1,6 +1,7 @@
 import React, { useCallback, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import AuthGate from './components/AuthGate';
+import RootErrorBoundary from './components/RootErrorBoundary';
 import SplashScreen from './components/SplashScreen';
 import './index.css';
 
@@ -29,7 +30,9 @@ function MiniAppRoot() {
 
   return (
     <>
-      <AuthGate />
+      <RootErrorBoundary>
+        <AuthGate />
+      </RootErrorBoundary>
       {showSplash && <SplashScreen onComplete={handleSplashComplete} />}
     </>
   );

@@ -4210,3 +4210,70 @@
   deployed application commit remains exact `e67ea7b...`. DB/schema/migrations,
   YCLIENTS, payments/provider, secrets and production were not changed. Next
   task is TD-002; only one numbered task remains active at a time.
+
+### 2026-08-11 — TD-002 root error-boundary candidate
+
+- Baseline is clean pushed closure `5406651759682703cc96da2e7e61581148b6a1c6`.
+  RED: the focused unit test failed because `RootErrorBoundary` did not exist.
+  Inspection also found and removed a P0 legacy `index.html` `window.onerror`
+  handler that exposed raw error text and a line number through `alert`.
+- Added a class boundary around `AuthGate` while leaving splash/session timing
+  unchanged. It catches React descendant render/lifecycle failures, shows a
+  mobile-safe accessible recovery screen, focuses an explicit retry action and
+  remounts its subtree only after that action. It does not claim to catch async
+  callbacks, event-handler failures or errors outside its React subtree.
+- Diagnostic reporting exposes only frozen allowlisted stage
+  `authenticated_app_render`; the exception and component stack are neither
+  rendered nor passed to the reporter. A failing reporter cannot replace the
+  recovery screen. Unit regressions cover normal rendering, sensitive-data
+  exclusion, focus, explicit remount, bounded repeat failure and reporter
+  failure. The unit regression covers the stage-only reporter; WebKit covers
+  the ordinary Telegram auth gate, absence of the unsafe global handler,
+  fallback and retry.
+- First fresh no-context review of candidate `ef786588...` scored `8.4/10`:
+  no P0, one P1 and one P2. It correctly found that React/WebKit still emitted
+  a caught raw exception through browser diagnostics and that the standalone
+  Playwright mount did not prove the actual `main.jsx` wrapper. Both findings
+  were reproduced before correction: the new `pageerror` assertion failed with
+  the synthetic bearer/initData/PII/provider string twice.
+- Added the confidentiality bootstrap as the first application-owned head
+  script, before Telegram and React. It replaces browser `console.error` with
+  the static occurrence marker `[prosto-padel] client error details suppressed`
+  and uses first-registered capture listeners plus `stopImmediatePropagation`
+  for window-targeted `error` and `unhandledrejection`, so later listeners
+  cannot receive the raw payload. Non-window resource errors pass through to
+  existing element/React `onError` recovery. This does not claim async/event
+  errors are recovered and does not change server logging. WebKit now proves
+  both diagnostic confinement and resource-handler delivery. Its fallback test
+  replaces `AuthGate` before real application startup, proving recovery through
+  the actual `main.jsx` integration.
+- Second fresh review of candidate `1c63b83...` scored `8.1/10`: no P0, one P1
+  and one P2. It found that the then module-installed bubble listener did not
+  confine payloads from other listeners and that stage-only reporting was
+  overstated as WebKit coverage. Both were corrected. Third fresh review of
+  candidate `0efb6dd...` scored `8.2/10`: no P0/P2 and one P1. It found that
+  unconditional capture suppression also blocked resource error handlers,
+  including the existing broken-avatar fallback. The handler now ignores
+  non-window error targets; focused WebKit passes `3/3` with the new resource
+  regression. Review of `2db97ab...` scored `9.2/10` with no P0/P1 and one P2:
+  the first full-run inventory omitted one `did not run`; documentation now
+  accounts for all 95 tests. Review of `f3fb504...` scored `9.3/10` with no
+  P0/P1 and one bounded P2: the bootstrap pushed `<meta charset>` beyond the
+  conforming first-1024-byte prescan window. Charset now precedes the bootstrap,
+  which remains the first executable application-owned script. A new exact-SHA
+  final review remains required.
+- Final verification PASS: focused boundary unit `4/4`; focused WebKit `3/3`;
+  full unit `8 files / 28 tests`; coverage aggregate
+  `56.89/86.86/71.05/56.89`, with the boundary held to
+  `100/100/100/100`; root build `1619` modules; `git diff --check`. The default
+  nine-worker E2E completed `91 passed / 1 skipped / 2 failed / 1 did not run`;
+  the failures were the two known resource flakes in unchanged
+  notifications/profile-photo tests. Their single-worker rerun passed `2/2`,
+  and the final full controlled four-worker run passed `94 / 1 skipped`.
+  Existing Vite CJS/large-
+  chunk warnings remain. Backend gates
+  are `not_applicable` because backend source did not change.
+- TD-002 is `review`. Candidate amend, fresh no-context re-review, push and exact
+  frontend-only Selectel test rollout with health, boundary smoke and bounded
+  logs remain pending. DB/schema/YCLIENTS/payment/provider/production were not
+  contacted or changed.

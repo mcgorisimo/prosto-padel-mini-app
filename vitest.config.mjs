@@ -20,6 +20,7 @@ export default defineConfig({
         'src/lib/backendBookingHomeAdapter.js',
         'src/lib/paidCourtCheckout.js',
         'src/lib/moscowDateTime.js',
+        'src/components/RootErrorBoundary.jsx',
       ],
       reporter: ['text', 'json-summary'],
       reportsDirectory: './coverage/unit',
@@ -28,6 +29,9 @@ export default defineConfig({
         branches: 85,
         functions: 66,
         lines: 51,
+        'src/components/RootErrorBoundary.jsx': {
+          100: true,
+        },
       },
     },
   },
