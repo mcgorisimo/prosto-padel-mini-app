@@ -4172,3 +4172,41 @@
 - TD-001 remains in `review`. No backend gates were run because no backend file
   changed. Candidate amend, repeated gates, fresh no-context review, push and
   dependency/frontend Selectel rollout are still pending.
+
+### 2026-08-11 — TD-001 closure and Selectel test rollout
+
+- Final immutable candidate
+  `e67ea7b19d529ddf52f8ef2e076e2579773dcf9f` was pushed to exact
+  `origin/main`. Fresh no-context release review
+  `/root/td001_release_review` scored `9.7/10` with zero P0/P1/P2 and confirmed
+  the production-source boundary, honest coverage scope, cross-test isolation,
+  dev-only dependency graph and acyclic `TD-037 → TD-036 → TD-037a` ordering.
+- Verification PASS: unit `7 files / 24 tests`; coverage `7 / 24` at actual
+  statements/branches/functions/lines `51.85/85.93/66.66/51.85` over ratchets
+  `51/85/66/51`; clean `npm ci`; controlled root E2E `91 passed / 1 skipped`;
+  root build `1618` modules; `git diff --check`. The default nine-worker E2E
+  attempt reproduced the existing resource flake (`81 passed / 1 skipped / 10
+  timeouts`) before the complete four-worker PASS. Backend gates were
+  `not_applicable` because backend source did not change.
+- Selectel preflight PASS at clean detached `b0a500c...`: fetched
+  `origin/main` matched the candidate; two-file Compose quiet validation passed;
+  all four containers were healthy/restart `0`; internal and HTTPS root/health
+  were `200`. Checkout then moved cleanly to exact detached `e67ea7b...`.
+- Frontend alone was rebuilt/recreated. Container/image changed from
+  `036764a2510a...` / `sha256:1034adca3dc4...` to `d6e625d033b5...` /
+  `sha256:11fe29e9d05c...`. Backend `7ca6956f77fb...`, nginx
+  `e5b98b53a385...` and PostgreSQL `5e36d4dc1a5c...`, including their image
+  IDs, remained unchanged.
+- Postcheck PASS: clean exact detached checkout; every container healthy with
+  restart `0`; internal and HTTPS root/health `200`; exact production asset
+  `/assets/index-DNzg8ZT1.js` returned `200`, `605894` bytes and contained zero
+  Vitest/jsdom/Testing Library markers. Direct-browser smoke rendered the exact
+  Telegram-only login boundary without console errors; the only warning is the
+  existing official Telegram WebApp 6.0 swipe warning. Bounded frontend,
+  backend and nginx critical counts and nginx 5xx count are all `0` since
+  frontend start `2026-08-11T13:23:55Z`.
+- TD-001 is `done` and `test_deployed`. This docs-only closure changes no
+  runtime/test/config/dependency byte, so its own deployment is `not_needed`;
+  deployed application commit remains exact `e67ea7b...`. DB/schema/migrations,
+  YCLIENTS, payments/provider, secrets and production were not changed. Next
+  task is TD-002; only one numbered task remains active at a time.
