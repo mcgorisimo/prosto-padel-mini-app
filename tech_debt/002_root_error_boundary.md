@@ -1,6 +1,6 @@
 # TD-002 — Root React error boundary and sanitized recovery
 
-- Status: `review`
+- Status: `done`
 - Priority: P0
 - Effort: S (0.5–1 day)
 - Risk: low
@@ -84,6 +84,88 @@ and whether errors outside React render are falsely claimed as handled.
   P0/P1 and one bounded P2: the early bootstrap pushed `<meta charset>` beyond
   the conforming prescan window. Charset now precedes the bootstrap while the
   bootstrap remains the first executable application-owned script. Final
-  exact-SHA review is pending.
-- Commit/push/deployment: local candidate pending; not pushed. Runtime/frontend
-  bundle changes require exact-candidate Selectel test rollout after review.
+  exact-SHA review of `044aeff...` scored `9.8/10` with no P0/P1/P2.
+- Final reviewed candidate:
+  `044aeffb71077fcde52d2eabadcc6145610f0f64`. It was pushed to exact
+  `origin/main` before deployment.
+- Deployment: `test_deployed`. Selectel test is on clean detached exact
+  `044aeffb71077fcde52d2eabadcc6145610f0f64`. Only frontend was
+  rebuilt/recreated: container `d6e625d033b5...` / image
+  `sha256:11fe29e9d05c...` became `15a637d33d6c...` / image
+  `sha256:d873752c9238...`. Backend `7ca6956f77fb...`, nginx
+  `e5b98b53a385...` and PostgreSQL `5e36d4dc1a5c...`, with their images,
+  remained unchanged. All four containers are healthy with restart `0`.
+  HTTPS root/health are `200`; exact asset `/assets/index-CD2hPLLo.js` is
+  `200`, `608422` bytes. Charset prescan, static diagnostic marker and absence
+  of the legacy raw alert handler are verified. Direct-browser smoke reached
+  the Telegram-only `outside_telegram` boundary without fallback, dialog or
+  error log. Bounded frontend/backend/nginx critical counts and nginx 5xx are
+  all `0`. DB/schema/migrations, YCLIENTS, payment/provider, secrets and
+  production were not changed.
+
+## Final independent review transcript
+
+Exact prompt sent to fresh no-context reviewer `/root/td002_final_review_4`:
+
+> Fresh no-context final independent review. Repository:
+> `C:\Projects\prosto-padel-mini-app`. Baseline SHA:
+> `5406651759682703cc96da2e7e61581148b6a1c6`. Exact candidate SHA:
+> `044aeffb71077fcde52d2eabadcc6145610f0f64`. Task file:
+> `tech_debt/002_root_error_boundary.md`. Read-only only: no edits, commits,
+> push, deploy, external/network calls, or long test reruns. Inspect exact
+> diff/tree independently. Report P0/P1/P2 with precise file/line evidence and
+> score 1-10; pass requires no P0/P1 and >=9. Re-audit complete scope: charset
+> is within conforming prescan and the confidentiality bootstrap remains first
+> executable application-owned script before Telegram/React; raw
+> console/window ErrorEvent/unhandledrejection payload confinement; resource
+> error delivery; meaningful WebKit and actual main root integration;
+> stage-only reporter unit attribution; bounded retry/repeated/reporter
+> behavior; accessibility/mobile copy; unchanged splash/auth/session; honest
+> recovery scope; 100% boundary coverage; coherent 95-test evidence and latest
+> 94/1 full pass; acceptable observability/runtime effects. Return concise
+> verbatim report.
+
+Verbatim reviewer report:
+
+> Final independent review:
+> `5406651759682703cc96da2e7e61581148b6a1c6` ->
+> `044aeffb71077fcde52d2eabadcc6145610f0f64`
+>
+> - P0: none
+> - P1: none
+> - P2: none
+> - Score: **9.8/10 — PASS**
+>
+> Evidence:
+>
+> - `index.html:4-40`: charset is at byte 48; confidentiality bootstrap is the
+>   first executable application-owned script and precedes Telegram/React.
+> - `index.html:7-29`: raw `console.error`, window `ErrorEvent`, and
+>   `unhandledrejection` payloads are replaced by a static marker and stopped
+>   before later listeners. Non-window resource errors pass through.
+> - `tests/e2e/root-error-boundary.spec.js:40-106`: meaningful WebKit coverage
+>   proves listener confinement and real image resource-error delivery.
+> - `src/main.jsx:33-36` and
+>   `tests/e2e/root-error-boundary.spec.js:108-164`: boundary wraps the real
+>   `AuthGate` integration; fallback/retry is exercised through actual
+>   application startup.
+> - `src/components/RootErrorBoundary.jsx:73-129`: retry is explicit,
+>   remount-keyed, non-automatic, and repeated reporter/child failures remain
+>   bounded. Reporter receives only the frozen stage marker.
+> - `src/components/RootErrorBoundary.test.jsx:29-108`: unit coverage correctly
+>   attributes stage-only reporting and covers focus, sanitization, remount,
+>   repeated failure, and reporter failure.
+> - `vitest.config.mjs:23-34`: explicit per-file 100% ratchet; recorded summary
+>   confirms `100/100/100/100`.
+> - Recovery UI has truthful scope/copy, preserved focus outline, 48px action,
+>   safe-area padding, responsive sizing, semantic heading/alert, and adequate
+>   contrast.
+> - Splash/auth/session implementation is unchanged except for the boundary
+>   wrapper; documentation honestly excludes async callbacks, event handlers,
+>   and failures outside the subtree.
+> - Inventory is exactly 95 WebKit tests; recorded
+>   `91 passed / 1 skipped / 2 failed / 1 did not run` totals 95, and latest
+>   controlled full result `94 passed / 1 skipped` is coherent.
+> - Global diagnostic suppression reduces client-side detail but retains
+>   occurrence markers, preserves resource recovery and server logging, and is
+>   acceptable for the stated confidentiality requirement.

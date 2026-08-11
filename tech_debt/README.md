@@ -107,7 +107,7 @@ the same god-file concurrently.
 | Order | Task | Priority | Depends on | Status |
 |---:|---|---|---|---|
 | 001 | Frontend unit/coverage characterization harness | P1 | — | done |
-| 002 | Root React error boundary and sanitized recovery | P0 | 001 | review |
+| 002 | Root React error boundary and sanitized recovery | P0 | 001 | done |
 | 003 | Static quality gates and dead-export detection | P1 | 001 | planned |
 | 004 | Establish Playwright inventory and fixture safety baseline | P1 | 001, 002, 003 | planned |
 | 004a | Split backend match lifecycle Playwright spec | P1 | 004 | planned |

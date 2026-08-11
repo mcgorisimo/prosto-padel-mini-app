@@ -4273,7 +4273,37 @@
   Existing Vite CJS/large-
   chunk warnings remain. Backend gates
   are `not_applicable` because backend source did not change.
-- TD-002 is `review`. Candidate amend, fresh no-context re-review, push and exact
-  frontend-only Selectel test rollout with health, boundary smoke and bounded
-  logs remain pending. DB/schema/YCLIENTS/payment/provider/production were not
-  contacted or changed.
+- Final immutable candidate is
+  `044aeffb71077fcde52d2eabadcc6145610f0f64`. Fresh no-context review task
+  `/root/td002_final_review_4` scored `9.8/10` with zero P0/P1/P2. Exact prompt
+  and verbatim report are stored in `tech_debt/002_root_error_boundary.md`.
+
+### 2026-08-11 — TD-002 closure and Selectel test rollout
+
+- Candidate `044aeffb71077fcde52d2eabadcc6145610f0f64` was pushed to exact
+  `origin/main`, then checked out detached on the clean Selectel test worktree.
+  Preflight confirmed the previous deployed TD-001 runtime `e67ea7b...`, quiet
+  two-file Compose validation, all healthy/restart `0`, and HTTPS root/health
+  `200`.
+- Only frontend was rebuilt/recreated. Container/image changed from
+  `d6e625d033b5...` / `sha256:11fe29e9d05c...` to `15a637d33d6c...` /
+  `sha256:d873752c9238...`. Backend `7ca6956f77fb...`, nginx
+  `e5b98b53a385...` and PostgreSQL `5e36d4dc1a5c...`, including their image
+  IDs, remained unchanged.
+- Postcheck PASS: exact clean detached checkout; all containers healthy/restart
+  `0`; HTTPS root/health `200`; exact asset `/assets/index-CD2hPLLo.js` returned
+  `200` and `608422` bytes. The UTF-8 prescan, static diagnostic marker and
+  absence of the legacy `window.onerror`/`alert` source were confirmed in the
+  deployed HTML. Bounded frontend/backend/nginx `error|fatal|unhandled` counts
+  and nginx 5xx are all `0` since frontend start
+  `2026-08-11T15:04:11.610115996Z`.
+- Direct-browser smoke PASS: the deployed page reached the expected
+  Telegram-only `outside_telegram` boundary; the recovery fallback did not
+  appear; no dialog or browser error log appeared. The official Telegram SDK
+  owns a runtime `window.onerror` on the real page, while the removed legacy
+  raw-alert source remains absent from shipped HTML.
+- TD-002 is `done` and `test_deployed`. This closure commit changes only the
+  task, register and WORKLOG Markdown, so its own deployment is `not_needed`;
+  deployed application remains exact `044aeffb...`. Backend, DB/schema,
+  migrations, YCLIENTS, payments/provider, secrets and production were not
+  changed. Next task is TD-003; only one numbered task remains active.
