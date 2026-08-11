@@ -4099,3 +4099,37 @@
 - Deployment status: `test_deployed_pending_owner_tma_smoke`. No backend, DB,
   schema/migration, YCLIENTS, payment/provider, secret or production change
   occurred.
+
+### 2026-08-11 — technical-debt execution register
+
+- From clean `main = origin/main = 886e7c0aa2126dfd4f910194199d476134ec02c6`,
+  added `tech_debt/README.md` and 78 bounded task files. The register covers
+  characterization/TDD, proven legacy removal, god-component/client/repository
+  decomposition, frontend/backend coverage, real-PostgreSQL invariant lanes,
+  strict transports/contracts, CSS/accessibility and source-of-truth cleanup.
+- Infrastructure work is explicitly excluded: Yandex Cloud/Selectel design,
+  Managed PostgreSQL/PgBouncer, Docker/Compose, networking, CI/CD, monitoring,
+  load/capacity and deployment automation remain a separate future track.
+  Payment/product additions, app YCLIENTS cancel/reschedule, schema changes and
+  legacy payment fields are also outside this cleanup register.
+- Mandatory per-task flow is now reproducible: TDD/characterization → local
+  candidate commit → fresh no-context review of exact SHA → fix/re-review until
+  no P0/P1 and score ≥9 → exact push/test rollout or explicit deferral → docs-
+  only closure commit that records review and deployment evidence and marks the
+  task `done` last. All quality ratchets established by completed prerequisites
+  remain mandatory for later tasks.
+- Independent catalog reviews were read-only and sequential. Scores progressed
+  `7/10` (`tech_debt_catalog_review`) → `8/10`
+  (`tech_debt_catalog_rereview`) → `8.7/10`
+  (`tech_debt_catalog_final_review`) → final PASS `9.7/10`
+  (`tech_debt_catalog_acceptance_review`). Final review reported zero P0, P1
+  and P2; it verified exactly 78 unique table IDs/files, matching metadata, an
+  acyclic feasible order, bounded tasks and preserved safety/product invariants.
+- Tests/build were not run because only Markdown files changed. Structural
+  catalog validation and `git diff --check` PASS. Deployment is `not_needed`:
+  runtime, bundle, containers, dependencies, DB/schema/migrations, YCLIENTS,
+  payment/provider config, secrets and production were not touched. Selectel
+  test remains on frontend/runtime commit `b0a500cac7cf1b5b7a2cf2adcc5be6a7eb9c135d`
+  with the previously recorded healthy container/HTTP/smoke/log result.
+- Next task is TD-001, `Frontend unit/coverage characterization harness`; only
+  one numbered task may be active at a time.
