@@ -61,7 +61,8 @@ as an external blocker in the current task; do not silently expand scope.
      backend coverage after TD-032, protected real-PostgreSQL lanes after
      TD-029/030 for affected repositories, contract-generation drift after
      TD-034, encoding verification after TD-035 and the Vite warning gate after
-     TD-036, plus any focused command introduced by the current task.
+     TD-036, dependency-audit gates after TD-037/037a, plus any focused command
+     introduced by the current task.
    Record `not_applicable` with a concrete scope reason for a gate that does not
    apply; never silently omit a completed prerequisite's mandatory command.
 7. Create one local candidate implementation commit with the task in `review`.
@@ -105,7 +106,7 @@ the same god-file concurrently.
 
 | Order | Task | Priority | Depends on | Status |
 |---:|---|---|---|---|
-| 001 | Frontend unit/coverage characterization harness | P1 | — | planned |
+| 001 | Frontend unit/coverage characterization harness | P1 | — | review |
 | 002 | Root React error boundary and sanitized recovery | P0 | 001 | planned |
 | 003 | Static quality gates and dead-export detection | P1 | 001 | planned |
 | 004 | Establish Playwright inventory and fixture safety baseline | P1 | 001, 002, 003 | planned |
@@ -181,7 +182,9 @@ the same god-file concurrently.
 | 034e | Generate lineup contracts | P2 | 034d | planned |
 | 034f | Generate result contracts | P2 | 034e | planned |
 | 034g | Generate booking contracts and remove manual frontend schemas | P2 | 034f | planned |
+| 037 | Remediate compatible root dependency advisories | P1 | 001 | planned |
 | 036 | Remove deprecated Vite CJS Node API usage | P2 | 001, 021 | planned |
+| 037a | Upgrade the Vite security boundary | P1 | 036, 037 | planned |
 | 035 | Repair source-of-truth docs and add encoding verification | P2 | all prior tasks | planned |
 
 The table order is the execution order; IDs remain grouped by original debt

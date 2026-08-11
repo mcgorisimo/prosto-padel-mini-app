@@ -4133,3 +4133,42 @@
   with the previously recorded healthy container/HTTP/smoke/log result.
 - Next task is TD-001, `Frontend unit/coverage characterization harness`; only
   one numbered task may be active at a time.
+
+### 2026-08-11 — TD-001 frontend unit/coverage candidate
+
+- Baseline is clean pushed `2ae6d4f64eeb628dfa5cd8849aba9c69cf0346f8`.
+  Added a Vitest 3.2.7 + jsdom/Testing Library harness, bounded two-worker unit
+  execution, global timer/mock/storage/portal cleanup and deterministic fetch/
+  crypto helpers. No production runtime module or product behavior changed.
+- RED was the factual missing `test:unit` script. GREEN: 6 files / 22 direct
+  unit/component tests cover existing match, booking-home, paid-court and Moscow
+  date helpers plus React interaction/effect/portal cleanup. Unit PASS in 1.34 s;
+  coverage PASS in 1.98 s with baseline thresholds `51/85/66/51` for statements/
+  branches/functions/lines. Clean `npm ci` PASS.
+- Dependency choice is explicit: latest Vitest 4 requires Vite 6+, so the
+  compatible Vite-5 line is used. Vitest 3.2.4 was rejected after audit found a
+  critical advisory; 3.2.7 removes critical findings. Five existing root
+  toolchain findings remain visible (`1 low / 1 moderate / 3 high`) and produced
+  new planned TD-037/TD-037a rather than an unsafe `npm audit fix --force`.
+- Root default E2E at 9 workers reproduced the known resource flake: 81 passed,
+  1 skipped and 10 simultaneous match-spec timeouts. The complete controlled
+  rerun on the established four-worker budget PASS: 91 passed / 1 skipped.
+  Production build PASS: 1,618 modules; existing CJS and large-chunk warnings
+  remain owned by TD-036/TD-021.
+- First no-context review of local candidate `1b222a35...` scored `9.1/10`
+  with no P0/P1 and one bounded P2: cleanup was implemented but no test proved
+  cleanup of deliberately leaked state between tests. Added a sequential
+  regression that leaves a React root/portal, fake timers, stubbed fetch/crypto/
+  env and both browser storages dirty, then proves the next test starts clean.
+- Second no-context review of amended `09764ea4...` scored `9.4/10`, reported
+  no P0/P1 and confirmed the isolation regression. Its only bounded P2 was a
+  planning dependency: compatible PostCSS/Nano ID/Babel remediation should not
+  wait for late Vite CJS work. TD-037 now depends on TD-001; TD-037a retains the
+  Vite-major prerequisites.
+- Acceptance review of `73b1e276...` scored `9.3/10`, reported no P0/P1 and one
+  bounded ordering P2: the authoritative table still placed TD-037 after late
+  TD-036. The row is now ordered before TD-036, consistent with its TD-001-only
+  dependency; a new exact candidate SHA requires final acceptance review.
+- TD-001 remains in `review`. No backend gates were run because no backend file
+  changed. Candidate amend, repeated gates, fresh no-context review, push and
+  dependency/frontend Selectel rollout are still pending.
