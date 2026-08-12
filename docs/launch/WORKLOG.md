@@ -4542,3 +4542,36 @@
   amend of the same single unpublished `review` commit and a ninth fresh
   no-context review remain. Backend/runtime, server, DB/schema, providers,
   payments and production remain untouched.
+
+### 2026-08-12 — TD-003 closed and deployed to Selectel test
+
+- Baseline `0e2f1fa1d7a7c67059981398c9e8d685a02b2549`; exact single
+  reviewed candidate `1779efb713f3ba4ddc5ffd574c37127570328387` was pushed to
+  `main`. Fresh no-context reviewer `/root/td003_review_9` returned PASS
+  `9.6/10`, with `P0=0`, `P1=0`, `P2=0`; the exact prompt and verbatim report
+  are preserved in `tech_debt/003_static_quality_gates.md`.
+- Final repository gates: lint `98 files / 105 ratcheted findings`, format
+  `485 / 391`, Knip/dead-code and seven restricted imports PASS, focused
+  ratchet `7/7`, root unit `9/35`, coverage
+  `56.89/86.86/71.05/56.89`, build `1619` modules and controlled root E2E
+  `94 passed / 1 skipped` with exit `0`. Backend typecheck, unit
+  `138 suites / 3366 tests`, E2E `2/4` and build PASS; `git diff --check` PASS.
+- Selectel test checkout is detached, exact and clean at `1779efb`. Frontend
+  container `50644090c6ea...` / image `sha256:135a897a3f84...` and backend
+  container `45a31e1af7aa...` / image `sha256:5594d55d9fb...` were rebuilt and
+  recreated; both are healthy with restart count zero. Nginx and PostgreSQL
+  retained their previous container/image IDs and restart count zero.
+- HTTPS root and `/api/v1/health` returned `200`. New asset
+  `/assets/index-CD2hPLLo.js` returned `200`, `608422` bytes, SHA-256
+  `00c57d7618b75f72fe5b537158807d594aa529000de68d058be9011ea8a7de0e`.
+  In-app-browser smoke showed title `Просто Падел — клубное приложение` and the
+  expected outside-Telegram gate; no root error fallback, dialog or browser
+  error log appeared. Bounded logs: frontend/backend
+  `error/fatal/unhandled=0/0/0`, nginx `5xx=0`.
+- Existing Vite chunk/CJS warnings remain. The backend image's Node `20.11.0`
+  reports a dev-only transitive engine warning requesting `20.11.1`; build and
+  runtime are healthy, and runtime production dependencies did not change.
+  Infrastructure image upgrades remain outside this register.
+- DB/schema, migrations, env, providers, payments and production were not
+  changed. TD-003 is `done`. This closure changes Markdown only, so closure
+  deployment is `not_needed`; deployed runtime remains `1779efb`.

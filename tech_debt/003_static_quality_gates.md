@@ -1,6 +1,6 @@
 # TD-003 — Static quality gates and dead-export detection
 
-- Status: `review`
+- Status: `done`
 - Priority: P1
 - Effort: M (2–4 days)
 - Risk: medium
@@ -166,8 +166,49 @@ no mass formatting obscures behavior changes.
   traversal is now recursive across nested arrays/maps with per-symbol
   locations, and the Playwright config is a sticky legacy format finding. A new
   exact-SHA review remains required.
-- Candidate state is `review`; exact correction SHA is supplied by the Git
-  review request. Push/deployment remain pending a passing fresh no-context
-  review and the mandatory Selectel test rollout because dependency manifests
-  and backend build inputs changed. DB/schema, migrations, YCLIENTS, payments
-  and production are unchanged.
+- Ninth fresh no-context review task `/root/td003_review_9` inspected the exact
+  one-commit range `0e2f1fa...1779efb`. Exact reviewer prompt:
+
+  > Fresh no-context read-only final TD-003 review in C:\Projects\prosto-padel-mini-app. Exact baseline 0e2f1fa1d7a7c67059981398c9e8d685a02b2549 through one amended candidate 1779efb713f3ba4ddc5ffd574c37127570328387. Do not edit/commit/push/deploy/touch server DB provider secrets. Read AGENTS.md, TASK.md, tech_debt/README.md, task 003, relevant WORKLOG and entire exact diff. P0/P1/P2, score 1–10. Verify all prior findings, especially: recursive Knip mismatch diagnostics flatten real JSON flat arrays, array-of-arrays duplicates, enumMembers/classMembers nested maps into per-symbol actionable path/line/column/category/symbol; digest semantics unchanged. Verify Prettier inventory includes every tracked relevant root config including playwright.config.js, current 485/391 baseline. Also one commit/review state/evidence, EOL, inventory/sticky gates, AST+symbols, dev deps, backend unused-only, Node20.11, no runtime/schema/payment/API/design. Bounded focused/static only. PASS needs zero P0/P1/P2 and >=9. Concise exact evidence, explicit PASS/FAIL.
+
+  Verbatim review report:
+
+  > PASS — 9.6/10
+  >
+  > Findings: P0 0, P1 0, P2 0.
+  >
+  > Evidence:
+  >
+  > - Exact clean one-commit candidate: `1779efb713f3ba4ddc5ffd574c37127570328387`, parent and `origin/main` both `0e2f1fa1d7a7c67059981398c9e8d685a02b2549`.
+  > - Knip formatter recursively handles flat arrays, duplicate array-of-arrays, and enum/class nested maps. Synthetic regression produces separate actionable `path:line:column: category [parent]: symbol` lines. Against current real Knip JSON, all `297` leaf findings produce exactly `297` diagnostic lines.
+  > - Knip digest semantics are unchanged: `5c6ca3d337fa9eac92ee243a5f0e89dd27a2a5165ff83f688a52b6b2a3fc8398` at both prior `928bebc` and candidate `1779efb`; only `pos` is excluded.
+  > - Prettier inventory now includes tracked `playwright.config.js`; reproduced `485` checked / `391` sticky legacy findings, with its LF-normalized hash present in the baseline.
+  > - Reproduced gates: ESLint `98/105`, Prettier `485/391`, Knip digest plus seven restricted imports, focused ratchet `7/7`, backend typecheck PASS, `git diff --check` PASS.
+  > - ESLint inventory is exact: 45 violating files; rule counts `70/21/11/2/1`. Knip inventory is exact: 16 files, exports in 38 files, types in 70, unresolved in six E2E files, zero dependency/unlisted/binary/duplicate findings.
+  > - AST restricted-import scan preserves multiplicity, covers JS/TS extensions and static import/export/dynamic/CommonJS/import-type forms, and rejects local `require`/`module` shadows.
+  > - EOL canonicalization, config/file hashes, issue counts and restricted-import lists provide sticky gates.
+  > - Dependencies are dev-only; production dependency sets are unchanged. Backend source changes remove only unused imports/constants; two test parameters are renamed with `_`. Strictness is strengthened by unused checks.
+  > - Direct tool engines support Node `20.11.0`; `@nestjs/schematics` is a justified direct backend dev dependency.
+  > - No runtime branch, API/schema, SQL/migration, payment field, provider, UI/design, or infrastructure change found. Push and required Selectel test rollout correctly remain pending review completion.
+- Reviewed candidate `1779efb713f3ba4ddc5ffd574c37127570328387`
+  was pushed to `main` and deployed exactly to Selectel test. Frontend and
+  backend were rebuilt/recreated and are healthy with restart count zero;
+  nginx and PostgreSQL retained their existing container/image IDs. HTTPS root
+  and `/api/v1/health` returned `200`; the new production asset returned `200`
+  (`608422` bytes, SHA-256
+  `00c57d7618b75f72fe5b537158807d594aa529000de68d058be9011ea8a7de0e`).
+  Browser smoke reached the expected outside-Telegram auth gate, with the
+  correct title, no root error fallback, dialog or browser error log. Bounded
+  container logs contained zero new frontend/backend `error`/`fatal`/
+  `unhandled` markers and zero nginx `5xx` responses.
+- Runtime containers after rollout: frontend
+  `50644090c6ea738721c306cfa7174e4897f8d15a0c6cd6963b36f60a7399a428`
+  / image
+  `sha256:135a897a3f84d73184b6501395eca460e846ea4aee1f9e2cf8177102cfcca7f3`;
+  backend
+  `45a31e1af7aa07934bf6e991c30ff5573d50d1f0142fd56455ff256f0a909754`
+  / image
+  `sha256:5594d55d9fb7119a116a13b73221504f608666b5b96a09a343c1d51ffbe555a0`.
+  Server checkout was exact and clean. DB/schema, migrations, env, YCLIENTS,
+  payments and production were unchanged. This docs-only closure has deployment
+  `not_needed`; the reviewed runtime remains `1779efb`.
