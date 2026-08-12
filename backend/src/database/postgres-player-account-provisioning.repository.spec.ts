@@ -29,7 +29,6 @@ import {
 } from './external-identity.repository';
 import {
   PlayerAccountProvisioningPersistenceError,
-  PlayerAccountProvisioningPersistenceFailure,
   ProvisionPlayerAccountInput,
 } from './player-account-provisioning.repository';
 import { PostgresPlayerAccountProvisioningRepository } from './postgres-player-account-provisioning.repository';

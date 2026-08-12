@@ -1,7 +1,5 @@
 import { QueryResult, QueryResultRow } from 'pg';
 import {
-  ExternalIdentityLookupDigest,
-  ExternalIdentityNamespace,
   externalIdentityLookupDigest,
   externalIdentityNamespace,
   trustProviderCanonicalizedExternalIdentitySubject,
@@ -11,7 +9,6 @@ import {
   AuthenticationOperationId,
   AuthenticationProofFingerprint,
   AuthenticationRequestDigest,
-  UnixEpochSeconds,
   unixEpochSeconds,
 } from '../auth/auth.types';
 import {
@@ -59,8 +56,6 @@ const PROOF_FINGERPRINT =
   'c'.repeat(64) as AuthenticationProofFingerprint;
 const OTHER_PROOF_FINGERPRINT =
   'd'.repeat(64) as AuthenticationProofFingerprint;
-const THIRD_PROOF_FINGERPRINT =
-  'e'.repeat(64) as AuthenticationProofFingerprint;
 const IDEMPOTENCY_KEY =
   'telegram-auth-idempotency-key' as AuthenticationIdempotencyKey;
 const OTHER_IDEMPOTENCY_KEY =

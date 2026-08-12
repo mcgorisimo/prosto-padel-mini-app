@@ -13,7 +13,6 @@ import {
   ReservationCancellationDeleteCommand,
   ReservationCancellationDeleteResult,
   ReservationCancellationExactRecord,
-  ReservationCancellationExactReadResult,
   ReservationCancellationProviderPort,
   reservationCancellationDeleteCommand,
 } from './reservation-cancellation.port';

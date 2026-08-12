@@ -34,12 +34,9 @@ import {
 import {
   AUTHENTICATION_INTENTS,
   AuthenticationCommandId,
-  AuthenticationIdempotencyKey,
   AuthenticationIntent,
-  AuthenticationOperationId,
   AuthenticationProofFingerprint,
   AuthenticationProofReference,
-  AuthenticationRequestDigest,
   UnixEpochSeconds,
   isAuthenticationCommandId,
   isAuthenticationIdempotencyKey,

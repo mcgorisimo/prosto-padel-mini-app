@@ -14,7 +14,6 @@ import {
   MatchResultMutationRecord,
   MatchResultRecord,
   MatchResultSetRecord,
-  MatchResultStatus,
   isMatchResultCommandId,
   isMatchResultId,
   isMatchResultRequestDigest,

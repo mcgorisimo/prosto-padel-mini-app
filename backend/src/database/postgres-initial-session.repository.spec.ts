@@ -2,7 +2,6 @@ import { QueryResult, QueryResultRow } from 'pg';
 import { AccountId } from '../accounts/account.types';
 import {
   AuthenticationOperationId,
-  UnixEpochSeconds,
   unixEpochSeconds,
 } from '../auth/auth.types';
 import {

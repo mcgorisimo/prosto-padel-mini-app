@@ -1189,7 +1189,7 @@ describe('session command idempotency', () => {
   it.each([
     [
       'presented digest',
-      (state: SessionState, command: RotateSessionCredentialCommand) => ({
+      (_state: SessionState, command: RotateSessionCredentialCommand) => ({
         ...command,
         presentedCredential: {
           ...command.presentedCredential,

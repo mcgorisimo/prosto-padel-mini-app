@@ -90,7 +90,7 @@ function harness() {
       storedReservation = reservation;
       return { outcome: 'created', reservation };
     }),
-    startOperation: jest.fn(async (_tx: unknown, actor: AccountId, _reservationId: string, input: Parameters<typeof startReservationOperation>[1]) => {
+    startOperation: jest.fn(async (_tx: unknown, _actor: AccountId, _reservationId: string, input: Parameters<typeof startReservationOperation>[1]) => {
       const result = startReservationOperation(storedReservation!, input, storedOperation ?? undefined);
       if (result.outcome !== 'rejected') {
         storedReservation = result.reservation;

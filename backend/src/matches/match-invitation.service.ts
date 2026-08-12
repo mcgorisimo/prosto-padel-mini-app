@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto';
 import {
-  AccountId,
   USER_ROLES,
   isAccountId,
 } from '../accounts/account.types';
@@ -22,7 +21,6 @@ import {
 } from '../database/public-player-profile-search.repository';
 import {
   MatchCommandId,
-  MatchId,
   MatchInvitationId,
   MatchParticipantId,
   MatchRequestDigest,

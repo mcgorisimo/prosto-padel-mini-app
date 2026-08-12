@@ -5,7 +5,6 @@ import {
   isUnixEpochSeconds,
 } from '../auth/auth.types';
 import {
-  MatchId,
   MatchInvitationId,
   MatchParticipantState,
   MatchSlotNumber,

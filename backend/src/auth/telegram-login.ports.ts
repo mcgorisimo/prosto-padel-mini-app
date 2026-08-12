@@ -19,10 +19,6 @@ import {
 } from './security-audit.types';
 import { SessionId } from './session.types';
 import {
-  IssuedSessionCredential,
-  SessionCredentialIssuer,
-} from './session-credential';
-import {
   PostgresTransaction,
   PostgresTransactionCommitObserver,
 } from '../database/postgres-transaction';

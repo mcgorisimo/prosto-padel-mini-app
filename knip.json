@@ -1,0 +1,41 @@
+{
+  "$schema": "./node_modules/knip/schema.json",
+  "entry": [
+    "src/main.jsx",
+    "tests/e2e/**/*.spec.js",
+    "tests/unit/**/*.test.{js,jsx}",
+    "scripts/**/*.{cjs,js,mjs}",
+    "*.config.{js,mjs}"
+  ],
+  "project": [
+    "src/**/*.{js,jsx}",
+    "tests/**/*.{js,jsx}",
+    "scripts/**/*.{cjs,js,mjs}",
+    "*.{js,mjs}"
+  ],
+  "ignore": [
+    "src/admin-notify.js",
+    "src/claude.js",
+    "src/config.js",
+    "src/conversation.js",
+    "src/index.js",
+    "src/keyboards.js",
+    "src/knowledge.js",
+    "src/telegram.js",
+    "src/tools.js",
+    "src/yclients.js"
+  ],
+  "workspaces": {
+    "backend": {
+      "entry": [
+        "src/main.ts",
+        "src/**/*.spec.ts",
+        "test/**/*.{cjs,cts,js,mjs,mts,ts,tsx}"
+      ],
+      "project": [
+        "src/**/*.{cjs,cts,js,mjs,mts,ts,tsx}",
+        "test/**/*.{cjs,cts,js,mjs,mts,ts,tsx}"
+      ]
+    }
+  }
+}

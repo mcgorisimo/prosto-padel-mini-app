@@ -2,7 +2,6 @@ import { AccountId } from '../accounts/account.types';
 import { deterministicUuid } from '../../test/deterministic-uuid';
 import {
   AuthenticationOperationId,
-  UnixEpochSeconds,
   unixEpochSeconds,
 } from './auth.types';
 import {
@@ -21,7 +20,6 @@ import {
   ScopedGrantId,
   ScopedGrantRequestDigest,
   ScopedGrantResourceDigest,
-  ScopedGrantRevokeReason,
   ScopedGrantScope,
   ScopedGrantState,
   ScopedGrantTransitionResult,

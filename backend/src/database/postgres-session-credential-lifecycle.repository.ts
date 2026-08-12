@@ -26,7 +26,6 @@ import {
   SessionCredentialDigest,
   SessionCredentialReference,
   SessionId,
-  SessionRequestDigest,
   SessionRevokeReason,
   SessionState,
   isSessionAccountId,

@@ -23,7 +23,6 @@ import {
   AuthenticationOperationId,
   AuthenticationProofFingerprint,
   AuthenticationRequestDigest,
-  UnixEpochSeconds,
   otpAuthenticationProofReference,
   telegramAuthenticationProofReference,
   unixEpochSeconds,
@@ -49,9 +48,6 @@ import {
 
 const OPERATION_ID = deterministicUuid(
   'terminal-operation',
-) as AuthenticationOperationId;
-const OTHER_OPERATION_ID = deterministicUuid(
-  'terminal-other-operation',
 ) as AuthenticationOperationId;
 const COMMAND_ID = deterministicUuid(
   'terminal-command',

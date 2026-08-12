@@ -4307,3 +4307,238 @@
   deployed application remains exact `044aeffb...`. Backend, DB/schema,
   migrations, YCLIENTS, payments/provider, secrets and production were not
   changed. Next task is TD-003; only one numbered task remains active.
+
+### 2026-08-11 — TD-003 static quality gates baseline
+
+- TD-003 is `in_progress` from clean pushed baseline
+  `0e2f1fa1d7a7c67059981398c9e8d685a02b2549`. Selectel test remains deployed
+  at reviewed runtime `044aeffb71077fcde52d2eabadcc6145610f0f64`.
+- Root had 83 tracked `.js`/`.jsx` files under `src/tests/scripts`; backend has
+  360 tracked TypeScript files under `backend/src`. Root/backend manifests have
+  no ESLint, Prettier, Knip or equivalent dependencies/scripts, and no static
+  gate configuration exists. Baseline violation counts remain to be measured
+  with pinned candidate tools before selecting narrow ratchets.
+- Scope is check-only quality tooling plus repository-specific regression tests;
+  no bulk formatting, runtime behavior, infra, DB/schema, YCLIENTS, payments or
+  production changes are authorized.
+
+### 2026-08-11 — TD-003 static quality gates candidate preparation
+
+- Added pinned Node-20.11-compatible check-only tooling: ESLint `9.39.5`,
+  Prettier `3.9.6`, Knip `5.88.1` and TypeScript `5.9.3`. The new `lint`,
+  `format:check` and `dead-code:check` scripts enumerate tracked plus nonignored new files, never
+  rewrite during checks, and pin both their configs and every allowed legacy
+  finding by exact SHA/digest.
+- ESLint measured 105 legacy issues in 45 of 96 checked files
+  (`no-unused-vars=70`, hooks dependencies `21`, empty blocks `11`, control
+  regex `2`, conditional hook `1`). Prettier initially measured 409 individually hashed
+  legacy files among 482 checked. Knip measured 16 unused files, unused exports
+  in 38 files and unused exported types in 70 files, with no dependency,
+  unlisted, binary or duplicate findings. Six E2E files have exact pinned
+  Vite-root browser imports instead of a blanket unresolved-import suppression.
+  Seven legacy `supabaseClient` occurrences in five files are separately
+  ratcheted; additions fail and removals remain owned by TD-006/TD-007.
+- Enabled backend `noUnusedLocals` and `noUnusedParameters`. The strict probe
+  went from 25 findings to zero through import/constant cleanup and two
+  underscore-prefixed intentionally unused test callback parameters. No runtime
+  branch, API/schema, SQL, UI or payment field changed.
+- TDD evidence: the focused ratchet test first failed because its helper module
+  was absent, then passed `3/3`; it also caught and drove the correction of a
+  nondeterministic Knip-array digest. Final clean-install verification: root and
+  backend `npm ci` PASS; static gates PASS; root unit `9/31`; coverage
+  `56.89/86.86/71.05/56.89`; root E2E on four workers `94/1 skipped`; root
+  build `1619` modules. Backend typecheck PASS, unit `138/3366`, E2E `2/4`,
+  build PASS; `git diff --check` PASS.
+- Candidate commit, fresh no-context review and Selectel test rollout remain
+  pending. Deployment is required because dependency manifests and backend
+  build inputs changed, even though runtime behavior is intended to remain
+  unchanged. Current Selectel runtime remains reviewed `044aeffb...`.
+
+### 2026-08-11 — TD-003 first independent review correction
+
+- Fresh no-context `/root/td003_review_1` reviewed exact
+  `0e2f1fa...bd8dbcc`, scored `7/10` and failed it with one P1 and three bounded
+  P2 findings. It found that import deduplication hid repeated restricted
+  imports, some JS/TS extensions and computed literals were outside the scan,
+  broad `ignoreUnresolved` could hide new Vite-root typos, the local-only Knip
+  exclusions lacked ownership, and the recorded unused-export file count was
+  stale (`39` instead of `38`).
+- Correction TDD first failed `2/4`, then passed `4/4`. Restricted-import
+  coverage now scans every tracked/nonignored JS/TS module variant, preserves
+  each occurrence and catches statically computed string concatenation. The
+  actual legacy baseline is seven occurrences in five files.
+- ESLint now receives only Git tracked/nonignored files, so it needs no local
+  prototype exclusions. Knip's broad unresolved suppression was removed; exact
+  legitimate Vite-root browser findings in six E2E files are now ratcheted.
+  Ten exact `src/` bot prototypes remain Knip-only exclusions because they are
+  untracked and already `.gitignore`d; TD-010 owns removing the exclusions when
+  those local files are deleted or moved outside the app workspace.
+- Repeat correction gates PASS: lint `96 files / 105 ratcheted issues`, format
+  `482 / 409 ratcheted`, Knip with seven restricted occurrences, focused ratchet
+  `4/4`, full root unit `9/32`, unchanged coverage
+  `56.89/86.86/71.05/56.89`, build `1619` modules and controlled root E2E
+  `94/1 skipped`. A corrected commit and new fresh exact-SHA review remain
+  pending. No runtime/API/schema/SQL/UI/payment behavior was changed.
+
+### 2026-08-11 — TD-003 second independent review correction
+
+- Fresh no-context `/root/td003_review_2` reviewed exact
+  `0e2f1fa...621c615`. It found no P0/P1 and confirmed the first review's four
+  findings were corrected, but scored `8.8/10` / FAIL for one bounded P2:
+  comments between `from` and a specifier and a static template expression such
+  as `` `./supabase${'Client'}.js` `` could evade the raw regex.
+- TDD reproduced both cases before implementation. The restricted-import gate
+  now uses a bounded deterministic static-string parser for whitespace/comments,
+  quoted and template literals, literal interpolation, `+` concatenation and
+  JavaScript escapes. Focused ratchet remains `4/4`; lint, format and Knip PASS
+  with the same 105/409/seven legacy baselines. A new correction commit and a
+  third fresh exact-SHA review remain required.
+
+### 2026-08-12 — TD-003 third independent review correction
+
+- Fresh no-context `/root/td003_review_3` reviewed exact
+  `0e2f1fa...1e89509`, scored `6.8/10` / FAIL and found one P1 plus two P2. The
+  interim token-blind parser still false-matched comments/string contents and
+  missed valid dynamic import/require variants; Node-only scripts/configs also
+  inherited browser globals, and the baseline root inventory was 83 tracked
+  `.js`/`.jsx` files rather than 93.
+- Replaced the custom source scanner with the TypeScript `5.9.3` compiler AST,
+  pinned as a direct dev dependency compatible with Node 20.11. It recognizes
+  import/export declarations, import-equals, dynamic `import()` and `require()`,
+  while evaluating only static quoted/template/concatenated string expressions.
+  Comments, ordinary strings and nonstatic expressions are ignored. Focused
+  regressions cover trivia between tokens, import options, parentheses inside a
+  literal, false-positive comments/strings and nonstatic concatenation.
+- ESLint now gives browser globals only to frontend and mixed browser E2E files;
+  root configs and quality scripts receive Node globals only. Baseline inventory
+  documentation is corrected. The rewritten lockfile now conforms to Prettier,
+  so the current ratcheted legacy count is 408 rather than the historical 409.
+  Clean installs PASS for root and backend. Repeat gates PASS: lint `96/105`,
+  format `482/408`, Knip with seven restricted occurrences, root unit and
+  coverage `9 files / 33 tests` at `56.89/86.86/71.05/56.89`, root build `1619`
+  modules, controlled four-worker E2E `94/1 skipped`, backend typecheck, unit
+  `138/3366`, E2E `2/4` and build. The first default-reporter E2E run completed
+  all `94/1 skipped` tests but its HTML-report process did not exit before the
+  outer timeout; the required controlled text-reporter rerun exited `0`.
+  `git diff --check` passed and the correction was committed as `3adc17a`, then
+  supplied to the fourth fresh exact-SHA review.
+
+### 2026-08-12 — TD-003 fourth independent review correction
+
+- Fresh no-context `/root/td003_review_4` reviewed exact
+  `0e2f1fa...3adc17a`, scored `6.3/10` / FAIL and found one P1 plus three bounded
+  P2 issues. The Windows CRLF checkout made lint/format hashes and Knip byte
+  offsets differ from the Node 20.11 Linux target; backend runner `.mjs`/`.cjs`
+  modules were outside the general gates; and static TypeScript assertion plus
+  CommonJS wrapper forms could evade the restricted-import scan. The task and
+  register also remained `in_progress` instead of entering `review`.
+- Repository reads now normalize CRLF/lone CR to LF before any baseline hash or
+  Prettier comparison. The Knip semantic digest omits only EOL-dependent `pos`
+  byte offsets while retaining file/name/line/column/category and occurrence
+  multiplicity. A direct comparison of normalized Windows `src/App.jsx` with
+  its Git LF blob produced the same SHA-256. The cross-platform baseline is 105
+  ESLint issues, 390 Prettier files and the same Knip semantic finding set.
+- Both backend auth integration runners are now covered by ESLint, Prettier and
+  the backend Knip workspace. Current gates cover `98` lint files and `484`
+  format files. Knip remains `16` unused files, exports in `38`, types in `70`,
+  six exact unresolved E2E files and zero dependency findings.
+- The AST evaluator now unwraps `as`, `satisfies` and type assertions and accepts
+  parenthesized `require` plus `module.require`. Focused regressions cover all
+  reported forms, EOL normalization and location-independent Knip semantics:
+  `7/7` PASS. The direct backend `@nestjs/schematics` dev dependency is retained
+  intentionally because `backend/nest-cli.json` directly names that collection;
+  production dependency count is unchanged.
+- Full repeat gates PASS: lint `98/105`, format `484/390`, Knip with seven
+  restricted occurrences, root unit and coverage `9 files / 35 tests` at
+  `56.89/86.86/71.05/56.89`, root build `1619` modules, controlled four-worker
+  E2E `94/1 skipped`, backend typecheck, unit `138/3366`, E2E `2/4` and build.
+  Task/register state is now `review`; `git diff --check`, immutable correction
+  commit and a fifth fresh exact-SHA review remain before any push or rollout.
+
+### 2026-08-12 — TD-003 fifth independent review correction
+
+- Fresh no-context `/root/td003_review_5` reviewed exact
+  `0e2f1fa...fbbc498`, scored `8.0/10` / FAIL and found one P1 plus two P2. The
+  AST scan missed `(module).require`, falsely counted a locally shadowed
+  `require`, omitted TypeScript import-type nodes, and the unpublished range
+  still contained five implementation/correction commits rather than the one
+  squashed task candidate required by `tech_debt/README.md`.
+- Restricted-import collection now builds an isolated no-lib/no-resolve
+  TypeScript program and uses its symbol checker. Global/ambient CommonJS
+  `require` and `module` calls remain covered, while local parameters/imports/
+  variables with those names are ignored. Transparent receiver wrappers,
+  `module['require']` and `type T = import('...').T` are covered. Focused ratchet
+  remains `7/7` PASS with eight positive static variants and two shadow-negative
+  variants in the CommonJS/TypeScript case.
+- Final root repeat gates PASS: lint `98/105`, format `484/390`, Knip/seven,
+  unit and coverage `9/35` at `56.89/86.86/71.05/56.89`, build `1619` modules,
+  controlled E2E `94/1 skipped`; `git diff --check` remains required after docs.
+  Backend content did not change after its last PASS results: typecheck, unit
+  `138/3366`, E2E `2/4`, build. Task/register stay `review`; the local unpublished
+  TD-003 range will be soft-squashed to one candidate commit before the sixth
+  fresh no-context review. Push, rollout, DB/schema, provider and production
+  remain untouched.
+
+### 2026-08-12 — TD-003 sixth independent review correction
+
+- The unpublished TD-003 range was soft-squashed without changing its index or
+  worktree content into one commit `d199a0b`, exactly one commit ahead of the
+  clean pushed baseline. Fresh no-context `/root/td003_review_6` reviewed exact
+  `0e2f1fa...d199a0b`, found no P0/P1 and verified all previous corrections, but
+  scored `8.8/10` / FAIL for one P2: Knip digest mismatch discarded the captured
+  report and printed only a generic remediation command.
+- The mismatch path now formats the current Knip report immediately: unused-file
+  paths and every issue's path, available line/column, category and symbol are
+  printed deterministically before the gate throws. Byte-only `pos` remains
+  excluded. Focused regression covers unused file, unresolved dependency,
+  unused export and enum member output; ratchet `7/7`, lint `98/105`, format
+  `484/390` and Knip/seven PASS.
+- Root repeat PASS: unit/coverage `9/35`, unchanged coverage percentages, build
+  `1619` modules and compact four-worker E2E `94/1 skipped` with exit `0`. One
+  preceding list-reporter run also completed all `94/1` tests but its Windows
+  cleanup did not exit before the outer timeout; no process or port remained.
+  `git diff --check` remains before amend. Candidate remains one unpublished
+  `review` commit after amend. Backend source is unchanged from its full PASS;
+  server/runtime, DB/schema, providers, payments and production remain untouched.
+
+### 2026-08-12 — TD-003 seventh independent review correction
+
+- Fresh no-context `/root/td003_review_7` reviewed the one-commit exact range
+  `0e2f1fa...20896ab`, found no P0/P1 and reconfirmed every previous correction,
+  but scored `8.8/10` / FAIL for one P2. Knip 5 represents both `enumMembers`
+  and `classMembers` as nested parent/member maps; the new failure formatter
+  special-cased only the former, so a class-member-only mismatch could still
+  print no actionable detail.
+- Diagnostic formatting is now shape-generic: every array category is printed,
+  and every object category is traversed as deterministic parent/member arrays.
+  The focused regression now proves path, line, column, category and symbol for
+  `classMembers Widget.legacyMethod` as well as enum members, unresolved imports,
+  exports and unused files. Focused ratchet `7/7`, lint `98/105`, format
+  `484/390` and Knip/seven PASS. Root unit/coverage `9/35` and build `1619`
+  modules PASS; runtime code is unchanged from the earlier clean E2E exit `0`.
+  The repeat dot-reporter run completed all `94/1 skipped` tests but its Windows
+  wrapper again failed to exit after the final summary and hit the outer timeout;
+  no product test failed. That harness cleanup instability belongs to TD-004 and
+  is not hidden as a passing command here. `git diff --check` remains before
+  amending the same single unpublished `review` commit and starting an eighth
+  fresh no-context review. Server/runtime, DB/schema, providers, payments and
+  production remain untouched.
+
+### 2026-08-12 — TD-003 eighth independent review correction
+
+- Fresh no-context `/root/td003_review_8` reviewed the one-commit exact range
+  `0e2f1fa...928bebc`, found no P0/P1 and verified the prior corrections, but
+  scored `8.2/10` / FAIL for two P2 findings. Knip's `duplicates` category is an
+  array of symbol arrays, so the diagnostic printed one JSON blob instead of
+  each available location; tracked `playwright.config.js` was also absent from
+  the Prettier inventory despite being nonconforming.
+- Knip diagnostic traversal is now recursive for arrays and parent/member maps;
+  the focused regression proves separate path/line/column/category/symbol output
+  for both duplicate symbols as well as flat, enum and class categories.
+  `playwright.config.js` is now part of the sticky format baseline. Current gates
+  PASS: lint `98/105`, format `485/391`, Knip/seven and focused ratchet `7/7`.
+  Full root repeat PASS: unit/coverage `9/35`, unchanged coverage, build `1619`
+  modules and four-worker E2E `94/1 skipped` with exit `0`. `git diff --check`,
+  amend of the same single unpublished `review` commit and a ninth fresh
+  no-context review remain. Backend/runtime, server, DB/schema, providers,
+  payments and production remain untouched.
