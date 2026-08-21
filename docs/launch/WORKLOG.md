@@ -28,7 +28,7 @@
 | D1 Backend-only/contracts | done | `main` / deployed `c04074459948d0bf545e865b885aea7a4e5fec3c` | frontend E2E PASS (82/1 skipped); focused fail-closed 2/2 PASS; frontend build PASS; backend all PASS; Selectel test smoke PASS | D1 закрыт; следующий отдельный этап — D2 |
 | D2 YCLIENTS reservation core | done | closure history through exact cleanup source `4515549f58d714624a333fbb059dd4054b1e1439`; Selectel test runtime `ac5b4be4e88c6b45ec8d290a1c68e01a41dc635d` | migration 033 applied/verified; all automated gates PASS; create/delete sync, admin-reschedule T1-T4, repeated-refresh no-churn, fully-bound cleanup and eight-row legacy cleanup live acceptance PASS | D2 closed; next stage is D3 match ↔ reservation lifecycle; payment, webhook and production remain separate gates |
 | D3 Match ↔ reservation lifecycle | done | Selectel test runtime `78a1cef68f74854a9d6e316ffd235ffbd42b38f8` | migration 034 `applied_verified`; root E2E 91/1 skipped and build PASS; owner TMA unbooked/ЮKassa fail-closed smoke, health/assets/exact logs PASS | D3 closed; real ЮKassa payment, paid YCLIENTS create/link and compensation belong to D4 |
-| D4 Payment Core | in_progress | local `codex/d4-payment-domain` from `ac3fcb0` | D4.1 provider-neutral order/attempt focused 2/28 PASS; full gates and independent P0/P1 review PASS | task 00 handoff before integration; provider/fiscal selection and runtime remain separate gates |
+| D4 Payment Core | in_progress | foundation `main` / `origin/main` `3f1fe58`; local review `codex/d4-payment-persistence-contract` | D4.1 focused 2/28, full gates and P0/P1 review PASS; runtime-disabled deployment `not_needed`; docs-contract local gates PASS | docs-only contract remains uncommitted; commit requires a separate gate; provider/fiscal selection and runtime remain separate gates |
 | D5 Settings/moderation/compliance | pending | — | — | standalone phone/email auth, verified backend email, approved club support/contact source and clickable action; затем schema review |
 | D6 Selectel readiness/load | pending | — | — | backend staging fixture, live concurrency и Selectel production readiness |
 | D7 Release candidate | pending | — | — | после D1–D6 |
@@ -4607,3 +4607,26 @@
   and returned PASS with `P0=0`, `P1=0`. The only post-review change records
   that result here; the final exact diff is rechecked before the local commit.
   Next step is a clean task 00 handoff before any integration decision.
+
+### 2026-08-21 — D4 payment persistence/concurrency review contract
+
+- A separate local docs-only slice on `codex/d4-payment-persistence-contract`
+  from exact `origin/main` `3f1fe58` defines the acceptance contract for atomic
+  attempt start, owner-scoped idempotency, one active `pending`/`unknown`
+  attempt, fixed lock ordering, a durable external-write dispatch fence, crash
+  windows and read-only reconciliation.
+- The proposal explicitly records the unresolved runtime prerequisite: the
+  current domain has no transition command ID/evidence digest, so exact replay
+  control must be designed in a later code-only slice before orchestration. It
+  does not claim that repository atomicity, dispatch recovery or terminal replay
+  is already implemented.
+- Local gates PASS: document Prettier, root lint `98/105`, format `491/391`,
+  Knip/dead-code with seven unchanged restricted legacy imports, E2E `94 passed
+  / 1 skipped` and build `1619 modules`. Backend gates are `not_applicable`
+  because no backend file changed.
+- No code, repository, SQL/migration, schema, DB, runtime/Nest, provider/API,
+  server/SSH, env/secret or legacy payment field was changed or invoked. No
+  commit, push, integration or deployment occurred. Deployment is `not_needed`
+  because the diff is documentation only and D4 payment code remains
+  runtime-disconnected. Independent review of exact staged diff `c1ca7397528c793fe2d8fca8bd93176003af4a7f`
+  returned PASS with `P0=0`, `P1=0`; a separate local commit gate remains.
