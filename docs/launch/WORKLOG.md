@@ -4653,3 +4653,35 @@
 - The contract is delivered. Any repository types, deterministic mocked
   concurrency tests, observation replay control, migration proposal or runtime
   work requires a new separately approved bounded slice.
+
+### 2026-08-21 — D5.1 migration 035 runtime-disconnected candidate closeout
+
+- On exact detached `main` base
+  `a3c2fe0c2b03f3e4f18b30001c7ceb780969fdf8`, the five-file migration 035
+  candidate adds only private backend PostgreSQL persistence for resumable,
+  versioned player onboarding: normalized declared email, ordered onboarding
+  state, bounded code-only initial-level survey answers and append-only exact
+  consent-document acceptances. It adds no Nest/API/frontend wiring.
+- Declared canonical phone and normalized email are required only for onboarding
+  completion. Neither contact is marked verified, no contact uniqueness is
+  claimed, and `player_rating_states.is_verified` remains rating verification
+  only. Public-player search/profile projections are unchanged and receive no
+  contact PII.
+- `PRECHECK` and `POSTCHECK` are read-only exact catalog checks. Application
+  access is least-privilege and column-scoped; consent acceptances and completed
+  onboarding are immutable. `ROLLBACK` locks the affected relations and refuses
+  destructive rollback after onboarding/contact data exists.
+- Focused migration contract PASS: `1 suite / 7 tests`. This worktree has no
+  installed `node_modules`; the successful rerun used an already installed
+  local dependency tree whose backend `package.json` and `package-lock.json`
+  SHA-256 values exactly match this worktree. No dependency was installed or
+  changed.
+- No migration was applied to a database. No DB/schema, runtime/Nest, API,
+  frontend, server/SSH, Selectel, provider, secret/env, payment field or
+  production state was changed. No commit, push, merge or integration occurred.
+  Deployment is `not_needed` for this uncommitted runtime-disconnected local
+  candidate; DB/schema application remains a separate explicit owner gate.
+- Independent read-only review of the exact six-file candidate snapshot returned
+  PASS with `P0=0, P1=0`. The only post-review change records that result here;
+  the final exact diff is rechecked before the separate local commit decision.
+  Migration apply and every runtime rollout remain separately gated.
