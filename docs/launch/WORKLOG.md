@@ -4876,3 +4876,42 @@
   was not reapplied. Independent read-only review of the exact 12-file
   candidate returned acceptance PASS with `P0=0, P1=0`; the final exact diff is
   rechecked before a separate local commit decision.
+
+### 2026-08-22 — D5.1 onboarding draft write deployed to Selectel test
+
+- Exact reviewed backend commit
+  `22e7097389d104f2f35801c1ce8a0ac012b02a9c` was integrated into `main` and
+  deployed only to host `prosto-padel-test-01`, Compose project
+  `prosto-padel-test`. The server checkout is detached, exact and clean at that
+  commit. Migration 035 was confirmed `applied_verified` by its exact read-only
+  POSTCHECK and was not applied again.
+- Only the backend container was rebuilt and recreated. It is running and
+  healthy with restart count `0` at container `99c4b88e823f...` / image
+  `sha256:5b2da4e96b989...`. PostgreSQL, frontend and nginx retained their exact
+  previous container/image IDs; all remained running and healthy with restart
+  count `0`.
+- Post-rollout internal backend `/api/v1/health` returned `200`, and HTTPS
+  `/api/v1/health` returned `200`. Unauthorized HTTPS
+  `GET /api/v1/onboarding/me` and `PATCH /api/v1/onboarding/me` each returned
+  `401` with `cache-control: no-store` and `pragma: no-cache`. The unauthenticated
+  PATCH was rejected by the bearer guard and performed no onboarding mutation.
+- Bounded post-rollout checks found backend
+  `error/fatal/unhandled/uncaught=0` and nginx HTTP `5xx=0`. Authenticated
+  create/update smoke was not executed and remains
+  `pending_separate_api_write_approval`; no credential or PII was extracted,
+  printed or logged. The existing focused contract proof remains green at
+  `5 suites / 123 tests`, with backend E2E `2 suites / 4 tests`.
+- Deployment status is `applied_with_authenticated_write_smoke_pending` for
+  Selectel test at exact commit
+  `22e7097389d104f2f35801c1ce8a0ac012b02a9c`. PostgreSQL/schema, migration
+  state, env/secrets, provider/API, frontend, nginx, production and every
+  non-backend container were unchanged by this rollout. This closeout changes
+  only this WORKLOG; its own deployment is `not_needed`.
+- Docs-only closeout gates PASS: root E2E `94 passed / 1 skipped` and root build
+  `1619 modules`. The initial sandbox attempts stopped before tests/build when
+  Vite/esbuild could not traverse the external dependency junction; the exact
+  approved retry used an existing dependency tree with an identical lockfile
+  SHA-256 and passed. The temporary junction was removed, and no package or
+  lock file was installed or changed.
+- Independent read-only review of the exact one-file closeout diff returned
+  acceptance PASS with `P0=0, P1=0`.
