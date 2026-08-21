@@ -4685,3 +4685,37 @@
   PASS with `P0=0, P1=0`. The only post-review change records that result here;
   the final exact diff is rechecked before the separate local commit decision.
   Migration apply and every runtime rollout remain separately gated.
+
+### 2026-08-21 — D5.1 migration 035 PRECHECK stop and local correction
+
+- Exact candidate commit `4377141277d0eeec6d13c38f6fa1d04335187326`
+  was integrated into clean local/remote `main` before the separately approved
+  database gate. Selectel test target identity was confirmed read-only as host
+  `prosto-padel-test-01`, compose project `prosto-padel-test`, PostgreSQL
+  `14.23`, database `prosto_padel_test_migration_cycle`, primary/not in recovery;
+  the PostgreSQL container was healthy with restart count `0`.
+- Exact migration 035 PRECHECK ran in a read-only transaction and failed closed
+  before DDL. Error:
+  `PRECHECK_FAILED: backend_auth.player_rating_states differs from 019_backend_auth_player_rating_state`.
+  Migration 035 was not applied; POSTCHECK and ROLLBACK were not run. Server
+  checkout, containers, runtime, env/secrets, provider/API and production were
+  unchanged.
+- Root cause is local and deterministic: migration 027 canonically re-comments
+  `backend_auth.player_rating_states` with fingerprint owner
+  `027_backend_admin_rating_state`, while all four migration-035 SQL artifacts
+  incorrectly required the obsolete migration-019 owner. The correction changes
+  only those checks and the corresponding rollback diagnostic to canonical 027;
+  it does not alter tables, columns, ACLs, transition logic or runtime wiring.
+- Focused regression now requires canonical 027 in apply/PRECHECK/POSTCHECK/
+  ROLLBACK and rejects every return to `019_backend_auth_player_rating_state`.
+  Focused migration contract PASS: `1 suite / 8 tests`; `git diff --check` PASS.
+  No dependency was installed or changed.
+- This correction slice made no SSH/DB/schema call and performed no commit,
+  push, integration or deployment. Deployment is `not_needed`; the documented
+  Selectel test runtime remains `1779efb` and the migration remains
+  `not_applied`. A corrected commit/integration and a new explicit DB gate are
+  required before PRECHECK may be retried.
+- Independent read-only P0/P1 review of the exact six-file correction diff
+  returned PASS with `P0=0, P1=0`. The only post-review change records that
+  result here; the final exact diff is rechecked before a separate local commit
+  decision.

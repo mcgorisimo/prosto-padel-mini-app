@@ -60,7 +60,7 @@ begin
       (
         'backend_auth',
         'player_rating_states',
-        '019_backend_auth_player_rating_state'
+        '027_backend_admin_rating_state'
       )
     ) expected(schema_name, relation_name, migration_name)
   loop

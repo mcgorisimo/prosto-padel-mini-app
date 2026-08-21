@@ -66,11 +66,11 @@ begin
        'backend_auth.player_rating_states'::pg_catalog.regclass,
        'pg_class'
      ) is distinct from
-       '019_backend_auth_player_rating_state:'
+       '027_backend_admin_rating_state:'
          || backend_auth.relation_fingerprint(
            'backend_auth.player_rating_states'::pg_catalog.regclass
          ) then
-    raise exception 'ROLLBACK_REFUSED: rating state differs from migration 019';
+    raise exception 'ROLLBACK_REFUSED: rating state differs from migration 027';
   end if;
 end;
 $preconditions$;
@@ -175,7 +175,7 @@ begin
        'backend_auth.player_rating_states'::pg_catalog.regclass,
        'pg_class'
      ) is distinct from
-       '019_backend_auth_player_rating_state:'
+       '027_backend_admin_rating_state:'
          || backend_auth.relation_fingerprint(
            'backend_auth.player_rating_states'::pg_catalog.regclass
          ) then

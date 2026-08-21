@@ -43,7 +43,7 @@ begin
         pg_catalog.to_regclass(
           'backend_auth.player_rating_states'
         )::oid,
-        '019_backend_auth_player_rating_state'
+        '027_backend_admin_rating_state'
       )
     ) expected(relation_name, relation_oid, migration_name)
   loop

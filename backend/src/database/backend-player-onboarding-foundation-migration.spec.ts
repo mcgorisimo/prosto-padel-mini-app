@@ -168,7 +168,7 @@ describe('migration 035 backend player onboarding foundation contract', () => {
     expect(precheck).toContain(
       "'018_backend_auth_player_profile_editable_fields'",
     );
-    expect(precheck).toContain("'019_backend_auth_player_rating_state'");
+    expect(precheck).toContain("'027_backend_admin_rating_state'");
     expect(postcheck).toContain('set transaction read only');
     expect(postcheck).toContain(
       'postcheck_failed: migration 035 target must start empty',
@@ -187,5 +187,14 @@ describe('migration 035 backend player onboarding foundation contract', () => {
       "'018_backend_auth_player_profile_editable_fields:' || backend_auth.relation_fingerprint",
     );
     expect(rollback).not.toContain('cascade');
+  });
+
+  it('pins the rating-state fingerprint to migration 027 and rejects obsolete migration 019', () => {
+    for (const artifact of [MIGRATION, PRECHECK, POSTCHECK, ROLLBACK]) {
+      const sql = compact(artifact);
+
+      expect(sql).toMatch(/'027_backend_admin_rating_state:?'/u);
+      expect(sql).not.toContain('019_backend_auth_player_rating_state');
+    }
   });
 });
