@@ -449,7 +449,7 @@
   },
   "deadCode": {
     "configSha256": "0b871f70181170857f19edb762b973a3ff663e57f04226786aecc84aefbe1e77",
-    "issueDigest": "5c6ca3d337fa9eac92ee243a5f0e89dd27a2a5165ff83f688a52b6b2a3fc8398",
+    "issueDigest": "96167f84bb3ff2a16bbe5a906913622c1920849bfb85cb9b1f60c38f704c6667",
     "restrictedImports": [
       "src/App.jsx::./lib/supabaseClient",
       "src/lib/invitationApi.js::./supabaseClient",
