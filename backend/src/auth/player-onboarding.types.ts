@@ -9,6 +9,24 @@ export interface ReadOwnPlayerOnboardingInput {
   readonly role: UserRole;
 }
 
+export interface OwnPlayerOnboardingDraft {
+  readonly expectedRevision: number | null;
+  readonly profile: Readonly<{
+    readonly firstName: string;
+    readonly lastName: string | null;
+  }>;
+  readonly contacts: Readonly<{
+    readonly phone: string | null;
+    readonly email: string | null;
+  }>;
+}
+
+export interface SaveOwnPlayerOnboardingDraftInput {
+  readonly accountId: AccountId;
+  readonly role: UserRole;
+  readonly draft: OwnPlayerOnboardingDraft;
+}
+
 export interface OwnPlayerOnboardingConsent {
   readonly kind: PlayerOnboardingConsentKind;
   readonly documentVersion: string;
@@ -43,6 +61,23 @@ export type ReadOwnPlayerOnboardingResult =
       readonly reason:
         | 'invalid_request'
         | 'onboarding_not_found'
+        | 'temporary_unavailable'
+        | 'internal_failure';
+    };
+
+export type SaveOwnPlayerOnboardingDraftResult =
+  | {
+      readonly outcome: 'saved';
+      readonly onboarding: OwnPlayerOnboarding;
+    }
+  | {
+      readonly outcome: 'rejected';
+      readonly reason:
+        | 'invalid_request'
+        | 'onboarding_not_found'
+        | 'stale_revision'
+        | 'onboarding_closed'
+        | 'content_not_allowed'
         | 'temporary_unavailable'
         | 'internal_failure';
     };
@@ -91,6 +126,36 @@ function isBoundedString(value: unknown, maximum: number): value is string {
     typeof value === 'string' &&
     value.length > 0 &&
     [...value].length <= maximum
+  );
+}
+
+function isDraftName(value: unknown): value is string {
+  return isBoundedString(value, 256) && value.trim() === value;
+}
+
+function isDraftProfile(
+  value: unknown,
+): value is OwnPlayerOnboardingDraft['profile'] {
+  return (
+    isPlainRecord(value) &&
+    hasExactlyKeys(value, ['firstName', 'lastName']) &&
+    isDraftName(value.firstName) &&
+    (value.lastName === null || isDraftName(value.lastName))
+  );
+}
+
+function isDraftContacts(
+  value: unknown,
+): value is OwnPlayerOnboardingDraft['contacts'] {
+  return (
+    isPlainRecord(value) &&
+    hasExactlyKeys(value, ['phone', 'email']) &&
+    (value.phone === null ||
+      (typeof value.phone === 'string' && PHONE_PATTERN.test(value.phone))) &&
+    (value.email === null ||
+      (typeof value.email === 'string' &&
+        value.email.length <= 512 &&
+        value.email.trim().length > 0))
   );
 }
 
@@ -214,5 +279,48 @@ export function isReadOwnPlayerOnboardingInput(
     hasExactlyKeys(value, ['accountId', 'role']) &&
     isAccountId(value.accountId) &&
     (value.role === 'player' || value.role === 'club_admin')
+  );
+}
+
+export function readOwnPlayerOnboardingDraft(
+  value: unknown,
+): OwnPlayerOnboardingDraft | undefined {
+  if (
+    !isPlainRecord(value) ||
+    !hasExactlyKeys(value, ['expectedRevision', 'profile', 'contacts']) ||
+    !(
+      value.expectedRevision === null ||
+      (typeof value.expectedRevision === 'number' &&
+        Number.isSafeInteger(value.expectedRevision) &&
+        value.expectedRevision >= 1)
+    ) ||
+    !isDraftProfile(value.profile) ||
+    !isDraftContacts(value.contacts)
+  ) {
+    return undefined;
+  }
+
+  return Object.freeze({
+    expectedRevision: value.expectedRevision,
+    profile: Object.freeze({
+      firstName: value.profile.firstName,
+      lastName: value.profile.lastName,
+    }),
+    contacts: Object.freeze({
+      phone: value.contacts.phone,
+      email: value.contacts.email,
+    }),
+  });
+}
+
+export function isSaveOwnPlayerOnboardingDraftInput(
+  value: unknown,
+): value is SaveOwnPlayerOnboardingDraftInput {
+  return (
+    isPlainRecord(value) &&
+    hasExactlyKeys(value, ['accountId', 'role', 'draft']) &&
+    isAccountId(value.accountId) &&
+    (value.role === 'player' || value.role === 'club_admin') &&
+    readOwnPlayerOnboardingDraft(value.draft) !== undefined
   );
 }

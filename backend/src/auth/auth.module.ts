@@ -30,6 +30,7 @@ import { PostgresMatchWaitlistRepository } from '../database/postgres-match-wait
 import { PostgresPlayerAccountProvisioningRepository } from '../database/postgres-player-account-provisioning.repository';
 import { PostgresPlayerProfileDetailsRepository } from '../database/postgres-player-profile-details.repository';
 import { PostgresPlayerProfilePhotoRepository } from '../database/postgres-player-profile-photo.repository';
+import { PostgresPlayerOnboardingDraftWriter } from '../database/postgres-player-onboarding-draft-writer';
 import { PostgresPlayerOnboardingReader } from '../database/postgres-player-onboarding-reader';
 import { PostgresPlayerProfileReader } from '../database/postgres-player-profile-reader';
 import { PostgresPlayerProfileWriter } from '../database/postgres-player-profile-writer';
@@ -288,8 +289,15 @@ function createPlayerProfileService(
 function createPlayerOnboardingService(
   transactions: PostgresTransactionExecutorAdapter,
   onboarding: PostgresPlayerOnboardingReader,
+  draftWriter: PostgresPlayerOnboardingDraftWriter,
+  clock: SessionAuthenticationClock,
 ): PlayerOnboardingService {
-  return new PlayerOnboardingService({ transactions, onboarding });
+  return new PlayerOnboardingService({
+    transactions,
+    onboarding,
+    draftWriter,
+    clock,
+  });
 }
 
 function createAdminPlayerRatingService(
@@ -607,6 +615,8 @@ function createPlayerProfilePhotoService(
       inject: [
         PostgresTransactionExecutorAdapter,
         PostgresPlayerOnboardingReader,
+        PostgresPlayerOnboardingDraftWriter,
+        SESSION_AUTHENTICATION_CLOCK,
       ],
       useFactory: createPlayerOnboardingService,
     },

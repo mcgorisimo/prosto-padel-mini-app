@@ -1,4 +1,10 @@
 import { isAccountId } from '../accounts/account.types';
+import { isUserGeneratedTextAllowed } from '../common/content-moderation';
+import {
+  PlayerOnboardingDraftWritePersistenceError,
+  PlayerOnboardingDraftWriter,
+  SavePlayerOnboardingDraftResult,
+} from '../database/player-onboarding-draft-writer';
 import {
   PlayerOnboardingReadPersistenceError,
   PlayerOnboardingReader,
@@ -9,9 +15,13 @@ import {
   OwnPlayerOnboarding,
   ReadOwnPlayerOnboardingInput,
   ReadOwnPlayerOnboardingResult,
+  SaveOwnPlayerOnboardingDraftInput,
+  SaveOwnPlayerOnboardingDraftResult,
   isOwnPlayerOnboarding,
   isReadOwnPlayerOnboardingInput,
+  isSaveOwnPlayerOnboardingDraftInput,
 } from './player-onboarding.types';
+import { SessionAuthenticationClock } from './session-authentication.guard';
 
 export interface PlayerOnboardingTransactionExecutor {
   run<T>(
@@ -22,12 +32,23 @@ export interface PlayerOnboardingTransactionExecutor {
 export interface PlayerOnboardingServiceDependencies {
   readonly transactions: PlayerOnboardingTransactionExecutor;
   readonly onboarding: PlayerOnboardingReader;
+  readonly draftWriter: PlayerOnboardingDraftWriter;
+  readonly clock: SessionAuthenticationClock;
 }
 
 type RejectionReason = Extract<
-  ReadOwnPlayerOnboardingResult,
+  ReadOwnPlayerOnboardingResult | SaveOwnPlayerOnboardingDraftResult,
   { readonly outcome: 'rejected' }
 >['reason'];
+
+type DraftTransactionResult =
+  | Exclude<SavePlayerOnboardingDraftResult, { readonly outcome: 'saved' }>
+  | Extract<SaveOwnPlayerOnboardingDraftResult, { readonly outcome: 'saved' }>;
+
+const ONBOARDING_FLOW_VERSION = 'tma_v1';
+const ONBOARDING_SURVEY_VERSION = 'initial_level_v1';
+const EMAIL_PATTERN =
+  /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9][a-z0-9.-]*\.[a-z]{2,63}$/u;
 
 function rejected<Reason extends RejectionReason>(
   reason: Reason,
@@ -165,9 +186,36 @@ function publicOnboarding(
 
 function temporaryStorageFailure(error: unknown): boolean {
   return (
-    error instanceof PlayerOnboardingReadPersistenceError &&
+    (error instanceof PlayerOnboardingReadPersistenceError ||
+      error instanceof PlayerOnboardingDraftWritePersistenceError) &&
     (error.reason === 'database_unavailable' ||
       error.reason === 'transaction_conflict')
+  );
+}
+
+function normalizeEmail(value: string | null): string | null | undefined {
+  if (value === null) {
+    return null;
+  }
+  const normalized = value.trim().toLowerCase();
+  return normalized.length <= 320 && EMAIL_PATTERN.test(normalized)
+    ? normalized
+    : undefined;
+}
+
+function containsDisallowedName(
+  input: SaveOwnPlayerOnboardingDraftInput,
+): boolean {
+  return (
+    !isUserGeneratedTextAllowed(input.draft.profile.firstName) ||
+    (input.draft.profile.lastName !== null &&
+      !isUserGeneratedTextAllowed(input.draft.profile.lastName))
+  );
+}
+
+function storageInvariantFailure(): PlayerOnboardingDraftWritePersistenceError {
+  return new PlayerOnboardingDraftWritePersistenceError(
+    'invalid_persisted_state',
   );
 }
 
@@ -213,6 +261,86 @@ export class PlayerOnboardingService {
         return rejected('internal_failure');
       }
       return Object.freeze({ outcome: 'found', onboarding });
+    } catch (error) {
+      return rejected(
+        temporaryStorageFailure(error)
+          ? 'temporary_unavailable'
+          : 'internal_failure',
+      );
+    }
+  }
+
+  async saveOwnOnboardingDraft(
+    input: SaveOwnPlayerOnboardingDraftInput,
+  ): Promise<SaveOwnPlayerOnboardingDraftResult> {
+    if (!isSaveOwnPlayerOnboardingDraftInput(input)) {
+      return rejected('invalid_request');
+    }
+    if (input.role !== 'player') {
+      return rejected('onboarding_not_found');
+    }
+    const normalizedEmail = normalizeEmail(input.draft.contacts.email);
+    if (normalizedEmail === undefined) {
+      return rejected('invalid_request');
+    }
+    if (containsDisallowedName(input)) {
+      return rejected('content_not_allowed');
+    }
+
+    try {
+      const result =
+        await this.dependencies.transactions.run<DraftTransactionResult>(
+          async (transaction) => {
+            const saved = await this.dependencies.draftWriter.saveDraft(
+              transaction,
+              {
+                accountId: input.accountId,
+                expectedRevision: input.draft.expectedRevision,
+                firstName: input.draft.profile.firstName,
+                lastName: input.draft.profile.lastName,
+                phone: input.draft.contacts.phone,
+                normalizedEmail,
+                flowVersion: ONBOARDING_FLOW_VERSION,
+                surveyVersion: ONBOARDING_SURVEY_VERSION,
+                updatedAt: this.dependencies.clock.nowEpochSeconds(),
+              },
+            );
+            if (saved.outcome !== 'saved') {
+              return saved;
+            }
+
+            const reread = await this.dependencies.onboarding.findByAccountId(
+              transaction,
+              { accountId: input.accountId },
+            );
+            if (reread.outcome !== 'found') {
+              throw storageInvariantFailure();
+            }
+            const onboarding = publicOnboarding(
+              reread.onboarding as PlayerOnboardingRecord,
+              input.accountId,
+            );
+            if (
+              onboarding === undefined ||
+              onboarding.status !== 'in_progress' ||
+              onboarding.revision !== saved.revision
+            ) {
+              throw storageInvariantFailure();
+            }
+            return Object.freeze({ outcome: 'saved', onboarding });
+          },
+        );
+
+      switch (result.outcome) {
+        case 'saved':
+          return result;
+        case 'not_found':
+          return rejected('onboarding_not_found');
+        case 'stale_revision':
+          return rejected('stale_revision');
+        case 'closed':
+          return rejected('onboarding_closed');
+      }
     } catch (error) {
       return rejected(
         temporaryStorageFailure(error)

@@ -1,6 +1,12 @@
 import { AccountId } from '../accounts/account.types';
 import { deterministicUuid } from '../../test/deterministic-uuid';
 import {
+  PlayerOnboardingDraftWritePersistenceError,
+  PlayerOnboardingDraftWriter,
+  SavePlayerOnboardingDraftInput,
+  SavePlayerOnboardingDraftResult,
+} from '../database/player-onboarding-draft-writer';
+import {
   PlayerOnboardingReadPersistenceError,
   PlayerOnboardingReader,
   ReadPlayerOnboardingInput,
@@ -11,11 +17,14 @@ import {
   PlayerOnboardingService,
   PlayerOnboardingTransactionExecutor,
 } from './player-onboarding.service';
+import { unixEpochSeconds } from './auth.types';
+import { SaveOwnPlayerOnboardingDraftInput } from './player-onboarding.types';
 
 const ACCOUNT_ID = deterministicUuid('player-onboarding-service') as AccountId;
 const OTHER_ACCOUNT_ID = deterministicUuid(
   'player-onboarding-service-other',
 ) as AccountId;
+const NOW = unixEpochSeconds(1_800_000_000);
 
 function createHarness(result: ReadPlayerOnboardingResult = firstRunResult()) {
   const transaction = {} as PostgresTransaction;
@@ -29,11 +38,19 @@ function createHarness(result: ReadPlayerOnboardingResult = firstRunResult()) {
       [PostgresTransaction, ReadPlayerOnboardingInput]
     >()
     .mockResolvedValue(result);
+  const saveDraft = jest
+    .fn<
+      Promise<SavePlayerOnboardingDraftResult>,
+      [PostgresTransaction, SavePlayerOnboardingDraftInput]
+    >()
+    .mockResolvedValue({ outcome: 'saved', revision: 1 });
   const service = new PlayerOnboardingService({
     transactions: { run } as PlayerOnboardingTransactionExecutor,
     onboarding: { findByAccountId } as PlayerOnboardingReader,
+    draftWriter: { saveDraft } as PlayerOnboardingDraftWriter,
+    clock: { nowEpochSeconds: () => NOW },
   });
-  return { service, transaction, run, findByAccountId };
+  return { service, transaction, run, findByAccountId, saveDraft };
 }
 
 function firstRunResult(): ReadPlayerOnboardingResult {
@@ -73,6 +90,46 @@ function draftResult(): ReadPlayerOnboardingResult {
         { kind: 'terms', documentVersion: '2026-08-01' },
       ],
     },
+  };
+}
+
+function savedDraftResult(revision: number): ReadPlayerOnboardingResult {
+  return {
+    outcome: 'found',
+    onboarding: {
+      accountId: ACCOUNT_ID,
+      firstName: 'Updated',
+      lastName: 'Player',
+      phone: '+79991112233',
+      normalizedEmail: 'owner@example.test',
+      state: {
+        flowVersion: 'tma_v1',
+        status: 'in_progress',
+        currentStep: 'profile',
+        surveyVersion: 'initial_level_v1',
+        surveyAnswers: {},
+        revision,
+      },
+      consents: [],
+    },
+  };
+}
+
+function saveInput(
+  overrides: Partial<SaveOwnPlayerOnboardingDraftInput> = {},
+): SaveOwnPlayerOnboardingDraftInput {
+  return {
+    accountId: ACCOUNT_ID,
+    role: 'player',
+    draft: {
+      expectedRevision: null,
+      profile: { firstName: 'Updated', lastName: 'Player' },
+      contacts: {
+        phone: '+79991112233',
+        email: ' Owner@Example.Test ',
+      },
+    },
+    ...overrides,
   };
 }
 
@@ -244,5 +301,173 @@ describe('PlayerOnboardingService', () => {
         role: 'player',
       }),
     ).resolves.toEqual({ outcome: 'rejected', reason });
+  });
+
+  it('creates a first-run owner draft with backend-owned versions and normalized declared contacts', async () => {
+    const harness = createHarness(savedDraftResult(1));
+
+    await expect(
+      harness.service.saveOwnOnboardingDraft(saveInput()),
+    ).resolves.toEqual({
+      outcome: 'saved',
+      onboarding: {
+        status: 'in_progress',
+        flowVersion: 'tma_v1',
+        currentStep: 'profile',
+        surveyVersion: 'initial_level_v1',
+        revision: 1,
+        profile: { firstName: 'Updated', lastName: 'Player' },
+        contacts: {
+          phone: '+79991112233',
+          normalizedEmail: 'owner@example.test',
+          assurance: 'declared',
+        },
+        consents: [],
+        surveyAnswers: {},
+      },
+    });
+    expect(harness.saveDraft).toHaveBeenCalledWith(harness.transaction, {
+      accountId: ACCOUNT_ID,
+      expectedRevision: null,
+      firstName: 'Updated',
+      lastName: 'Player',
+      phone: '+79991112233',
+      normalizedEmail: 'owner@example.test',
+      flowVersion: 'tma_v1',
+      surveyVersion: 'initial_level_v1',
+      updatedAt: NOW,
+    });
+    expect(harness.findByAccountId).toHaveBeenCalledWith(harness.transaction, {
+      accountId: ACCOUNT_ID,
+    });
+  });
+
+  it('resumes only the exact revision and rereads the same owner in one transaction', async () => {
+    const harness = createHarness(savedDraftResult(5));
+    harness.saveDraft.mockResolvedValueOnce({
+      outcome: 'saved',
+      revision: 5,
+    });
+    const input = saveInput({
+      draft: {
+        ...saveInput().draft,
+        expectedRevision: 4,
+      },
+    });
+
+    await expect(
+      harness.service.saveOwnOnboardingDraft(input),
+    ).resolves.toMatchObject({
+      outcome: 'saved',
+      onboarding: { revision: 5 },
+    });
+    expect(harness.run).toHaveBeenCalledTimes(1);
+    expect(harness.saveDraft.mock.invocationCallOrder[0]).toBeLessThan(
+      harness.findByAccountId.mock.invocationCallOrder[0],
+    );
+  });
+
+  it.each([
+    ['not_found', 'onboarding_not_found'],
+    ['stale_revision', 'stale_revision'],
+    ['closed', 'onboarding_closed'],
+  ] as const)('maps writer %s without rereading', async (outcome, reason) => {
+    const harness = createHarness(savedDraftResult(1));
+    harness.saveDraft.mockResolvedValueOnce({ outcome });
+
+    await expect(
+      harness.service.saveOwnOnboardingDraft(saveInput()),
+    ).resolves.toEqual({ outcome: 'rejected', reason });
+    expect(harness.findByAccountId).not.toHaveBeenCalled();
+  });
+
+  it('hides non-player ownership before opening a transaction', async () => {
+    const harness = createHarness(savedDraftResult(1));
+    await expect(
+      harness.service.saveOwnOnboardingDraft(saveInput({ role: 'club_admin' })),
+    ).resolves.toEqual({
+      outcome: 'rejected',
+      reason: 'onboarding_not_found',
+    });
+    expect(harness.run).not.toHaveBeenCalled();
+    expect(harness.saveDraft).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    saveInput({
+      draft: {
+        ...saveInput().draft,
+        contacts: { phone: '79991112233', email: null },
+      },
+    }),
+    saveInput({
+      draft: {
+        ...saveInput().draft,
+        contacts: { phone: null, email: 'invalid-email' },
+      },
+    }),
+    { ...saveInput(), accountId: OTHER_ACCOUNT_ID, owner: ACCOUNT_ID },
+  ])(
+    'rejects malformed or expanded input before persistence %#',
+    async (input) => {
+      const harness = createHarness(savedDraftResult(1));
+      await expect(
+        harness.service.saveOwnOnboardingDraft(input as never),
+      ).resolves.toEqual({ outcome: 'rejected', reason: 'invalid_request' });
+      expect(harness.run).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects disallowed names without copying them into persistence', async () => {
+    const harness = createHarness(savedDraftResult(1));
+    await expect(
+      harness.service.saveOwnOnboardingDraft(
+        saveInput({
+          draft: {
+            ...saveInput().draft,
+            profile: { firstName: 'fuck', lastName: null },
+          },
+        }),
+      ),
+    ).resolves.toEqual({
+      outcome: 'rejected',
+      reason: 'content_not_allowed',
+    });
+    expect(harness.run).not.toHaveBeenCalled();
+  });
+
+  it('fails transactionally when the post-write reread belongs to another owner', async () => {
+    const result = savedDraftResult(1);
+    if (result.outcome !== 'found') {
+      throw new Error('Expected found fixture');
+    }
+    const harness = createHarness({
+      outcome: 'found',
+      onboarding: { ...result.onboarding, accountId: OTHER_ACCOUNT_ID },
+    });
+    await expect(
+      harness.service.saveOwnOnboardingDraft(saveInput()),
+    ).resolves.toEqual({
+      outcome: 'rejected',
+      reason: 'internal_failure',
+    });
+    expect(harness.saveDraft).toHaveBeenCalledTimes(1);
+    expect(harness.findByAccountId).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['database_unavailable', 'temporary_unavailable'],
+    ['transaction_conflict', 'temporary_unavailable'],
+    ['permission_denied', 'internal_failure'],
+    ['invalid_persisted_state', 'internal_failure'],
+  ] as const)('maps draft writer %s safely', async (failure, reason) => {
+    const harness = createHarness(savedDraftResult(1));
+    harness.saveDraft.mockRejectedValueOnce(
+      new PlayerOnboardingDraftWritePersistenceError(failure),
+    );
+    await expect(
+      harness.service.saveOwnOnboardingDraft(saveInput()),
+    ).resolves.toEqual({ outcome: 'rejected', reason });
+    expect(harness.findByAccountId).not.toHaveBeenCalled();
   });
 });

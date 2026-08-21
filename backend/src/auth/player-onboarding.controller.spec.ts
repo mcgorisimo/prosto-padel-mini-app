@@ -11,6 +11,8 @@ import { PlayerOnboardingService } from './player-onboarding.service';
 import {
   OwnPlayerOnboarding,
   ReadOwnPlayerOnboardingResult,
+  SaveOwnPlayerOnboardingDraftInput,
+  SaveOwnPlayerOnboardingDraftResult,
 } from './player-onboarding.types';
 import {
   SESSION_AUTHENTICATION_CLOCK,
@@ -46,6 +48,10 @@ interface Harness {
   readonly readOwnOnboarding: jest.Mock<
     Promise<ReadOwnPlayerOnboardingResult>,
     [{ readonly accountId: AccountId; readonly role: 'player' | 'club_admin' }]
+  >;
+  readonly saveOwnOnboardingDraft: jest.Mock<
+    Promise<SaveOwnPlayerOnboardingDraftResult>,
+    [SaveOwnPlayerOnboardingDraftInput]
   >;
   readonly logs: readonly unknown[][];
 }
@@ -108,6 +114,15 @@ async function createHarness(): Promise<Harness> {
       ]
     >()
     .mockResolvedValue(foundResult());
+  const saveOwnOnboardingDraft = jest
+    .fn<
+      Promise<SaveOwnPlayerOnboardingDraftResult>,
+      [SaveOwnPlayerOnboardingDraftInput]
+    >()
+    .mockResolvedValue({
+      outcome: 'saved',
+      onboarding: foundOnboarding(),
+    });
   const nowEpochSeconds = jest.fn<
     ReturnType<SessionAuthenticationClock['nowEpochSeconds']>,
     []
@@ -122,7 +137,7 @@ async function createHarness(): Promise<Harness> {
       },
       {
         provide: PlayerOnboardingService,
-        useValue: { readOwnOnboarding },
+        useValue: { readOwnOnboarding, saveOwnOnboardingDraft },
       },
       {
         provide: SESSION_AUTHENTICATION_CLOCK,
@@ -138,7 +153,13 @@ async function createHarness(): Promise<Harness> {
   app.setGlobalPrefix('api/v1');
   await app.init();
   await app.getHttpAdapter().getInstance().ready();
-  return { app, authenticate, readOwnOnboarding, logs };
+  return {
+    app,
+    authenticate,
+    readOwnOnboarding,
+    saveOwnOnboardingDraft,
+    logs,
+  };
 }
 
 function inject(
@@ -159,6 +180,32 @@ function inject(
     url: `${ROUTE}${suffix}`,
     headers,
   });
+}
+
+function patch(
+  harness: Harness,
+  body: unknown,
+  authorization?: string,
+  suffix = '',
+) {
+  const headers: Record<string, string> = {};
+  if (authorization !== undefined) {
+    headers.authorization = authorization;
+  }
+  return harness.app.inject({
+    method: 'PATCH',
+    url: `${ROUTE}${suffix}`,
+    headers,
+    payload: body as never,
+  });
+}
+
+function draftBody(expectedRevision: number | null = null) {
+  return {
+    expectedRevision,
+    profile: { firstName: 'Private', lastName: 'Owner' },
+    contacts: { phone: PHONE_MARKER, email: EMAIL_MARKER },
+  };
 }
 
 function expectNoStore(response: {
@@ -301,6 +348,122 @@ describe('PlayerOnboardingController HTTP boundary', () => {
       ),
     );
     const response = await inject(harness, `Bearer ${CREDENTIAL}`);
+    expect(response.statusCode).toBe(500);
+    const output = JSON.stringify({
+      response: response.json(),
+      logs: harness.logs,
+    });
+    for (const marker of [
+      PRIVATE_MARKER,
+      PHONE_MARKER,
+      EMAIL_MARKER,
+      CREDENTIAL,
+    ]) {
+      expect(output).not.toContain(marker);
+    }
+  });
+
+  it.each([
+    ['first run', null],
+    ['resume', 2],
+  ] as const)(
+    'saves an authenticated owner draft for %s',
+    async (_label, revision) => {
+      const response = await patch(
+        harness,
+        draftBody(revision),
+        `Bearer ${CREDENTIAL}`,
+      );
+
+      expect(response.statusCode).toBe(200);
+      expectNoStore(response);
+      expect(response.json()).toEqual(foundOnboarding());
+      expect(harness.saveOwnOnboardingDraft).toHaveBeenCalledWith({
+        accountId: ACCOUNT_ID,
+        role: 'player',
+        draft: draftBody(revision),
+      });
+      const output = JSON.stringify(harness.logs);
+      expect(output).not.toContain(PHONE_MARKER);
+      expect(output).not.toContain(EMAIL_MARKER);
+      expect(output).not.toContain(CREDENTIAL);
+    },
+  );
+
+  it('rejects unauthorized draft writes before the service', async () => {
+    const response = await patch(harness, draftBody());
+    expect(response.statusCode).toBe(401);
+    expectNoStore(response);
+    expect(harness.saveOwnOnboardingDraft).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {},
+    { ...draftBody(), accountId: OTHER_ACCOUNT_ID },
+    { ...draftBody(), expectedRevision: 0 },
+    {
+      ...draftBody(),
+      contacts: { phone: '79991112233', email: EMAIL_MARKER },
+    },
+    {
+      ...draftBody(),
+      verification: { phone: true, email: true },
+    },
+  ])(
+    'rejects malformed or expanded draft body without persistence %#',
+    async (body) => {
+      const response = await patch(
+        harness,
+        body,
+        `Bearer ${CREDENTIAL}`,
+        `?accountId=${OTHER_ACCOUNT_ID}`,
+      );
+      expect(response.statusCode).toBe(400);
+      expectNoStore(response);
+      expect(response.json()).toEqual({
+        statusCode: 400,
+        code: 'onboarding_draft_invalid_request',
+        message: 'Onboarding draft request is invalid',
+      });
+      expect(harness.saveOwnOnboardingDraft).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ['onboarding_not_found', 404, 'onboarding_not_found'],
+    ['stale_revision', 409, 'onboarding_draft_revision_conflict'],
+    ['onboarding_closed', 409, 'onboarding_draft_closed'],
+    ['content_not_allowed', 422, 'onboarding_draft_content_not_allowed'],
+    ['temporary_unavailable', 503, 'onboarding_service_unavailable'],
+    ['invalid_request', 400, 'onboarding_draft_invalid_request'],
+    ['internal_failure', 500, 'onboarding_internal_error'],
+  ] as const)(
+    'maps draft %s to safe HTTP %d',
+    async (reason, statusCode, code) => {
+      harness.saveOwnOnboardingDraft.mockResolvedValueOnce({
+        outcome: 'rejected',
+        reason,
+      });
+      const response = await patch(
+        harness,
+        draftBody(2),
+        `Bearer ${CREDENTIAL}`,
+      );
+      expect(response.statusCode).toBe(statusCode);
+      expectNoStore(response);
+      expect(response.json()).toMatchObject({ statusCode, code });
+      expect(response.body).not.toContain(PHONE_MARKER);
+      expect(response.body).not.toContain(EMAIL_MARKER);
+    },
+  );
+
+  it('hides thrown draft PII and credentials from response and logs', async () => {
+    harness.saveOwnOnboardingDraft.mockRejectedValueOnce(
+      new Error(
+        `${PRIVATE_MARKER}:${PHONE_MARKER}:${EMAIL_MARKER}:${CREDENTIAL}`,
+      ),
+    );
+    const response = await patch(harness, draftBody(2), `Bearer ${CREDENTIAL}`);
     expect(response.statusCode).toBe(500);
     const output = JSON.stringify({
       response: response.json(),

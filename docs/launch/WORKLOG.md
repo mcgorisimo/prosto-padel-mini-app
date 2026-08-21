@@ -4830,3 +4830,49 @@
   PostgreSQL/schema, migration state, env/secrets, provider/API, frontend, nginx,
   production and every non-backend container were unchanged by this rollout.
   This closeout changes only this WORKLOG; its deployment is `not_needed`.
+
+### 2026-08-22 — D5.1 onboarding draft write candidate
+
+- On exact detached base `14bac13eb9eb8fc19de30dc949cd36ab2845836b`,
+  this bounded backend-only slice adds authenticated
+  `PATCH /api/v1/onboarding/me` creation/update for the current player's
+  resumable draft. The account and role come only from the existing bearer
+  principal; the exact body can provide only `expectedRevision`, name and
+  declared phone/email. Flow/survey versions, state, completion, consent,
+  survey, verification and rating fields remain backend-owned and cannot be
+  selected by the caller.
+- First-run requires `expectedRevision=null` and creates migration-035 state at
+  `in_progress/profile/revision=1`. Resume requires the exact current revision
+  and increments it once without advancing the step or changing versions,
+  survey answers or consents. A dedicated transaction locks owner profile then
+  onboarding state, rejects missing/non-player ownership, completed state and
+  stale revisions before any mutation, updates only name plus declared
+  canonical phone/backend-normalized email, and rereads the owner in the same
+  transaction. Any anomaly after the first write throws so a partial profile
+  update cannot commit.
+- Contacts remain explicitly `assurance=declared`; no phone/email verification
+  claim or `rating.isVerified` coupling was added. HTTP and persistence errors
+  are fixed and generic; request bodies, contact values, credentials, account
+  IDs and database diagnostics are not logged or copied into errors. No
+  frontend/TMA UI, Supabase path, admin backoffice, completion, consent/survey
+  mutation, migration or schema change was added.
+- Focused onboarding PASS: `5 suites / 123 tests`, covering first-run, resume,
+  owner derivation, missing/non-player ownership, stale revision, completed
+  state, rollback-on-post-write anomaly, exact request allowlists and PII-safe
+  errors/logging. Full gates PASS: backend typecheck, unit
+  `145 suites / 3513 tests`, E2E `2 suites / 4 tests` and build; root E2E
+  `94 passed / 1 skipped` and build `1619 modules`. The first root build was
+  blocked only by sandbox directory access; the identical approved local retry
+  passed. Matching dependency trees were used through temporary local
+  junctions only; no package or lock file was installed or changed.
+- No commit, push, integration, SSH/DB/schema command, provider/API write,
+  server/container action, env/secret change or production action occurred.
+  This candidate changes backend runtime, so deployment is
+  `deployment_deferred_by_user`. Selectel test was not contacted; the latest
+  deployed backend remains exact
+  `841e2abe4d3959441e20b9a2fb6ec1a3b8580959`, with its documented health/log
+  checks green and authenticated GET smoke still
+  `blocked_by_client_inspector`. Migration 035 remains `applied_verified` and
+  was not reapplied. Independent read-only review of the exact 12-file
+  candidate returned acceptance PASS with `P0=0, P1=0`; the final exact diff is
+  rechecked before a separate local commit decision.

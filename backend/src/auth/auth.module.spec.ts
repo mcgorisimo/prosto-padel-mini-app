@@ -26,6 +26,7 @@ import { PostgresMatchRepository } from '../database/postgres-match.repository';
 import { PostgresMatchWaitlistRepository } from '../database/postgres-match-waitlist.repository';
 import { PostgresPlayerAccountProvisioningRepository } from '../database/postgres-player-account-provisioning.repository';
 import { PostgresPlayerProfileDetailsRepository } from '../database/postgres-player-profile-details.repository';
+import { PostgresPlayerOnboardingDraftWriter } from '../database/postgres-player-onboarding-draft-writer';
 import { PostgresPlayerOnboardingReader } from '../database/postgres-player-onboarding-reader';
 import { PostgresPlayerProfileReader } from '../database/postgres-player-profile-reader';
 import { PostgresPlayerProfileWriter } from '../database/postgres-player-profile-writer';
@@ -434,6 +435,12 @@ describe('AuthModule Telegram login wiring', () => {
     expect(playerOnboarding.dependencies.onboarding).toBe(
       moduleRef.get(PostgresPlayerOnboardingReader),
     );
+    expect(playerOnboarding.dependencies.draftWriter).toBe(
+      moduleRef.get(PostgresPlayerOnboardingDraftWriter),
+    );
+    expect(playerOnboarding.dependencies.clock).toBe(
+      moduleRef.get(SESSION_AUTHENTICATION_CLOCK),
+    );
     expect(
       getPlayerOnboardingControllerService(
         moduleRef.get(PlayerOnboardingController),
@@ -666,6 +673,9 @@ describe('AuthModule Telegram login wiring', () => {
     );
     expect(moduleRef.get(PostgresPlayerOnboardingReader)).toBeInstanceOf(
       PostgresPlayerOnboardingReader,
+    );
+    expect(moduleRef.get(PostgresPlayerOnboardingDraftWriter)).toBeInstanceOf(
+      PostgresPlayerOnboardingDraftWriter,
     );
     expect(moduleRef.get(PostgresPlayerProfileWriter)).toBeInstanceOf(
       PostgresPlayerProfileWriter,
