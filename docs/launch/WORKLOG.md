@@ -5003,3 +5003,58 @@
   post-review change records that result here, and the final exact diff is
   rechecked before a separate local commit decision. No commit, push,
   integration, SSH/DB/schema command or runtime action is part of this closeout.
+
+### 2026-08-22 — D5.1 authenticated onboarding draft smoke passed on Selectel test
+
+- Exact integrated commit
+  `6d52349e22d438e8fe11fa3bd3a9323538289a82` has the same backend runtime tree
+  as deployed commit `22e7097389d104f2f35801c1ce8a0ac012b02a9c`.
+  Read-only preflight confirmed host `prosto-padel-test-01`, Compose project
+  `prosto-padel-test`, a clean detached server checkout at the deployed commit,
+  and unchanged backend container
+  `99c4b88e823f1c97253bedb4a8641438306ae60474834b245d3a6682cdd439f7` /
+  image
+  `sha256:5b2da4e96b9890695cc390a2f827dff1fd9a9bf05571be30e8f63eb07bc282f2`,
+  running healthy with restart count `0`. Internal `/api/v1/health` returned
+  `200`.
+- Exact read-only migration-036 POSTCHECK SHA-256
+  `D0E81EF8CFE0A5B906609B56D20137C52C5C308B291741B217DB431F95BE8052`
+  returned `verified=true`, `backend_auth_app_execute=true`,
+  `public_execute=false`, unchanged function definitions/relations/data and
+  `synthetic_fixture_compatible=true`, then ended with `ROLLBACK`. Migration
+  036 remained `applied_verified`; it was not applied again.
+- One syntax-checked, stream-only Node runner executed inside the unchanged
+  backend container under correlation
+  `01bb92b8-5102-473e-98d2-f165e16cf758`. It locally signed fresh synthetic
+  Telegram initData from the existing read-only secret mount and produced the
+  exact PASS sequence: login `200/new`; first GET `required` with revision
+  `null`; first-run PATCH revision `1`; resume GET revision `1`; update PATCH
+  revision `2`; stale PATCH with expected revision `1` returned `409`; final
+  GET remained revision `2`; logout returned `204`; the old bearer then
+  returned `401`.
+- The approved test writes retained one new PII-free synthetic
+  account/profile/onboarding/auth/audit fixture. Its canonical phone/email are
+  synthetic declared contacts only and are not verified; Telegram notification
+  permission was omitted. No cleanup, rollback, deletion or anonymization was
+  attempted, matching the approved fail-closed fixture policy. Credential,
+  bearer, initData, response bodies, identifiers and contact values were never
+  printed.
+- Bounded checks from smoke start
+  `2026-08-21T22:26:13.166Z` found backend
+  `error/fatal/unhandled/uncaught=0` and nginx HTTP `5xx=0`. Final backend state
+  remained running/healthy with restart count `0` and the same container/image.
+  Server checkout, files, containers, DB schema/migrations, application runtime,
+  env/secrets, provider API, frontend and production were unchanged; no restart,
+  rebuild or rollout occurred. Deployment is
+  `applied_verified_with_authenticated_write_smoke_pass`.
+- This docs-only closeout changes only this WORKLOG. The first root E2E run
+  completed `92 passed / 1 skipped` with two unrelated 30-second UI timeouts;
+  their focused rerun passed `2/2`, and a full clean rerun passed
+  `94 passed / 1 skipped`. Root build PASS (`1619 modules`). A matching
+  lockfile dependency tree was used only through a removed temporary junction;
+  no dependency or lockfile changed. Independent read-only review of the exact
+  one-file closeout diff returned acceptance PASS with `P0=0, P1=0`; the only
+  post-review change records that result here, and the final exact diff is
+  rechecked before a separate local commit decision. No commit, push,
+  integration, SSH/DB/schema command, API write or runtime action is part of
+  this closeout.
