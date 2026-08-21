@@ -4915,3 +4915,43 @@
   lock file was installed or changed.
 - Independent read-only review of the exact one-file closeout diff returned
   acceptance PASS with `P0=0, P1=0`.
+
+### 2026-08-22 — D5.1 migration 036 runtime function ACL candidate
+
+- On exact base `5259274ccab022fe5b536fdcadc6d3e3b457addc`, the failed
+  PII-free onboarding draft smoke was traced to the intentional migration-035
+  function EXECUTE prohibition: the runtime role cannot evaluate the survey
+  CHECK function, and the transition trigger function is the next required
+  runtime dependency. Migration 035 remains immutable and `applied_verified`.
+- This runtime-disconnected forward candidate changes only ACLs. It grants
+  `backend_auth_app` EXECUTE on exactly
+  `backend_auth.is_onboarding_survey_answer_codes(jsonb)` and
+  `backend_auth.guard_player_onboarding_state_transition()`, while PUBLIC keeps
+  no EXECUTE. It does not replace or alter either function, touch relation
+  definitions/comments/fingerprints, or read/write/delete persisted PII or
+  domain data.
+- PRECHECK requires the exact migration-035 prohibition and canonical 035/027
+  fingerprints. POSTCHECK requires owner plus application as the only direct
+  EXECUTE grantees and revalidates unchanged function definitions. ROLLBACK
+  removes only the application grants and restores the exact 035 ACL. All
+  gates tolerate the existing synthetic fixture and expose only counts, never
+  credential, identifiers, contacts or bodies.
+- Focused migration contract PASS: `1 suite / 6 tests`, covering the narrow
+  grant, canonical 035/027 fingerprints, exact owner/application ACL without
+  grant option, original 035 prohibition, rollback and non-empty synthetic
+  fixture compatibility. Full gates PASS: backend typecheck, clean unit rerun
+  `146 suites / 3519 tests`, E2E `2 suites / 4 tests` and build; root E2E
+  `94 passed / 1 skipped` and build `1619 modules`. The first backend unit run
+  had one unrelated five-second session-lifecycle timeout; its isolated rerun
+  passed `32/32`, followed by the clean full rerun. The first root E2E attempt
+  stopped before tests because sandboxed Vite could not traverse the external
+  dependency junction; the exact approved retry passed. Matching lockfile
+  dependency trees were used only through removed temporary junctions; no
+  dependency or lockfile changed.
+- Independent read-only review of the exact six-file candidate returned
+  acceptance PASS with `P0=0, P1=0`. The only post-review change records that
+  result here; the final exact diff is rechecked before a separate local commit
+  decision. No commit, push, integration, SSH/DB/schema apply,
+  restart/rebuild/rollout, provider/API write, secrets/env change or production
+  action has occurred. Deployment is `not_needed` for this local
+  runtime-disconnected candidate; a DB apply would require a separate gate.
