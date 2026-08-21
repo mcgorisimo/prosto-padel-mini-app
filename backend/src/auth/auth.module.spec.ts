@@ -26,6 +26,7 @@ import { PostgresMatchRepository } from '../database/postgres-match.repository';
 import { PostgresMatchWaitlistRepository } from '../database/postgres-match-waitlist.repository';
 import { PostgresPlayerAccountProvisioningRepository } from '../database/postgres-player-account-provisioning.repository';
 import { PostgresPlayerProfileDetailsRepository } from '../database/postgres-player-profile-details.repository';
+import { PostgresPlayerOnboardingReader } from '../database/postgres-player-onboarding-reader';
 import { PostgresPlayerProfileReader } from '../database/postgres-player-profile-reader';
 import { PostgresPlayerProfileWriter } from '../database/postgres-player-profile-writer';
 import { PostgresPublicPlayerProfileSearchRepository } from '../database/postgres-public-player-profile-search.repository';
@@ -64,6 +65,8 @@ import { AdminPlayerRatingService } from './admin-player-rating.service';
 import { NodeSessionCredentialIssuer } from './session-credential-issuer.adapter';
 import { PlayerProfileController } from './player-profile.controller';
 import { PlayerProfileService } from './player-profile.service';
+import { PlayerOnboardingController } from './player-onboarding.controller';
+import { PlayerOnboardingService } from './player-onboarding.service';
 import { PublicPlayerProfileController } from './public-player-profile.controller';
 import { PublicPlayerProfileService } from './public-player-profile.service';
 import { SessionAuthenticationController } from './session-authentication.controller';
@@ -248,6 +251,16 @@ function getPlayerProfileControllerService(
   ).service;
 }
 
+function getPlayerOnboardingControllerService(
+  controller: PlayerOnboardingController,
+): PlayerOnboardingService {
+  return (
+    controller as unknown as {
+      readonly service: PlayerOnboardingService;
+    }
+  ).service;
+}
+
 function getPublicPlayerProfileControllerService(
   controller: PublicPlayerProfileController,
 ): PublicPlayerProfileService {
@@ -414,6 +427,18 @@ describe('AuthModule Telegram login wiring', () => {
         moduleRef.get(PlayerProfileController),
       ),
     ).toBe(playerProfile);
+    const playerOnboarding = moduleRef.get(PlayerOnboardingService);
+    expect(playerOnboarding.dependencies.transactions).toBe(
+      moduleRef.get(PostgresTransactionExecutorAdapter),
+    );
+    expect(playerOnboarding.dependencies.onboarding).toBe(
+      moduleRef.get(PostgresPlayerOnboardingReader),
+    );
+    expect(
+      getPlayerOnboardingControllerService(
+        moduleRef.get(PlayerOnboardingController),
+      ),
+    ).toBe(playerOnboarding);
     const publicPlayerProfile = moduleRef.get(
       PublicPlayerProfileService,
     );
@@ -638,6 +663,9 @@ describe('AuthModule Telegram login wiring', () => {
     );
     expect(moduleRef.get(PostgresPlayerProfileReader)).toBeInstanceOf(
       PostgresPlayerProfileReader,
+    );
+    expect(moduleRef.get(PostgresPlayerOnboardingReader)).toBeInstanceOf(
+      PostgresPlayerOnboardingReader,
     );
     expect(moduleRef.get(PostgresPlayerProfileWriter)).toBeInstanceOf(
       PostgresPlayerProfileWriter,

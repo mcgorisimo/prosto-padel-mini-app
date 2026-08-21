@@ -4758,3 +4758,41 @@
   review of the exact one-file diff returned PASS with `P0=0, P1=0`; the only
   post-review change records that result here, and the final exact diff is
   rechecked before a separate local commit decision.
+
+### 2026-08-21 — D5.1 authenticated onboarding read/resume candidate
+
+- On exact detached base `57abac76bfea7a38f2936dfa6ed09b1389c455ed`,
+  this bounded backend-only slice adds `GET /api/v1/onboarding/me` behind the
+  existing Telegram session bearer guard. The account and role come only from
+  the authenticated principal; query parameters and cookies cannot select a
+  different owner. The repository performs one static parameterized SELECT
+  over the already applied migration-035 relations and makes no write.
+- A player profile with no onboarding row is returned as a derived first-run
+  `required` state without creating data or inventing flow/survey versions. An
+  existing draft returns its current step, revision, code-only survey answers
+  and current-flow consent document versions so a later client can resume it.
+  The response excludes account IDs, timestamps, rating fields and contact
+  verification claims. Canonical phone and normalized email are explicitly
+  returned only with `assurance=declared`; D5.2 verification remains separate.
+- Focused owner-boundary coverage PASS: `4 suites / 66 tests`, including
+  first-run without a row, resumable draft, cross-owner fail-closed behavior,
+  non-player ownership, malformed/absent bearer credentials, safe persistence
+  and HTTP errors, and PII-free logging. Full gates PASS: root E2E sequential
+  rerun `94 passed / 1 skipped` and build `1619 modules`; backend typecheck,
+  unit `144 suites / 3456 tests`, E2E `2 suites / 4 tests` and build. The first
+  root E2E attempt ran concurrently with five other gates and had two unrelated
+  match-UI timeouts; both passed in the clean full sequential rerun.
+- No onboarding mutation/completion API, frontend/TMA UI, Supabase path,
+  contact verification, admin backoffice, migration, schema/DB command,
+  provider/API write, SSH, server/container, env/secret or production action was
+  added or performed. No commit, push or integration occurred. The matching
+  dependency trees were used through temporary local junctions only; no package
+  or lock file was installed or changed.
+- This slice changes backend runtime wiring, so deployment is
+  `deployment_deferred_by_user`. Selectel was not contacted and no rollout,
+  restart, health, business smoke or log check was performed; the latest
+  documented Selectel test runtime remains `1779efb`. Migration 035 remains
+  `applied_verified` and was not reapplied. Independent read-only review of the
+  exact 12-file candidate returned acceptance PASS with `P0=0, P1=0`. The only
+  post-review change records that result here; the final exact diff is rechecked
+  before a separate commit decision.

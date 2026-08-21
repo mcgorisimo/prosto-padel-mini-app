@@ -27,6 +27,7 @@ import { PostgresMatchWaitlistRepository } from './postgres-match-waitlist.repos
 import { PostgresPlayerAccountProvisioningRepository } from './postgres-player-account-provisioning.repository';
 import { PostgresPlayerProfileDetailsRepository } from './postgres-player-profile-details.repository';
 import { PostgresPlayerProfilePhotoRepository } from './postgres-player-profile-photo.repository';
+import { PostgresPlayerOnboardingReader } from './postgres-player-onboarding-reader';
 import { PostgresPlayerProfileReader } from './postgres-player-profile-reader';
 import { PostgresPlayerProfileWriter } from './postgres-player-profile-writer';
 import { PostgresPublicPlayerProfileSearchRepository } from './postgres-public-player-profile-search.repository';
@@ -85,6 +86,7 @@ const DATABASE_WORKFLOW_PROVIDERS: Provider[] = [
   PostgresAccountStatusReader,
   PostgresPlayerProfileDetailsRepository,
   PostgresPlayerProfilePhotoRepository,
+  PostgresPlayerOnboardingReader,
   PostgresPlayerProfileWriter,
   PostgresSessionAuthenticationRepository,
   PostgresMatchChatRepository,
@@ -215,6 +217,7 @@ const DATABASE_WORKFLOW_EXPORTS = [
   PostgresPlayerAccountProvisioningRepository,
   PostgresPlayerProfileDetailsRepository,
   PostgresPlayerProfilePhotoRepository,
+  PostgresPlayerOnboardingReader,
   PostgresPlayerProfileReader,
   PlayerProfilePhotoUrlResolver,
   PostgresPlayerProfileWriter,

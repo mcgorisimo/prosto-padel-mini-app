@@ -30,6 +30,7 @@ import { PostgresMatchWaitlistRepository } from '../database/postgres-match-wait
 import { PostgresPlayerAccountProvisioningRepository } from '../database/postgres-player-account-provisioning.repository';
 import { PostgresPlayerProfileDetailsRepository } from '../database/postgres-player-profile-details.repository';
 import { PostgresPlayerProfilePhotoRepository } from '../database/postgres-player-profile-photo.repository';
+import { PostgresPlayerOnboardingReader } from '../database/postgres-player-onboarding-reader';
 import { PostgresPlayerProfileReader } from '../database/postgres-player-profile-reader';
 import { PostgresPlayerProfileWriter } from '../database/postgres-player-profile-writer';
 import { PostgresPublicPlayerProfileSearchRepository } from '../database/postgres-public-player-profile-search.repository';
@@ -68,6 +69,8 @@ import { AdminPlayerRatingController } from './admin-player-rating.controller';
 import { AdminPlayerRatingService } from './admin-player-rating.service';
 import { PlayerProfileController } from './player-profile.controller';
 import { PlayerProfileService } from './player-profile.service';
+import { PlayerOnboardingController } from './player-onboarding.controller';
+import { PlayerOnboardingService } from './player-onboarding.service';
 import { PublicPlayerProfileController } from './public-player-profile.controller';
 import { PublicPlayerProfileService } from './public-player-profile.service';
 import { SessionAuthenticationController } from './session-authentication.controller';
@@ -282,6 +285,13 @@ function createPlayerProfileService(
   });
 }
 
+function createPlayerOnboardingService(
+  transactions: PostgresTransactionExecutorAdapter,
+  onboarding: PostgresPlayerOnboardingReader,
+): PlayerOnboardingService {
+  return new PlayerOnboardingService({ transactions, onboarding });
+}
+
 function createAdminPlayerRatingService(
   transactions: PostgresTransactionExecutorAdapter,
   ratings: PostgresAdminPlayerRatingRepository,
@@ -456,6 +466,7 @@ function createPlayerProfilePhotoService(
     SessionLifecycleController,
     SessionAuthenticationController,
     PlayerProfileController,
+    PlayerOnboardingController,
     PublicPlayerProfileController,
     MatchController,
     MatchReservationController,
@@ -592,6 +603,14 @@ function createPlayerProfilePhotoService(
       useFactory: createPublicPlayerProfileService,
     },
     {
+      provide: PlayerOnboardingService,
+      inject: [
+        PostgresTransactionExecutorAdapter,
+        PostgresPlayerOnboardingReader,
+      ],
+      useFactory: createPlayerOnboardingService,
+    },
+    {
       provide: PlayerProfileService,
       inject: [
         PostgresTransactionExecutorAdapter,
@@ -641,6 +660,7 @@ function createPlayerProfilePhotoService(
     SessionBearerGuard,
     AdminPlayerRatingService,
     PlayerProfileService,
+    PlayerOnboardingService,
     PlayerProfilePhotoService,
     PublicPlayerProfileService,
     MatchApiService,
