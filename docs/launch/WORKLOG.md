@@ -4955,3 +4955,51 @@
   restart/rebuild/rollout, provider/API write, secrets/env change or production
   action has occurred. Deployment is `not_needed` for this local
   runtime-disconnected candidate; a DB apply would require a separate gate.
+
+### 2026-08-22 — D5.1 migration 036 applied and verified on Selectel test
+
+- Exact integrated source commit
+  `7a95808bacd969a7a49204403c40d167ae317682` was used only to stream reviewed
+  migration artifacts through the loaded Windows SSH agent directly into the
+  Selectel test PostgreSQL container. The confirmed target was host
+  `prosto-padel-test-01`, Compose project `prosto-padel-test`, PostgreSQL
+  `14.23`, database `prosto_padel_test_migration_cycle`, primary/not in
+  recovery. The migration user is a member of `backend_auth_owner`, while
+  `backend_auth_app` is not.
+- Exact read-only PRECHECK SHA-256
+  `18D8C26429D2418939108576FD54FEA780192F85C4C9690CB8C149A354707CED`
+  exited `0`, completed its catalog/fingerprint/ACL checks, returned
+  `ready=true`, the exact migration-035 EXECUTE prohibition,
+  `public_execute=false` and `synthetic_fixture_compatible=true`, and ended
+  with `ROLLBACK`.
+- Exact migration SHA-256
+  `16E9924CC4FB7CBB34E578113E1DAB82C306CD6BDC4A5D6E9049FEC69D0A5BE3`
+  was then applied exactly once. It exited `0`, granted
+  `backend_auth_app` EXECUTE only on
+  `backend_auth.is_onboarding_survey_answer_codes(jsonb)` and
+  `backend_auth.guard_player_onboarding_state_transition()`, reached `COMMIT`
+  and performed no relation or data mutation.
+- Exact read-only POSTCHECK SHA-256
+  `D0E81EF8CFE0A5B906609B56D20137C52C5C308B291741B217DB431F95BE8052`
+  exited `0`, returned `verified=true`, `backend_auth_app_execute=true`,
+  `public_execute=false`, `function_definitions_changed=false`,
+  `relations_or_data_changed=false` and
+  `synthetic_fixture_compatible=true`, and ended with `ROLLBACK`. Observed
+  onboarding/consent row counts remained `0`; no identifier, credential,
+  contact or body was printed.
+- Migration 036 is now `applied_verified` and must not be applied again. Its
+  rollback was not run. Server checkout, all containers, application runtime,
+  env/secrets, provider/API, frontend and production were unchanged; no
+  restart, rebuild or rollout occurred. Deployment is
+  `applied_verified_runtime_unchanged`. Application health/business smoke/log
+  checks were not run because this gate changed only PostgreSQL function ACL;
+  the separately approved authenticated onboarding write smoke remains the
+  next runtime proof.
+- This docs-only closeout changes only this WORKLOG. Required local gates PASS:
+  root E2E `94 passed / 1 skipped` and root build `1619 modules`. A matching
+  lockfile dependency tree was used only through a removed temporary junction;
+  no dependency or lockfile changed. Independent read-only review of the exact
+  one-file closeout diff returned acceptance PASS with `P0=0, P1=0`; the only
+  post-review change records that result here, and the final exact diff is
+  rechecked before a separate local commit decision. No commit, push,
+  integration, SSH/DB/schema command or runtime action is part of this closeout.
