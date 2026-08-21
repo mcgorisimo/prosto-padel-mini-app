@@ -4719,3 +4719,42 @@
   returned PASS with `P0=0, P1=0`. The only post-review change records that
   result here; the final exact diff is rechecked before a separate local commit
   decision.
+
+### 2026-08-21 — D5.1 migration 035 applied and verified on Selectel test
+
+- Exact corrected source commit
+  `0162d01765a1ab653c0932e8c94eee4862097f24` was present in clean local and
+  remote `main`. Reviewed artifact SHA-256 values were migration
+  `3400a283cfae623b019782c50366fb6ef46b863baeda55d5fc9991a37e8e8aba`,
+  PRECHECK `e34706d96d27baf3d51377f0959f1f9d8a8857d9740337802e21dcbd5d85176c`
+  and POSTCHECK
+  `03059abd3c7239fca0cde3602ba4a7c33a91c4ab6ca8c58135c7178edba41323`.
+- Selectel test target was confirmed read-only as host
+  `prosto-padel-test-01`, Compose project `prosto-padel-test`, PostgreSQL
+  `14.23`, database `prosto_padel_test_migration_cycle`, primary/not in
+  recovery. Database user `prosto_padel_test` is a direct member of
+  `backend_auth_owner`; the PostgreSQL container was healthy with restart count
+  `0`.
+- Exact PRECHECK was streamed directly from the reviewed local artifact without
+  creating a server file. It exited `0`, returned `ready=true`,
+  `target_absent=true` and `runtime_connected=false`, and ended with `ROLLBACK`.
+  The corrected canonical `027_backend_admin_rating_state` fingerprint gate
+  passed.
+- Exact migration 035 was then streamed and applied exactly once. It exited `0`,
+  reached `COMMIT` and returned
+  `035_backend_player_onboarding_foundation applied; runtime remains disconnected`.
+- Exact read-only POSTCHECK exited `0`, returned `verified=true`,
+  `new_tables_empty=true`, `runtime_connected=false`,
+  `rating_state_unchanged=true` and `contact_verification_added=false`, and ended
+  with `ROLLBACK`. Migration status is `applied_verified`; migration 035 must
+  not be applied again. The rollback migration was not run.
+- Server checkout, application containers/runtime, env/secrets, provider/API and
+  production were unchanged. No Selectel rollout/restart occurred. Deployment
+  is `not_needed` for this runtime-disconnected schema foundation; the
+  application runtime remains `1779efb`. Application health/business smoke/log
+  checks were not run because no runtime was deployed.
+- This closeout changes only this WORKLOG entry. It performs no commit, push,
+  integration, SSH/DB/schema command or runtime action. Independent read-only
+  review of the exact one-file diff returned PASS with `P0=0, P1=0`; the only
+  post-review change records that result here, and the final exact diff is
+  rechecked before a separate local commit decision.
