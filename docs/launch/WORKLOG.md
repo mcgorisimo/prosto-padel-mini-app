@@ -4796,3 +4796,37 @@
   exact 12-file candidate returned acceptance PASS with `P0=0, P1=0`. The only
   post-review change records that result here; the final exact diff is rechecked
   before a separate commit decision.
+
+### 2026-08-21 — D5.1 onboarding read/resume deployed to Selectel test
+
+- Exact reviewed backend commit
+  `841e2abe4d3959441e20b9a2fb6ec1a3b8580959` was integrated into `main` and
+  deployed only to host `prosto-padel-test-01`, Compose project
+  `prosto-padel-test`. The server checkout is detached, exact and clean at that
+  commit. Migration 035 was confirmed `applied_verified` by its exact read-only
+  POSTCHECK and was not applied again.
+- Only the backend container was rebuilt and recreated. It is running and
+  healthy with restart count `0` at container `6f538b64837c...` / image
+  `sha256:305cb25f4fc5...`. PostgreSQL, frontend and nginx retained their previous
+  container/image IDs; all remained running and healthy with restart count `0`.
+- Post-rollout internal backend `/api/v1/health` returned `200`, and HTTPS
+  `/api/v1/health` returned `200`. Unauthorized HTTPS
+  `GET /api/v1/onboarding/me` returned `401` with `cache-control: no-store` and
+  `pragma: no-cache`. Bounded post-rollout checks found backend
+  `error/fatal/unhandled=0` and nginx HTTP `5xx=0`.
+- Authenticated runtime `GET /api/v1/onboarding/me` is
+  `blocked_by_client_inspector`: the current Telegram Desktop Mini App exposes
+  neither Inspect/DevTools nor a debug listener. No credential, response body or
+  PII was extracted or printed. This is a client-observability limitation, not
+  an authentication failure and not a completed authenticated runtime smoke.
+- Authenticated contract proof currently rests on the already green focused
+  mocked bearer coverage (`4 suites / 66 tests`) plus the full backend E2E gate
+  (`2 suites / 4 tests`). A manual first-run/resume/ownership TMA smoke remains
+  required after the separately gated frontend onboarding rollout. If proof is
+  required earlier, a PII-free instrumented test mechanism needs its own exact
+  owner approval before implementation or use.
+- Deployment status is `applied_with_authenticated_smoke_blocked` for Selectel
+  test at exact commit `841e2abe4d3959441e20b9a2fb6ec1a3b8580959`.
+  PostgreSQL/schema, migration state, env/secrets, provider/API, frontend, nginx,
+  production and every non-backend container were unchanged by this rollout.
+  This closeout changes only this WORKLOG; its deployment is `not_needed`.
