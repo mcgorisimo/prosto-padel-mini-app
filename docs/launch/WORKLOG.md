@@ -5292,3 +5292,65 @@
   progress API wiring remains a later code slice; real consent UI remains
   blocked until the Terms, Privacy and Cancellation texts and exposed versions
   are approved.
+
+### 2026-08-22 — D5.1 authenticated onboarding progress contract candidate
+
+- On exact detached base/main
+  `f1514a6319a01bdb22fac885ad61366ecd9e671e`, applied and verified migration
+  037 is sufficient for this slice: its guarded transition matrix permits
+  `profile -> consents`, legacy resume `contacts -> consents` and
+  `consents -> level_survey` while rejecting new `profile -> contacts`, silent
+  skips and backward transitions. Migrations 035/036/037 are unchanged and no
+  new migration is required or proposed.
+- Added authenticated owner-scoped POST `/api/v1/onboarding/me/progress` over
+  the existing Telegram bearer guard. The strict request contract accepts only
+  an expected optimistic revision, exact flow version and the immediate next
+  step; `level_survey` additionally requires exactly Terms, Privacy and
+  Cancellation versions from the current backend policy. Player ownership is
+  derived only from the bearer principal; non-player and missing/foreign owners
+  fail closed without cross-owner data exposure. Responses are `no-store` and
+  persistence errors do not retain or expose PII diagnostics.
+- The Postgres writer locks the owner profile and onboarding state in the
+  existing transaction boundary, advances exactly one guarded step and one
+  revision, and records the three supplied test-policy consent rows atomically
+  with `consents -> level_survey`. Entry into either step revalidates nonblank
+  name, canonical E.164 declared phone and normalized declared email. Exact
+  retries return the already advanced state without another write; stale
+  revision and a same-revision different target/version return distinct
+  conflicts. Declared phone/email remain unverified, and contact verification,
+  `rating.isVerified`, payment fields, completion and survey answers are
+  untouched.
+- `2026-08-01` is used only by the backend test policy and focused synthetic
+  tests. This candidate has no frontend/TMA consent UI and collects no real user
+  acceptance in the current local/runtime-disconnected gate. Real consent
+  acceptance and completion UI remain blocked until the Terms, Privacy and
+  Cancellation texts and their actually exposed versions are approved.
+- Focused progress regressions PASS: controller/service/Postgres writer/module
+  `4 suites / 140 tests`, covering first transition, legacy resume, atomic
+  consent transition, ownership/unauthorized handling, exact replay,
+  stale/different conflict, historical plus current same-flow consent versions,
+  incomplete profile, silent-skip rejection and PII-safe failures. Mandatory
+  backend gates PASS: typecheck; unit `149 suites / 3607 tests`; E2E
+  `2 suites / 4 tests`; build. Mandatory root
+  gates PASS: E2E `94 passed / 1 skipped`; build `1619 modules`.
+- Existing dependency trees were used only through two validated temporary
+  junctions after root/backend normalized lockfile SHA-256 values matched the
+  main worktree. Both junctions were removed after the gates; no dependency,
+  package or lockfile was installed or changed. The first root build attempt
+  was blocked only by sandbox traversal of the junction; the exact unrestricted
+  retry passed.
+- This candidate changes backend runtime, so deployment is
+  `deployment_deferred_by_user`. Selectel test was not contacted; the documented
+  deployed backend remains exact
+  `852ca925ea19bbc5a724cf41422c6a0e70cb3bb4`, while migration 037 remains
+  `applied_verified` and must not be reapplied. No commit, push, integration,
+  SSH/DB/schema command, TLS/nginx/restart/rollout, provider/API write,
+  secrets/env change or production action occurred.
+- The independent local read-only review initially found one P1: a new policy
+  helper selected the first consent row per kind, so an older same-flow document
+  version ordered before the current version could make an otherwise valid
+  progress reread fail. Membership is now checked by exact kind plus version;
+  a historical/current coexistence regression was added and every focused,
+  backend and root gate above was rerun. The exact corrected candidate review
+  returned `P0=0, P1=0`; only this review record was added afterward and final
+  scope, whitespace and manifest checks were repeated before handoff.

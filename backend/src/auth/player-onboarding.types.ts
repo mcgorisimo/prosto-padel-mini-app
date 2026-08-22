@@ -27,6 +27,25 @@ export interface SaveOwnPlayerOnboardingDraftInput {
   readonly draft: OwnPlayerOnboardingDraft;
 }
 
+export type OwnPlayerOnboardingProgress =
+  | Readonly<{
+      readonly expectedRevision: number;
+      readonly flowVersion: string;
+      readonly nextStep: 'consents';
+    }>
+  | Readonly<{
+      readonly expectedRevision: number;
+      readonly flowVersion: string;
+      readonly nextStep: 'level_survey';
+      readonly consents: readonly OwnPlayerOnboardingConsent[];
+    }>;
+
+export interface AdvanceOwnPlayerOnboardingInput {
+  readonly accountId: AccountId;
+  readonly role: UserRole;
+  readonly progress: OwnPlayerOnboardingProgress;
+}
+
 export interface OwnPlayerOnboardingCompletion {
   readonly expectedRevision: number;
   readonly flowVersion: string;
@@ -94,6 +113,24 @@ export type SaveOwnPlayerOnboardingDraftResult =
         | 'stale_revision'
         | 'onboarding_closed'
         | 'content_not_allowed'
+        | 'temporary_unavailable'
+        | 'internal_failure';
+    };
+
+export type AdvanceOwnPlayerOnboardingResult =
+  | {
+      readonly outcome: 'advanced';
+      readonly onboarding: OwnPlayerOnboarding;
+    }
+  | {
+      readonly outcome: 'rejected';
+      readonly reason:
+        | 'invalid_request'
+        | 'onboarding_not_found'
+        | 'stale_revision'
+        | 'onboarding_incomplete'
+        | 'progress_conflict'
+        | 'onboarding_closed'
         | 'temporary_unavailable'
         | 'internal_failure';
     };
@@ -346,6 +383,63 @@ export function readOwnPlayerOnboardingDraft(
   });
 }
 
+export function readOwnPlayerOnboardingProgress(
+  value: unknown,
+): OwnPlayerOnboardingProgress | undefined {
+  if (
+    !isPlainRecord(value) ||
+    typeof value.expectedRevision !== 'number' ||
+    !Number.isSafeInteger(value.expectedRevision) ||
+    value.expectedRevision < 1 ||
+    typeof value.flowVersion !== 'string' ||
+    !FLOW_VERSION_PATTERN.test(value.flowVersion)
+  ) {
+    return undefined;
+  }
+
+  if (
+    value.nextStep === 'consents' &&
+    hasExactlyKeys(value, ['expectedRevision', 'flowVersion', 'nextStep'])
+  ) {
+    return Object.freeze({
+      expectedRevision: value.expectedRevision,
+      flowVersion: value.flowVersion,
+      nextStep: 'consents',
+    });
+  }
+
+  if (
+    value.nextStep !== 'level_survey' ||
+    !hasExactlyKeys(value, [
+      'expectedRevision',
+      'flowVersion',
+      'nextStep',
+      'consents',
+    ]) ||
+    !isConsents(value.consents) ||
+    value.consents.length !== CONSENT_KINDS.length ||
+    new Set(value.consents.map((consent) => consent.kind)).size !==
+      CONSENT_KINDS.length
+  ) {
+    return undefined;
+  }
+
+  const consents = [...value.consents]
+    .sort((left, right) => left.kind.localeCompare(right.kind))
+    .map((consent) =>
+      Object.freeze({
+        kind: consent.kind,
+        documentVersion: consent.documentVersion,
+      }),
+    );
+  return Object.freeze({
+    expectedRevision: value.expectedRevision,
+    flowVersion: value.flowVersion,
+    nextStep: 'level_survey',
+    consents: Object.freeze(consents),
+  });
+}
+
 function readCompletionSurvey(
   value: unknown,
 ): OwnPlayerOnboardingCompletion['survey'] | undefined {
@@ -426,6 +520,18 @@ export function isSaveOwnPlayerOnboardingDraftInput(
     isAccountId(value.accountId) &&
     (value.role === 'player' || value.role === 'club_admin') &&
     readOwnPlayerOnboardingDraft(value.draft) !== undefined
+  );
+}
+
+export function isAdvanceOwnPlayerOnboardingInput(
+  value: unknown,
+): value is AdvanceOwnPlayerOnboardingInput {
+  return (
+    isPlainRecord(value) &&
+    hasExactlyKeys(value, ['accountId', 'role', 'progress']) &&
+    isAccountId(value.accountId) &&
+    (value.role === 'player' || value.role === 'club_admin') &&
+    readOwnPlayerOnboardingProgress(value.progress) !== undefined
   );
 }
 

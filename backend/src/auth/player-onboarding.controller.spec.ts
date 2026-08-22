@@ -9,6 +9,8 @@ import { unixEpochSeconds } from './auth.types';
 import { PlayerOnboardingController } from './player-onboarding.controller';
 import { PlayerOnboardingService } from './player-onboarding.service';
 import {
+  AdvanceOwnPlayerOnboardingInput,
+  AdvanceOwnPlayerOnboardingResult,
   CompleteOwnPlayerOnboardingInput,
   CompleteOwnPlayerOnboardingResult,
   OwnPlayerOnboarding,
@@ -54,6 +56,10 @@ interface Harness {
   readonly saveOwnOnboardingDraft: jest.Mock<
     Promise<SaveOwnPlayerOnboardingDraftResult>,
     [SaveOwnPlayerOnboardingDraftInput]
+  >;
+  readonly advanceOwnOnboarding: jest.Mock<
+    Promise<AdvanceOwnPlayerOnboardingResult>,
+    [AdvanceOwnPlayerOnboardingInput]
   >;
   readonly completeOwnOnboarding: jest.Mock<
     Promise<CompleteOwnPlayerOnboardingResult>,
@@ -153,6 +159,15 @@ async function createHarness(): Promise<Harness> {
       outcome: 'completed',
       onboarding: completedOnboarding(),
     });
+  const advanceOwnOnboarding = jest
+    .fn<
+      Promise<AdvanceOwnPlayerOnboardingResult>,
+      [AdvanceOwnPlayerOnboardingInput]
+    >()
+    .mockResolvedValue({
+      outcome: 'advanced',
+      onboarding: { ...foundOnboarding(), currentStep: 'consents', revision: 3 },
+    });
   const nowEpochSeconds = jest.fn<
     ReturnType<SessionAuthenticationClock['nowEpochSeconds']>,
     []
@@ -170,6 +185,7 @@ async function createHarness(): Promise<Harness> {
         useValue: {
           readOwnOnboarding,
           saveOwnOnboardingDraft,
+          advanceOwnOnboarding,
           completeOwnOnboarding,
         },
       },
@@ -192,6 +208,7 @@ async function createHarness(): Promise<Harness> {
     authenticate,
     readOwnOnboarding,
     saveOwnOnboardingDraft,
+    advanceOwnOnboarding,
     completeOwnOnboarding,
     logs,
   };
@@ -257,6 +274,54 @@ function completionBody(expectedRevision = 4) {
       answers: { experience: 'beginner' },
     },
   };
+}
+
+function progressBody(
+  expectedRevision = 2,
+): Extract<
+  AdvanceOwnPlayerOnboardingInput['progress'],
+  { readonly nextStep: 'consents' }
+> {
+  return {
+    expectedRevision,
+    flowVersion: 'tma_v1',
+    nextStep: 'consents',
+  };
+}
+
+function levelSurveyProgressBody(
+  expectedRevision = 3,
+): Extract<
+  AdvanceOwnPlayerOnboardingInput['progress'],
+  { readonly nextStep: 'level_survey' }
+> {
+  return {
+    expectedRevision,
+    flowVersion: 'tma_v1',
+    nextStep: 'level_survey',
+    consents: [
+      { kind: 'terms', documentVersion: '2026-08-01' },
+      { kind: 'privacy', documentVersion: '2026-08-01' },
+      { kind: 'cancellation', documentVersion: '2026-08-01' },
+    ],
+  };
+}
+
+function postProgress(
+  harness: Harness,
+  body: unknown,
+  authorization?: string,
+) {
+  const headers: Record<string, string> = {};
+  if (authorization !== undefined) {
+    headers.authorization = authorization;
+  }
+  return harness.app.inject({
+    method: 'POST',
+    url: `${ROUTE}/progress`,
+    headers,
+    payload: body as never,
+  });
 }
 
 function postCompletion(
@@ -532,6 +597,168 @@ describe('PlayerOnboardingController HTTP boundary', () => {
       ),
     );
     const response = await patch(harness, draftBody(2), `Bearer ${CREDENTIAL}`);
+    expect(response.statusCode).toBe(500);
+    const output = JSON.stringify({
+      response: response.json(),
+      logs: harness.logs,
+    });
+    for (const marker of [
+      PRIVATE_MARKER,
+      PHONE_MARKER,
+      EMAIL_MARKER,
+      CREDENTIAL,
+    ]) {
+      expect(output).not.toContain(marker);
+    }
+  });
+
+  it.each([
+    ['profile', progressBody()],
+    ['consents', levelSurveyProgressBody()],
+  ] as const)(
+    'advances authenticated owner progress from %s with an exact no-store body',
+    async (_step, body) => {
+      const nextRevision = body.expectedRevision + 1;
+      harness.advanceOwnOnboarding.mockResolvedValueOnce({
+        outcome: 'advanced',
+        onboarding: {
+          ...foundOnboarding(),
+          currentStep: body.nextStep,
+          revision: nextRevision,
+          consents:
+            body.nextStep === 'level_survey'
+              ? levelSurveyProgressBody().consents
+              : [],
+        },
+      });
+      const response = await postProgress(
+        harness,
+        body,
+        `Bearer ${CREDENTIAL}`,
+      );
+      expect(response.statusCode).toBe(200);
+      expectNoStore(response);
+      expect(harness.advanceOwnOnboarding).toHaveBeenCalledWith({
+        accountId: ACCOUNT_ID,
+        role: 'player',
+        progress:
+          body.nextStep === 'level_survey'
+            ? {
+                ...body,
+                consents: [
+                  { kind: 'cancellation', documentVersion: '2026-08-01' },
+                  { kind: 'privacy', documentVersion: '2026-08-01' },
+                  { kind: 'terms', documentVersion: '2026-08-01' },
+                ],
+              }
+            : body,
+      });
+      expect(response.json()).toMatchObject({
+        status: 'in_progress',
+        currentStep: body.nextStep,
+        revision: nextRevision,
+        contacts: { assurance: 'declared' },
+      });
+      expect(response.body).not.toMatch(/isVerified|verified|rating/iu);
+      const logs = JSON.stringify(harness.logs);
+      expect(logs).not.toContain(PHONE_MARKER);
+      expect(logs).not.toContain(EMAIL_MARKER);
+      expect(logs).not.toContain(CREDENTIAL);
+    },
+  );
+
+  it('rejects unauthorized progress before the service', async () => {
+    harness.authenticate.mockResolvedValueOnce({
+      outcome: 'rejected',
+      reason: 'session_invalid',
+    });
+    const response = await postProgress(harness, progressBody());
+    expect(response.statusCode).toBe(401);
+    expectNoStore(response);
+    expect(harness.advanceOwnOnboarding).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['extra owner selector', { ...progressBody(), accountId: OTHER_ACCOUNT_ID }],
+    ['unsafe revision', progressBody(0)],
+    [
+      'silent skip payload',
+      { ...progressBody(), nextStep: 'level_survey' },
+    ],
+    [
+      'duplicate consent kind',
+      {
+        ...levelSurveyProgressBody(),
+        consents: [
+          { kind: 'terms', documentVersion: '2026-08-01' },
+          { kind: 'terms', documentVersion: '2026-08-01' },
+          { kind: 'privacy', documentVersion: '2026-08-01' },
+        ],
+      },
+    ],
+    [
+      'verification claim',
+      { ...progressBody(), verification: { phone: true, email: true } },
+    ],
+  ])(
+    'rejects progress %s with an exact body allowlist',
+    async (_label, body) => {
+      const response = await postProgress(
+        harness,
+        body,
+        `Bearer ${CREDENTIAL}`,
+      );
+      expect(response.statusCode).toBe(400);
+      expectNoStore(response);
+      expect(response.json()).toEqual({
+        statusCode: 400,
+        code: 'onboarding_progress_invalid_request',
+        message: 'Onboarding progress request is invalid',
+      });
+      expect(harness.advanceOwnOnboarding).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ['onboarding_not_found', 404, 'onboarding_not_found'],
+    ['stale_revision', 409, 'onboarding_progress_revision_conflict'],
+    ['progress_conflict', 409, 'onboarding_progress_conflict'],
+    ['onboarding_incomplete', 422, 'onboarding_progress_incomplete'],
+    ['onboarding_closed', 409, 'onboarding_progress_closed'],
+    ['temporary_unavailable', 503, 'onboarding_service_unavailable'],
+    ['invalid_request', 400, 'onboarding_progress_invalid_request'],
+    ['internal_failure', 500, 'onboarding_internal_error'],
+  ] as const)(
+    'maps progress %s to safe HTTP %d',
+    async (reason, statusCode, code) => {
+      harness.advanceOwnOnboarding.mockResolvedValueOnce({
+        outcome: 'rejected',
+        reason,
+      });
+      const response = await postProgress(
+        harness,
+        progressBody(),
+        `Bearer ${CREDENTIAL}`,
+      );
+      expect(response.statusCode).toBe(statusCode);
+      expectNoStore(response);
+      expect(response.json()).toMatchObject({ statusCode, code });
+      expect(response.body).not.toContain(PHONE_MARKER);
+      expect(response.body).not.toContain(EMAIL_MARKER);
+    },
+  );
+
+  it('hides thrown progress PII and credentials from response and logs', async () => {
+    harness.advanceOwnOnboarding.mockRejectedValueOnce(
+      new Error(
+        `${PRIVATE_MARKER}:${PHONE_MARKER}:${EMAIL_MARKER}:${CREDENTIAL}`,
+      ),
+    );
+    const response = await postProgress(
+      harness,
+      progressBody(),
+      `Bearer ${CREDENTIAL}`,
+    );
     expect(response.statusCode).toBe(500);
     const output = JSON.stringify({
       response: response.json(),

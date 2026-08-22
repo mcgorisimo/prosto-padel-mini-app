@@ -1,5 +1,7 @@
-import { PlayerOnboardingConsentKind } from '../database/player-onboarding-reader';
-import type { OwnPlayerOnboardingCompletion } from './player-onboarding.types';
+import type {
+  OwnPlayerOnboardingCompletion,
+  OwnPlayerOnboardingConsent,
+} from './player-onboarding.types';
 
 export const PLAYER_ONBOARDING_FLOW_VERSION = 'tma_v1';
 export const PLAYER_ONBOARDING_SURVEY_VERSION = 'initial_level_v1';
@@ -29,12 +31,26 @@ export const CURRENT_PLAYER_ONBOARDING_POLICY = Object.freeze({
   }),
 });
 
-function consentVersion(
-  completion: OwnPlayerOnboardingCompletion,
-  kind: PlayerOnboardingConsentKind,
-): string | undefined {
-  return completion.consents.find((consent) => consent.kind === kind)
-    ?.documentVersion;
+export function areCurrentPlayerOnboardingConsents(
+  consents: readonly OwnPlayerOnboardingConsent[],
+): boolean {
+  return (
+    consents.length === CURRENT_CONSENTS.length &&
+    hasCurrentPlayerOnboardingConsents(consents)
+  );
+}
+
+export function hasCurrentPlayerOnboardingConsents(
+  consents: readonly OwnPlayerOnboardingConsent[],
+): boolean {
+  return CURRENT_CONSENTS.every(
+    (required) =>
+      consents.some(
+        (consent) =>
+          consent.kind === required.kind &&
+          consent.documentVersion === required.documentVersion,
+      ),
+  );
 }
 
 export function isCurrentPlayerOnboardingCompletion(
@@ -44,7 +60,7 @@ export function isCurrentPlayerOnboardingCompletion(
     completion.flowVersion !== CURRENT_PLAYER_ONBOARDING_POLICY.flowVersion ||
     completion.survey.version !==
       CURRENT_PLAYER_ONBOARDING_POLICY.survey.version ||
-    completion.consents.length !== CURRENT_CONSENTS.length ||
+    !areCurrentPlayerOnboardingConsents(completion.consents) ||
     Object.keys(completion.survey.answers).length !== 1 ||
     !Object.prototype.hasOwnProperty.call(
       completion.survey.answers,
@@ -52,12 +68,6 @@ export function isCurrentPlayerOnboardingCompletion(
     )
   ) {
     return false;
-  }
-
-  for (const consent of CURRENT_CONSENTS) {
-    if (consentVersion(completion, consent.kind) !== consent.documentVersion) {
-      return false;
-    }
   }
 
   const answer =

@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
   HttpException,
   HttpStatus,
   Patch,
@@ -18,6 +19,7 @@ import {
 import { SessionLifecyclePublicError } from './session-lifecycle.http';
 import { PlayerOnboardingService } from './player-onboarding.service';
 import {
+  AdvanceOwnPlayerOnboardingResult,
   CompleteOwnPlayerOnboardingResult,
   OwnPlayerOnboarding,
   ReadOwnPlayerOnboardingResult,
@@ -25,6 +27,7 @@ import {
   isOwnPlayerOnboarding,
   readOwnPlayerOnboardingCompletion,
   readOwnPlayerOnboardingDraft,
+  readOwnPlayerOnboardingProgress,
 } from './player-onboarding.types';
 
 function publicError(
@@ -105,6 +108,64 @@ function draftRejection(
         HttpStatus.UNPROCESSABLE_ENTITY,
         'onboarding_draft_content_not_allowed',
         'Onboarding draft content is not allowed',
+      );
+    case 'temporary_unavailable':
+      return publicError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        'onboarding_service_unavailable',
+        'Onboarding service is unavailable',
+      );
+    case 'internal_failure':
+      return publicError(
+        HttpStatus.INTERNAL_SERVER_ERROR,
+        'onboarding_internal_error',
+        'Onboarding request failed',
+      );
+  }
+}
+
+function progressRejection(
+  reason: Extract<
+    AdvanceOwnPlayerOnboardingResult,
+    { readonly outcome: 'rejected' }
+  >['reason'],
+): HttpException {
+  switch (reason) {
+    case 'invalid_request':
+      return publicError(
+        HttpStatus.BAD_REQUEST,
+        'onboarding_progress_invalid_request',
+        'Onboarding progress request is invalid',
+      );
+    case 'onboarding_not_found':
+      return publicError(
+        HttpStatus.NOT_FOUND,
+        'onboarding_not_found',
+        'Onboarding was not found',
+      );
+    case 'stale_revision':
+      return publicError(
+        HttpStatus.CONFLICT,
+        'onboarding_progress_revision_conflict',
+        'Onboarding progress revision is stale',
+      );
+    case 'progress_conflict':
+      return publicError(
+        HttpStatus.CONFLICT,
+        'onboarding_progress_conflict',
+        'Onboarding progress conflicts with current state',
+      );
+    case 'onboarding_incomplete':
+      return publicError(
+        HttpStatus.UNPROCESSABLE_ENTITY,
+        'onboarding_progress_incomplete',
+        'Onboarding progress requirements are incomplete',
+      );
+    case 'onboarding_closed':
+      return publicError(
+        HttpStatus.CONFLICT,
+        'onboarding_progress_closed',
+        'Onboarding progress is closed',
       );
     case 'temporary_unavailable':
       return publicError(
@@ -289,6 +350,72 @@ function readDraftRejectionReason(
     : undefined;
 }
 
+function readAdvanced(
+  value: unknown,
+  expectedStep: 'consents' | 'level_survey',
+): OwnPlayerOnboarding {
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    Array.isArray(value) ||
+    Object.getPrototypeOf(value) !== Object.prototype ||
+    Object.keys(value).length !== 2 ||
+    !Object.prototype.hasOwnProperty.call(value, 'outcome') ||
+    !Object.prototype.hasOwnProperty.call(value, 'onboarding')
+  ) {
+    throw progressRejection('internal_failure');
+  }
+  const result = value as Record<string, unknown>;
+  if (
+    result.outcome !== 'advanced' ||
+    !isOwnPlayerOnboarding(result.onboarding) ||
+    result.onboarding.status !== 'in_progress' ||
+    result.onboarding.currentStep !== expectedStep
+  ) {
+    throw progressRejection('internal_failure');
+  }
+  return result.onboarding;
+}
+
+function readProgressRejectionReason(
+  value: unknown,
+):
+  | Extract<
+      AdvanceOwnPlayerOnboardingResult,
+      { readonly outcome: 'rejected' }
+    >['reason']
+  | undefined {
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    Array.isArray(value) ||
+    Object.getPrototypeOf(value) !== Object.prototype ||
+    Object.keys(value).length !== 2 ||
+    !Object.prototype.hasOwnProperty.call(value, 'outcome') ||
+    !Object.prototype.hasOwnProperty.call(value, 'reason')
+  ) {
+    return undefined;
+  }
+  const result = value as Record<string, unknown>;
+  return result.outcome === 'rejected' &&
+    typeof result.reason === 'string' &&
+    [
+      'invalid_request',
+      'onboarding_not_found',
+      'stale_revision',
+      'onboarding_incomplete',
+      'progress_conflict',
+      'onboarding_closed',
+      'temporary_unavailable',
+      'internal_failure',
+    ].includes(result.reason)
+    ? (result.reason as Extract<
+        AdvanceOwnPlayerOnboardingResult,
+        { readonly outcome: 'rejected' }
+      >['reason'])
+    : undefined;
+}
+
 function readCompleted(value: unknown): OwnPlayerOnboarding {
   if (
     typeof value !== 'object' ||
@@ -414,6 +541,41 @@ export class PlayerOnboardingController {
       throw draftRejection(rejectionReason);
     }
     return readSaved(result);
+  }
+
+  @Post('me/progress')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(SessionBearerGuard)
+  async advance(
+    @Body() body: unknown,
+    @Req() request: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ): Promise<OwnPlayerOnboarding> {
+    disableCaching(reply);
+    const principal = readAuthenticatedSessionPrincipal(request);
+    if (principal === undefined) {
+      throw progressRejection('internal_failure');
+    }
+    const progress = readOwnPlayerOnboardingProgress(body);
+    if (progress === undefined) {
+      throw progressRejection('invalid_request');
+    }
+
+    let result: unknown;
+    try {
+      result = await this.service.advanceOwnOnboarding({
+        accountId: principal.accountId,
+        role: principal.role,
+        progress,
+      });
+    } catch {
+      throw progressRejection('internal_failure');
+    }
+    const rejectionReason = readProgressRejectionReason(result);
+    if (rejectionReason !== undefined) {
+      throw progressRejection(rejectionReason);
+    }
+    return readAdvanced(result, progress.nextStep);
   }
 
   @Post('me/complete')

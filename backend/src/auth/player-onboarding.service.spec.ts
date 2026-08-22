@@ -13,6 +13,11 @@ import {
   SavePlayerOnboardingDraftResult,
 } from '../database/player-onboarding-draft-writer';
 import {
+  AdvancePlayerOnboardingInput,
+  AdvancePlayerOnboardingResult,
+  PlayerOnboardingProgressWriter,
+} from '../database/player-onboarding-progress-writer';
+import {
   PlayerOnboardingReadPersistenceError,
   PlayerOnboardingReader,
   ReadPlayerOnboardingInput,
@@ -25,6 +30,7 @@ import {
 } from './player-onboarding.service';
 import { unixEpochSeconds } from './auth.types';
 import {
+  AdvanceOwnPlayerOnboardingInput,
   CompleteOwnPlayerOnboardingInput,
   SaveOwnPlayerOnboardingDraftInput,
 } from './player-onboarding.types';
@@ -59,10 +65,17 @@ function createHarness(result: ReadPlayerOnboardingResult = firstRunResult()) {
       [PostgresTransaction, CompletePlayerOnboardingInput]
     >()
     .mockResolvedValue({ outcome: 'completed', revision: 5, replayed: false });
+  const advance = jest
+    .fn<
+      Promise<AdvancePlayerOnboardingResult>,
+      [PostgresTransaction, AdvancePlayerOnboardingInput]
+    >()
+    .mockResolvedValue({ outcome: 'advanced', revision: 2, replayed: false });
   const service = new PlayerOnboardingService({
     transactions: { run } as PlayerOnboardingTransactionExecutor,
     onboarding: { findByAccountId } as PlayerOnboardingReader,
     draftWriter: { saveDraft } as PlayerOnboardingDraftWriter,
+    progressWriter: { advance } as PlayerOnboardingProgressWriter,
     completionWriter: { complete } as PlayerOnboardingCompletionWriter,
     clock: { nowEpochSeconds: () => NOW },
   });
@@ -72,6 +85,7 @@ function createHarness(result: ReadPlayerOnboardingResult = firstRunResult()) {
     run,
     findByAccountId,
     saveDraft,
+    advance,
     complete,
   };
 }
@@ -134,6 +148,38 @@ function savedDraftResult(revision: number): ReadPlayerOnboardingResult {
         revision,
       },
       consents: [],
+    },
+  };
+}
+
+function progressResult(
+  currentStep: 'consents' | 'level_survey',
+  revision: number,
+): ReadPlayerOnboardingResult {
+  return {
+    outcome: 'found',
+    onboarding: {
+      accountId: ACCOUNT_ID,
+      firstName: 'Updated',
+      lastName: 'Player',
+      phone: '+79991112233',
+      normalizedEmail: 'owner@example.test',
+      state: {
+        flowVersion: 'tma_v1',
+        status: 'in_progress',
+        currentStep,
+        surveyVersion: 'initial_level_v1',
+        surveyAnswers: {},
+        revision,
+      },
+      consents:
+        currentStep === 'level_survey'
+          ? [
+              { kind: 'cancellation', documentVersion: '2026-08-01' },
+              { kind: 'privacy', documentVersion: '2026-08-01' },
+              { kind: 'terms', documentVersion: '2026-08-01' },
+            ]
+          : [],
     },
   };
 }
@@ -201,6 +247,22 @@ function completionInput(
         answers: { experience: 'beginner' },
       },
     },
+    ...overrides,
+  };
+}
+
+function progressInput(
+  progress: AdvanceOwnPlayerOnboardingInput['progress'] = {
+    expectedRevision: 1,
+    flowVersion: 'tma_v1',
+    nextStep: 'consents',
+  },
+  overrides: Partial<AdvanceOwnPlayerOnboardingInput> = {},
+): AdvanceOwnPlayerOnboardingInput {
+  return {
+    accountId: ACCOUNT_ID,
+    role: 'player',
+    progress,
     ...overrides,
   };
 }
@@ -541,6 +603,205 @@ describe('PlayerOnboardingService', () => {
       harness.service.saveOwnOnboardingDraft(saveInput()),
     ).resolves.toEqual({ outcome: 'rejected', reason });
     expect(harness.findByAccountId).not.toHaveBeenCalled();
+  });
+
+  it('advances a ready owner profile to consents by one exact revision', async () => {
+    const harness = createHarness(progressResult('consents', 2));
+
+    await expect(
+      harness.service.advanceOwnOnboarding(progressInput()),
+    ).resolves.toEqual({
+      outcome: 'advanced',
+      onboarding: {
+        status: 'in_progress',
+        flowVersion: 'tma_v1',
+        currentStep: 'consents',
+        surveyVersion: 'initial_level_v1',
+        revision: 2,
+        profile: { firstName: 'Updated', lastName: 'Player' },
+        contacts: {
+          phone: '+79991112233',
+          normalizedEmail: 'owner@example.test',
+          assurance: 'declared',
+        },
+        consents: [],
+        surveyAnswers: {},
+      },
+    });
+    expect(harness.advance).toHaveBeenCalledWith(harness.transaction, {
+      accountId: ACCOUNT_ID,
+      expectedRevision: 1,
+      flowVersion: 'tma_v1',
+      nextStep: 'consents',
+      consents: [],
+      advancedAt: NOW,
+    });
+    expect(harness.findByAccountId).toHaveBeenCalledWith(harness.transaction, {
+      accountId: ACCOUNT_ID,
+    });
+  });
+
+  it('resumes consents with exact backend test policy before level_survey', async () => {
+    const harness = createHarness(progressResult('level_survey', 3));
+    harness.advance.mockResolvedValueOnce({
+      outcome: 'advanced',
+      revision: 3,
+      replayed: false,
+    });
+    const progress: AdvanceOwnPlayerOnboardingInput['progress'] = {
+      expectedRevision: 2,
+      flowVersion: 'tma_v1',
+      nextStep: 'level_survey',
+      consents: [
+        { kind: 'terms', documentVersion: '2026-08-01' },
+        { kind: 'privacy', documentVersion: '2026-08-01' },
+        { kind: 'cancellation', documentVersion: '2026-08-01' },
+      ],
+    };
+
+    const result = await harness.service.advanceOwnOnboarding(
+      progressInput(progress),
+    );
+    expect(result).toMatchObject({
+      outcome: 'advanced',
+      onboarding: { currentStep: 'level_survey', revision: 3 },
+    });
+    expect(harness.advance).toHaveBeenCalledWith(harness.transaction, {
+      accountId: ACCOUNT_ID,
+      expectedRevision: 2,
+      flowVersion: 'tma_v1',
+      nextStep: 'level_survey',
+      consents: [
+        { kind: 'cancellation', documentVersion: '2026-08-01' },
+        { kind: 'privacy', documentVersion: '2026-08-01' },
+        { kind: 'terms', documentVersion: '2026-08-01' },
+      ],
+      advancedAt: NOW,
+    });
+  });
+
+  it('accepts current test policy alongside historical same-flow consent rows', async () => {
+    const persisted = progressResult('level_survey', 3);
+    if (persisted.outcome !== 'found') {
+      throw new Error('Expected progress fixture');
+    }
+    const harness = createHarness({
+      outcome: 'found',
+      onboarding: {
+        ...persisted.onboarding,
+        consents: [
+          { kind: 'cancellation', documentVersion: '2026-07-01' },
+          { kind: 'cancellation', documentVersion: '2026-08-01' },
+          { kind: 'privacy', documentVersion: '2026-07-01' },
+          { kind: 'privacy', documentVersion: '2026-08-01' },
+          { kind: 'terms', documentVersion: '2026-07-01' },
+          { kind: 'terms', documentVersion: '2026-08-01' },
+        ],
+      },
+    });
+    harness.advance.mockResolvedValueOnce({
+      outcome: 'advanced',
+      revision: 3,
+      replayed: true,
+    });
+
+    await expect(
+      harness.service.advanceOwnOnboarding(
+        progressInput({
+          expectedRevision: 2,
+          flowVersion: 'tma_v1',
+          nextStep: 'level_survey',
+          consents: [
+            { kind: 'terms', documentVersion: '2026-08-01' },
+            { kind: 'privacy', documentVersion: '2026-08-01' },
+            { kind: 'cancellation', documentVersion: '2026-08-01' },
+          ],
+        }),
+      ),
+    ).resolves.toMatchObject({
+      outcome: 'advanced',
+      onboarding: { currentStep: 'level_survey', revision: 3 },
+    });
+  });
+
+  it('returns an exact replay as the current resumable representation', async () => {
+    const harness = createHarness(progressResult('consents', 2));
+    harness.advance.mockResolvedValueOnce({
+      outcome: 'advanced',
+      revision: 2,
+      replayed: true,
+    });
+
+    await expect(
+      harness.service.advanceOwnOnboarding(progressInput()),
+    ).resolves.toMatchObject({
+      outcome: 'advanced',
+      onboarding: { currentStep: 'consents', revision: 2 },
+    });
+    expect(harness.findByAccountId).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects non-owner roles and outdated consent policy before a transaction', async () => {
+    const harness = createHarness();
+    await expect(
+      harness.service.advanceOwnOnboarding(
+        progressInput(undefined, { role: 'club_admin' }),
+      ),
+    ).resolves.toEqual({
+      outcome: 'rejected',
+      reason: 'onboarding_not_found',
+    });
+    await expect(
+      harness.service.advanceOwnOnboarding(
+        progressInput({
+          expectedRevision: 2,
+          flowVersion: 'tma_v1',
+          nextStep: 'level_survey',
+          consents: [
+            { kind: 'terms', documentVersion: '2026-08-02' },
+            { kind: 'privacy', documentVersion: '2026-08-02' },
+            { kind: 'cancellation', documentVersion: '2026-08-02' },
+          ],
+        }),
+      ),
+    ).resolves.toEqual({
+      outcome: 'rejected',
+      reason: 'progress_conflict',
+    });
+    expect(harness.run).not.toHaveBeenCalled();
+    expect(harness.advance).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['stale_revision', 'stale_revision'],
+    ['conflict', 'progress_conflict'],
+  ] as const)(
+    'maps writer %s to a bounded owner conflict',
+    async (outcome, reason) => {
+      const harness = createHarness();
+      harness.advance.mockResolvedValueOnce({ outcome });
+      await expect(
+        harness.service.advanceOwnOnboarding(progressInput()),
+      ).resolves.toEqual({ outcome: 'rejected', reason });
+      expect(harness.findByAccountId).not.toHaveBeenCalled();
+    },
+  );
+
+  it('fails transactionally when progress reread belongs to another owner', async () => {
+    const harness = createHarness({
+      outcome: 'found',
+      onboarding: {
+        ...(progressResult('consents', 2) as Extract<
+          ReadPlayerOnboardingResult,
+          { outcome: 'found' }
+        >).onboarding,
+        accountId: OTHER_ACCOUNT_ID,
+      },
+    });
+
+    await expect(
+      harness.service.advanceOwnOnboarding(progressInput()),
+    ).resolves.toEqual({ outcome: 'rejected', reason: 'internal_failure' });
   });
 
   it('atomically completes the authenticated owner with backend-owned policy and rereads the result', async () => {

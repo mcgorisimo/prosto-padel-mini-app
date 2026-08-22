@@ -32,6 +32,7 @@ import { PostgresPlayerProfileDetailsRepository } from '../database/postgres-pla
 import { PostgresPlayerProfilePhotoRepository } from '../database/postgres-player-profile-photo.repository';
 import { PostgresPlayerOnboardingDraftWriter } from '../database/postgres-player-onboarding-draft-writer';
 import { PostgresPlayerOnboardingCompletionWriter } from '../database/postgres-player-onboarding-completion-writer';
+import { PostgresPlayerOnboardingProgressWriter } from '../database/postgres-player-onboarding-progress-writer';
 import { PostgresPlayerOnboardingReader } from '../database/postgres-player-onboarding-reader';
 import { PostgresPlayerProfileReader } from '../database/postgres-player-profile-reader';
 import { PostgresPlayerProfileWriter } from '../database/postgres-player-profile-writer';
@@ -291,6 +292,7 @@ function createPlayerOnboardingService(
   transactions: PostgresTransactionExecutorAdapter,
   onboarding: PostgresPlayerOnboardingReader,
   draftWriter: PostgresPlayerOnboardingDraftWriter,
+  progressWriter: PostgresPlayerOnboardingProgressWriter,
   completionWriter: PostgresPlayerOnboardingCompletionWriter,
   clock: SessionAuthenticationClock,
 ): PlayerOnboardingService {
@@ -298,6 +300,7 @@ function createPlayerOnboardingService(
     transactions,
     onboarding,
     draftWriter,
+    progressWriter,
     completionWriter,
     clock,
   });
@@ -619,6 +622,7 @@ function createPlayerProfilePhotoService(
         PostgresTransactionExecutorAdapter,
         PostgresPlayerOnboardingReader,
         PostgresPlayerOnboardingDraftWriter,
+        PostgresPlayerOnboardingProgressWriter,
         PostgresPlayerOnboardingCompletionWriter,
         SESSION_AUTHENTICATION_CLOCK,
       ],

@@ -11,12 +11,19 @@ import {
   SavePlayerOnboardingDraftResult,
 } from '../database/player-onboarding-draft-writer';
 import {
+  AdvancePlayerOnboardingResult,
+  PlayerOnboardingProgressPersistenceError,
+  PlayerOnboardingProgressWriter,
+} from '../database/player-onboarding-progress-writer';
+import {
   PlayerOnboardingReadPersistenceError,
   PlayerOnboardingReader,
   PlayerOnboardingRecord,
 } from '../database/player-onboarding-reader';
 import { PostgresTransaction } from '../database/postgres-transaction';
 import {
+  AdvanceOwnPlayerOnboardingInput,
+  AdvanceOwnPlayerOnboardingResult,
   CompleteOwnPlayerOnboardingInput,
   CompleteOwnPlayerOnboardingResult,
   OwnPlayerOnboarding,
@@ -24,6 +31,7 @@ import {
   ReadOwnPlayerOnboardingResult,
   SaveOwnPlayerOnboardingDraftInput,
   SaveOwnPlayerOnboardingDraftResult,
+  isAdvanceOwnPlayerOnboardingInput,
   isOwnPlayerOnboarding,
   isCompleteOwnPlayerOnboardingInput,
   isReadOwnPlayerOnboardingInput,
@@ -33,6 +41,8 @@ import {
   CURRENT_PLAYER_ONBOARDING_POLICY,
   PLAYER_ONBOARDING_FLOW_VERSION,
   PLAYER_ONBOARDING_SURVEY_VERSION,
+  areCurrentPlayerOnboardingConsents,
+  hasCurrentPlayerOnboardingConsents,
   isCurrentPlayerOnboardingCompletion,
 } from './player-onboarding.policy';
 import { SessionAuthenticationClock } from './session-authentication.guard';
@@ -47,6 +57,7 @@ export interface PlayerOnboardingServiceDependencies {
   readonly transactions: PlayerOnboardingTransactionExecutor;
   readonly onboarding: PlayerOnboardingReader;
   readonly draftWriter: PlayerOnboardingDraftWriter;
+  readonly progressWriter: PlayerOnboardingProgressWriter;
   readonly completionWriter: PlayerOnboardingCompletionWriter;
   readonly clock: SessionAuthenticationClock;
 }
@@ -54,6 +65,7 @@ export interface PlayerOnboardingServiceDependencies {
 type RejectionReason = Extract<
   | ReadOwnPlayerOnboardingResult
   | SaveOwnPlayerOnboardingDraftResult
+  | AdvanceOwnPlayerOnboardingResult
   | CompleteOwnPlayerOnboardingResult,
   { readonly outcome: 'rejected' }
 >['reason'];
@@ -67,6 +79,13 @@ type CompletionTransactionResult =
   | Extract<
       CompleteOwnPlayerOnboardingResult,
       { readonly outcome: 'completed' }
+    >;
+
+type ProgressTransactionResult =
+  | Exclude<AdvancePlayerOnboardingResult, { readonly outcome: 'advanced' }>
+  | Extract<
+      AdvanceOwnPlayerOnboardingResult,
+      { readonly outcome: 'advanced' }
     >;
 
 const EMAIL_PATTERN =
@@ -210,6 +229,7 @@ function temporaryStorageFailure(error: unknown): boolean {
   return (
     (error instanceof PlayerOnboardingReadPersistenceError ||
       error instanceof PlayerOnboardingDraftWritePersistenceError ||
+      error instanceof PlayerOnboardingProgressPersistenceError ||
       error instanceof PlayerOnboardingCompletionPersistenceError) &&
     (error.reason === 'database_unavailable' ||
       error.reason === 'transaction_conflict')
@@ -283,6 +303,21 @@ function completedMatches(
         consent.kind === required.kind &&
         consent.documentVersion === required.documentVersion,
     ),
+  );
+}
+
+function progressMatches(
+  onboarding: OwnPlayerOnboarding,
+  input: AdvanceOwnPlayerOnboardingInput,
+  revision: number,
+): boolean {
+  return (
+    onboarding.status === 'in_progress' &&
+    onboarding.currentStep === input.progress.nextStep &&
+    onboarding.revision === revision &&
+    onboarding.flowVersion === input.progress.flowVersion &&
+    (input.progress.nextStep === 'consents' ||
+      hasCurrentPlayerOnboardingConsents(onboarding.consents))
   );
 }
 
@@ -405,6 +440,91 @@ export class PlayerOnboardingService {
           return rejected('onboarding_not_found');
         case 'stale_revision':
           return rejected('stale_revision');
+        case 'closed':
+          return rejected('onboarding_closed');
+      }
+    } catch (error) {
+      return rejected(
+        temporaryStorageFailure(error)
+          ? 'temporary_unavailable'
+          : 'internal_failure',
+      );
+    }
+  }
+
+  async advanceOwnOnboarding(
+    input: AdvanceOwnPlayerOnboardingInput,
+  ): Promise<AdvanceOwnPlayerOnboardingResult> {
+    if (!isAdvanceOwnPlayerOnboardingInput(input)) {
+      return rejected('invalid_request');
+    }
+    if (input.role !== 'player') {
+      return rejected('onboarding_not_found');
+    }
+    if (
+      input.progress.flowVersion !==
+        CURRENT_PLAYER_ONBOARDING_POLICY.flowVersion ||
+      (input.progress.nextStep === 'level_survey' &&
+        !areCurrentPlayerOnboardingConsents(input.progress.consents))
+    ) {
+      return rejected('progress_conflict');
+    }
+
+    const consents =
+      input.progress.nextStep === 'level_survey'
+        ? CURRENT_PLAYER_ONBOARDING_POLICY.consents
+        : Object.freeze([]);
+    try {
+      const result =
+        await this.dependencies.transactions.run<ProgressTransactionResult>(
+          async (transaction) => {
+            const advanced = await this.dependencies.progressWriter.advance(
+              transaction,
+              {
+                accountId: input.accountId,
+                expectedRevision: input.progress.expectedRevision,
+                flowVersion: CURRENT_PLAYER_ONBOARDING_POLICY.flowVersion,
+                nextStep: input.progress.nextStep,
+                consents,
+                advancedAt: this.dependencies.clock.nowEpochSeconds(),
+              },
+            );
+            if (advanced.outcome !== 'advanced') {
+              return advanced;
+            }
+
+            const reread = await this.dependencies.onboarding.findByAccountId(
+              transaction,
+              { accountId: input.accountId },
+            );
+            if (reread.outcome !== 'found') {
+              throw storageInvariantFailure();
+            }
+            const onboarding = publicOnboarding(
+              reread.onboarding as PlayerOnboardingRecord,
+              input.accountId,
+            );
+            if (
+              onboarding === undefined ||
+              !progressMatches(onboarding, input, advanced.revision)
+            ) {
+              throw storageInvariantFailure();
+            }
+            return Object.freeze({ outcome: 'advanced', onboarding });
+          },
+        );
+
+      switch (result.outcome) {
+        case 'advanced':
+          return result;
+        case 'not_found':
+          return rejected('onboarding_not_found');
+        case 'stale_revision':
+          return rejected('stale_revision');
+        case 'incomplete':
+          return rejected('onboarding_incomplete');
+        case 'conflict':
+          return rejected('progress_conflict');
         case 'closed':
           return rejected('onboarding_closed');
       }
