@@ -5635,3 +5635,56 @@
   must visually verify the profile form in Telegram Mini App with the keyboard
   open, long text, safe-area insets and stale/error feedback before the final
   manual TMA onboarding smoke.
+
+### 2026-08-22 — D5.1 test-host TLS/SNI correction verified
+
+- DNS verification PASS: `test-app.prostopdl.ru A 135.106.155.112` resolved on
+  authoritative `ns1.reg.ru` and `ns2.reg.ru` and public `1.1.1.1` and
+  `8.8.8.8`. The isolated test hostname therefore no longer depends on a
+  pending REG.RU publication action.
+- On Selectel test host `prosto-padel-test-01` / `135.106.155.112`, the active
+  host-systemd nginx listener on `443` received a separate SNI site for
+  `test-app.prostopdl.ru`, proxying only the existing test upstream
+  `127.0.0.1:8080`. The test SNI config SHA-256 is
+  `564ca28d5086c70c44fa0c97c227736c3f892346950397ed944f5022892e22a9`.
+- A separate Let's Encrypt certificate was issued only for
+  `test-app.prostopdl.ru`: subject/SAN `CN=test-app.prostopdl.ru` /
+  `DNS:test-app.prostopdl.ru`, issuer `Let's Encrypt YE2`, validity
+  `2026-08-22 12:29:50 UTC` through `2026-11-20 12:29:49 UTC`, SHA-256
+  fingerprint
+  `22:67:8E:6B:4B:B3:7F:70:87:28:0A:36:60:C1:CE:DF:B9:BD:D8:98:80:6E:78:E3:E8:5A:0C:47:10:99:02:6B`.
+  The certificate renewal timer is enabled and active.
+- The production `app.prostopdl.ru` site was not changed: its active config
+  retained SHA-256
+  `d6e6484a1917ae061cea986ae3926c34a87278140313873989b3b30a6da0438a`,
+  and its certificate retained SHA-256 fingerprint
+  `EA:30:36:4C:FC:98:A9:38:6F:74:D2:B3:A4:49:1A:14:5F:7E:98:84:F4:A6:71:15:43:0D:40:A0:22:BA:E5:A2`.
+- Nginx config validation PASS, the listener owner was reloaded once, and the
+  bounded post-reload nginx journal error count was `0`. Windows Schannel
+  verification with normal TLS/SNI validation and no `--insecure` returned
+  `ssl_verify_result=0`; HTTPS `GET /api/v1/health` returned `200` from exact
+  remote IP `135.106.155.112`. A CRLF artifact affected only the first
+  read-only fingerprint command after the successful reload; direct read-only
+  SNI and Schannel verification then passed without another issuance or reload.
+- Server checkout remained clean and unchanged at
+  `450479eb82697542ab5e2f5f8ca83c504c2fe735`. Backend
+  `490ab45823b7`, frontend `50644090c6ea`, nginx `e5b98b53a385` and PostgreSQL
+  `5e36d4dc1a5c` containers remained unchanged and healthy. No checkout,
+  frontend/backend container, DB/schema, env/secrets, provider DNS/API or
+  production change occurred.
+- The verified infrastructure state is
+  `deployment=test_tls_applied_verified_runtime_containers_unchanged`. This
+  local append-only docs closeout itself has deployment `not_needed`; it does
+  not deploy the integrated profile frontend commit
+  `7e98cb45645ddc8d32e2436a15f401a3e74ef264`, which remains a separate test
+  rollout gate before visual and manual TMA onboarding smoke.
+- Mandatory root gates for this exact one-file closeout PASS:
+  `npm.cmd run test:e2e` passed `98 / 1 intentional skip`, and
+  `npm.cmd run build` passed with `1621` modules transformed; the existing
+  large-chunk advisory remains. Dependencies were not installed or changed:
+  normalized-LF `package-lock.json` SHA-256 remained
+  `36F6B0109D39A8E06249B3E2B6214DD8631D21849660A9961FF64E815E7E415D`,
+  and the temporary local dependency junction was removed after the gates.
+- Independent read-only P0/P1 review of the exact one-file closeout found no
+  factual, scope or deployment-status issue: acceptance PASS with
+  `P0=0, P1=0`.
