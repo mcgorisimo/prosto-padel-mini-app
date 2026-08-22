@@ -9,6 +9,8 @@ import { unixEpochSeconds } from './auth.types';
 import { PlayerOnboardingController } from './player-onboarding.controller';
 import { PlayerOnboardingService } from './player-onboarding.service';
 import {
+  CompleteOwnPlayerOnboardingInput,
+  CompleteOwnPlayerOnboardingResult,
   OwnPlayerOnboarding,
   ReadOwnPlayerOnboardingResult,
   SaveOwnPlayerOnboardingDraftInput,
@@ -53,6 +55,10 @@ interface Harness {
     Promise<SaveOwnPlayerOnboardingDraftResult>,
     [SaveOwnPlayerOnboardingDraftInput]
   >;
+  readonly completeOwnOnboarding: jest.Mock<
+    Promise<CompleteOwnPlayerOnboardingResult>,
+    [CompleteOwnPlayerOnboardingInput]
+  >;
   readonly logs: readonly unknown[][];
 }
 
@@ -92,6 +98,21 @@ function foundResult(): ReadOwnPlayerOnboardingResult {
   return { outcome: 'found', onboarding: foundOnboarding() };
 }
 
+function completedOnboarding(): OwnPlayerOnboarding {
+  return {
+    ...foundOnboarding(),
+    status: 'completed',
+    currentStep: 'completed',
+    revision: 5,
+    consents: [
+      { kind: 'cancellation', documentVersion: '2026-08-01' },
+      { kind: 'privacy', documentVersion: '2026-08-01' },
+      { kind: 'terms', documentVersion: '2026-08-01' },
+    ],
+    surveyAnswers: { experience: 'beginner' },
+  };
+}
+
 async function createHarness(): Promise<Harness> {
   const authenticate = jest
     .fn<Promise<SessionAuthenticationResult>, [SessionAuthenticationInput]>()
@@ -123,6 +144,15 @@ async function createHarness(): Promise<Harness> {
       outcome: 'saved',
       onboarding: foundOnboarding(),
     });
+  const completeOwnOnboarding = jest
+    .fn<
+      Promise<CompleteOwnPlayerOnboardingResult>,
+      [CompleteOwnPlayerOnboardingInput]
+    >()
+    .mockResolvedValue({
+      outcome: 'completed',
+      onboarding: completedOnboarding(),
+    });
   const nowEpochSeconds = jest.fn<
     ReturnType<SessionAuthenticationClock['nowEpochSeconds']>,
     []
@@ -137,7 +167,11 @@ async function createHarness(): Promise<Harness> {
       },
       {
         provide: PlayerOnboardingService,
-        useValue: { readOwnOnboarding, saveOwnOnboardingDraft },
+        useValue: {
+          readOwnOnboarding,
+          saveOwnOnboardingDraft,
+          completeOwnOnboarding,
+        },
       },
       {
         provide: SESSION_AUTHENTICATION_CLOCK,
@@ -158,6 +192,7 @@ async function createHarness(): Promise<Harness> {
     authenticate,
     readOwnOnboarding,
     saveOwnOnboardingDraft,
+    completeOwnOnboarding,
     logs,
   };
 }
@@ -206,6 +241,39 @@ function draftBody(expectedRevision: number | null = null) {
     profile: { firstName: 'Private', lastName: 'Owner' },
     contacts: { phone: PHONE_MARKER, email: EMAIL_MARKER },
   };
+}
+
+function completionBody(expectedRevision = 4) {
+  return {
+    expectedRevision,
+    flowVersion: 'tma_v1',
+    consents: [
+      { kind: 'terms', documentVersion: '2026-08-01' },
+      { kind: 'privacy', documentVersion: '2026-08-01' },
+      { kind: 'cancellation', documentVersion: '2026-08-01' },
+    ],
+    survey: {
+      version: 'initial_level_v1',
+      answers: { experience: 'beginner' },
+    },
+  };
+}
+
+function postCompletion(
+  harness: Harness,
+  body: unknown,
+  authorization?: string,
+) {
+  const headers: Record<string, string> = {};
+  if (authorization !== undefined) {
+    headers.authorization = authorization;
+  }
+  return harness.app.inject({
+    method: 'POST',
+    url: `${ROUTE}/complete`,
+    headers,
+    payload: body as never,
+  });
 }
 
 function expectNoStore(response: {
@@ -464,6 +532,157 @@ describe('PlayerOnboardingController HTTP boundary', () => {
       ),
     );
     const response = await patch(harness, draftBody(2), `Bearer ${CREDENTIAL}`);
+    expect(response.statusCode).toBe(500);
+    const output = JSON.stringify({
+      response: response.json(),
+      logs: harness.logs,
+    });
+    for (const marker of [
+      PRIVATE_MARKER,
+      PHONE_MARKER,
+      EMAIL_MARKER,
+      CREDENTIAL,
+    ]) {
+      expect(output).not.toContain(marker);
+    }
+  });
+
+  it('completes only the bearer owner and returns a no-store declared-contact response', async () => {
+    const response = await postCompletion(
+      harness,
+      completionBody(),
+      `Bearer ${CREDENTIAL}`,
+    );
+    expect(response.statusCode).toBe(201);
+    expectNoStore(response);
+    expect(harness.completeOwnOnboarding).toHaveBeenCalledWith({
+      accountId: ACCOUNT_ID,
+      role: 'player',
+      completion: {
+        expectedRevision: 4,
+        flowVersion: 'tma_v1',
+        consents: [
+          { kind: 'cancellation', documentVersion: '2026-08-01' },
+          { kind: 'privacy', documentVersion: '2026-08-01' },
+          { kind: 'terms', documentVersion: '2026-08-01' },
+        ],
+        survey: {
+          version: 'initial_level_v1',
+          answers: { experience: 'beginner' },
+        },
+      },
+    });
+    expect(response.json()).toMatchObject({
+      status: 'completed',
+      revision: 5,
+      contacts: { assurance: 'declared' },
+    });
+    expect(response.body).not.toMatch(/isVerified|verified|rating/iu);
+  });
+
+  it('rejects unauthorized completion before the service', async () => {
+    harness.authenticate.mockResolvedValueOnce({
+      outcome: 'rejected',
+      reason: 'session_invalid',
+    });
+    const response = await postCompletion(harness, completionBody());
+    expect(response.statusCode).toBe(401);
+    expectNoStore(response);
+    expect(harness.completeOwnOnboarding).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      'extra owner selector',
+      { ...completionBody(), accountId: OTHER_ACCOUNT_ID },
+    ],
+    ['unsafe revision', completionBody(0)],
+    [
+      'duplicate consent kind',
+      {
+        ...completionBody(),
+        consents: [
+          { kind: 'terms', documentVersion: '2026-08-01' },
+          { kind: 'terms', documentVersion: '2026-08-01' },
+          { kind: 'privacy', documentVersion: '2026-08-01' },
+        ],
+      },
+    ],
+    [
+      'partial survey',
+      {
+        ...completionBody(),
+        survey: { version: 'initial_level_v1', answers: {} },
+      },
+    ],
+    [
+      'unsafe survey code',
+      {
+        ...completionBody(),
+        survey: {
+          version: 'initial_level_v1',
+          answers: { experience: PRIVATE_MARKER },
+        },
+      },
+    ],
+  ])(
+    'rejects completion %s with an exact body allowlist',
+    async (_label, body) => {
+      const response = await postCompletion(
+        harness,
+        body,
+        `Bearer ${CREDENTIAL}`,
+      );
+      expect(response.statusCode).toBe(400);
+      expectNoStore(response);
+      expect(response.json()).toMatchObject({
+        statusCode: 400,
+        code: 'onboarding_completion_invalid_request',
+      });
+      expect(harness.completeOwnOnboarding).not.toHaveBeenCalled();
+      expect(response.body).not.toContain(PRIVATE_MARKER);
+    },
+  );
+
+  it.each([
+    ['onboarding_not_found', 404, 'onboarding_not_found'],
+    ['stale_revision', 409, 'onboarding_completion_revision_conflict'],
+    ['completion_conflict', 409, 'onboarding_completion_conflict'],
+    ['onboarding_incomplete', 422, 'onboarding_incomplete'],
+    ['temporary_unavailable', 503, 'onboarding_service_unavailable'],
+    ['invalid_request', 400, 'onboarding_completion_invalid_request'],
+    ['internal_failure', 500, 'onboarding_internal_error'],
+  ] as const)(
+    'maps completion %s to safe HTTP %d',
+    async (reason, statusCode, code) => {
+      harness.completeOwnOnboarding.mockResolvedValueOnce({
+        outcome: 'rejected',
+        reason,
+      });
+      const response = await postCompletion(
+        harness,
+        completionBody(),
+        `Bearer ${CREDENTIAL}`,
+      );
+      expect(response.statusCode).toBe(statusCode);
+      expectNoStore(response);
+      expect(response.json()).toMatchObject({ statusCode, code });
+      expect(response.body).not.toContain(PHONE_MARKER);
+      expect(response.body).not.toContain(EMAIL_MARKER);
+    },
+  );
+
+  it('hides thrown completion body, PII and credential details from response and logs', async () => {
+    harness.completeOwnOnboarding.mockRejectedValueOnce(
+      new Error(
+        `${PRIVATE_MARKER}:${PHONE_MARKER}:${EMAIL_MARKER}:${CREDENTIAL}`,
+      ),
+    );
+    const response = await postCompletion(
+      harness,
+      completionBody(),
+      `Bearer ${CREDENTIAL}`,
+    );
     expect(response.statusCode).toBe(500);
     const output = JSON.stringify({
       response: response.json(),

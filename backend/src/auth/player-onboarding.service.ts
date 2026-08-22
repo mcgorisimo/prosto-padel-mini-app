@@ -1,6 +1,11 @@
 import { isAccountId } from '../accounts/account.types';
 import { isUserGeneratedTextAllowed } from '../common/content-moderation';
 import {
+  CompletePlayerOnboardingResult,
+  PlayerOnboardingCompletionPersistenceError,
+  PlayerOnboardingCompletionWriter,
+} from '../database/player-onboarding-completion-writer';
+import {
   PlayerOnboardingDraftWritePersistenceError,
   PlayerOnboardingDraftWriter,
   SavePlayerOnboardingDraftResult,
@@ -12,15 +17,24 @@ import {
 } from '../database/player-onboarding-reader';
 import { PostgresTransaction } from '../database/postgres-transaction';
 import {
+  CompleteOwnPlayerOnboardingInput,
+  CompleteOwnPlayerOnboardingResult,
   OwnPlayerOnboarding,
   ReadOwnPlayerOnboardingInput,
   ReadOwnPlayerOnboardingResult,
   SaveOwnPlayerOnboardingDraftInput,
   SaveOwnPlayerOnboardingDraftResult,
   isOwnPlayerOnboarding,
+  isCompleteOwnPlayerOnboardingInput,
   isReadOwnPlayerOnboardingInput,
   isSaveOwnPlayerOnboardingDraftInput,
 } from './player-onboarding.types';
+import {
+  CURRENT_PLAYER_ONBOARDING_POLICY,
+  PLAYER_ONBOARDING_FLOW_VERSION,
+  PLAYER_ONBOARDING_SURVEY_VERSION,
+  isCurrentPlayerOnboardingCompletion,
+} from './player-onboarding.policy';
 import { SessionAuthenticationClock } from './session-authentication.guard';
 
 export interface PlayerOnboardingTransactionExecutor {
@@ -33,11 +47,14 @@ export interface PlayerOnboardingServiceDependencies {
   readonly transactions: PlayerOnboardingTransactionExecutor;
   readonly onboarding: PlayerOnboardingReader;
   readonly draftWriter: PlayerOnboardingDraftWriter;
+  readonly completionWriter: PlayerOnboardingCompletionWriter;
   readonly clock: SessionAuthenticationClock;
 }
 
 type RejectionReason = Extract<
-  ReadOwnPlayerOnboardingResult | SaveOwnPlayerOnboardingDraftResult,
+  | ReadOwnPlayerOnboardingResult
+  | SaveOwnPlayerOnboardingDraftResult
+  | CompleteOwnPlayerOnboardingResult,
   { readonly outcome: 'rejected' }
 >['reason'];
 
@@ -45,8 +62,13 @@ type DraftTransactionResult =
   | Exclude<SavePlayerOnboardingDraftResult, { readonly outcome: 'saved' }>
   | Extract<SaveOwnPlayerOnboardingDraftResult, { readonly outcome: 'saved' }>;
 
-const ONBOARDING_FLOW_VERSION = 'tma_v1';
-const ONBOARDING_SURVEY_VERSION = 'initial_level_v1';
+type CompletionTransactionResult =
+  | Exclude<CompletePlayerOnboardingResult, { readonly outcome: 'completed' }>
+  | Extract<
+      CompleteOwnPlayerOnboardingResult,
+      { readonly outcome: 'completed' }
+    >;
+
 const EMAIL_PATTERN =
   /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9][a-z0-9.-]*\.[a-z]{2,63}$/u;
 
@@ -187,7 +209,8 @@ function publicOnboarding(
 function temporaryStorageFailure(error: unknown): boolean {
   return (
     (error instanceof PlayerOnboardingReadPersistenceError ||
-      error instanceof PlayerOnboardingDraftWritePersistenceError) &&
+      error instanceof PlayerOnboardingDraftWritePersistenceError ||
+      error instanceof PlayerOnboardingCompletionPersistenceError) &&
     (error.reason === 'database_unavailable' ||
       error.reason === 'transaction_conflict')
   );
@@ -216,6 +239,50 @@ function containsDisallowedName(
 function storageInvariantFailure(): PlayerOnboardingDraftWritePersistenceError {
   return new PlayerOnboardingDraftWritePersistenceError(
     'invalid_persisted_state',
+  );
+}
+
+function sameAnswers(
+  left: Readonly<Record<string, string>>,
+  right: Readonly<Record<string, string>>,
+): boolean {
+  const leftEntries = Object.entries(left).sort(([leftKey], [rightKey]) =>
+    leftKey.localeCompare(rightKey),
+  );
+  const rightEntries = Object.entries(right).sort(([leftKey], [rightKey]) =>
+    leftKey.localeCompare(rightKey),
+  );
+  return (
+    leftEntries.length === rightEntries.length &&
+    leftEntries.every(
+      ([question, answer], index) =>
+        rightEntries[index][0] === question &&
+        rightEntries[index][1] === answer,
+    )
+  );
+}
+
+function completedMatches(
+  onboarding: OwnPlayerOnboarding,
+  input: CompleteOwnPlayerOnboardingInput,
+  revision: number,
+): boolean {
+  if (
+    onboarding.status !== 'completed' ||
+    onboarding.currentStep !== 'completed' ||
+    onboarding.revision !== revision ||
+    onboarding.flowVersion !== input.completion.flowVersion ||
+    onboarding.surveyVersion !== input.completion.survey.version ||
+    !sameAnswers(onboarding.surveyAnswers, input.completion.survey.answers)
+  ) {
+    return false;
+  }
+  return CURRENT_PLAYER_ONBOARDING_POLICY.consents.every((required) =>
+    onboarding.consents.some(
+      (consent) =>
+        consent.kind === required.kind &&
+        consent.documentVersion === required.documentVersion,
+    ),
   );
 }
 
@@ -300,8 +367,8 @@ export class PlayerOnboardingService {
                 lastName: input.draft.profile.lastName,
                 phone: input.draft.contacts.phone,
                 normalizedEmail,
-                flowVersion: ONBOARDING_FLOW_VERSION,
-                surveyVersion: ONBOARDING_SURVEY_VERSION,
+                flowVersion: PLAYER_ONBOARDING_FLOW_VERSION,
+                surveyVersion: PLAYER_ONBOARDING_SURVEY_VERSION,
                 updatedAt: this.dependencies.clock.nowEpochSeconds(),
               },
             );
@@ -340,6 +407,81 @@ export class PlayerOnboardingService {
           return rejected('stale_revision');
         case 'closed':
           return rejected('onboarding_closed');
+      }
+    } catch (error) {
+      return rejected(
+        temporaryStorageFailure(error)
+          ? 'temporary_unavailable'
+          : 'internal_failure',
+      );
+    }
+  }
+
+  async completeOwnOnboarding(
+    input: CompleteOwnPlayerOnboardingInput,
+  ): Promise<CompleteOwnPlayerOnboardingResult> {
+    if (!isCompleteOwnPlayerOnboardingInput(input)) {
+      return rejected('invalid_request');
+    }
+    if (input.role !== 'player') {
+      return rejected('onboarding_not_found');
+    }
+    if (!isCurrentPlayerOnboardingCompletion(input.completion)) {
+      return rejected('completion_conflict');
+    }
+
+    try {
+      const result =
+        await this.dependencies.transactions.run<CompletionTransactionResult>(
+          async (transaction) => {
+            const completed = await this.dependencies.completionWriter.complete(
+              transaction,
+              {
+                accountId: input.accountId,
+                expectedRevision: input.completion.expectedRevision,
+                flowVersion: CURRENT_PLAYER_ONBOARDING_POLICY.flowVersion,
+                consents: CURRENT_PLAYER_ONBOARDING_POLICY.consents,
+                surveyVersion: CURRENT_PLAYER_ONBOARDING_POLICY.survey.version,
+                surveyAnswers: input.completion.survey.answers,
+                completedAt: this.dependencies.clock.nowEpochSeconds(),
+              },
+            );
+            if (completed.outcome !== 'completed') {
+              return completed;
+            }
+
+            const reread = await this.dependencies.onboarding.findByAccountId(
+              transaction,
+              { accountId: input.accountId },
+            );
+            if (reread.outcome !== 'found') {
+              throw storageInvariantFailure();
+            }
+            const onboarding = publicOnboarding(
+              reread.onboarding as PlayerOnboardingRecord,
+              input.accountId,
+            );
+            if (
+              onboarding === undefined ||
+              !completedMatches(onboarding, input, completed.revision)
+            ) {
+              throw storageInvariantFailure();
+            }
+            return Object.freeze({ outcome: 'completed', onboarding });
+          },
+        );
+
+      switch (result.outcome) {
+        case 'completed':
+          return result;
+        case 'not_found':
+          return rejected('onboarding_not_found');
+        case 'stale_revision':
+          return rejected('stale_revision');
+        case 'incomplete':
+          return rejected('onboarding_incomplete');
+        case 'conflict':
+          return rejected('completion_conflict');
       }
     } catch (error) {
       return rejected(

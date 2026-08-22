@@ -27,6 +27,22 @@ export interface SaveOwnPlayerOnboardingDraftInput {
   readonly draft: OwnPlayerOnboardingDraft;
 }
 
+export interface OwnPlayerOnboardingCompletion {
+  readonly expectedRevision: number;
+  readonly flowVersion: string;
+  readonly consents: readonly OwnPlayerOnboardingConsent[];
+  readonly survey: Readonly<{
+    readonly version: string;
+    readonly answers: Readonly<Record<string, string>>;
+  }>;
+}
+
+export interface CompleteOwnPlayerOnboardingInput {
+  readonly accountId: AccountId;
+  readonly role: UserRole;
+  readonly completion: OwnPlayerOnboardingCompletion;
+}
+
 export interface OwnPlayerOnboardingConsent {
   readonly kind: PlayerOnboardingConsentKind;
   readonly documentVersion: string;
@@ -78,6 +94,23 @@ export type SaveOwnPlayerOnboardingDraftResult =
         | 'stale_revision'
         | 'onboarding_closed'
         | 'content_not_allowed'
+        | 'temporary_unavailable'
+        | 'internal_failure';
+    };
+
+export type CompleteOwnPlayerOnboardingResult =
+  | {
+      readonly outcome: 'completed';
+      readonly onboarding: OwnPlayerOnboarding;
+    }
+  | {
+      readonly outcome: 'rejected';
+      readonly reason:
+        | 'invalid_request'
+        | 'onboarding_not_found'
+        | 'stale_revision'
+        | 'onboarding_incomplete'
+        | 'completion_conflict'
         | 'temporary_unavailable'
         | 'internal_failure';
     };
@@ -313,6 +346,77 @@ export function readOwnPlayerOnboardingDraft(
   });
 }
 
+function readCompletionSurvey(
+  value: unknown,
+): OwnPlayerOnboardingCompletion['survey'] | undefined {
+  if (
+    !isPlainRecord(value) ||
+    !hasExactlyKeys(value, ['version', 'answers']) ||
+    typeof value.version !== 'string' ||
+    !FLOW_VERSION_PATTERN.test(value.version) ||
+    !isSurveyAnswers(value.answers) ||
+    Object.keys(value.answers).length === 0
+  ) {
+    return undefined;
+  }
+
+  return Object.freeze({
+    version: value.version,
+    answers: Object.freeze(
+      Object.fromEntries(
+        Object.entries(value.answers).sort(([left], [right]) =>
+          left.localeCompare(right),
+        ),
+      ),
+    ),
+  });
+}
+
+export function readOwnPlayerOnboardingCompletion(
+  value: unknown,
+): OwnPlayerOnboardingCompletion | undefined {
+  if (
+    !isPlainRecord(value) ||
+    !hasExactlyKeys(value, [
+      'expectedRevision',
+      'flowVersion',
+      'consents',
+      'survey',
+    ]) ||
+    typeof value.expectedRevision !== 'number' ||
+    !Number.isSafeInteger(value.expectedRevision) ||
+    value.expectedRevision < 1 ||
+    typeof value.flowVersion !== 'string' ||
+    !FLOW_VERSION_PATTERN.test(value.flowVersion) ||
+    !isConsents(value.consents) ||
+    value.consents.length !== CONSENT_KINDS.length ||
+    new Set(value.consents.map((consent) => consent.kind)).size !==
+      CONSENT_KINDS.length
+  ) {
+    return undefined;
+  }
+
+  const survey = readCompletionSurvey(value.survey);
+  if (survey === undefined) {
+    return undefined;
+  }
+  const consents = [...value.consents]
+    .sort((left, right) => left.kind.localeCompare(right.kind))
+    .map((consent) =>
+      Object.freeze({
+        kind: consent.kind,
+        documentVersion: consent.documentVersion,
+      }),
+    );
+
+  return Object.freeze({
+    expectedRevision: value.expectedRevision,
+    flowVersion: value.flowVersion,
+    consents: Object.freeze(consents),
+    survey,
+  });
+}
+
 export function isSaveOwnPlayerOnboardingDraftInput(
   value: unknown,
 ): value is SaveOwnPlayerOnboardingDraftInput {
@@ -322,5 +426,17 @@ export function isSaveOwnPlayerOnboardingDraftInput(
     isAccountId(value.accountId) &&
     (value.role === 'player' || value.role === 'club_admin') &&
     readOwnPlayerOnboardingDraft(value.draft) !== undefined
+  );
+}
+
+export function isCompleteOwnPlayerOnboardingInput(
+  value: unknown,
+): value is CompleteOwnPlayerOnboardingInput {
+  return (
+    isPlainRecord(value) &&
+    hasExactlyKeys(value, ['accountId', 'role', 'completion']) &&
+    isAccountId(value.accountId) &&
+    (value.role === 'player' || value.role === 'club_admin') &&
+    readOwnPlayerOnboardingCompletion(value.completion) !== undefined
   );
 }

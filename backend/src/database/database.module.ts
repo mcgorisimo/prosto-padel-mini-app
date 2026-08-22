@@ -28,6 +28,7 @@ import { PostgresPlayerAccountProvisioningRepository } from './postgres-player-a
 import { PostgresPlayerProfileDetailsRepository } from './postgres-player-profile-details.repository';
 import { PostgresPlayerProfilePhotoRepository } from './postgres-player-profile-photo.repository';
 import { PostgresPlayerOnboardingDraftWriter } from './postgres-player-onboarding-draft-writer';
+import { PostgresPlayerOnboardingCompletionWriter } from './postgres-player-onboarding-completion-writer';
 import { PostgresPlayerOnboardingReader } from './postgres-player-onboarding-reader';
 import { PostgresPlayerProfileReader } from './postgres-player-profile-reader';
 import { PostgresPlayerProfileWriter } from './postgres-player-profile-writer';
@@ -87,6 +88,7 @@ const DATABASE_WORKFLOW_PROVIDERS: Provider[] = [
   PostgresAccountStatusReader,
   PostgresPlayerProfileDetailsRepository,
   PostgresPlayerProfilePhotoRepository,
+  PostgresPlayerOnboardingCompletionWriter,
   PostgresPlayerOnboardingDraftWriter,
   PostgresPlayerOnboardingReader,
   PostgresPlayerProfileWriter,
@@ -219,6 +221,7 @@ const DATABASE_WORKFLOW_EXPORTS = [
   PostgresPlayerAccountProvisioningRepository,
   PostgresPlayerProfileDetailsRepository,
   PostgresPlayerProfilePhotoRepository,
+  PostgresPlayerOnboardingCompletionWriter,
   PostgresPlayerOnboardingDraftWriter,
   PostgresPlayerOnboardingReader,
   PostgresPlayerProfileReader,

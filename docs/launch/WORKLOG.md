@@ -5058,3 +5058,70 @@
   rechecked before a separate local commit decision. No commit, push,
   integration, SSH/DB/schema command, API write or runtime action is part of
   this closeout.
+
+### 2026-08-22 — D5.1 authenticated onboarding completion candidate
+
+- On exact detached base
+  `adfa641329ce2b90cb3f8cb6d8fd0c3fae7e82c7`, read-only schema review confirmed
+  that applied migrations 035/036 are sufficient for this narrow completion
+  contract: migration 035 already provides the owner state, append-only consent
+  ledger, optimistic revision/step/completion guard and required contact checks;
+  migration 036 provides the runtime role's exact two function EXECUTE grants.
+  No migration, SQL/schema change or DB command was added or run.
+- The backend-only candidate adds authenticated owner-scoped
+  `POST /api/v1/onboarding/me/complete`. Its exact body contains only
+  `expectedRevision`, echoed `flowVersion`, the three versioned consent
+  acceptances and a versioned code-only survey. Account and role come only from
+  the existing bearer principal; profile name and declared canonical phone /
+  normalized email are read under the owner lock and cannot be supplied or
+  overridden by the completion body.
+- Immutable backend policy `tma_v1` requires `terms`, `privacy` and
+  `cancellation` document version `2026-08-01`. Survey
+  `initial_level_v1` requires exactly the `experience` question with one of
+  `beginner`, `intermediate` or `advanced`. Structurally valid but stale/different
+  policy payloads fail with a fixed conflict; incomplete/extra/unsafe request
+  shapes fail before persistence.
+- Completion locks owner profile then onboarding state and is allowed only from
+  exact `in_progress/level_survey` at the supplied revision with a nonblank name,
+  canonical E.164 phone and normalized email. In one transaction it inserts the
+  exact current consent acceptances, performs one guarded transition to
+  `completed` with the complete survey and `revision + 1`, then rereads the same
+  owner. Any anomaly after a write throws a fixed persistence error so the
+  transaction rolls back.
+- An exact retry is read-only success only when completed revision equals
+  `expectedRevision + 1` and final flow/survey/answers/current consent versions
+  match exactly. A stale in-progress revision and any different completed retry
+  return fixed conflicts without another write. Contacts remain
+  `assurance=declared`; no phone/email verification, `rating.isVerified`, rating
+  mutation, PII logging, raw database diagnostics or request-body logging was
+  added.
+- This slice deliberately does not add consent/survey progress mutations. The
+  existing draft writer keeps `currentStep=profile`, so reaching
+  `level_survey` remains a separate future bounded backend slice; completion does
+  not silently skip that state boundary. No frontend/TMA UI, Supabase path,
+  admin backoffice, dependency, env/secret, server/provider API or production
+  change is included.
+- Focused completion PASS: `4 suites / 118 tests`; focused migrations 035/036
+  contract PASS: `2 suites / 14 tests`. Full gates PASS: backend typecheck, unit
+  `147 suites / 3563 tests`, E2E `2 suites / 4 tests` and build; root E2E
+  `94 passed / 1 skipped` and build `1619 modules`. Matching lockfile dependency
+  trees were used through removed temporary junctions; no dependency or lockfile
+  changed. The first root E2E launch was blocked by sandbox access to the
+  external junction; the exact clean rerun outside that restriction passed.
+- Additional root lint PASS (`98 files / 105 unchanged legacy issues`). The
+  non-mandatory format/dead-code diagnostics remain baseline-limited: format
+  identified the already unformatted unmodified migration-036 spec plus legacy
+  formatting in touched module files; Knip reproduced the existing inventory,
+  but its line-sensitive digest changed because the already exported
+  `PlayerOnboardingServiceDependencies` moved with the new imports. No new
+  completion file or export was reported unused. No unrelated format/baseline
+  file was changed; mandatory AGENTS gates above are green.
+- This candidate changes backend runtime, so deployment is
+  `deployment_deferred_by_user`. Selectel test was not contacted; its documented
+  backend remains exact `22e7097389d104f2f35801c1ce8a0ac012b02a9c` with the
+  prior authenticated draft smoke, health and bounded logs green. No commit,
+  push, integration, SSH/DB/schema command, restart/rebuild/rollout or external
+  write occurred. Independent read-only acceptance review of the exact candidate
+  diff passed with `P0=0, P1=0`; the only post-review change records the review
+  result and diagnostic facts in this entry and is subject to a final exact-diff
+  recheck before a separate local commit decision.

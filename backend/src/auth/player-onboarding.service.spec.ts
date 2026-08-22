@@ -1,6 +1,12 @@
 import { AccountId } from '../accounts/account.types';
 import { deterministicUuid } from '../../test/deterministic-uuid';
 import {
+  CompletePlayerOnboardingInput,
+  CompletePlayerOnboardingResult,
+  PlayerOnboardingCompletionPersistenceError,
+  PlayerOnboardingCompletionWriter,
+} from '../database/player-onboarding-completion-writer';
+import {
   PlayerOnboardingDraftWritePersistenceError,
   PlayerOnboardingDraftWriter,
   SavePlayerOnboardingDraftInput,
@@ -18,7 +24,10 @@ import {
   PlayerOnboardingTransactionExecutor,
 } from './player-onboarding.service';
 import { unixEpochSeconds } from './auth.types';
-import { SaveOwnPlayerOnboardingDraftInput } from './player-onboarding.types';
+import {
+  CompleteOwnPlayerOnboardingInput,
+  SaveOwnPlayerOnboardingDraftInput,
+} from './player-onboarding.types';
 
 const ACCOUNT_ID = deterministicUuid('player-onboarding-service') as AccountId;
 const OTHER_ACCOUNT_ID = deterministicUuid(
@@ -44,13 +53,27 @@ function createHarness(result: ReadPlayerOnboardingResult = firstRunResult()) {
       [PostgresTransaction, SavePlayerOnboardingDraftInput]
     >()
     .mockResolvedValue({ outcome: 'saved', revision: 1 });
+  const complete = jest
+    .fn<
+      Promise<CompletePlayerOnboardingResult>,
+      [PostgresTransaction, CompletePlayerOnboardingInput]
+    >()
+    .mockResolvedValue({ outcome: 'completed', revision: 5, replayed: false });
   const service = new PlayerOnboardingService({
     transactions: { run } as PlayerOnboardingTransactionExecutor,
     onboarding: { findByAccountId } as PlayerOnboardingReader,
     draftWriter: { saveDraft } as PlayerOnboardingDraftWriter,
+    completionWriter: { complete } as PlayerOnboardingCompletionWriter,
     clock: { nowEpochSeconds: () => NOW },
   });
-  return { service, transaction, run, findByAccountId, saveDraft };
+  return {
+    service,
+    transaction,
+    run,
+    findByAccountId,
+    saveDraft,
+    complete,
+  };
 }
 
 function firstRunResult(): ReadPlayerOnboardingResult {
@@ -115,6 +138,32 @@ function savedDraftResult(revision: number): ReadPlayerOnboardingResult {
   };
 }
 
+function completedResult(): ReadPlayerOnboardingResult {
+  return {
+    outcome: 'found',
+    onboarding: {
+      accountId: ACCOUNT_ID,
+      firstName: 'Synthetic',
+      lastName: 'Player',
+      phone: '+79990000000',
+      normalizedEmail: 'player@example.test',
+      state: {
+        flowVersion: 'tma_v1',
+        status: 'completed',
+        currentStep: 'completed',
+        surveyVersion: 'initial_level_v1',
+        surveyAnswers: { experience: 'beginner' },
+        revision: 5,
+      },
+      consents: [
+        { kind: 'cancellation', documentVersion: '2026-08-01' },
+        { kind: 'privacy', documentVersion: '2026-08-01' },
+        { kind: 'terms', documentVersion: '2026-08-01' },
+      ],
+    },
+  };
+}
+
 function saveInput(
   overrides: Partial<SaveOwnPlayerOnboardingDraftInput> = {},
 ): SaveOwnPlayerOnboardingDraftInput {
@@ -127,6 +176,29 @@ function saveInput(
       contacts: {
         phone: '+79991112233',
         email: ' Owner@Example.Test ',
+      },
+    },
+    ...overrides,
+  };
+}
+
+function completionInput(
+  overrides: Partial<CompleteOwnPlayerOnboardingInput> = {},
+): CompleteOwnPlayerOnboardingInput {
+  return {
+    accountId: ACCOUNT_ID,
+    role: 'player',
+    completion: {
+      expectedRevision: 4,
+      flowVersion: 'tma_v1',
+      consents: [
+        { kind: 'terms', documentVersion: '2026-08-01' },
+        { kind: 'privacy', documentVersion: '2026-08-01' },
+        { kind: 'cancellation', documentVersion: '2026-08-01' },
+      ],
+      survey: {
+        version: 'initial_level_v1',
+        answers: { experience: 'beginner' },
       },
     },
     ...overrides,
@@ -469,5 +541,179 @@ describe('PlayerOnboardingService', () => {
       harness.service.saveOwnOnboardingDraft(saveInput()),
     ).resolves.toEqual({ outcome: 'rejected', reason });
     expect(harness.findByAccountId).not.toHaveBeenCalled();
+  });
+
+  it('atomically completes the authenticated owner with backend-owned policy and rereads the result', async () => {
+    const harness = createHarness(completedResult());
+
+    await expect(
+      harness.service.completeOwnOnboarding(completionInput()),
+    ).resolves.toEqual({
+      outcome: 'completed',
+      onboarding: {
+        status: 'completed',
+        flowVersion: 'tma_v1',
+        currentStep: 'completed',
+        surveyVersion: 'initial_level_v1',
+        revision: 5,
+        profile: { firstName: 'Synthetic', lastName: 'Player' },
+        contacts: {
+          phone: '+79990000000',
+          normalizedEmail: 'player@example.test',
+          assurance: 'declared',
+        },
+        consents: [
+          { kind: 'cancellation', documentVersion: '2026-08-01' },
+          { kind: 'privacy', documentVersion: '2026-08-01' },
+          { kind: 'terms', documentVersion: '2026-08-01' },
+        ],
+        surveyAnswers: { experience: 'beginner' },
+      },
+    });
+    expect(harness.run).toHaveBeenCalledTimes(1);
+    expect(harness.complete).toHaveBeenCalledWith(harness.transaction, {
+      accountId: ACCOUNT_ID,
+      expectedRevision: 4,
+      flowVersion: 'tma_v1',
+      consents: [
+        { kind: 'cancellation', documentVersion: '2026-08-01' },
+        { kind: 'privacy', documentVersion: '2026-08-01' },
+        { kind: 'terms', documentVersion: '2026-08-01' },
+      ],
+      surveyVersion: 'initial_level_v1',
+      surveyAnswers: { experience: 'beginner' },
+      completedAt: NOW,
+    });
+    expect(harness.findByAccountId).toHaveBeenCalledWith(harness.transaction, {
+      accountId: ACCOUNT_ID,
+    });
+    expect(JSON.stringify(harness.complete.mock.calls[0])).not.toMatch(
+      /isVerified|verified|rating/iu,
+    );
+  });
+
+  it('returns an exact replay as the same completed representation without verification claims', async () => {
+    const harness = createHarness(completedResult());
+    harness.complete.mockResolvedValueOnce({
+      outcome: 'completed',
+      revision: 5,
+      replayed: true,
+    });
+
+    const result =
+      await harness.service.completeOwnOnboarding(completionInput());
+    expect(result.outcome).toBe('completed');
+    if (result.outcome === 'completed') {
+      expect(result.onboarding.contacts.assurance).toBe('declared');
+      expect(result.onboarding).not.toHaveProperty('isVerified');
+      expect(result.onboarding).not.toHaveProperty('rating');
+    }
+  });
+
+  it.each([
+    [
+      'outdated consent',
+      {
+        ...completionInput().completion,
+        consents: [
+          { kind: 'terms' as const, documentVersion: '2026-07-01' },
+          { kind: 'privacy' as const, documentVersion: '2026-08-01' },
+          { kind: 'cancellation' as const, documentVersion: '2026-08-01' },
+        ],
+      },
+    ],
+    [
+      'unknown survey answer',
+      {
+        ...completionInput().completion,
+        survey: {
+          version: 'initial_level_v1',
+          answers: { experience: 'unsupported' },
+        },
+      },
+    ],
+    [
+      'partial survey',
+      {
+        ...completionInput().completion,
+        survey: { version: 'initial_level_v1', answers: {} },
+      },
+    ],
+  ])('rejects %s before persistence', async (_label, completion) => {
+    const harness = createHarness(completedResult());
+    const result = await harness.service.completeOwnOnboarding(
+      completionInput({ completion }),
+    );
+    expect(result).toEqual({
+      outcome: 'rejected',
+      reason:
+        _label === 'partial survey' ? 'invalid_request' : 'completion_conflict',
+    });
+    expect(harness.run).not.toHaveBeenCalled();
+  });
+
+  it('hides non-player ownership before policy validation or a transaction', async () => {
+    const harness = createHarness(completedResult());
+    await expect(
+      harness.service.completeOwnOnboarding(
+        completionInput({ role: 'club_admin' }),
+      ),
+    ).resolves.toEqual({
+      outcome: 'rejected',
+      reason: 'onboarding_not_found',
+    });
+    expect(harness.run).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['not_found', 'onboarding_not_found'],
+    ['stale_revision', 'stale_revision'],
+    ['incomplete', 'onboarding_incomplete'],
+    ['conflict', 'completion_conflict'],
+  ] as const)(
+    'maps completion writer %s without rereading',
+    async (outcome, reason) => {
+      const harness = createHarness(completedResult());
+      harness.complete.mockResolvedValueOnce({ outcome });
+      await expect(
+        harness.service.completeOwnOnboarding(completionInput()),
+      ).resolves.toEqual({ outcome: 'rejected', reason });
+      expect(harness.findByAccountId).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ['database_unavailable', 'temporary_unavailable'],
+    ['transaction_conflict', 'temporary_unavailable'],
+    ['permission_denied', 'internal_failure'],
+    ['invalid_persisted_state', 'internal_failure'],
+  ] as const)(
+    'maps completion persistence %s safely',
+    async (failure, reason) => {
+      const harness = createHarness(completedResult());
+      harness.complete.mockRejectedValueOnce(
+        new PlayerOnboardingCompletionPersistenceError(failure),
+      );
+      await expect(
+        harness.service.completeOwnOnboarding(completionInput()),
+      ).resolves.toEqual({ outcome: 'rejected', reason });
+      expect(harness.findByAccountId).not.toHaveBeenCalled();
+    },
+  );
+
+  it('fails transactionally when completion reread is not the exact completed owner state', async () => {
+    const completed = completedResult();
+    if (completed.outcome !== 'found') {
+      throw new Error('Expected completed fixture');
+    }
+    const harness = createHarness({
+      outcome: 'found',
+      onboarding: { ...completed.onboarding, accountId: OTHER_ACCOUNT_ID },
+    });
+    await expect(
+      harness.service.completeOwnOnboarding(completionInput()),
+    ).resolves.toEqual({ outcome: 'rejected', reason: 'internal_failure' });
+    expect(harness.complete).toHaveBeenCalledTimes(1);
+    expect(harness.findByAccountId).toHaveBeenCalledTimes(1);
   });
 });
