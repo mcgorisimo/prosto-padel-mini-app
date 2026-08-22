@@ -5185,3 +5185,60 @@
   acceptance PASS with `P0=0, P1=0`. This final line records only that review
   result; the resulting diff was rechecked for exact one-file scope and
   whitespace errors before handoff.
+
+### 2026-08-22 — D5.1 migration 037 onboarding progress transition candidate
+
+- On exact base `596e2ab86569403db65c227abe084aef7fa934cc`, read-only
+  review found that applied migration 035 still orders onboarding as
+  `profile -> contacts -> consents -> level_survey`, while the approved product
+  flow stores declared phone/email in the profile draft and requires the
+  product-visible sequence `profile -> consents -> level_survey`. Hiding two
+  state UPDATEs in one API call would silently skip `contacts` and advance the
+  optimistic revision twice, so migrations 035/036 are insufficient without a
+  forward function correction. Applied artifacts 035/036 remain unchanged.
+- Runtime-disconnected migration 037 replaces only
+  `backend_auth.guard_player_onboarding_state_transition()`. It preserves
+  same-step draft revision updates, allows direct `profile -> consents`, keeps
+  `contacts -> consents` only for legacy resume, allows
+  `consents -> level_survey` and preserves the existing
+  `level_survey -> completed` checks. New `profile -> contacts`, backward and
+  other skip transitions fail closed. In-progress survey answers remain empty.
+- Entry into `consents` requires a nonblank name, canonical E.164 declared phone
+  and normalized declared email; the same profile readiness is revalidated on
+  entry into `level_survey` so a later draft edit cannot bypass it.
+  `level_survey` also requires all three consent kinds for the same flow and
+  accepted within the onboarding time window. Exact current document versions
+  deliberately remain an application policy check: no legal version or
+  `2026-08-01` is hardcoded in SQL. Declared contacts are not marked verified;
+  rating and contact verification are untouched.
+- PRECHECK pins the exact migration-035 relation/function fingerprints and the
+  post-036 owner/application EXECUTE ACL. POSTCHECK pins the new 037 guard
+  fingerprint and transition markers while requiring
+  `backend_auth_app EXECUTE=true`, `PUBLIC EXECUTE=false` and unchanged relation
+  fingerprints/data counts. ROLLBACK restores the exact migration-035 guard
+  definition while preserving the migration-036 runtime ACL. Existing
+  synthetic fixtures and any retained legacy `contacts` state are accepted;
+  none is mutated, cleaned up, logged or exposed.
+- Focused migration-037 contract PASS: `1 suite / 8 tests`; combined 035/036/037
+  regression PASS: `3 suites / 22 tests`. The first focused run failed five
+  assertions because its extractor expected a literal COMMENT target after the
+  candidate switched to the safe dynamic fingerprint form; the extractor alone
+  was corrected and the clean focused rerun passed.
+- Mandatory gates PASS: backend typecheck, unit `148 suites / 3571 tests`, E2E
+  `2 suites / 4 tests` and build; root E2E `94 passed / 1 skipped` and build
+  `1619 modules`. Existing dependency trees with exact matching root/backend
+  lockfile SHA-256 values were used only through validated temporary junctions;
+  both junctions were removed and no dependency, package or lockfile changed.
+- This candidate has no API/service/controller/frontend wiring and does not
+  change application runtime until a separately approved DB apply and later
+  code/rollout gates. Deployment is `not_needed` for this local
+  runtime-disconnected candidate. No commit, push, integration, SSH/DB/schema
+  command, TLS/nginx/restart/rollout, provider/API write, secrets/env change or
+  production action occurred.
+- Local read-only review initially found one P1: profile readiness had to be
+  revalidated on `consents -> level_survey` because the existing draft writer
+  can still edit contacts after leaving `profile`. The guard and regression
+  were corrected, all focused/backend/root gates above were rerun and passed,
+  and the exact final six-file candidate review returned `P0=0, P1=0`. The only
+  post-review change records this result; final scope and whitespace were
+  rechecked before handoff.
