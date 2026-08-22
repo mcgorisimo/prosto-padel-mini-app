@@ -5493,3 +5493,82 @@
   returned acceptance PASS with `P0=0, P1=0`; final scope and whitespace were
   rechecked after recording this result. The next safe gate is a separate
   local docs-only commit; no rollout is needed for this documentation change.
+
+### 2026-08-22 — D5.1 frontend onboarding client/state foundation candidate
+
+- On exact detached base/main
+  `2afd025e248e6898fffca13d446c561ec787e77c`, the existing Telegram session
+  boundary keeps the bearer credential caller-owned and uses Telegram
+  SecureStorage without browser-storage fallback. Existing private frontend
+  clients already use `cache: no-store`, `credentials: omit`, bounded response
+  parsing and abortable requests. The new bounded onboarding client follows
+  those contracts without importing the legacy Supabase profile path.
+- Added an owner-credential-scoped client/state foundation for exact GET and
+  PATCH `/api/v1/onboarding/me`, POST `/api/v1/onboarding/me/progress` and POST
+  `/api/v1/onboarding/me/complete`. It is not imported by `App.jsx` or any
+  runtime component. Strict request allowlists reject owner overrides,
+  verification/rating claims, silent step skips and extra fields before fetch;
+  draft email is normalized to trimmed lowercase and phone must already be
+  canonical E.164. Contacts remain `declared` only.
+- Successful responses require the exact backend onboarding state shape and a
+  `no-store` response directive. The parser returns deeply frozen in-memory
+  state, accepts bounded historical consent versions, and fails closed on
+  account/session identifiers, verification/rating fields, malformed bodies or
+  expanded response fields. The module does not reference localStorage,
+  sessionStorage, logging or a persistent PII cache.
+- GET, progress and completion use bounded retry/abort behavior. Network,
+  timeout and exact `onboarding_service_unavailable` outcomes retry at most
+  three times with the byte-identical normalized request body; 401, stale
+  revision and different-request conflicts are not retried. Because PATCH draft
+  has optimistic revision but no backend replay contract, an unknown network or
+  timeout outcome is not retried and returns `unknown_outcome` for a later GET
+  reconciliation. An explicit 503 remains retryable. No frontend request key or
+  database authority was added.
+- Focused format and ESLint checks PASS. Focused Vitest PASS:
+  `1 suite / 8 tests`, covering first-run read/profile save, resume,
+  unauthorized, stale/different conflict, draft unknown-outcome no-retry,
+  byte-identical idempotent progress retry, exact progress/completion payloads,
+  PII-safe storage/log boundaries and fail-closed expanded fields. The first
+  runnable suite had one expectation mismatch because the fixture expected
+  unsorted consents while the client correctly canonicalized them; only the
+  fixture was corrected and the clean rerun passed.
+- Mandatory root gates PASS: E2E `94 passed / 1 skipped`; build `1619 modules`.
+  After the first review correction, one full E2E run had an unrelated lineup
+  click timeout; the exact failing test then passed `1/1`, and clean full E2E
+  reruns after both review corrections passed `94/1`. No product correction was
+  needed for that existing test.
+  The unchanged module count confirms that this unimported foundation does not
+  enter the frontend bundle. The isolated worktree used the existing dependency
+  tree through a temporary junction after normalized-LF lockfile SHA-256
+  `36F6B0109D39A8E06249B3E2B6214DD8631D21849660A9961FF64E815E7E415D`
+  matched; the junction was removed and no dependency, package or lockfile was
+  installed or changed.
+- Independent local read-only P0/P1 review found two P1 findings before
+  acceptance. First, the response parser imposed an arbitrary 32-row
+  consent-history limit that is not present in the backend contract and could
+  reject a valid long-lived resume; the count cap was removed while the existing
+  32 KiB response bound remained, with a historical-plus-current same-kind
+  regression. Second, draft writes were incorrectly retried after an unknown
+  network outcome even though the backend draft writer has no replay contract;
+  draft now returns `unknown_outcome` without a retry, while replay-idempotent
+  progress/complete retain byte-identical retries. Focused regressions cover both
+  corrections, and all focused and mandatory gates passed afterward. Final
+  acceptance: `P0=0, P1=0`.
+- The DNS dependency is cleared by owner-confirmed read-only verification:
+  `test-app.prostopdl.ru A 135.106.155.112` resolves on `ns1.reg.ru`,
+  `ns2.reg.ru`, `1.1.1.1` and `8.8.8.8`; authoritative SOA serial is
+  `1787388524` and TTL is `86400`. The REG.RU action is complete and needs no
+  further owner action. This does not authorize TLS/nginx/server/runtime writes;
+  test-host TLS/SNI/certificate correction and verification remain a separate
+  future gate.
+- No real consent acceptance was collected and no onboarding or completion UI
+  was added. Terms, Privacy and Cancellation texts and exposed versions remain
+  an explicit blocker for real consent UI. Supabase, contact verification,
+  `rating.isVerified`, admin backoffice, migration/schema, backend, payment and
+  provider boundaries are unchanged.
+- Because the new client is not runtime-reachable, this local code/test/docs
+  candidate has deployment `not_needed`. No commit, push, integration,
+  SSH/DB/schema command, TLS/nginx/restart/rollout, provider/API write,
+  secrets/env change or production action occurred. The next bounded frontend
+  slice after review/commit is TMA onboarding gate and profile first-run/resume
+  UI wiring; consent/survey/completion UI remains blocked as described above.
