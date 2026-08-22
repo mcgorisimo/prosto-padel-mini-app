@@ -2091,6 +2091,240 @@ test.describe('backend session credential lifecycle', () => {
     });
   });
 
+  test('advances onboarding through the private credential boundary and fails closed for conflicts or malformed state', async ({
+    page,
+  }) => {
+    await prepareTelegramWithSecureStorage(page, null, '');
+    await page.goto('/');
+
+    const summary = await page.evaluate(async (parameters) => {
+      const { createTelegramBackendLoginLifecycle } = await import(
+        '/src/hooks/useTelegramBackendLogin.js'
+      );
+      const consents = Object.freeze([
+        Object.freeze({ kind: 'terms', documentVersion: 'synthetic-v1' }),
+        Object.freeze({ kind: 'privacy', documentVersion: 'synthetic-v1' }),
+        Object.freeze({ kind: 'cancellation', documentVersion: 'synthetic-v1' }),
+      ]);
+      const onboardingState = (currentStep, revision, acceptedConsents = []) =>
+        Object.freeze({
+          status: 'in_progress',
+          flowVersion: 'tma_v1',
+          currentStep,
+          surveyVersion: 'initial_level_v1',
+          revision,
+          profile: Object.freeze({
+            firstName: 'Synthetic',
+            lastName: null,
+          }),
+          contacts: Object.freeze({
+            phone: parameters.syntheticPhone,
+            normalizedEmail: parameters.syntheticEmail,
+            assurance: 'declared',
+          }),
+          consents: acceptedConsents,
+          surveyAnswers: Object.freeze({}),
+        });
+      const consentsState = onboardingState('consents', 2);
+      const surveyState = onboardingState('level_survey', 3, consents);
+      const calls = [];
+      let storedCredential = null;
+      const lifecycle = createTelegramBackendLoginLifecycle({
+        fingerprint: async () => 'onboarding-progress-fingerprint',
+        client: {
+          async login() {
+            return {
+              outcome: 'authenticated',
+              credential: parameters.credential,
+              expiresAt: Math.floor(Date.now() / 1_000) + 3_600,
+              accountKind: 'existing',
+            };
+          },
+        },
+        sessions: {
+          async refresh() {
+            throw new Error('must not refresh');
+          },
+          async authenticate(credential) {
+            if (credential !== parameters.credential) {
+              return { outcome: 'rejected', reason: 'internal_error' };
+            }
+            return {
+              outcome: 'authenticated',
+              principal: {
+                accountId: parameters.accountId,
+                role: 'player',
+                expiresAt: Math.floor(Date.now() / 1_000) + 3_600,
+              },
+            };
+          },
+          async logout() {
+            throw new Error('must not logout');
+          },
+        },
+        onboarding: {
+          async advance(credential, progress, options) {
+            calls.push({
+              credentialMatched: credential === parameters.credential,
+              progress,
+              signalPresent: options.signal instanceof AbortSignal,
+            });
+            switch (calls.length) {
+              case 1:
+                return { outcome: 'advanced', onboarding: consentsState };
+              case 2:
+              case 3:
+                return { outcome: 'advanced', onboarding: surveyState };
+              case 4:
+                return { outcome: 'rejected', reason: 'stale_revision' };
+              case 5:
+                return { outcome: 'rejected', reason: 'conflict' };
+              case 6:
+                return {
+                  outcome: 'advanced',
+                  onboarding: { ...surveyState, revision: 'unsafe' },
+                };
+              default:
+                return { outcome: 'rejected', reason: 'invalid' };
+            }
+          },
+        },
+        credentialStorage: {
+          async read() {
+            return { outcome: 'empty' };
+          },
+          async write(credential) {
+            storedCredential = credential;
+            return { outcome: 'stored' };
+          },
+          async remove() {
+            storedCredential = null;
+            return { outcome: 'removed' };
+          },
+        },
+      });
+
+      const detach = lifecycle.attach(parameters.initData, () => {});
+      for (let attempt = 0; attempt < 50; attempt += 1) {
+        if (lifecycle.hasPrincipal()) break;
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+
+      const toConsents = Object.freeze({
+        expectedRevision: 1,
+        flowVersion: 'tma_v1',
+        nextStep: 'consents',
+      });
+      const toSurvey = Object.freeze({
+        expectedRevision: 2,
+        flowVersion: 'tma_v1',
+        nextStep: 'level_survey',
+        consents,
+      });
+      const first = await lifecycle.advanceOwnOnboarding(toConsents);
+      const survey = await lifecycle.advanceOwnOnboarding(toSurvey);
+      const idempotentRetry = await lifecycle.advanceOwnOnboarding(toSurvey);
+      const stale = await lifecycle.advanceOwnOnboarding(toSurvey);
+      const different = await lifecycle.advanceOwnOnboarding({
+        ...toSurvey,
+        consents: consents.map((consent) => ({
+          ...consent,
+          documentVersion: 'synthetic-v2',
+        })),
+      });
+      const malformed = await lifecycle.advanceOwnOnboarding(toSurvey);
+      const credentialStayedBeforeUnauthorized =
+        storedCredential === parameters.credential;
+      const unauthorized = await lifecycle.advanceOwnOnboarding(toSurvey);
+      for (let attempt = 0; attempt < 50; attempt += 1) {
+        if (storedCredential === null) break;
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      detach();
+
+      const localValues = Array.from(
+        { length: localStorage.length },
+        (_, index) => localStorage.getItem(localStorage.key(index)),
+      ).filter((value) => typeof value === 'string');
+      const serializedResults = JSON.stringify([
+        first,
+        survey,
+        idempotentRetry,
+        stale,
+        different,
+        malformed,
+        unauthorized,
+      ]);
+
+      return {
+        calls: calls.length,
+        everyCredentialMatched: calls.every(
+          ({ credentialMatched }) => credentialMatched,
+        ),
+        everySignalPresent: calls.every(({ signalPresent }) => signalPresent),
+        exactFirstProgress:
+          JSON.stringify(calls[0].progress) === JSON.stringify(toConsents),
+        exactSurveyProgress:
+          JSON.stringify(calls[1].progress) === JSON.stringify(toSurvey),
+        exactIdempotentRetry:
+          JSON.stringify(calls[2].progress) === JSON.stringify(toSurvey),
+        firstOutcome: first.outcome,
+        firstStep: first.onboarding?.currentStep,
+        surveyOutcome: survey.outcome,
+        surveyStep: survey.onboarding?.currentStep,
+        retryOutcome: idempotentRetry.outcome,
+        retryRevision: idempotentRetry.onboarding?.revision,
+        stale,
+        different,
+        malformed,
+        unauthorized,
+        boundaryCleared:
+          !lifecycle.hasCredential() && !lifecycle.hasPrincipal(),
+        storedCredentialCleared: storedCredential === null,
+        resultExposesCredential: serializedResults.includes(
+          parameters.credential,
+        ),
+        localStorageExposesPrivateData: localValues.some(
+          (value) =>
+            value.includes(parameters.credential) ||
+            value.includes(parameters.syntheticPhone) ||
+            value.includes(parameters.syntheticEmail),
+        ),
+        credentialStayedBeforeUnauthorized,
+      };
+    }, {
+      credential: LOGIN_CREDENTIAL,
+      accountId: SYNTHETIC_ACCOUNT_ID,
+      initData: SYNTHETIC_INIT_DATA,
+      syntheticPhone: '+79990000001',
+      syntheticEmail: 'onboarding-progress@example.test',
+    });
+
+    expect(summary).toEqual({
+      calls: 7,
+      everyCredentialMatched: true,
+      everySignalPresent: true,
+      exactFirstProgress: true,
+      exactSurveyProgress: true,
+      exactIdempotentRetry: true,
+      firstOutcome: 'advanced',
+      firstStep: 'consents',
+      surveyOutcome: 'advanced',
+      surveyStep: 'level_survey',
+      retryOutcome: 'advanced',
+      retryRevision: 3,
+      stale: { outcome: 'rejected', reason: 'stale_revision' },
+      different: { outcome: 'rejected', reason: 'conflict' },
+      malformed: { outcome: 'rejected', reason: 'internal_error' },
+      unauthorized: { outcome: 'rejected', reason: 'session_invalid' },
+      boundaryCleared: true,
+      storedCredentialCleared: true,
+      resultExposesCredential: false,
+      localStorageExposesPrivateData: false,
+      credentialStayedBeforeUnauthorized: true,
+    });
+  });
+
   test('profile rejection invalidates the private credential and SecureStorage boundary', async ({
     page,
   }) => {

@@ -5800,3 +5800,42 @@
 - Independent read-only P0/P1 review of the exact one-file closeout found no
   factual, scope, PII-boundary or deployment-status issue: acceptance PASS
   with `P0=0, P1=0`.
+
+### 2026-08-22 — D5.1 frontend onboarding progress lifecycle foundation
+
+- The clean isolated worktree started from exact integrated `main`
+  `ff9dddc93dabbd74e03fed1e9e367bac32942718`. Added the narrow
+  `advanceOwnOnboarding` bridge from the existing `playerOnboardingClient`
+  through the private Telegram bearer lifecycle. The bridge presents the
+  credential only to the bounded client call, forwards its abort signal and
+  accepts an `advanced` response only when its exact parsed state is
+  `in_progress` at the requested `consents` or `level_survey` step.
+- The focused browser lifecycle regression passed `1 / 1`. It covers both
+  successful progress states, an exact idempotent retry, stale revision,
+  different-request conflict, structurally malformed state, unauthorized
+  session clearing, private credential presentation and absence of the
+  synthetic credential/declared contacts from browser `localStorage`.
+- `AuthGate`, `OnboardingProfileGate` and `playerOnboardingClient` were not
+  changed. No consent, survey or completion UI was added; no real consent was
+  collected; no Terms/Privacy/Cancellation text or document version was
+  invented. The backend test-policy version `2026-08-01` was not added to the
+  frontend. No API/DB/provider write, SSH, migration, rollout/restart,
+  env/secrets change or production action occurred.
+- Mandatory root gates PASS: `npm.cmd run test:e2e` passed
+  `99 / 1 intentional skip`, and `npm.cmd run build` passed with `1621`
+  modules transformed; the existing large-chunk advisory remains.
+  Dependencies were not installed or changed: normalized-LF
+  `package-lock.json` SHA-256 remained
+  `36F6B0109D39A8E06249B3E2B6214DD8631D21849660A9961FF64E815E7E415D`.
+- This source change affects a future frontend bundle but has no UI caller in
+  this slice. Commit, integration and test rollout were explicitly excluded,
+  so deployment is `deployment_deferred_by_user`; Selectel test remains on
+  runtime tree `552cd1d048dc2399687285c6b816197e94186f76` with no container,
+  health, smoke or log change in this local slice.
+- D5.1 remains open. Real consent acceptance and completion UI stay blocked
+  until approved, user-visible Terms, Privacy and Cancellation texts, URLs and
+  exact document versions exist. Survey submission remains coupled to the
+  separately gated completion contract and was not exposed here.
+- Independent read-only review of the exact three-file candidate found no
+  scope, auth-boundary, PII-safety, contract or deployment-status issue:
+  acceptance PASS with `P0=0, P1=0`.
