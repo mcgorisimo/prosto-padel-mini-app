@@ -5242,3 +5242,53 @@
   and the exact final six-file candidate review returned `P0=0, P1=0`. The only
   post-review change records this result; final scope and whitespace were
   rechecked before handoff.
+
+### 2026-08-22 — D5.1 migration 037 applied and verified on Selectel test
+
+- Exact integrated source commit
+  `003e741e67ef21b1ee52a1dd2fa7303336b6dfe3` was used only to stream the
+  reviewed migration artifacts through the loaded Windows SSH agent directly
+  into Selectel test PostgreSQL. The confirmed target was host
+  `prosto-padel-test-01`, Compose project `prosto-padel-test`, PostgreSQL
+  `14.23`, database `prosto_padel_test_migration_cycle`, primary/not in
+  recovery. Database user `prosto_padel_test` is a member of
+  `backend_auth_owner`, while `backend_auth_app` is not.
+- Exact read-only PRECHECK SHA-256
+  `3AD45EFE2BFEDEB68374537FD1BA477589B69C246D8E421E88C438986F82CEA5`
+  exited `0` with empty stderr, returned `ready=true`, confirmed the canonical
+  migration-035 function/relation baseline and migration-036 function ACL, and
+  ended with `ROLLBACK`. It observed one onboarding row, zero legacy
+  `contacts` rows and zero consent rows without exposing identifiers or PII.
+- Exact migration SHA-256
+  `700C801EE71A265EC3889D3A77B61FC20B43F31C0682171F71513987E47BFB43`
+  was applied exactly once with exit `0` and empty stderr and reached `COMMIT`.
+  It replaced only
+  `backend_auth.guard_player_onboarding_state_transition()`, restored the exact
+  post-036 function ACL and did not alter relations or persisted data.
+- Exact read-only POSTCHECK SHA-256
+  `4843E1FD1618D06300C51C77E1774A8407C9A043DE171EE96DF30472D0B2F57A`
+  exited `0` with empty stderr, returned `verified=true` and ended with
+  `ROLLBACK`. It verified direct `profile -> consents`, prohibited new
+  `profile -> contacts`, retained legacy `contacts -> consents`, allowed
+  `consents -> level_survey`, and confirmed
+  `backend_auth_app EXECUTE=true`, `PUBLIC EXECUTE=false`, unchanged relation
+  definitions/data and synthetic fixture compatibility. Observed counts
+  remained one onboarding row, zero legacy `contacts` rows and zero consent
+  rows.
+- Migration 037 is `applied_verified` and must not be applied again. Its
+  rollback migration was not run. Server checkout, files, containers,
+  application runtime, env/secrets, TLS/nginx, provider API, frontend and
+  production were unchanged; no restart, rebuild or rollout occurred.
+  Deployment is `applied_verified_runtime_unchanged`.
+- Required docs-only gates PASS: root E2E `94 passed / 1 skipped` and root build
+  `1619 modules`. The isolated worktree and existing dependency tree had the
+  same normalized lockfile SHA-256 and exact Git lockfile blob. The initial
+  build attempt was blocked only by sandbox traversal of the temporary
+  dependency junction; the exact unrestricted retry passed. The junction was
+  removed, and no dependency, package or lockfile was installed or changed.
+- Independent local read-only review of the exact one-file closeout diff
+  returned acceptance PASS with `P0=0, P1=0`; scope and whitespace checks also
+  passed. The next safe gate is a separate local docs-only commit. Backend
+  progress API wiring remains a later code slice; real consent UI remains
+  blocked until the Terms, Privacy and Cancellation texts and exposed versions
+  are approved.
