@@ -5125,3 +5125,63 @@
   diff passed with `P0=0, P1=0`; the only post-review change records the review
   result and diagnostic facts in this entry and is subject to a final exact-diff
   recheck before a separate local commit decision.
+
+### 2026-08-22 — D5.1 onboarding completion Selectel test rollout checkpoint
+
+- Exact completion commit
+  `852ca925ea19bbc5a724cf41422c6a0e70cb3bb4` was integrated into `main` and
+  deployed backend-only to Selectel test host `prosto-padel-test-01`, Compose
+  project `prosto-padel-test`. The server checkout was clean and exact at that
+  commit after rollout. Applied migrations 035/036 were not reapplied; exact
+  migration-036 POSTCHECK SHA-256
+  `D0E81EF8CFE0A5B906609B56D20137C52C5C308B291741B217DB431F95BE8052`
+  passed as the authoritative verifier for the current migration-035
+  fingerprints and post-036 function ACL.
+- Only the backend container was rebuilt and recreated. It remained healthy
+  with restart count `0` at container
+  `450da5cef5649637f377bd231d229da67c6731fc536dcbcc89e793bb1047be7b` /
+  image
+  `sha256:fc033510fdffbec7362e8e9dea193ebcc8121a736fe43c7ebd54e694f1c5c960`;
+  internal `/api/v1/health` returned `200`. Frontend container
+  `50644090c6ea738721c306cfa7174e4897f8d15a0c6cd6963b36f60a7399a428`,
+  nginx container
+  `e5b98b53a385aef67465e097753fb54b060596d3c620af3cfb484a175d624be7`
+  and PostgreSQL container
+  `5e36d4dc1a5c3e2fa658382cfc4a8dff7fe3ea2ba1a9834bb89cc83df743f7be`
+  were unchanged.
+- Public HTTPS health and unauthorized no-store GET/PATCH
+  `/api/v1/onboarding/me` plus POST `/api/v1/onboarding/me/complete` were not
+  verified. Test DNS initially had no authoritative A record, and direct
+  SNI verification correctly failed because the active certificate covers only
+  production `app.prostopdl.ru`, not `test-app.prostopdl.ru`. The owner has now
+  added `A test-app.prostopdl.ru -> 135.106.155.112` in REG.RU, but repeated
+  read-only checks still return no record from both authoritative servers and
+  public resolvers. Publication is pending; no repeated REG.RU action is
+  requested. TLS/nginx/certificate work and public rollout verification remain
+  separate gates after authoritative DNS confirmation.
+- Authenticated completion smoke remains
+  `pending_separate_api_write_approval`. It is also intentionally unreachable
+  from the current real user flow because the draft writer keeps
+  `currentStep=profile`; a separate owner-scoped resumable progress contract
+  must enforce `profile -> consents -> level_survey` without silent skip before
+  completion can be exercised through TMA. Real consent acceptance and user
+  completion UI remain blocked until Terms, Privacy and Cancellation texts and
+  their exposed versions are approved; `2026-08-01` is backend test policy only.
+- Deployment status is `applied_verification_blocked_by_test_dns_tls`: the exact
+  backend runtime is applied and internally healthy, while public HTTPS,
+  unauthorized routing, bounded post-verification logs and authenticated
+  completion smoke remain open. This local checkpoint changes only this
+  WORKLOG; its own deployment is `not_needed`. No SSH/DB/schema/provider API
+  command, server/container/runtime/env change, commit, push or production
+  action was performed for this closeout.
+- Required docs-only gates PASS: root E2E `94 passed / 1 skipped` and root build
+  `1619 modules`. Initial attempts stopped before their checks because this
+  isolated worktree has no local `node_modules`; a dependency tree with the
+  exact same root lockfile SHA-256 was then used through a temporary junction.
+  The first build retry was blocked by sandbox traversal of that junction, and
+  the exact unrestricted retry passed. The temporary junction was removed; no
+  dependency, package or lockfile was installed or changed.
+- Local read-only review of the exact one-file checkpoint diff returned
+  acceptance PASS with `P0=0, P1=0`. This final line records only that review
+  result; the resulting diff was rechecked for exact one-file scope and
+  whitespace errors before handoff.
