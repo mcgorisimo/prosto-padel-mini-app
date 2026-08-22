@@ -5688,3 +5688,69 @@
 - Independent read-only P0/P1 review of the exact one-file closeout found no
   factual, scope or deployment-status issue: acceptance PASS with
   `P0=0, P1=0`.
+
+### 2026-08-22 — D5.1 TMA onboarding profile frontend Selectel test rollout
+
+- Exact integrated commit
+  `552cd1d048dc2399687285c6b816197e94186f76` was targeted only at Selectel
+  test host `prosto-padel-test-01` / `135.106.155.112`, Compose project
+  `prosto-padel-test`. The final read-only preflight passed before any rollout
+  write: server checkout was clean at
+  `450479eb82697542ab5e2f5f8ca83c504c2fe735`, actual remote `origin/main` was
+  the target commit, the documented `.env.test` was present with owner
+  `prostopadel` and mode `0600`, and all four existing containers were healthy
+  with restart count `0`. Two earlier read-only Docker metadata probes stopped
+  without writes because the non-root account had neither socket access nor
+  passwordless sudo; the successful preflight used the existing root SSH
+  boundary without exposing credentials or environment values.
+- Before rollout, frontend container
+  `50644090c6ea738721c306cfa7174e4897f8d15a0c6cd6963b36f60a7399a428` /
+  image
+  `sha256:135a897a3f84d73184b6501395eca460e846ea4aee1f9e2cf8177102cfcca7f3`
+  was running and healthy with restart count `0`. Backend
+  `490ab45823b7f4f2900e55616a0741ac2d4f34fbb91cd4ea73044e26de0d5a55`,
+  nginx `e5b98b53a385aef67465e097753fb54b060596d3c620af3cfb484a175d624be7`
+  and PostgreSQL
+  `5e36d4dc1a5c3e2fa658382cfc4a8dff7fe3ea2ba1a9834bb89cc83df743f7be`
+  were exact expected containers and also healthy with restart count `0`.
+- The clean detached checkout was fast-forwarded to the exact target. The
+  explicit `.env.test`, `compose.yaml` and `compose.runtime-backend.yaml`
+  invocation passed `config --quiet` without printing expanded configuration.
+  The frontend-only build passed with `1621` modules transformed and
+  `VITE_TELEGRAM_BACKEND_LOGIN_ENABLED=true`; the existing large-chunk advisory
+  remains. Only frontend was rebuilt and force-recreated with `--no-deps`.
+- New frontend container
+  `a1c62b4d09bc55243af67e1aead54fa00a7ce63f3750283485edb4879751733e` /
+  image
+  `sha256:4dadee43e10c7be63bae71011daf1d27458ceaa0091f650adc4f29ef0269ce5c`
+  is running and healthy with restart count `0`. Backend, nginx and PostgreSQL
+  retained the exact container IDs above and remained healthy with restart
+  count `0`; final server checkout is clean and exact at the target commit.
+- Windows Schannel checks used normal certificate/SNI validation without
+  `--insecure`. HTTPS frontend `/` returned `200`, and HTTPS
+  `/api/v1/health` returned `200`; both returned `ssl_verify_result=0` from
+  exact remote IP `135.106.155.112`. Bounded logs from rollout start
+  `2026-08-22T13:46:25Z` returned frontend HTTP 5xx `0`, frontend critical
+  `0`, nginx HTTP 5xx `0` and nginx critical `0`.
+- Test SNI config SHA-256 remained
+  `564ca28d5086c70c44fa0c97c227736c3f892346950397ed944f5022892e22a9`,
+  and production `app.prostopdl.ru` config SHA-256 remained
+  `d6e6484a1917ae061cea986ae3926c34a87278140313873989b3b30a6da0438a`.
+  No backend/nginx/PostgreSQL container, TLS/nginx config, env/secrets,
+  DB/schema, provider API or production change occurred.
+- Manual authenticated TMA profile smoke is
+  `pending_separate_owner_gate`; it was not combined with rollout. Deployment
+  is `applied_with_manual_tma_profile_smoke_pending`. This local append-only
+  docs closeout itself has deployment `not_needed`; no commit, push,
+  integration, SSH/DB/schema command, restart/rebuild/rollout, provider/API
+  write, secrets/env change or production action occurred while preparing it.
+- Mandatory root gates for this exact one-file closeout PASS:
+  `npm.cmd run test:e2e` passed `98 / 1 intentional skip`, and
+  `npm.cmd run build` passed with `1621` modules transformed; the existing
+  large-chunk advisory remains. Dependencies were not installed or changed:
+  normalized-LF `package-lock.json` SHA-256 remained
+  `36F6B0109D39A8E06249B3E2B6214DD8631D21849660A9961FF64E815E7E415D`,
+  and the temporary local dependency junction was removed after the gates.
+- Independent read-only P0/P1 review of the exact one-file closeout found no
+  factual, scope or deployment-status issue: acceptance PASS with
+  `P0=0, P1=0`.
