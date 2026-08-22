@@ -5354,3 +5354,76 @@
   backend and root gate above was rerun. The exact corrected candidate review
   returned `P0=0, P1=0`; only this review record was added afterward and final
   scope, whitespace and manifest checks were repeated before handoff.
+
+### 2026-08-22 — D5.1 onboarding progress Selectel test rollout checkpoint
+
+- Exact integrated commit
+  `450479eb82697542ab5e2f5f8ca83c504c2fe735` was targeted only at Selectel
+  test host `prosto-padel-test-01`, Compose project `prosto-padel-test`.
+  Read-only preflight confirmed the prior clean detached checkout at
+  `852ca925ea19bbc5a724cf41422c6a0e70cb3bb4`, actual remote `origin/main` at
+  the target commit and unchanged healthy backend/frontend/nginx/PostgreSQL
+  containers with restart count `0`.
+- Exact canonical-LF read-only migration-037 POSTCHECK SHA-256
+  `4843E1FD1618D06300C51C77E1774A8407C9A043DE171EE96DF30472D0B2F57A`
+  exited `0` with empty stderr, returned `verified=true`, confirmed the current
+  migration-035/036/037 fingerprints, transition matrix and function ACL, and
+  ended with `ROLLBACK`. Migration 037 remained `applied_verified` and was not
+  applied again; relation definitions and persisted data were unchanged.
+- The first rollout attempt began at `2026-08-22T10:46:44Z`. Fetch and detached
+  checkout advanced the clean server tree to the target commit, but Compose
+  stopped before build/recreate because the command had not specified the
+  required environment source and therefore could not resolve
+  `TELEGRAM_LOGIN_UUID_NAMESPACE`. No container or image changed, no rollback
+  was attempted and no guessed environment value was supplied.
+- Bounded read-only diagnosis identified the documented runtime source as
+  `/home/prostopadel/prosto-padel-mini-app/infra/test/.env.test`, a regular
+  non-symlink file owned by `prostopadel` with mode `0600`. All eleven required
+  backend keys were declared and nonempty; all nine referenced secret files
+  were regular non-symlinks owned by `prostopadel` with mode `0600`. Direct
+  environment values and mount source paths matched the already running backend
+  without revealing any value or secret. Two legacy `VITE_SUPABASE_*` key names
+  remain in that source but were absent from the backend container and are not
+  consumed by this backend-only Compose service; no Supabase key was passed to
+  the rebuilt backend. Their eventual removal remains a separate bounded
+  env-cleanup gate.
+- The retry began at `2026-08-22T10:56:11Z`, used the exact base and runtime
+  Compose files plus explicit `--env-file` and passed `config --quiet` without
+  printing expanded configuration. Only backend was rebuilt and recreated:
+  old container
+  `450da5cef5649637f377bd231d229da67c6731fc536dcbcc89e793bb1047be7b`
+  was replaced by
+  `490ab45823b7f4f2900e55616a0741ac2d4f34fbb91cd4ea73044e26de0d5a55`
+  using image
+  `sha256:1550ae332d2ee8e5875bd8a1992a42f44ec8b3f91ff1c3514fe2ceac3c624615`.
+  The new backend is running/healthy with restart count `0`; its internal
+  `/api/v1/health` returned `200`.
+- Internal unauthorized GET and PATCH `/api/v1/onboarding/me`, POST
+  `/api/v1/onboarding/me/progress` and POST
+  `/api/v1/onboarding/me/complete` each returned `401` with `no-store=true`.
+  The first stream runner omitted `docker exec -i` and therefore issued no
+  request; its corrected read-only rerun produced the four PASS results above.
+  Bounded logs from retry start returned backend critical count `0` and nginx
+  HTTP 5xx count `0`.
+- Frontend container
+  `50644090c6ea738721c306cfa7174e4897f8d15a0c6cd6963b36f60a7399a428`,
+  nginx container
+  `e5b98b53a385aef67465e097753fb54b060596d3c620af3cfb484a175d624be7`
+  and PostgreSQL container
+  `5e36d4dc1a5c3e2fa658382cfc4a8dff7fe3ea2ba1a9834bb89cc83df743f7be`
+  remained unchanged, running and healthy with restart count `0`. Final server
+  checkout is clean and exact at the target commit. Env/secrets, DB/schema,
+  frontend, nginx/TLS configuration, provider API and production were not
+  changed; public HTTPS/TLS checks were not run.
+- Authenticated progress smoke is
+  `pending_separate_api_write_approval`. Deployment is
+  `applied_with_authenticated_progress_smoke_pending`. This local closeout
+  changes only this WORKLOG and has deployment `not_needed`. The next gate is a
+  local commit of this reviewed one-file closeout; authenticated progress smoke
+  remains the next functional D5.1 checkpoint after that commit is integrated.
+- Mandatory root gates used the unchanged root lockfile through a validated
+  read-only `node_modules` junction, removed immediately afterward. The first
+  full `npm.cmd run test:e2e` run had one unrelated UI stability timeout in
+  `booking-availability-client.spec.js`; the exact focused rerun passed `1/1`,
+  and a clean full rerun passed `94` with `1` intentional skip. Final
+  `npm.cmd run build` passed with `1619` modules transformed.
