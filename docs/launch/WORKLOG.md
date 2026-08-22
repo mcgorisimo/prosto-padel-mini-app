@@ -5754,3 +5754,49 @@
 - Independent read-only P0/P1 review of the exact one-file closeout found no
   factual, scope or deployment-status issue: acceptance PASS with
   `P0=0, P1=0`.
+
+### 2026-08-22 — D5.1 manual TMA onboarding profile visual smoke
+
+- The owner opened `test-app.prostopdl.ru` through Telegram Mini App against
+  deployed runtime tree
+  `552cd1d048dc2399687285c6b816197e94186f76`; integrated `main`
+  `a98ab137afdfbfe88b40afebd6f341966179f7c8` differs only by the already
+  recorded rollout documentation. Automatic Telegram authentication passed
+  without a separate registration/login screen, and the backend-owned profile
+  gate rendered successfully.
+- The first owner screenshot showed the populated profile form and its visible
+  success status, so a profile save had already been performed manually by the
+  owner outside agent scope before the final no-submit continuation. The agent
+  did not initiate or replay PATCH/progress/complete. PII values visible in the
+  owner-provided screenshots were not transcribed into repository files, tool
+  commands, logs or this worklog.
+- Manual visual checks PASS for top/bottom safe-area clearance, absence of
+  horizontal overflow, visible field labels and declared-contact disclosure,
+  approximately 48 px inputs/action, and a visible high-contrast focus state.
+  With the native mobile keyboard open, the focused field remained uncovered;
+  the owner separately reported `keyboard_scroll_bottom=PASS` and
+  `long_text_layout=PASS` without another screenshot or submit.
+- Inline validation was intentionally
+  `not_exercised_no_submit`. Its client-side field errors, first-invalid focus
+  and no-write invalid-submit behavior remain covered by the reviewed focused
+  profile UI/client tests and Telegram auth/onboarding Playwright regressions.
+  Final manual visual acceptance is `P0=0, P1=0`.
+- Manual smoke status is
+  `deployment=applied_verified_with_manual_tma_profile_visual_smoke_pass`.
+  The final continuation performed no submit, credential extraction, agent
+  API/DB/provider write, SSH, checkout/container/runtime/config/env change or
+  production action. This local append-only docs closeout itself has deployment
+  `not_needed` and performs no commit, push or integration.
+- D5.1 remains open for the separately bounded consent/survey frontend work.
+  Real consent acceptance and completion UI remain blocked until the Terms,
+  Privacy and Cancellation texts and their user-visible versions are approved.
+- Mandatory root gates for this exact one-file closeout PASS:
+  `npm.cmd run test:e2e` passed `98 / 1 intentional skip`, and
+  `npm.cmd run build` passed with `1621` modules transformed; the existing
+  large-chunk advisory remains. Dependencies were not installed or changed:
+  normalized-LF `package-lock.json` SHA-256 remained
+  `36F6B0109D39A8E06249B3E2B6214DD8631D21849660A9961FF64E815E7E415D`,
+  and the temporary local dependency junction was removed after the gates.
+- Independent read-only P0/P1 review of the exact one-file closeout found no
+  factual, scope, PII-boundary or deployment-status issue: acceptance PASS
+  with `P0=0, P1=0`.
