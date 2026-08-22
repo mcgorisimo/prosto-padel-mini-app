@@ -8,6 +8,7 @@ const LOGIN_ROUTE = '**/api/v1/auth/telegram/login';
 const REFRESH_ROUTE = '**/api/v1/auth/session/refresh';
 const SESSION_ME_ROUTE = '**/api/v1/auth/session/me';
 const PROFILE_ROUTE = '**/api/v1/profile/me';
+const ONBOARDING_ROUTE = '**/api/v1/onboarding/me';
 const TELEGRAM_SDK_ROUTE = 'https://telegram.org/js/telegram-web-app.js';
 const SYNTHETIC_INIT_DATA =
   'query_id=session-lifecycle&auth_date=1700000000&hash=synthetic';
@@ -32,6 +33,33 @@ async function fulfillJson(route, status, body) {
     status,
     contentType: 'application/json',
     body: JSON.stringify(body),
+  });
+}
+
+async function fulfillCompletedOnboarding(route) {
+  await route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    headers: { 'Cache-Control': 'no-store' },
+    body: JSON.stringify({
+      status: 'completed',
+      flowVersion: 'tma_v1',
+      currentStep: 'completed',
+      surveyVersion: 'initial_level_v1',
+      revision: 4,
+      profile: { firstName: 'Synthetic', lastName: 'Player' },
+      contacts: {
+        phone: '+79991234567',
+        normalizedEmail: 'synthetic@example.com',
+        assurance: 'declared',
+      },
+      consents: [
+        { kind: 'terms', documentVersion: 'synthetic-v1' },
+        { kind: 'privacy', documentVersion: 'synthetic-v1' },
+        { kind: 'cancellation', documentVersion: 'synthetic-v1' },
+      ],
+      surveyAnswers: { experience: 'beginner' },
+    }),
   });
 }
 
@@ -113,6 +141,7 @@ test.describe('backend session credential lifecycle', () => {
         sidePreference: null,
       });
     });
+    await page.route(ONBOARDING_ROUTE, fulfillCompletedOnboarding);
   });
 
   test('restores through refresh, replaces SecureStorage and skips Telegram login', async ({

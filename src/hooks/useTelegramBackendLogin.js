@@ -5,6 +5,10 @@ import {
   isBackendOwnProfilePatch,
 } from '../lib/backendSessionClient';
 import { bookingAvailabilityClient } from '../lib/bookingAvailabilityClient';
+import {
+  playerOnboardingClient,
+  readPlayerOnboardingState,
+} from '../lib/playerOnboardingClient';
 import { telegramBackendLoginClient } from '../lib/telegramBackendLogin';
 import { telegramSecureCredentialStorage } from '../lib/telegramSecureCredentialStorage';
 
@@ -67,6 +71,8 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
   const profiles = dependencies.profiles ?? sessions;
   const matches = dependencies.matches ?? sessions;
   const bookings = dependencies.bookings ?? bookingAvailabilityClient;
+  const onboarding =
+    dependencies.onboarding ?? playerOnboardingClient;
   const credentialStorage =
     dependencies.credentialStorage ?? telegramSecureCredentialStorage;
   const fingerprint = dependencies.fingerprint ?? fingerprintInitData;
@@ -1143,6 +1149,25 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
     })();
   }
 
+  function loadOwnOnboarding() {
+    return runMatchOperation(
+      (credential, signal) => onboarding.read(credential, { signal }),
+      (result) =>
+        result?.outcome === 'loaded' &&
+        readPlayerOnboardingState(result.onboarding) !== null,
+    );
+  }
+
+  function saveOwnOnboardingDraft(draft) {
+    return runMatchOperation(
+      (credential, signal) =>
+        onboarding.saveDraft(credential, draft, { signal }),
+      (result) =>
+        result?.outcome === 'saved' &&
+        readPlayerOnboardingState(result.onboarding) !== null,
+    );
+  }
+
   function listBookingServices() {
     return runMatchOperation(
       (credential, signal) =>
@@ -1751,6 +1776,8 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
     updateOwnProfile,
     uploadOwnProfilePhoto,
     deleteOwnProfilePhoto,
+    loadOwnOnboarding,
+    saveOwnOnboardingDraft,
     listBookingServices,
     listBookingCourts,
     listBookingDates,
@@ -1860,6 +1887,26 @@ export function useTelegramBackendLogin() {
       }));
     }
     return telegramBackendLoginLifecycle.deleteOwnProfilePhoto();
+  }, []);
+
+  const loadOwnOnboarding = useCallback(() => {
+    if (!FEATURE_ENABLED) {
+      return Promise.resolve(Object.freeze({
+        outcome: 'rejected',
+        reason: 'not_authenticated',
+      }));
+    }
+    return telegramBackendLoginLifecycle.loadOwnOnboarding();
+  }, []);
+
+  const saveOwnOnboardingDraft = useCallback((draft) => {
+    if (!FEATURE_ENABLED) {
+      return Promise.resolve(Object.freeze({
+        outcome: 'rejected',
+        reason: 'not_authenticated',
+      }));
+    }
+    return telegramBackendLoginLifecycle.saveOwnOnboardingDraft(draft);
   }, []);
 
   const listBookingServices = useCallback(() => {
@@ -2329,6 +2376,8 @@ export function useTelegramBackendLogin() {
     updateOwnProfile,
     uploadOwnProfilePhoto,
     deleteOwnProfilePhoto,
+    loadOwnOnboarding,
+    saveOwnOnboardingDraft,
     listBookingServices,
     listBookingCourts,
     listBookingDates,

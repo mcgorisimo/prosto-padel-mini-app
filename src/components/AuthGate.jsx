@@ -10,6 +10,7 @@ import Toast from './Toast'; // Correct path for Toast
 import { useTelegramBackendLogin } from '../hooks/useTelegramBackendLogin';
 import TelegramBackendLoginStatus from './auth/TelegramBackendLoginStatus';
 import BallLoader from './BallLoader'; // Если мяч лежит в папке components
+import OnboardingProfileGate from './OnboardingProfileGate';
 
 export function resolveOwnProfileGate({
   backendRequired,
@@ -111,6 +112,10 @@ export default function AuthGate() {
   const [backendProfileStatus, setBackendProfileStatus] =
     useState('inactive');
   const backendProfileRequestRef = useRef(0);
+  const [playerOnboarding, setPlayerOnboarding] = useState(null);
+  const [playerOnboardingStatus, setPlayerOnboardingStatus] =
+    useState('inactive');
+  const playerOnboardingRequestRef = useRef(0);
 
   useEffect(() => {
     if (!telegramBackendLogin.sessionReady) {
@@ -153,6 +158,58 @@ export default function AuthGate() {
     backendProfileRequestRef.current += 1;
   }, []);
 
+  const loadPlayerOnboarding = useCallback(async ({
+    showLoading = true,
+  } = {}) => {
+    if (!telegramBackendLogin.sessionReady) {
+      return Object.freeze({
+        outcome: 'rejected',
+        reason: 'not_authenticated',
+      });
+    }
+    const requestToken = playerOnboardingRequestRef.current + 1;
+    playerOnboardingRequestRef.current = requestToken;
+    if (showLoading) setPlayerOnboardingStatus('loading');
+    try {
+      const result = await telegramBackendLogin.loadOwnOnboarding();
+      if (playerOnboardingRequestRef.current !== requestToken) return result;
+      if (result.outcome === 'loaded') {
+        setPlayerOnboarding(result.onboarding);
+        setPlayerOnboardingStatus('ready');
+      } else if (result.outcome !== 'cancelled') {
+        setPlayerOnboarding(null);
+        setPlayerOnboardingStatus('error');
+      }
+      return result;
+    } catch {
+      if (playerOnboardingRequestRef.current === requestToken) {
+        setPlayerOnboarding(null);
+        setPlayerOnboardingStatus('error');
+      }
+      return Object.freeze({
+        outcome: 'rejected',
+        reason: 'internal_error',
+      });
+    }
+  }, [
+    telegramBackendLogin.loadOwnOnboarding,
+    telegramBackendLogin.sessionReady,
+  ]);
+
+  useEffect(() => {
+    if (!telegramBackendLogin.sessionReady) {
+      playerOnboardingRequestRef.current += 1;
+      setPlayerOnboarding(null);
+      setPlayerOnboardingStatus('inactive');
+      return;
+    }
+    void loadPlayerOnboarding();
+  }, [loadPlayerOnboarding, telegramBackendLogin.sessionReady]);
+
+  useEffect(() => () => {
+    playerOnboardingRequestRef.current += 1;
+  }, []);
+
   const handleBackendProfileRefresh = useCallback(async () => {
     if (!telegramBackendLogin.sessionReady) {
       return Object.freeze({ outcome: 'rejected' });
@@ -177,13 +234,42 @@ export default function AuthGate() {
 
   const handleAppLogout = useCallback(async () => {
     backendProfileRequestRef.current += 1;
+    playerOnboardingRequestRef.current += 1;
     setBackendProfile(null);
     setBackendProfileStatus('inactive');
+    setPlayerOnboarding(null);
+    setPlayerOnboardingStatus('inactive');
     const backendResult = await telegramBackendLogin.logout();
     if (backendResult.outcome !== 'logged_out') {
       throw new Error('Backend session logout failed');
     }
   }, [telegramBackendLogin.logout]);
+
+  const handlePlayerOnboardingSave = useCallback(async (draft) => {
+    playerOnboardingRequestRef.current += 1;
+    const result = await telegramBackendLogin.saveOwnOnboardingDraft(draft);
+    if (result.outcome === 'saved') {
+      setPlayerOnboarding(result.onboarding);
+      setPlayerOnboardingStatus('ready');
+      return result;
+    }
+    if (
+      result.outcome === 'rejected' &&
+      result.reason === 'stale_revision'
+    ) {
+      const refreshed = await loadPlayerOnboarding({ showLoading: false });
+      return refreshed.outcome === 'loaded'
+        ? Object.freeze({
+            outcome: 'reconciled',
+            onboarding: refreshed.onboarding,
+          })
+        : refreshed;
+    }
+    return result;
+  }, [
+    loadPlayerOnboarding,
+    telegramBackendLogin.saveOwnOnboardingDraft,
+  ]);
 
   const handleBackendProfileSave = useCallback(async (changes) => {
     backendProfileRequestRef.current += 1;
@@ -331,6 +417,60 @@ export default function AuthGate() {
         <BallLoader />
         {telegramBackendStatus}
       </div>
+    );
+  }
+
+  if (playerOnboardingStatus !== 'ready' || playerOnboarding === null) {
+    if (playerOnboardingStatus === 'error') {
+      return (
+        <>
+          <main className="onboarding-profile-screen" data-testid="player-onboarding-load-gate" data-state="error">
+            <section className="onboarding-profile-card" aria-labelledby="onboarding-load-error-title">
+              <p className="onboarding-profile-eyebrow">Просто Падел</p>
+              <h1 id="onboarding-load-error-title">Не удалось загрузить анкету</h1>
+              <p className="onboarding-profile-intro" role="alert">
+                Проверьте соединение и попробуйте снова.
+              </p>
+              <button type="button" className="onboarding-profile-submit" onClick={() => void loadPlayerOnboarding()}>
+                Попробовать снова
+              </button>
+            </section>
+          </main>
+          {telegramBackendStatus}
+        </>
+      );
+    }
+    return (
+      <div data-testid="player-onboarding-load-gate" data-state="loading">
+        <BallLoader />
+        {telegramBackendStatus}
+      </div>
+    );
+  }
+
+  if (playerOnboarding.status !== 'completed') {
+    if (
+      playerOnboarding.currentStep === 'profile' ||
+      playerOnboarding.currentStep === 'contacts'
+    ) {
+      return (
+        <OnboardingProfileGate
+          onboarding={playerOnboarding}
+          onReload={loadPlayerOnboarding}
+          onSave={handlePlayerOnboardingSave}
+        />
+      );
+    }
+    return (
+      <main className="onboarding-profile-screen" data-testid="player-onboarding-next-step-gate">
+        <section className="onboarding-profile-card" aria-labelledby="onboarding-next-step-title">
+          <p className="onboarding-profile-eyebrow">Просто Падел</p>
+          <h1 id="onboarding-next-step-title">Профиль сохранён</h1>
+          <p className="onboarding-profile-intro">
+            Следующий шаг анкеты пока недоступен в этой версии приложения.
+          </p>
+        </section>
+      </main>
     );
   }
 

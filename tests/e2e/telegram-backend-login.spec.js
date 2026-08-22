@@ -7,6 +7,7 @@ const FEATURE_ENABLED =
 const LOGIN_ROUTE = '**/api/v1/auth/telegram/login';
 const SESSION_ME_ROUTE = '**/api/v1/auth/session/me';
 const PROFILE_ROUTE = '**/api/v1/profile/me';
+const ONBOARDING_ROUTE = '**/api/v1/onboarding/me';
 const TELEGRAM_SDK_ROUTE = 'https://telegram.org/js/telegram-web-app.js';
 const SYNTHETIC_INIT_DATA =
   'query_id=synthetic-login&auth_date=1700000000&hash=synthetic-hash';
@@ -27,6 +28,29 @@ function successBody(accountKind = 'new') {
     credential: SYNTHETIC_CREDENTIAL,
     expiresAt: Math.floor(Date.now() / 1_000) + 3_600,
     accountKind,
+  };
+}
+
+function onboardingState(overrides = {}) {
+  return {
+    status: 'completed',
+    flowVersion: 'tma_v1',
+    currentStep: 'completed',
+    surveyVersion: 'initial_level_v1',
+    revision: 4,
+    profile: { firstName: 'Synthetic', lastName: 'Player' },
+    contacts: {
+      phone: '+79991234567',
+      normalizedEmail: 'synthetic@example.com',
+      assurance: 'declared',
+    },
+    consents: [
+      { kind: 'terms', documentVersion: 'synthetic-v1' },
+      { kind: 'privacy', documentVersion: 'synthetic-v1' },
+      { kind: 'cancellation', documentVersion: 'synthetic-v1' },
+    ],
+    surveyAnswers: { experience: 'beginner' },
+    ...overrides,
   };
 }
 
@@ -100,6 +124,15 @@ async function fulfillJson(route, status, body) {
   });
 }
 
+async function fulfillOnboardingJson(route, status, body) {
+  await route.fulfill({
+    status,
+    contentType: 'application/json',
+    headers: { 'Cache-Control': 'no-store' },
+    body: JSON.stringify(body),
+  });
+}
+
 async function expectBackendApp(page) {
   await expect(page.locator('.bottom-nav')).toBeVisible();
 }
@@ -116,6 +149,7 @@ test.describe('Telegram backend login feature disabled', () => {
     let loginCalls = 0;
     let sessionCalls = 0;
     let profileCalls = 0;
+    let onboardingCalls = 0;
     await prepareBrowser(page);
     await page.route(LOGIN_ROUTE, async (route) => {
       loginCalls += 1;
@@ -143,15 +177,20 @@ test.describe('Telegram backend login feature disabled', () => {
         sidePreference: null,
       });
     });
+    await page.route(ONBOARDING_ROUTE, async (route) => {
+      onboardingCalls += 1;
+      await fulfillOnboardingJson(route, 200, onboardingState());
+    });
 
     await page.goto('/');
     await expect(page.locator('.bottom-nav')).toHaveCount(0);
     await page.waitForTimeout(300);
 
-    expect({ loginCalls, sessionCalls, profileCalls }).toEqual({
+    expect({ loginCalls, sessionCalls, profileCalls, onboardingCalls }).toEqual({
       loginCalls: 0,
       sessionCalls: 0,
       profileCalls: 0,
+      onboardingCalls: 0,
     });
     await expect(
       page.getByTestId('telegram-backend-login-status'),
@@ -185,6 +224,9 @@ test.describe('Telegram backend login feature enabled', () => {
         phone: null,
         sidePreference: null,
       });
+    });
+    await page.route(ONBOARDING_ROUTE, async (route) => {
+      await fulfillOnboardingJson(route, 200, onboardingState());
     });
   });
 
@@ -358,6 +400,241 @@ test.describe('Telegram backend login feature enabled', () => {
     await expect(status).toHaveAttribute('data-status', 'authenticated');
     await expectBackendApp(page);
     expect(legacyProviderRequests).toBe(0);
+  });
+
+  test('shows first-run profile onboarding and sends one canonical revisioned PATCH without persisting PII', async ({
+    page,
+  }) => {
+    const phone = '+7 (999) 123-45-67';
+    const canonicalPhone = '+79991234567';
+    const email = 'PLAYER@EXAMPLE.COM';
+    let readCalls = 0;
+    let patchCalls = 0;
+    let patchContract = null;
+    let piiConsoleLeak = false;
+
+    page.on('console', (message) => {
+      const text = message.text();
+      if (text.includes(canonicalPhone) || text.includes(email)) {
+        piiConsoleLeak = true;
+      }
+    });
+    await page.unroute(ONBOARDING_ROUTE);
+    await page.route(ONBOARDING_ROUTE, async (route) => {
+      const request = route.request();
+      if (request.method() === 'PATCH') {
+        patchCalls += 1;
+        const headers = request.headers();
+        const body = request.postDataJSON();
+        patchContract = {
+          body,
+          bearerMatches:
+            headers.authorization === `Bearer ${SYNTHETIC_CREDENTIAL}`,
+          noCookie:
+            !Object.prototype.hasOwnProperty.call(headers, 'cookie'),
+        };
+        await fulfillOnboardingJson(route, 200, onboardingState({
+          status: 'in_progress',
+          currentStep: 'profile',
+          revision: 1,
+          profile: { firstName: 'Анна', lastName: 'Петрова' },
+          contacts: {
+            phone: canonicalPhone,
+            normalizedEmail: 'player@example.com',
+            assurance: 'declared',
+          },
+          consents: [],
+          surveyAnswers: {},
+        }));
+        return;
+      }
+      readCalls += 1;
+      await fulfillOnboardingJson(route, 200, onboardingState({
+        status: 'required',
+        flowVersion: null,
+        currentStep: 'profile',
+        surveyVersion: null,
+        revision: null,
+        profile: { firstName: 'Synthetic', lastName: null },
+        contacts: {
+          phone: null,
+          normalizedEmail: null,
+          assurance: 'declared',
+        },
+        consents: [],
+        surveyAnswers: {},
+      }));
+    });
+    await prepareBrowser(page);
+    await page.route(LOGIN_ROUTE, async (route) => {
+      await fulfillJson(route, 200, successBody('new'));
+    });
+
+    await page.goto('/');
+    const gate = page.getByTestId('onboarding-profile-gate');
+    await expect(gate).toBeVisible();
+    await expect(
+      page.getByTestId('telegram-backend-login-status'),
+    ).toHaveCount(0);
+    await expect(page.locator('.bottom-nav')).toHaveCount(0);
+    await page.getByLabel('Имя *').fill('  Анна  ');
+    await page.getByLabel('Фамилия').fill('  Петрова  ');
+    await page.getByLabel('Телефон *').fill(phone);
+    await page.getByLabel('Email *').fill(email);
+    await page.getByRole('button', { name: 'Сохранить профиль' }).click();
+
+    await expect(gate.getByRole('status')).toContainText('Профиль сохранён.');
+    expect(readCalls).toBe(1);
+    expect(patchCalls).toBe(1);
+    expect(patchContract).toEqual({
+      body: {
+        expectedRevision: null,
+        profile: { firstName: 'Анна', lastName: 'Петрова' },
+        contacts: {
+          phone: canonicalPhone,
+          email: 'player@example.com',
+        },
+      },
+      bearerMatches: true,
+      noCookie: true,
+    });
+    const persistence = await page.evaluate(({ phoneValue, emailValue }) => ({
+      localStorage: Object.values(window.localStorage).some(
+        (value) => value.includes(phoneValue) || value.includes(emailValue),
+      ),
+      sessionStorage: Object.values(window.sessionStorage).some(
+        (value) => value.includes(phoneValue) || value.includes(emailValue),
+      ),
+    }), { phoneValue: canonicalPhone, emailValue: email });
+    expect(persistence).toEqual({ localStorage: false, sessionStorage: false });
+    expect(piiConsoleLeak).toBe(false);
+  });
+
+  test('resumes the current owner profile draft with its server revision', async ({
+    page,
+  }) => {
+    let submittedRevision = null;
+    const resume = onboardingState({
+      status: 'in_progress',
+      currentStep: 'profile',
+      revision: 6,
+      profile: { firstName: 'Ирина', lastName: 'Соколова' },
+      contacts: {
+        phone: '+79990001122',
+        normalizedEmail: 'irina@example.com',
+        assurance: 'declared',
+      },
+      consents: [],
+      surveyAnswers: {},
+    });
+    await page.unroute(ONBOARDING_ROUTE);
+    await page.route(ONBOARDING_ROUTE, async (route) => {
+      if (route.request().method() === 'PATCH') {
+        submittedRevision = route.request().postDataJSON().expectedRevision;
+      }
+      await fulfillOnboardingJson(route, 200, resume);
+    });
+    await prepareBrowser(page);
+    await page.route(LOGIN_ROUTE, async (route) => {
+      await fulfillJson(route, 200, successBody('existing'));
+    });
+
+    await page.goto('/');
+    await expect(page.getByLabel('Имя *')).toHaveValue('Ирина');
+    await expect(page.getByLabel('Телефон *')).toHaveValue('+79990001122');
+    await page.getByRole('button', { name: 'Сохранить профиль' }).click();
+    await expect(
+      page.getByTestId('onboarding-profile-gate').getByRole('status'),
+    ).toContainText('Профиль сохранён.');
+    expect(submittedRevision).toBe(6);
+  });
+
+  test('reconciles a stale profile PATCH with one GET and does not replay the write', async ({
+    page,
+  }) => {
+    let readCalls = 0;
+    let patchCalls = 0;
+    const original = onboardingState({
+      status: 'in_progress',
+      currentStep: 'profile',
+      revision: 2,
+      profile: { firstName: 'Старая', lastName: null },
+      contacts: {
+        phone: '+79990001122',
+        normalizedEmail: 'old@example.com',
+        assurance: 'declared',
+      },
+      consents: [],
+      surveyAnswers: {},
+    });
+    const refreshed = onboardingState({
+      status: 'in_progress',
+      currentStep: 'profile',
+      revision: 3,
+      profile: { firstName: 'Новая', lastName: 'Версия' },
+      contacts: {
+        phone: '+79995554433',
+        normalizedEmail: 'new@example.com',
+        assurance: 'declared',
+      },
+      consents: [],
+      surveyAnswers: {},
+    });
+    await page.unroute(ONBOARDING_ROUTE);
+    await page.route(ONBOARDING_ROUTE, async (route) => {
+      if (route.request().method() === 'PATCH') {
+        patchCalls += 1;
+        await fulfillOnboardingJson(route, 409, {
+          statusCode: 409,
+          code: 'onboarding_draft_revision_conflict',
+          message: 'Synthetic conflict',
+        });
+        return;
+      }
+      readCalls += 1;
+      await fulfillOnboardingJson(route, 200, readCalls === 1 ? original : refreshed);
+    });
+    await prepareBrowser(page);
+    await page.route(LOGIN_ROUTE, async (route) => {
+      await fulfillJson(route, 200, successBody('existing'));
+    });
+
+    await page.goto('/');
+    await expect(page.getByLabel('Имя *')).toHaveValue('Старая');
+    await page.getByRole('button', { name: 'Сохранить профиль' }).click();
+
+    await expect(page.getByLabel('Имя *')).toHaveValue('Новая');
+    await expect(page.getByLabel('Email *')).toHaveValue('new@example.com');
+    await expect(page.getByText(/более новая версия/u)).toBeVisible();
+    expect({ readCalls, patchCalls }).toEqual({ readCalls: 2, patchCalls: 1 });
+  });
+
+  test('clears the private session boundary when onboarding GET is unauthorized', async ({
+    page,
+  }) => {
+    let onboardingCalls = 0;
+    await page.unroute(ONBOARDING_ROUTE);
+    await page.route(ONBOARDING_ROUTE, async (route) => {
+      onboardingCalls += 1;
+      await fulfillOnboardingJson(route, 401, {
+        statusCode: 401,
+        code: 'session_invalid',
+        message: 'Synthetic invalid session',
+      });
+    });
+    await prepareBrowser(page);
+    await page.route(LOGIN_ROUTE, async (route) => {
+      await fulfillJson(route, 200, successBody('existing'));
+    });
+
+    await page.goto('/');
+    await expect.poll(() => onboardingCalls).toBe(1);
+    await expect(page.getByTestId('backend-own-profile-gate')).toHaveAttribute(
+      'data-state',
+      'loading',
+    );
+    await expect(page.getByTestId('onboarding-profile-gate')).toHaveCount(0);
+    await expect(page.locator('.bottom-nav')).toHaveCount(0);
   });
 
   test('does not expose the legacy profile when the Telegram backend profile is unavailable', async ({

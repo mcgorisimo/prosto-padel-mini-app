@@ -5572,3 +5572,66 @@
   secrets/env change or production action occurred. The next bounded frontend
   slice after review/commit is TMA onboarding gate and profile first-run/resume
   UI wiring; consent/survey/completion UI remains blocked as described above.
+
+### 2026-08-22 — D5.1 TMA onboarding profile gate candidate
+
+- On exact detached base/main
+  `e7c0a7b1f74276047003e14317243f19201c3387`, the existing Telegram backend
+  session lifecycle now exposes only credential-bound onboarding GET/PATCH
+  operations to `AuthGate`; the bearer remains private to the lifecycle and is
+  never passed into a component. Incomplete onboarding fails closed before
+  `App.jsx`, while an exact completed state keeps the existing application path
+  unchanged. `App.jsx` itself was not changed.
+- Added the first-run/resume profile screen for required first name, optional
+  last name, canonical E.164 phone and normalized email. The PATCH uses the
+  server `expectedRevision`; a stale revision performs one GET reconciliation
+  and never replays PATCH. An unknown PATCH outcome requires an explicit GET
+  before another write, and an unauthorized response clears the existing
+  private session boundary. Legacy `contacts` resumes on the same bounded
+  profile screen; later `consents`/`level_survey` states remain fail-closed and
+  expose no acceptance, survey or completion controls.
+- Phone/email are explicitly described as declared contacts only. No contact
+  verification or `rating.isVerified` claim was added. Form state stays in
+  React memory; production code does not write PII or credentials to
+  localStorage, sessionStorage, IndexedDB, URLs or logs. No Supabase import or
+  fallback, progress/completion mutation, consent version, migration, backend,
+  admin, rating, payment or env change was introduced.
+- The new screen reuses the existing TMA palette and typography, respects top
+  and bottom safe areas, remains vertically scrollable for the mobile keyboard
+  and landscape, uses 48 px inputs/actions, visible labels and focus rings,
+  semantic required fields, inline errors with first-invalid focus and
+  accessible live save/reconciliation feedback. The transient successful auth
+  banner is not rendered over the ready profile form.
+- Focused Vitest PASS: `2 suites / 14 tests`. Focused Telegram auth/onboarding
+  Playwright PASS: `32 passed / 1 intentional skip`, covering first-run,
+  resume, exact optimistic PATCH, stale GET reconciliation without write
+  replay, unauthorized session invalidation and browser-storage/console PII
+  boundaries.
+- Mandatory root gates PASS. The first full E2E run passed `97`, skipped `1`
+  intentionally and had one unrelated existing avatar-badge test timeout only
+  during its final unmount; its exact retry passed `1/1`, and the clean full
+  rerun passed `98 / 1 intentional skip`. `npm.cmd run build` passed with
+  `1621` modules transformed; the existing large-chunk advisory remains.
+  Dependencies were not installed or changed: the unchanged lockfile matched
+  normalized-LF SHA-256
+  `36F6B0109D39A8E06249B3E2B6214DD8631D21849660A9961FF64E815E7E415D`
+  before using the existing dependency tree through a temporary local junction.
+- Two independent read-only reviews were bounded to the exact candidate. The
+  mobile UI/accessibility review initially found two P1 issues: the transient
+  auth banner could cover the form header and required fields lacked semantic
+  required state. Both were corrected with regressions. Final exact-diff
+  re-review by the UI/accessibility and auth/state/test reviewers returned
+  acceptance PASS with `P0=0, P1=0`; no scope creep was found.
+- DNS remains cleared: `test-app.prostopdl.ru` resolves to
+  `135.106.155.112`; no REG.RU action is needed. TLS/SNI/nginx/server work was
+  not performed and remains a separate future gate. This runtime-reachable
+  frontend candidate has `deployment_deferred_by_user`: no commit, push,
+  integration, SSH/DB/schema command, TLS/nginx/restart/rollout, provider/API
+  write, secrets/env change or production action occurred.
+- D5.1 remains open after this profile slice. Consent/survey/progress UI still
+  requires a separate frontend slice, and real consent acceptance/completion UI
+  remains blocked until the Terms, Privacy and Cancellation texts and exposed
+  versions are approved. After later integration and test rollout, the owner
+  must visually verify the profile form in Telegram Mini App with the keyboard
+  open, long text, safe-area insets and stale/error feedback before the final
+  manual TMA onboarding smoke.

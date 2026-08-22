@@ -1404,3 +1404,224 @@ textarea {
   border-color: rgba(216, 243, 74, 0.46) !important;
   box-shadow: 0 0 0 2px rgba(216, 243, 74, 0.08);
 }
+
+/* Authenticated Telegram onboarding profile gate */
+.onboarding-profile-screen {
+  min-height: 100dvh;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding:
+    calc(24px + env(safe-area-inset-top, 0px))
+    16px
+    calc(24px + env(safe-area-inset-bottom, 0px));
+  background:
+    radial-gradient(circle at 50% -8%, rgba(216, 243, 74, 0.12), transparent 24rem),
+    linear-gradient(180deg, var(--surface) 0%, var(--bg) 100%);
+  color: var(--text-primary);
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
+}
+
+.onboarding-profile-card {
+  width: 100%;
+  max-width: 420px;
+  margin: 0 auto;
+  padding: 24px;
+  border: 1px solid rgba(245, 241, 232, 0.12);
+  border-radius: 24px;
+  background: var(--surface-dark);
+  color: #f5f1e8;
+  box-shadow: 0 20px 54px rgba(5, 15, 11, 0.2);
+}
+
+.onboarding-profile-eyebrow {
+  margin-bottom: 8px;
+  color: var(--accent-light);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  line-height: 1.4;
+  text-transform: uppercase;
+}
+
+.onboarding-profile-card h1 {
+  margin: 0;
+  color: #f5f1e8;
+  font-size: clamp(26px, 7vw, 34px);
+  font-weight: 800;
+  line-height: 1.12;
+}
+
+.onboarding-profile-intro {
+  margin: 12px 0 24px;
+  color: rgba(245, 241, 232, 0.72);
+  font-size: 16px;
+  line-height: 1.55;
+}
+
+.onboarding-profile-card form {
+  display: grid;
+  gap: 16px;
+}
+
+.onboarding-profile-field {
+  display: grid;
+  gap: 8px;
+}
+
+.onboarding-profile-field label {
+  color: #f5f1e8;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.onboarding-profile-field input {
+  width: 100%;
+  min-height: 48px;
+  padding: 11px 14px;
+  border: 1px solid rgba(245, 241, 232, 0.18) !important;
+  border-radius: 12px;
+  background: rgba(245, 241, 232, 0.06) !important;
+  color: #f5f1e8 !important;
+  font-size: 16px;
+  line-height: 1.4;
+  outline: none;
+  touch-action: manipulation;
+}
+
+.onboarding-profile-field input:focus-visible {
+  border-color: var(--accent-light) !important;
+  box-shadow: 0 0 0 3px rgba(216, 243, 74, 0.18);
+}
+
+.onboarding-profile-field input[aria-invalid='true'] {
+  border-color: var(--accent) !important;
+}
+
+.onboarding-profile-hint,
+.onboarding-profile-error {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.onboarding-profile-hint {
+  color: rgba(245, 241, 232, 0.62);
+}
+
+.onboarding-profile-error {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.onboarding-profile-declared-note {
+  margin: 0;
+  padding: 12px;
+  border: 1px solid rgba(216, 243, 74, 0.18);
+  border-radius: 12px;
+  background: rgba(216, 243, 74, 0.06);
+  color: rgba(245, 241, 232, 0.76);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.onboarding-profile-notice {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid rgba(245, 241, 232, 0.16);
+  border-radius: 12px;
+  color: #f5f1e8;
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.5;
+}
+
+.onboarding-profile-notice--success {
+  border-color: rgba(216, 243, 74, 0.34);
+  background: rgba(216, 243, 74, 0.08);
+}
+
+.onboarding-profile-notice--warning,
+.onboarding-profile-notice--error {
+  border-color: rgba(255, 111, 97, 0.42);
+  background: rgba(255, 111, 97, 0.08);
+}
+
+.onboarding-profile-submit,
+.onboarding-profile-reload {
+  min-height: 48px;
+  border-radius: 12px;
+  font-weight: 800;
+  touch-action: manipulation;
+  cursor: pointer;
+}
+
+.onboarding-profile-submit {
+  width: 100%;
+  padding: 12px 18px;
+  border: 1px solid var(--accent-light);
+  background: var(--accent-light);
+  color: var(--deep);
+  box-shadow: 0 10px 24px rgba(216, 243, 74, 0.14);
+}
+
+.onboarding-profile-reload {
+  justify-self: start;
+  padding: 8px 12px;
+  border: 1px solid rgba(245, 241, 232, 0.24);
+  background: transparent;
+  color: #f5f1e8;
+}
+
+.onboarding-profile-submit:hover:not(:disabled),
+.onboarding-profile-submit:active:not(:disabled) {
+  background: rgba(216, 243, 74, 0.88);
+}
+
+.onboarding-profile-reload:hover:not(:disabled),
+.onboarding-profile-reload:active:not(:disabled) {
+  background: rgba(245, 241, 232, 0.08);
+}
+
+.onboarding-profile-submit:focus-visible,
+.onboarding-profile-reload:focus-visible {
+  outline: 3px solid rgba(216, 243, 74, 0.36);
+  outline-offset: 3px;
+}
+
+.onboarding-profile-submit:disabled,
+.onboarding-profile-reload:disabled {
+  cursor: wait;
+  opacity: 0.48;
+}
+
+@media (max-width: 350px) {
+  .onboarding-profile-screen {
+    padding-right: 12px;
+    padding-left: 12px;
+  }
+
+  .onboarding-profile-card {
+    padding: 20px 16px;
+    border-radius: 20px;
+  }
+}
+
+@media (orientation: landscape) and (max-height: 560px) {
+  .onboarding-profile-screen {
+    padding-top: calc(12px + env(safe-area-inset-top, 0px));
+    padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .onboarding-profile-submit,
+  .onboarding-profile-reload,
+  .onboarding-profile-field input {
+    scroll-behavior: auto;
+    transition-duration: 0.01ms !important;
+  }
+}
