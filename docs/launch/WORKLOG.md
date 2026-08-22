@@ -5427,3 +5427,69 @@
   `booking-availability-client.spec.js`; the exact focused rerun passed `1/1`,
   and a clean full rerun passed `94` with `1` intentional skip. Final
   `npm.cmd run build` passed with `1619` modules transformed.
+
+### 2026-08-22 — D5.1 authenticated onboarding progress smoke verified on Selectel test
+
+- Exact integrated commit
+  `94d9d94fe40bcb3a071fe4a52a6cc1b878b558eb` contains only the rollout
+  closeout over the backend tree deployed from exact commit
+  `450479eb82697542ab5e2f5f8ca83c504c2fe735`. Read-only preflight confirmed
+  the clean server checkout at the deployed backend commit, unchanged backend
+  container
+  `490ab45823b7f4f2900e55616a0741ac2d4f34fbb91cd4ea73044e26de0d5a55` /
+  image
+  `sha256:1550ae332d2ee8e5875bd8a1992a42f44ec8b3f91ff1c3514fe2ceac3c624615`,
+  running/healthy state, restart count `0` and internal health `200`.
+- Exact read-only migration-037 POSTCHECK SHA-256
+  `4843E1FD1618D06300C51C77E1774A8407C9A043DE171EE96DF30472D0B2F57A`
+  exited `0` with empty stderr, returned `verified=true`, reconfirmed
+  `backend_auth_app EXECUTE=true` and `PUBLIC EXECUTE=false`, and ended with
+  terminal `ROLLBACK`. Migration 037 remains `applied_verified` and was not
+  applied again.
+- The corrected syntax-checked in-memory PII-safe runner had SHA-256
+  `22331A123CFFEECB9041474488CC7D5D472D206F8CE92409F1536EF64062F3B3`
+  and was executed exactly once through `docker exec -i`. It explicitly
+  constrained the synthetic Telegram subject to a safe integer in
+  `4000000000000000..4499999999999999` and below the backend maximum
+  `2^52-1`; no subject, account, session or correlation identifier was
+  printed.
+- The exact authenticated sequence passed:
+  `login 200/new -> GET required/null -> PATCH profile/revision 1 -> progress
+  consents/revision 2 -> GET resume/2 -> exact idempotent retry/2 -> progress
+  level_survey with three synthetic backend test-policy consents/revision 3 ->
+  GET resume/3 -> exact idempotent retry/3 -> stale progress/409 -> GET
+  unchanged/3 -> logout/204 -> old bearer/401`. Every checked response was
+  `no-store`; phone/email remained declared and no verification or rating
+  claim was introduced.
+- The allowed API-backed writes retained one PII-free synthetic fixture with
+  declared synthetic contacts and three synthetic backend test-policy consent
+  records, without notification permission. These records are not real user
+  consent acceptances. No secret, bearer, initData, response body, contact,
+  identifier or PII was emitted by the runner.
+- Bounded logs from the corrected smoke start returned backend critical count
+  `0` and nginx HTTP 5xx count `0`. Final read-only verification reconfirmed
+  the exact clean checkout, unchanged backend container/image, healthy state
+  and restart count `0`.
+- No checkout file, container, DB schema/migration, runtime, env/secret,
+  frontend, nginx/TLS configuration, provider API or production state changed
+  during this smoke verification. D5.1 backend progress deployment is
+  `applied_verified_with_authenticated_progress_smoke_pass`; this docs-only
+  closeout itself has deployment `not_needed`.
+- D5.1 remains open for the separate frontend/TMA onboarding and tests,
+  dependent DNS/TLS/public verification and final manual TMA smoke. Real
+  consent acceptance and completion UI remain blocked until the Terms,
+  Privacy and Cancellation texts and their exposed versions are approved.
+- Required docs-only root gates PASS: E2E `94 passed / 1 skipped` and build
+  `1619 modules`. The first E2E attempt stopped before tests because this
+  isolated worktree has no local `node_modules`. The existing dependency tree
+  was then used through a temporary junction only after the root lockfiles
+  matched by exact Git blob
+  `a5db96ca2068b6020b181a05c9461bbf7e3f49e1` and normalized-LF SHA-256
+  `36F6B0109D39A8E06249B3E2B6214DD8631D21849660A9961FF64E815E7E415D`.
+  The first build attempt was blocked only by sandbox traversal of that
+  junction; the exact unrestricted retry passed. The junction was removed,
+  and no dependency, package or lockfile was installed or changed.
+- Independent local read-only review of the exact one-file closeout diff
+  returned acceptance PASS with `P0=0, P1=0`; final scope and whitespace were
+  rechecked after recording this result. The next safe gate is a separate
+  local docs-only commit; no rollout is needed for this documentation change.
