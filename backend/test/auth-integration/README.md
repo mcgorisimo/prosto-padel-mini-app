@@ -17,11 +17,11 @@ that must be retained.
    `docs/migrations/018_backend_auth_player_profile_editable_fields.sql`
    manually after its PRECHECK, then require its POSTCHECK to pass.
 5. Apply migration 019, then the migration 030 backend-match prerequisites
-   020 through 024 and 029, and finally migration 030. Run each migration's
-   PRECHECK, guarded apply, and POSTCHECK procedure. This deliberately minimal
-   disposable schema is required because the login graph uses the real
-   Telegram notification destination repository and verifies its
-   column-level ACL boundary.
+   020 through 024 and 029, migration 030, and finally migration 038. Run each
+   migration's PRECHECK, guarded apply, and POSTCHECK procedure. This
+   deliberately minimal disposable schema is required because the login graph
+   uses the real Telegram notification destination repository and verifies
+   its column-level ACL boundary.
 6. Connect as the non-superuser `backend_auth_app` role.
 7. Set all four environment variables:
 

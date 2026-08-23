@@ -13,6 +13,7 @@ import {
   TELEGRAM_SESSION_TTL_SECONDS,
 } from '../config/telegram-login.config';
 import { PostgresAccountStatusReader } from '../database/postgres-account-status.reader';
+import { PostgresAccountNotificationPreferencesRepository } from '../database/postgres-account-notification-preferences.repository';
 import { PostgresAdminPlayerRatingRepository } from '../database/postgres-admin-player-rating.repository';
 import { PostgresAuthenticationOperationTerminalRepository } from '../database/postgres-authentication-operation-terminal.repository';
 import { PostgresExternalIdentityResolutionRepository } from '../database/postgres-external-identity.repository';
@@ -65,6 +66,8 @@ import {
 import { AuthModule } from './auth.module';
 import { AdminPlayerRatingController } from './admin-player-rating.controller';
 import { AdminPlayerRatingService } from './admin-player-rating.service';
+import { AccountNotificationPreferencesController } from './account-notification-preferences.controller';
+import { AccountNotificationPreferencesService } from './account-notification-preferences.service';
 import { NodeSessionCredentialIssuer } from './session-credential-issuer.adapter';
 import { PlayerProfileController } from './player-profile.controller';
 import { PlayerProfileService } from './player-profile.service';
@@ -254,6 +257,16 @@ function getPlayerProfileControllerService(
   ).service;
 }
 
+function getAccountNotificationPreferencesControllerService(
+  controller: AccountNotificationPreferencesController,
+): AccountNotificationPreferencesService {
+  return (
+    controller as unknown as {
+      readonly service: AccountNotificationPreferencesService;
+    }
+  ).service;
+}
+
 function getPlayerOnboardingControllerService(
   controller: PlayerOnboardingController,
 ): PlayerOnboardingService {
@@ -412,6 +425,23 @@ describe('AuthModule Telegram login wiring', () => {
     expect(moduleRef.get(SessionAuthenticationController)).toBeInstanceOf(
       SessionAuthenticationController,
     );
+    const notificationPreferences = moduleRef.get(
+      AccountNotificationPreferencesService,
+    );
+    expect(notificationPreferences.dependencies.transactions).toBe(
+      moduleRef.get(PostgresTransactionExecutorAdapter),
+    );
+    expect(notificationPreferences.dependencies.preferences).toBe(
+      moduleRef.get(PostgresAccountNotificationPreferencesRepository),
+    );
+    expect(notificationPreferences.dependencies.clock).toBe(
+      moduleRef.get(SESSION_AUTHENTICATION_CLOCK),
+    );
+    expect(
+      getAccountNotificationPreferencesControllerService(
+        moduleRef.get(AccountNotificationPreferencesController),
+      ),
+    ).toBe(notificationPreferences);
     const playerProfile = moduleRef.get(PlayerProfileService);
     expect(playerProfile.dependencies.transactions).toBe(
       moduleRef.get(PostgresTransactionExecutorAdapter),

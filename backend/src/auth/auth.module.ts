@@ -15,6 +15,7 @@ import {
 import { DatabaseModule } from '../database/database.module';
 import { ContentModerationController } from '../common/content-moderation.controller';
 import { PostgresAccountStatusReader } from '../database/postgres-account-status.reader';
+import { PostgresAccountNotificationPreferencesRepository } from '../database/postgres-account-notification-preferences.repository';
 import { PostgresAdminPlayerRatingRepository } from '../database/postgres-admin-player-rating.repository';
 import { PostgresAuthenticationOperationTerminalRepository } from '../database/postgres-authentication-operation-terminal.repository';
 import { PostgresExternalIdentityResolutionRepository } from '../database/postgres-external-identity.repository';
@@ -70,6 +71,8 @@ import {
 import { NodeSessionCredentialIssuer } from './session-credential-issuer.adapter';
 import { AdminPlayerRatingController } from './admin-player-rating.controller';
 import { AdminPlayerRatingService } from './admin-player-rating.service';
+import { AccountNotificationPreferencesController } from './account-notification-preferences.controller';
+import { AccountNotificationPreferencesService } from './account-notification-preferences.service';
 import { PlayerProfileController } from './player-profile.controller';
 import { PlayerProfileService } from './player-profile.service';
 import { PlayerOnboardingController } from './player-onboarding.controller';
@@ -288,6 +291,18 @@ function createPlayerProfileService(
   });
 }
 
+function createAccountNotificationPreferencesService(
+  transactions: PostgresTransactionExecutorAdapter,
+  preferences: PostgresAccountNotificationPreferencesRepository,
+  clock: SessionAuthenticationClock,
+): AccountNotificationPreferencesService {
+  return new AccountNotificationPreferencesService({
+    transactions,
+    preferences,
+    clock,
+  });
+}
+
 function createPlayerOnboardingService(
   transactions: PostgresTransactionExecutorAdapter,
   onboarding: PostgresPlayerOnboardingReader,
@@ -479,6 +494,7 @@ function createPlayerProfilePhotoService(
     TelegramLoginController,
     SessionLifecycleController,
     SessionAuthenticationController,
+    AccountNotificationPreferencesController,
     PlayerProfileController,
     PlayerOnboardingController,
     PublicPlayerProfileController,
@@ -498,6 +514,15 @@ function createPlayerProfilePhotoService(
     SESSION_AUTHENTICATION_CLOCK_PROVIDER,
     SessionBearerGuard,
     PlayerProfilePhotoProcessor,
+    {
+      provide: AccountNotificationPreferencesService,
+      inject: [
+        PostgresTransactionExecutorAdapter,
+        PostgresAccountNotificationPreferencesRepository,
+        SESSION_AUTHENTICATION_CLOCK,
+      ],
+      useFactory: createAccountNotificationPreferencesService,
+    },
     {
       provide: PLAYER_PROFILE_PHOTO_OBJECT_STORAGE,
       inject: [ConfigService],

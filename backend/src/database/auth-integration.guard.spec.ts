@@ -260,16 +260,81 @@ describe('auth integration migration inventory', () => {
       foreignKeys: evidence.foreignKeys.length,
       columnAclEntries: evidence.columnAcl.length,
     }).toEqual({
-      tables: 17,
-      columns: 177,
+      tables: 18,
+      columns: 182,
       functions: 20,
       triggers: 33,
       indexes: 11,
-      constraints: 154,
-      keys: 33,
-      foreignKeys: 30,
-      columnAclEntries: 186,
+      constraints: 158,
+      keys: 34,
+      foreignKeys: 31,
+      columnAclEntries: 194,
     });
+  });
+
+  it('requires the migration 038 preference table, account binding, and least-privilege ACL', () => {
+    const evidence = validAuthIntegrationCatalogEvidenceFixture();
+
+    expect(
+      evidence.tables.find(
+        (table) => table.name === 'account_notification_preferences',
+      ),
+    ).toEqual({
+      name: 'account_notification_preferences',
+      fingerprintMatches: true,
+    });
+    expect(
+      evidence.foreignKeys.find(
+        (foreignKey) =>
+          foreignKey.name ===
+          'account_notification_preferences_account_id_fkey',
+      ),
+    ).toMatchObject({
+      tableName: 'account_notification_preferences',
+      sourceColumns: 'account_id',
+      targetTable: 'accounts',
+      targetColumns: 'id',
+      onUpdate: 'a',
+      onDelete: 'a',
+      isDeferrable: false,
+      isDeferred: false,
+      isValidated: true,
+    });
+    expect(
+      evidence.tableAcl.filter(
+        (entry) =>
+          entry.relationName === 'account_notification_preferences',
+      ),
+    ).toEqual([
+      {
+        schemaName: 'backend_auth',
+        relationName: 'account_notification_preferences',
+        grantee: 'backend_auth_app',
+        privilegeType: 'SELECT',
+        isGrantable: false,
+      },
+    ]);
+    const columnAcl = evidence.columnAcl.filter(
+      (entry) =>
+        entry.tableName === 'account_notification_preferences',
+    );
+    expect(columnAcl).toHaveLength(8);
+    expect(
+      columnAcl
+        .filter((entry) => entry.privilegeType === 'UPDATE')
+        .map((entry) => entry.columnName),
+    ).toEqual([
+      'telegram_match_notifications_enabled',
+      'updated_at',
+      'version',
+    ]);
+    expect(
+      columnAcl.some(
+        (entry) =>
+          entry.columnName === 'account_id' &&
+          entry.privilegeType === 'UPDATE',
+      ),
+    ).toBe(false);
   });
 
   it('requires the migration 017 table, foreign key, and migration 018 editable ACL', () => {

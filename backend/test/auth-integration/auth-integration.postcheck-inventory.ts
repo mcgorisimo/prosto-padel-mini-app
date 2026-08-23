@@ -1,4 +1,4 @@
-// Fixed test-only semantic inventory copied from migrations 015, 017, 018, 019 and 030.
+// Fixed test-only semantic inventory copied from migrations 015, 017, 018, 019, 030 and 038.
 // It is independent from database comments and is never loaded from SQL at runtime.
 
 export const AUTH_INTEGRATION_EXPECTED_COLUMNS = Object.freeze([
@@ -7,6 +7,11 @@ export const AUTH_INTEGRATION_EXPECTED_COLUMNS = Object.freeze([
   ["backend_auth","accounts",3,"status","text",true,"'active'::text",""],
   ["backend_auth","accounts",4,"created_at","bigint",true,null,""],
   ["backend_auth","accounts",5,"updated_at","bigint",true,null,""],
+  ["backend_auth","account_notification_preferences",1,"account_id","uuid",true,null,""],
+  ["backend_auth","account_notification_preferences",2,"telegram_match_notifications_enabled","boolean",true,null,""],
+  ["backend_auth","account_notification_preferences",3,"created_at","bigint",true,null,""],
+  ["backend_auth","account_notification_preferences",4,"updated_at","bigint",true,null,""],
+  ["backend_auth","account_notification_preferences",5,"version","bigint",true,null,""],
   ["backend_auth","player_profiles",1,"account_id","uuid",true,null,""],
   ["backend_auth","player_profile_details",1,"account_id","uuid",true,null,""],
   ["backend_auth","player_profile_details",2,"first_name","text",true,null,""],
@@ -186,6 +191,10 @@ export const AUTH_INTEGRATION_EXPECTED_CONSTRAINTS = Object.freeze([
   ["backend_auth","accounts","accounts_role_check","c",false,false,true],
   ["backend_auth","accounts","accounts_status_check","c",false,false,true],
   ["backend_auth","accounts","accounts_time_check","c",false,false,true],
+  ["backend_auth","account_notification_preferences","account_notification_preferences_pkey","p",false,false,true],
+  ["backend_auth","account_notification_preferences","account_notification_preferences_account_id_fkey","f",false,false,true],
+  ["backend_auth","account_notification_preferences","account_notification_preferences_time_check","c",false,false,true],
+  ["backend_auth","account_notification_preferences","account_notification_preferences_version_check","c",false,false,true],
   ["backend_auth","player_profiles","player_profiles_pkey","p",false,false,true],
   ["backend_auth","player_profiles","player_profiles_account_id_fkey","f",false,false,true],
   ["backend_auth","player_profile_details","player_profile_details_pkey","p",false,false,true],
@@ -340,6 +349,7 @@ export const AUTH_INTEGRATION_EXPECTED_CONSTRAINTS = Object.freeze([
 
 export const AUTH_INTEGRATION_EXPECTED_KEYS = Object.freeze([
   ["backend_auth","accounts","accounts_pkey","p","id",false,false,true],
+  ["backend_auth","account_notification_preferences","account_notification_preferences_pkey","p","account_id",false,false,true],
   ["backend_auth","player_profiles","player_profiles_pkey","p","account_id",false,false,true],
   ["backend_auth","player_profile_details","player_profile_details_pkey","p","account_id",false,false,true],
   ["backend_auth","player_rating_states","player_rating_states_pkey","p","account_id",false,false,true],
@@ -375,6 +385,7 @@ export const AUTH_INTEGRATION_EXPECTED_KEYS = Object.freeze([
 ] as const);
 
 export const AUTH_INTEGRATION_EXPECTED_FOREIGN_KEYS = Object.freeze([
+  ["backend_auth","account_notification_preferences","account_notification_preferences_account_id_fkey","account_id","backend_auth","accounts","id","s","a","a",false,false,true],
   ["backend_auth","player_profiles","player_profiles_account_id_fkey","account_id","backend_auth","accounts","id","s","a","a",false,false,true],
   ["backend_auth","player_profile_details","player_profile_details_account_id_fkey","account_id","backend_auth","player_profiles","account_id","s","a","a",false,false,true],
   ["backend_auth","player_rating_states","player_rating_states_account_id_fkey","account_id","backend_auth","player_profiles","account_id","s","a","a",false,false,true],
@@ -413,6 +424,7 @@ export const AUTH_INTEGRATION_EXPECTED_SCHEMA_ACL = Object.freeze([
 
 export const AUTH_INTEGRATION_EXPECTED_TABLE_ACL = Object.freeze([
   ["backend_auth","accounts","backend_auth_app","SELECT",false],
+  ["backend_auth","account_notification_preferences","backend_auth_app","SELECT",false],
   ["backend_auth","player_profiles","backend_auth_app","SELECT",false],
   ["backend_auth","player_profile_details","backend_auth_app","SELECT",false],
   ["backend_auth","player_rating_states","backend_auth_app","SELECT",false],
@@ -437,6 +449,14 @@ export const AUTH_INTEGRATION_EXPECTED_COLUMN_ACL = Object.freeze([
   ["backend_auth","accounts","updated_at","backend_auth_app","INSERT",false],
   ["backend_auth","accounts","status","backend_auth_app","UPDATE",false],
   ["backend_auth","accounts","updated_at","backend_auth_app","UPDATE",false],
+  ["backend_auth","account_notification_preferences","account_id","backend_auth_app","INSERT",false],
+  ["backend_auth","account_notification_preferences","telegram_match_notifications_enabled","backend_auth_app","INSERT",false],
+  ["backend_auth","account_notification_preferences","created_at","backend_auth_app","INSERT",false],
+  ["backend_auth","account_notification_preferences","updated_at","backend_auth_app","INSERT",false],
+  ["backend_auth","account_notification_preferences","version","backend_auth_app","INSERT",false],
+  ["backend_auth","account_notification_preferences","telegram_match_notifications_enabled","backend_auth_app","UPDATE",false],
+  ["backend_auth","account_notification_preferences","updated_at","backend_auth_app","UPDATE",false],
+  ["backend_auth","account_notification_preferences","version","backend_auth_app","UPDATE",false],
   ["backend_auth","player_profiles","account_id","backend_auth_app","INSERT",false],
   ["backend_auth","player_profile_details","account_id","backend_auth_app","INSERT",false],
   ["backend_auth","player_profile_details","first_name","backend_auth_app","INSERT",false],

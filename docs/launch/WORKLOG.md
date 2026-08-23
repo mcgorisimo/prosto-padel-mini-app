@@ -6134,3 +6134,49 @@
   are `not_run/not_needed`, deployment rollout is `not_needed`, and its next
   gate is a separate local commit before the dependent repository/runtime
   preference slice starts.
+
+### 2026-08-23 — D5.3 NP2 account notification-preferences backend local candidate
+
+- Continued from clean local/remote `main` base
+  `050c5b0a9157437ec34be14d0913f4df889e492a`. The bounded candidate adds only
+  bearer-protected own-account `GET/PATCH /api/v1/notification-preferences/me`,
+  its service/PostgreSQL repository and focused tests, exact migration-038 auth
+  catalog evidence, module wiring, and this append-only record. No frontend,
+  notification dispatcher/enqueue/send, Telegram login/destination, payment,
+  privacy-setting, schema or migration artifact changed.
+- `GET` interprets an absent
+  `backend_auth.account_notification_preferences` row as the compatibility
+  default `telegramMatchNotificationsEnabled=true`, `version=null`; an
+  explicit row returns its stored boolean and positive version. `PATCH`
+  accepts only that boolean plus `expectedVersion`: `null` performs a
+  conflict-safe first insert, while an observed positive safe-integer version
+  performs one account-scoped compare-and-swap update and increments version.
+  Stale or racing writes return the fixed `409` conflict contract.
+- The account comes only from the authenticated bearer principal (player or
+  club_admin); no account, credential, destination or chat selector is accepted
+  from the body, query or cookie. Responses are an exact two-field allowlist
+  with `no-store`; persistence and HTTP errors fail closed without database,
+  credential or Telegram details.
+- The auth-integration catalog now requires migration 038 exactly: the table
+  fingerprint, five columns, four constraints, account PK/FK, table SELECT,
+  five column INSERT and three column UPDATE grants. Focused repository,
+  service, HTTP, module-wiring and catalog regressions passed together:
+  `5 / 5` suites and `134 / 134` tests.
+- Mandatory backend gates PASS: typecheck; unit `153 / 153` suites and
+  `3675 / 3675` tests; e2e `2 / 2` suites and `4 / 4` tests; build. Mandatory
+  root stability gates PASS: e2e with four workers `99 passed / 1 intentional
+  skip`; build transformed `1621` modules with the existing large-chunk
+  advisory. The first sandbox-only root attempt could not traverse the existing
+  external dependency junction; the authorised local retry outside that
+  filesystem sandbox passed. No dependency or lockfile changed.
+- The destructive auth-integration harness was not run because it requires a
+  separately prepared disposable database and leaves fixture rows; its exact
+  catalog validator is covered by the passing unit regression. Migration 038
+  was not reapplied and no DB/Selectel/provider/API action occurred.
+- This candidate changes backend runtime, so local implementation is complete
+  but the NP2 stage remains `deployment_deferred_by_user` and is not marked
+  done. No commit, push, merge, image/config/env change, rollout/restart,
+  server/DB/schema/provider or production action is authorised in this gate.
+  Independent exact-diff review completed after correcting the focused-test
+  count in this record: `P0=0`, `P1=0`, acceptance PASS and
+  `git diff --check` PASS. The reviewer made no file or external-state change.

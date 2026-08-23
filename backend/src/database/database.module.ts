@@ -13,6 +13,7 @@ import {
   SystemMatchCourtCatalog,
 } from '../matches/match-court-catalog';
 import { PostgresAccountStatusReader } from './postgres-account-status.reader';
+import { PostgresAccountNotificationPreferencesRepository } from './postgres-account-notification-preferences.repository';
 import { PostgresAdminPlayerRatingRepository } from './postgres-admin-player-rating.repository';
 import { PostgresAuthenticationOperationTerminalRepository } from './postgres-authentication-operation-terminal.repository';
 import { PostgresExternalIdentityResolutionRepository } from './postgres-external-identity.repository';
@@ -84,6 +85,7 @@ const DATABASE_WORKFLOW_PROVIDERS: Provider[] = [
       new PostgresMatchReservationRepository(reservations),
   },
   PostgresAdminPlayerRatingRepository,
+  PostgresAccountNotificationPreferencesRepository,
   PostgresSecurityAuditRepository,
   PostgresExternalIdentityResolutionRepository,
   PostgresAccountStatusReader,
@@ -212,6 +214,7 @@ const DATABASE_WORKFLOW_EXPORTS = [
   PostgresTransactionRunner,
   PostgresTransactionExecutorAdapter,
   PostgresAdminPlayerRatingRepository,
+  PostgresAccountNotificationPreferencesRepository,
   PostgresSecurityAuditRepository,
   PostgresTelegramAuthenticationOperationRepository,
   PostgresTelegramNotificationDestinationRepository,

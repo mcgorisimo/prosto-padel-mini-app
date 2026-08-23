@@ -135,6 +135,7 @@ export interface AuthIntegrationCatalogEvidence {
 
 export const AUTH_INTEGRATION_EXPECTED_TABLES = Object.freeze([
   'accounts',
+  'account_notification_preferences',
   'auth_session_commands',
   'auth_session_credentials',
   'auth_session_families',
