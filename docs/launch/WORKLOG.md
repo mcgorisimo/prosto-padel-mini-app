@@ -6720,3 +6720,56 @@
   hidden or repaired outside the authorized D5.1-039 scope.
 - Independent read-only review of the exact candidate diff found no blocking
   issues: `P0=0`, `P1=0`. No correction was required after review.
+
+### 2026-08-24 — D5.1 migration 039 applied and verified on Selectel test
+
+- Exact integrated source commit
+  `a38493ef291347551027246be202294d3640ff64` was used only to stream the
+  reviewed migration artifacts through the loaded Windows SSH agent directly
+  into Selectel test PostgreSQL. The confirmed target was host
+  `prosto-padel-test-01`, Compose project `prosto-padel-test`, PostgreSQL
+  `14.23`, database `prosto_padel_test_migration_cycle`, primary/not in
+  recovery. The PostgreSQL container
+  `5e36d4dc1a5c3e2fa658382cfc4a8dff7fe3ea2ba1a9834bb89cc83df743f7be`
+  was running, healthy and at restart count `0` before the gate.
+- Exact read-only PRECHECK SHA-256
+  `E78E3D56C5FF4DC85AE9E6D257D30ABCBDFF35078AA4F519D1A1EE4B3906A859`
+  exited `0` with empty stderr, returned `ready=true`, matched exact local base
+  `9dbac1669a046900bef6290ae6b83fd4fdf533de`, observed zero
+  `initial_level_v2` rows and ended with a separate terminal `ROLLBACK` line.
+- Exact migration SHA-256
+  `F191ED634070CBBC8332216E7CC9A121901F7DAEDBDB6EBA55E3A19729F88187`
+  was applied exactly once with exit `0` and empty stderr. It emitted exactly
+  one separate `COMMIT` line, no `ROLLBACK` line and the expected migration-039
+  result marker. No server-side migration file was created.
+- Exact read-only POSTCHECK SHA-256
+  `F98744A79E6C3F4363CD4F7F49502327FFD567286799897562B7A8A6C523035D`
+  exited `0` with empty stderr, confirmed the migration-039 relation
+  fingerprint, exact owner-granted non-grantable column-level `UPDATE` ACL for
+  `backend_auth_app`, no table-level or `PUBLIC UPDATE`, synthetic fixture
+  compatibility and zero `initial_level_v2` rows, then ended with a separate
+  terminal `ROLLBACK` line. Existing completed rows remain without backfill;
+  their new result fields remain nullable and no data mutation was performed.
+- Migration 039 is `applied_verified` and must not be applied again. Its
+  rollback migration was not run. Checkout, container definitions, application
+  runtime, env/secrets, TLS/nginx, provider API and production were not changed;
+  no fetch, checkout, restart, rebuild or rollout command was executed.
+  Deployment is `applied_verified_runtime_unchanged`.
+- An additional optional post-gate read-only checkout/container inventory was
+  stopped by the remote Git command with exit `128` before its container query
+  ran. Its stderr reason was not emitted by the wrapper, so no narrower cause is
+  asserted here. The successful PRECHECK/APPLY/POSTCHECK evidence above is
+  unaffected, and no write of any kind was executed after POSTCHECK.
+- Required local root gates covered the complete suite. The first four-worker
+  E2E run passed `95` tests with `1` intentional skip and had four WebKit
+  timeouts in unchanged UI scenarios; the exact four timed-out scenarios then
+  passed `4/4` sequentially with one worker. Root build passed with `1623`
+  modules and only the existing large-chunk advisory. The dependency lockfile
+  matched the existing installed tree exactly; no dependency or lockfile was
+  installed or changed.
+- This closeout changes only this append-only WORKLOG entry. It performs no
+  commit, push, integration, SSH/DB/schema command, runtime action, API/provider
+  write or production change; its own deployment impact is
+  `deployment=not_needed`.
+- Independent read-only review of the exact one-file closeout diff found no
+  blocking issues: `P0=0`, `P1=0`. No correction was required after review.
