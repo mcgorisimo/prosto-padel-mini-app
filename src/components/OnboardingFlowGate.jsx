@@ -23,18 +23,18 @@ function OnboardingShell({ testId, title, intro, children }) {
   );
 }
 
-function LegalUnavailableGate() {
+function LegalUnavailableNotice() {
   return (
-    <OnboardingShell
-      testId="onboarding-legal-unavailable-gate"
-      title="Документы готовятся"
-      intro="Условия, политика конфиденциальности и правила отмены ещё не опубликованы. Продолжение станет доступно после публикации утверждённых документов."
+    <div
+      id="onboarding-legal-readiness"
+      className="onboarding-legal-unavailable-note"
+      data-testid="onboarding-legal-unavailable-note"
+      role="status"
     >
-      <p className="onboarding-profile-declared-note" role="status">
-        Черновики не используются для принятия согласий. Ваш профиль уже
-        сохранён, и этот шаг откроется при следующем запуске.
-      </p>
-    </OnboardingShell>
+      Документы ещё не опубликованы или не согласованы с backend policy.
+      Черновики не используются для принятия согласий, поэтому продолжение пока
+      недоступно.
+    </div>
   );
 }
 
@@ -45,196 +45,159 @@ function TestOnlyLegalNotice({ legalConfig }) {
       className="onboarding-legal-test-only-note"
       aria-label="Временные документы тестового контура"
     >
-      Тестовый контур: это временные версии документов, не публикация для
-      production. Новые версии нельзя считать принятыми без отдельного
-      повторного согласия.
+      Тестовый контур: временные версии, не публикация для production.
     </aside>
   );
 }
 
-function OnboardingConsentsGate({
+function OnboardingIdentityGate({
   onboarding,
   legalConfig,
   onReload,
+  onSaveProfile,
   onAdvance,
 }) {
   const [accepted, setAccepted] = useState({});
-  const [notice, setNotice] = useState(null);
-  const [submitting, setSubmitting] = useState(false);
-  const checkboxRefs = useRef(new Map());
   const consents = useMemo(
     () => legalConsentContract(legalConfig),
     [legalConfig],
   );
+  const allAccepted =
+    consents !== null &&
+    legalConfig.documents.every(({ kind }) => accepted[kind] === true);
 
   useEffect(() => {
     setAccepted({});
-    setNotice(null);
   }, [onboarding.revision]);
 
-  if (consents === null) return <LegalUnavailableGate />;
+  const withSavedProfile = (result) =>
+    result.outcome === 'reconciled' || result.outcome === 'cancelled'
+      ? result
+      : Object.freeze({ ...result, profileSaved: true });
 
-  const handleSubmit = async (event) => {
-    event.preventDefault();
-    if (submitting) return;
-    const firstMissing = legalConfig.documents.find(
-      ({ kind }) => accepted[kind] !== true,
-    );
-    if (firstMissing) {
-      setNotice({
-        tone: 'error',
-        kind: 'validation',
-        message: 'Подтвердите ознакомление со всеми тремя документами.',
+  const saveAndAdvance = async (draft) => {
+    if (consents === null || !allAccepted) {
+      return Object.freeze({
+        outcome: 'rejected',
+        reason: 'legal_consents_required',
       });
-      queueMicrotask(() =>
-        checkboxRefs.current.get(firstMissing.kind)?.focus(),
-      );
-      return;
     }
 
-    setSubmitting(true);
-    setNotice(null);
-    try {
-      const result = await onAdvance({
-        expectedRevision: onboarding.revision,
-        flowVersion: onboarding.flowVersion,
-        nextStep: 'level_survey',
-        consents,
+    const saved = await onSaveProfile(draft);
+    if (saved.outcome !== 'saved') return saved;
+    let current = saved.onboarding;
+
+    if (
+      current.currentStep === 'profile' ||
+      current.currentStep === 'contacts'
+    ) {
+      const consentStep = await onAdvance({
+        expectedRevision: current.revision,
+        flowVersion: current.flowVersion,
+        nextStep: 'consents',
       });
-      if (result.outcome === 'advanced' || result.outcome === 'cancelled') {
-        return;
+      if (consentStep.outcome !== 'advanced') {
+        return withSavedProfile(consentStep);
       }
-      if (result.outcome === 'reconciled') {
-        setNotice({
-          tone: 'warning',
-          message:
-            'На сервере уже есть более новая версия анкеты. Проверьте текущий шаг.',
-        });
-        return;
-      }
-      setNotice({
-        tone: 'error',
-        message:
-          result.reason === 'conflict'
-            ? 'На сервере сохранён другой набор документов. Обновите анкету перед продолжением.'
-            : 'Не удалось сохранить согласия. Обновите анкету и попробуйте снова.',
-        canReload: true,
-      });
-    } catch {
-      setNotice({
-        tone: 'error',
-        message: 'Не удалось сохранить согласия. Попробуйте снова позже.',
-        canReload: true,
-      });
-    } finally {
-      setSubmitting(false);
+      current = consentStep.onboarding;
     }
+
+    if (current.currentStep !== 'consents') {
+      return Object.freeze({
+        outcome: 'rejected',
+        reason: 'conflict',
+        profileSaved: true,
+      });
+    }
+
+    const surveyStep = await onAdvance({
+      expectedRevision: current.revision,
+      flowVersion: current.flowVersion,
+      nextStep: 'level_survey',
+      consents,
+    });
+    return surveyStep.outcome === 'advanced'
+      ? surveyStep
+      : withSavedProfile(surveyStep);
   };
 
-  const handleReload = async () => {
-    if (submitting) return;
-    setSubmitting(true);
-    try {
-      await onReload();
-    } finally {
-      setSubmitting(false);
-    }
-  };
+  const renderLegalControls = ({ submitting }) => (
+    <section
+      className="onboarding-profile-consents"
+      aria-labelledby="onboarding-consents-title"
+    >
+      <h2 id="onboarding-consents-title">Обязательные согласия</h2>
+      {consents === null ? (
+        <LegalUnavailableNotice />
+      ) : (
+        <>
+          <TestOnlyLegalNotice legalConfig={legalConfig} />
+          <fieldset className="onboarding-consent-list" disabled={submitting}>
+            <legend>Откройте документы и отметьте все три пункта *</legend>
+            {legalConfig.documents.map((document) => {
+              const inputId = `onboarding-consent-${document.kind}`;
+              return (
+                <div className="onboarding-consent-row" key={document.kind}>
+                  <label
+                    className="onboarding-consent-toggle"
+                    htmlFor={inputId}
+                  >
+                    <input
+                      id={inputId}
+                      type="checkbox"
+                      required
+                      aria-required="true"
+                      aria-label={`${document.acceptanceLabel}: ${document.title}, версия ${document.version}`}
+                      checked={accepted[document.kind] === true}
+                      onChange={(event) => {
+                        setAccepted((previous) => ({
+                          ...previous,
+                          [document.kind]: event.target.checked,
+                        }));
+                      }}
+                    />
+                  </label>
+                  <a
+                    className="onboarding-legal-link"
+                    href={document.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    <span>{document.title}</span>
+                    <small>Версия {document.version}</small>
+                  </a>
+                </div>
+              );
+            })}
+          </fieldset>
+          <p
+            id="onboarding-legal-readiness"
+            className="onboarding-consent-hint"
+          >
+            {allAccepted
+              ? 'Все три согласия отмечены.'
+              : 'Продолжение станет доступно после заполнения профиля и трёх согласий.'}
+          </p>
+        </>
+      )}
+    </section>
+  );
 
   return (
-    <OnboardingShell
-      testId="onboarding-consents-gate"
-      title="Документы и согласия"
-      intro="Откройте и прочитайте каждый опубликованный документ, затем подтвердите принятие условий и ознакомление с политикой."
-    >
-      <p className="onboarding-step-indicator">Шаг 2 из 3</p>
-      <TestOnlyLegalNotice legalConfig={legalConfig} />
-      <form
-        noValidate
-        aria-describedby={
-          notice?.kind === 'validation'
-            ? 'onboarding-consents-notice'
-            : undefined
-        }
-        onSubmit={handleSubmit}
-      >
-        <div className="onboarding-legal-list">
-          {legalConfig.documents.map((document) => {
-            const inputId = `onboarding-consent-${document.kind}`;
-            return (
-              <section className="onboarding-legal-item" key={document.kind}>
-                <a
-                  className="onboarding-legal-link"
-                  href={document.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  <span>{document.title}</span>
-                  <small>Версия {document.version}</small>
-                </a>
-                <label className="onboarding-consent-check" htmlFor={inputId}>
-                  <input
-                    ref={(element) => {
-                      if (element)
-                        checkboxRefs.current.set(document.kind, element);
-                    }}
-                    id={inputId}
-                    type="checkbox"
-                    required
-                    aria-required="true"
-                    aria-invalid={notice?.kind === 'validation'}
-                    aria-describedby={
-                      notice?.kind === 'validation'
-                        ? 'onboarding-consents-notice'
-                        : undefined
-                    }
-                    aria-label={`${document.acceptanceLabel}: ${document.title}, версия ${document.version}`}
-                    checked={accepted[document.kind] === true}
-                    onChange={(event) => {
-                      setAccepted((previous) => ({
-                        ...previous,
-                        [document.kind]: event.target.checked,
-                      }));
-                      setNotice(null);
-                    }}
-                  />
-                  <span>{document.acceptanceLabel}</span>
-                </label>
-              </section>
-            );
-          })}
-        </div>
-
-        {notice && (
-          <div
-            id="onboarding-consents-notice"
-            className={`onboarding-profile-notice onboarding-profile-notice--${notice.tone}`}
-            role={notice.tone === 'error' ? 'alert' : 'status'}
-            aria-live={notice.tone === 'error' ? 'assertive' : 'polite'}
-          >
-            <span>{notice.message}</span>
-            {notice.canReload && (
-              <button
-                type="button"
-                className="onboarding-profile-reload"
-                onClick={handleReload}
-                disabled={submitting}
-              >
-                Обновить анкету
-              </button>
-            )}
-          </div>
-        )}
-
-        <button
-          type="submit"
-          className="onboarding-profile-submit"
-          disabled={submitting}
-        >
-          {submitting ? 'Сохраняем…' : 'Продолжить'}
-        </button>
-      </form>
-    </OnboardingShell>
+    <OnboardingProfileGate
+      onboarding={onboarding}
+      onReload={onReload}
+      onSave={saveAndAdvance}
+      title="Давайте познакомимся"
+      intro="Заполните личные данные, ознакомьтесь с документами и подтвердите обязательные согласия."
+      stepIndicator="Шаг 1 из 2"
+      supplementalContent={renderLegalControls}
+      submitLabel="Продолжить"
+      submittingLabel="Сохраняем и продолжаем…"
+      submitReady={allAccepted}
+      disableUntilValid
+      submitDescriptionId="onboarding-legal-readiness"
+    />
   );
 }
 
@@ -347,11 +310,12 @@ function OnboardingSurveyGate({
       title="Ваш начальный уровень"
       intro="Ответ поможет подобрать подходящие матчи. Рейтинг и верификация контактов этим ответом не подтверждаются."
     >
-      <p className="onboarding-step-indicator">Шаг 3 из 3</p>
+      <p className="onboarding-step-indicator">Шаг 2 из 2</p>
       <TestOnlyLegalNotice legalConfig={legalConfig} />
       <form noValidate onSubmit={handleSubmit}>
         <fieldset
           className="onboarding-survey-fieldset"
+          disabled={submitting}
           aria-required="true"
           aria-invalid={notice?.kind === 'validation'}
           aria-describedby={
@@ -406,6 +370,7 @@ function OnboardingSurveyGate({
           type="submit"
           className="onboarding-profile-submit"
           disabled={submitting}
+          aria-busy={submitting || undefined}
         >
           {submitting ? 'Завершаем…' : 'Завершить настройку'}
         </button>
@@ -424,43 +389,15 @@ export default function OnboardingFlowGate({
 }) {
   if (
     onboarding.currentStep === 'profile' ||
-    onboarding.currentStep === 'contacts'
+    onboarding.currentStep === 'contacts' ||
+    onboarding.currentStep === 'consents'
   ) {
-    const saveAndAdvance = async (draft) => {
-      const saved = await onSaveProfile(draft);
-      if (saved.outcome !== 'saved') return saved;
-      const savedState = saved.onboarding;
-      const advanced = await onAdvance({
-        expectedRevision: savedState.revision,
-        flowVersion: savedState.flowVersion,
-        nextStep: 'consents',
-      });
-      return advanced.outcome === 'advanced'
-        ? Object.freeze({
-            outcome: 'advanced',
-            onboarding: advanced.onboarding,
-          })
-        : advanced.outcome === 'reconciled' || advanced.outcome === 'cancelled'
-          ? advanced
-          : Object.freeze({
-              ...advanced,
-              profileSaved: true,
-            });
-    };
     return (
-      <OnboardingProfileGate
-        onboarding={onboarding}
-        onReload={onReload}
-        onSave={saveAndAdvance}
-      />
-    );
-  }
-  if (onboarding.currentStep === 'consents') {
-    return (
-      <OnboardingConsentsGate
+      <OnboardingIdentityGate
         onboarding={onboarding}
         legalConfig={legalConfig}
         onReload={onReload}
+        onSaveProfile={onSaveProfile}
         onAdvance={onAdvance}
       />
     );

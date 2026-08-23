@@ -70,6 +70,15 @@ export default function OnboardingProfileGate({
   onboarding,
   onReload,
   onSave,
+  title = 'Давайте познакомимся',
+  intro = 'Заполните профиль, чтобы продолжить в приложении.',
+  stepIndicator = null,
+  supplementalContent = null,
+  submitLabel = 'Сохранить профиль',
+  submittingLabel = 'Сохраняем…',
+  submitReady = true,
+  disableUntilValid = false,
+  submitDescriptionId,
 }) {
   const [fields, setFields] = useState(() => initialFields(onboarding));
   const [errors, setErrors] = useState({});
@@ -95,6 +104,19 @@ export default function OnboardingProfileGate({
       return next;
     });
     setNotice(null);
+  };
+
+  const handleBlur = (field) => () => {
+    const validation = buildOnboardingProfileDraft(fields, onboarding.revision);
+    setErrors((previous) => {
+      const next = { ...previous };
+      if (validation.errors[field]) {
+        next[field] = validation.errors[field];
+      } else {
+        delete next[field];
+      }
+      return next;
+    });
   };
 
   const focusFirstError = (validationErrors) => {
@@ -149,7 +171,7 @@ export default function OnboardingProfileGate({
         setNotice({
           tone: 'error',
           message:
-            'Профиль сохранён, но перейти дальше не удалось. Обновите анкету перед повтором.',
+            'Данные сохранены, но перейти дальше не удалось. Обновите анкету перед повтором.',
           canReload: true,
         });
         return;
@@ -211,6 +233,11 @@ export default function OnboardingProfileGate({
     }
   };
 
+  const profileReady =
+    buildOnboardingProfileDraft(fields, onboarding.revision).draft !== null;
+  const submitDisabled =
+    submitting || (disableUntilValid && (!profileReady || !submitReady));
+
   return (
     <main
       className="onboarding-profile-screen"
@@ -221,10 +248,11 @@ export default function OnboardingProfileGate({
         aria-labelledby="onboarding-profile-title"
       >
         <p className="onboarding-profile-eyebrow">Просто Падел</p>
-        <h1 id="onboarding-profile-title">Давайте познакомимся</h1>
-        <p className="onboarding-profile-intro">
-          Заполните профиль, чтобы продолжить в приложении.
-        </p>
+        <h1 id="onboarding-profile-title">{title}</h1>
+        {stepIndicator && (
+          <p className="onboarding-step-indicator">{stepIndicator}</p>
+        )}
+        <p className="onboarding-profile-intro">{intro}</p>
 
         <form noValidate onSubmit={handleSubmit}>
           <div className="onboarding-profile-field">
@@ -235,6 +263,7 @@ export default function OnboardingProfileGate({
               name="firstName"
               type="text"
               required
+              disabled={submitting}
               aria-required="true"
               autoComplete="given-name"
               maxLength={256}
@@ -244,6 +273,7 @@ export default function OnboardingProfileGate({
                 errors.firstName ? 'onboarding-first-name-error' : undefined
               }
               onChange={handleChange('firstName')}
+              onBlur={handleBlur('firstName')}
             />
             {errors.firstName && (
               <p
@@ -263,6 +293,7 @@ export default function OnboardingProfileGate({
               id="onboarding-last-name"
               name="lastName"
               type="text"
+              disabled={submitting}
               autoComplete="family-name"
               maxLength={256}
               value={fields.lastName}
@@ -271,6 +302,7 @@ export default function OnboardingProfileGate({
                 errors.lastName ? 'onboarding-last-name-error' : undefined
               }
               onChange={handleChange('lastName')}
+              onBlur={handleBlur('lastName')}
             />
             {errors.lastName && (
               <p
@@ -291,6 +323,7 @@ export default function OnboardingProfileGate({
               name="phone"
               type="tel"
               required
+              disabled={submitting}
               aria-required="true"
               inputMode="tel"
               autoComplete="tel"
@@ -303,6 +336,7 @@ export default function OnboardingProfileGate({
                   : 'onboarding-phone-hint'
               }
               onChange={handleChange('phone')}
+              onBlur={handleBlur('phone')}
             />
             <p id="onboarding-phone-hint" className="onboarding-profile-hint">
               Международный формат: + и 7–15 цифр.
@@ -326,6 +360,7 @@ export default function OnboardingProfileGate({
               name="email"
               type="email"
               required
+              disabled={submitting}
               aria-required="true"
               inputMode="email"
               autoComplete="email"
@@ -338,6 +373,7 @@ export default function OnboardingProfileGate({
                 errors.email ? 'onboarding-email-error' : undefined
               }
               onChange={handleChange('email')}
+              onBlur={handleBlur('email')}
             />
             {errors.email && (
               <p
@@ -354,6 +390,10 @@ export default function OnboardingProfileGate({
             Телефон и email сохраняются как указанные контакты. Их подтверждение
             выполняется отдельно.
           </p>
+
+          {typeof supplementalContent === 'function'
+            ? supplementalContent({ submitting })
+            : supplementalContent}
 
           {notice && (
             <div
@@ -379,9 +419,11 @@ export default function OnboardingProfileGate({
           <button
             type="submit"
             className="onboarding-profile-submit"
-            disabled={submitting}
+            disabled={submitDisabled}
+            aria-busy={submitting || undefined}
+            aria-describedby={submitDescriptionId}
           >
-            {submitting ? 'Сохраняем…' : 'Сохранить профиль'}
+            {submitting ? submittingLabel : submitLabel}
           </button>
         </form>
       </section>

@@ -24,7 +24,6 @@ test.use({
   video: 'off',
   screenshot: 'off',
 });
-
 function successBody(accountKind = 'new') {
   return {
     credential: SYNTHETIC_CREDENTIAL,
@@ -404,7 +403,7 @@ test.describe('Telegram backend login feature enabled', () => {
     expect(legacyProviderRequests).toBe(0);
   });
 
-  test('saves first-run profile, advances to fail-closed legal gate and persists no PII', async ({
+  test('keeps first-run profile and legal readiness on one fail-closed screen without persisting PII', async ({
     page,
   }) => {
     const phone = '+7 (999) 123-45-67';
@@ -415,7 +414,6 @@ test.describe('Telegram backend login feature enabled', () => {
     let progressCalls = 0;
     let completionCalls = 0;
     let patchContract = null;
-    let progressContract = null;
     let piiConsoleLeak = false;
 
     page.on('console', (message) => {
@@ -472,7 +470,6 @@ test.describe('Telegram backend login feature enabled', () => {
     });
     await page.route(ONBOARDING_PROGRESS_ROUTE, async (route) => {
       progressCalls += 1;
-      progressContract = route.request().postDataJSON();
       await fulfillOnboardingJson(route, 200, onboardingState({
         status: 'in_progress',
         currentStep: 'consents',
@@ -507,33 +504,19 @@ test.describe('Telegram backend login feature enabled', () => {
     await page.getByLabel('Фамилия').fill('  Петрова  ');
     await page.getByLabel('Телефон *').fill(phone);
     await page.getByLabel('Email *').fill(email);
-    await page.getByRole('button', { name: 'Сохранить профиль' }).click();
-
     await expect(
-      page.getByTestId('onboarding-legal-unavailable-gate'),
+      page.getByTestId('onboarding-legal-unavailable-note'),
     ).toBeVisible();
     await expect(page.getByText(/Черновики не используются/u)).toBeVisible();
+    await expect(page.getByTestId('onboarding-consents-gate')).toHaveCount(0);
+    await expect(page.getByRole('checkbox')).toHaveCount(0);
+    await expect(page.getByRole('link')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Продолжить' })).toBeDisabled();
     expect(readCalls).toBe(1);
-    expect(patchCalls).toBe(1);
-    expect(progressCalls).toBe(1);
+    expect(patchCalls).toBe(0);
+    expect(progressCalls).toBe(0);
     expect(completionCalls).toBe(0);
-    expect(patchContract).toEqual({
-      body: {
-        expectedRevision: null,
-        profile: { firstName: 'Анна', lastName: 'Петрова' },
-        contacts: {
-          phone: canonicalPhone,
-          email: 'player@example.com',
-        },
-      },
-      bearerMatches: true,
-      noCookie: true,
-    });
-    expect(progressContract).toEqual({
-      expectedRevision: 1,
-      flowVersion: 'tma_v1',
-      nextStep: 'consents',
-    });
+    expect(patchContract).toBeNull();
     const persistence = await page.evaluate(({ phoneValue, emailValue }) => ({
       localStorage: Object.values(window.localStorage).some(
         (value) => value.includes(phoneValue) || value.includes(emailValue),
@@ -546,7 +529,7 @@ test.describe('Telegram backend login feature enabled', () => {
     expect(piiConsoleLeak).toBe(false);
   });
 
-  test('resumes the current owner profile draft with its server revision', async ({
+  test('resumes the current owner profile draft on the combined fail-closed screen', async ({
     page,
   }) => {
     let submittedRevision = null;
@@ -587,15 +570,15 @@ test.describe('Telegram backend login feature enabled', () => {
     await page.goto('/');
     await expect(page.getByLabel('Имя *')).toHaveValue('Ирина');
     await expect(page.getByLabel('Телефон *')).toHaveValue('+79990001122');
-    await page.getByRole('button', { name: 'Сохранить профиль' }).click();
     await expect(
-      page.getByTestId('onboarding-legal-unavailable-gate'),
+      page.getByTestId('onboarding-legal-unavailable-note'),
     ).toBeVisible();
-    expect(submittedRevision).toBe(6);
-    expect(progressCalls).toBe(1);
+    await expect(page.getByRole('button', { name: 'Продолжить' })).toBeDisabled();
+    expect(submittedRevision).toBeNull();
+    expect(progressCalls).toBe(0);
   });
 
-  test('reconciles a stale profile PATCH with one GET and does not replay the write', async ({
+  test('does not attempt a stale profile PATCH while legal configuration is unavailable', async ({
     page,
   }) => {
     let readCalls = 0;
@@ -647,12 +630,9 @@ test.describe('Telegram backend login feature enabled', () => {
 
     await page.goto('/');
     await expect(page.getByLabel('Имя *')).toHaveValue('Старая');
-    await page.getByRole('button', { name: 'Сохранить профиль' }).click();
-
-    await expect(page.getByLabel('Имя *')).toHaveValue('Новая');
-    await expect(page.getByLabel('Email *')).toHaveValue('new@example.com');
-    await expect(page.getByText(/более новая версия/u)).toBeVisible();
-    expect({ readCalls, patchCalls }).toEqual({ readCalls: 2, patchCalls: 1 });
+    await expect(page.getByRole('button', { name: 'Продолжить' })).toBeDisabled();
+    await expect(page.getByTestId('onboarding-legal-unavailable-note')).toBeVisible();
+    expect({ readCalls, patchCalls }).toEqual({ readCalls: 1, patchCalls: 0 });
   });
 
   test('clears the private session boundary when onboarding GET is unauthorized', async ({

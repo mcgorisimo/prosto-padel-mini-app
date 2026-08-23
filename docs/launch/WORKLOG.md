@@ -6508,3 +6508,72 @@
   its commit and integration remain separate gates. The future replacement
   legal versions still require the separately approved re-consent lifecycle for
   already-completed players; immutable accepted versions must not be overwritten.
+
+### 2026-08-23 — D5.1 combined profile and legal-consent frontend correction candidate
+
+- Started from the clean detached exact integrated `main` commit
+  `36a9f06a141e7a63e9b57d2b4e1fa68522a840fb`. The correction is limited to the
+  existing onboarding flow/profile components, their CSS and focused tests, the
+  Telegram lifecycle E2E expectation and this append-only record. `AuthGate`,
+  the credential lifecycle/client, backend state machine, migrations 035–037,
+  database schema/data and policy configuration remain unchanged.
+- The separate large `Документы и согласия` screen was removed. Onboarding
+  states `profile`, legacy `contacts` and resumable `consents` now render the
+  same first visual step with server-owned name, canonical phone and normalized
+  email fields followed by three compact required checkbox rows. Each row links
+  to the exact configured versioned Terms, Privacy or Cancellation document;
+  unpublished or policy-unaligned configuration remains fail-closed inline and
+  exposes no consent controls or enabled primary action.
+- The single `Продолжить` action stays disabled until the profile draft is valid
+  and all three checkboxes are selected. It preserves existing optimistic
+  revisions and executes only the required backend transitions in order: a new
+  profile uses `PATCH -> profile/contacts to consents -> consents to
+  level_survey`, while resume at `consents` uses `PATCH -> consents to
+  level_survey`. Any stale, reconciled, cancelled, unknown or rejected stage
+  stops the chain without silent skip or automatic write replay. The level
+  survey is now the second visual step; completed onboarding still enters the
+  existing application directly.
+- The combined form keeps PII and checkbox state only in React memory, never in
+  browser storage or logs. Declared phone/email remain explicitly unverified.
+  The temporary test-only warning is compact but still states that the versions
+  are not a production publication. Existing safe-area/keyboard scroll behavior,
+  visible labels/focus, inline field errors, 48 px controls and disabled/loading
+  semantics were retained or strengthened following the `ui-ux-pro-max` mobile
+  form checklist. Profile/consent controls and survey answers are semantically
+  disabled for their full in-flight request, legal links remain readable, and
+  adjacent checkbox/link touch targets have an `8 px` gap.
+- Focused profile/flow/policy tests passed `20 / 20`, including explicit legacy
+  `contacts` resume and in-flight control-lock coverage. Candidate-only
+  Prettier passed for the formatted
+  component/test files and candidate-only ESLint passed for every changed
+  JS/JSX file. The first mandatory root E2E run passed every changed
+  onboarding/auth scenario but reported two unrelated 30-second UI timeouts in
+  unchanged waitlist and booking-confirmation tests (`97 passed / 1 intentional
+  skip / 2 timed out`). One clean rerun against the unchanged candidate passed
+  `99 / 1 intentional skip`. Two later verification reruns again kept every
+  changed onboarding/auth scenario green while unrelated unchanged chat/home/
+  booking and profile-photo UI flakes varied (`96 / 1 / 3` and `98 / 1 / 1`);
+  no candidate test failed. The final exact corrected candidate then passed the
+  complete root E2E gate cleanly (`99 / 1 intentional skip`). Mandatory root
+  build passed with `1623` modules transformed and the existing large-chunk
+  advisory.
+- Repository-wide format/lint ratchets were also run. Lint remains blocked only
+  by the unchanged `AuthGate.jsx` baseline (`13` findings). The format ratchet
+  still lists its inherited baseline plus the exact changed legacy CSS/E2E
+  files because their historical formatting outside the bounded hunks was
+  intentionally preserved; full-file churn was removed after independent scope
+  review. No baseline cleanup was folded into this D5.1 slice. The verified
+  temporary dependency junction used the identical lockfile Git blob
+  `a5db96ca2068b6020b181a05c9461bbf7e3f49e1` and was removed before handoff; no
+  dependency or lockfile was installed or changed.
+- Independent bounded state/PII and mobile UI/accessibility reviews of the exact
+  corrected diff both passed with `P0=0`, `P1=0`. The UI review's initial three
+  P1 findings (in-flight control locking and touch-target separation) were
+  corrected and re-reviewed before this handoff.
+- This candidate changes the frontend bundle, so deployment is
+  `deployment_deferred_by_user` pending separate commit, integration and
+  frontend-only Selectel test rollout gates. No commit, push, SSH, container,
+  API/DB/schema, env/secret, TLS/nginx, provider or production action occurred;
+  the prior deployed runtime and successful API-level full-onboarding smoke
+  remain unchanged. Manual TMA verification must target the corrected frontend
+  only after its separately approved test rollout.

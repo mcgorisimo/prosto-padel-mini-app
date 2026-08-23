@@ -30,8 +30,7 @@ const TEST_ONLY_LEGAL_CONFIG = readOnboardingLegalConfig({
   VITE_ONBOARDING_PRIVACY_VERSION: 'privacy-test-2026-08-23-v1',
   VITE_ONBOARDING_CANCELLATION_URL:
     'https://test-app.prostopdl.ru/legal/test-only/cancellation-test-2026-08-23-v1/',
-  VITE_ONBOARDING_CANCELLATION_VERSION:
-    'cancellation-test-2026-08-23-v1',
+  VITE_ONBOARDING_CANCELLATION_VERSION: 'cancellation-test-2026-08-23-v1',
 });
 
 const CONSENTS = Object.freeze([
@@ -108,6 +107,8 @@ describe('OnboardingFlowGate', () => {
     ).toBe(
       'https://test-app.prostopdl.ru/legal/test-only/terms-test-2026-08-23-v1/',
     );
+    expect(screen.getByTestId('onboarding-profile-gate')).toBeTruthy();
+    expect(screen.queryByTestId('onboarding-consents-gate')).toBeNull();
   });
 
   it('runs first-run profile, published consents, survey and completion without persisting PII', async () => {
@@ -168,9 +169,15 @@ describe('OnboardingFlowGate', () => {
     await user.type(screen.getByLabelText('Фамилия'), '  Петрова  ');
     await user.type(screen.getByLabelText('Телефон *'), '+7 999 123-45-67');
     await user.type(screen.getByLabelText('Email *'), ' PLAYER@EXAMPLE.TEST ');
-    await user.click(screen.getByRole('button', { name: 'Сохранить профиль' }));
+    const continueButton = screen.getByRole('button', { name: 'Продолжить' });
+    expect(continueButton.disabled).toBe(true);
+    for (const checkbox of screen.getAllByRole('checkbox')) {
+      await user.click(checkbox);
+    }
+    expect(continueButton.disabled).toBe(false);
+    await user.click(continueButton);
 
-    await screen.findByTestId('onboarding-consents-gate');
+    await screen.findByTestId('onboarding-level-survey-gate');
     expect(saveCalls).toEqual([
       {
         expectedRevision: null,
@@ -186,13 +193,6 @@ describe('OnboardingFlowGate', () => {
       flowVersion: 'tma_v1',
       nextStep: 'consents',
     });
-
-    for (const checkbox of screen.getAllByRole('checkbox')) {
-      await user.click(checkbox);
-    }
-    await user.click(screen.getByRole('button', { name: 'Продолжить' }));
-
-    await screen.findByTestId('onboarding-level-survey-gate');
     expect(advanceCalls[1]).toEqual({
       expectedRevision: 2,
       flowVersion: 'tma_v1',
@@ -228,7 +228,63 @@ describe('OnboardingFlowGate', () => {
     expect(consoleError).not.toHaveBeenCalled();
   });
 
-  it('resumes consents and refuses all legal or completion writes while documents are unpublished', () => {
+  it('resumes the legacy contacts step without skipping either progress transition', async () => {
+    const user = userEvent.setup();
+    const saved = inProgressState('contacts', 5);
+    const consentStep = inProgressState('consents', 6);
+    const surveyStep = inProgressState('level_survey', 7, {
+      consents: CONSENTS,
+    });
+    const onSaveProfile = vi.fn().mockResolvedValue({
+      outcome: 'saved',
+      onboarding: saved,
+    });
+    const onAdvance = vi
+      .fn()
+      .mockResolvedValueOnce({ outcome: 'advanced', onboarding: consentStep })
+      .mockResolvedValueOnce({ outcome: 'advanced', onboarding: surveyStep });
+
+    render(
+      <OnboardingFlowGate
+        onboarding={inProgressState('contacts', 4)}
+        legalConfig={LEGAL_CONFIG}
+        onReload={vi.fn()}
+        onSaveProfile={onSaveProfile}
+        onAdvance={onAdvance}
+        onComplete={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('onboarding-profile-gate')).toBeTruthy();
+    expect(screen.getByLabelText('Email *').value).toBe('player@example.test');
+    for (const checkbox of screen.getAllByRole('checkbox')) {
+      await user.click(checkbox);
+    }
+    await user.click(screen.getByRole('button', { name: 'Продолжить' }));
+
+    await waitFor(() => expect(onAdvance).toHaveBeenCalledTimes(2));
+    expect(onSaveProfile.mock.calls[0][0].expectedRevision).toBe(4);
+    expect(onAdvance.mock.calls).toEqual([
+      [
+        {
+          expectedRevision: 5,
+          flowVersion: 'tma_v1',
+          nextStep: 'consents',
+        },
+      ],
+      [
+        {
+          expectedRevision: 6,
+          flowVersion: 'tma_v1',
+          nextStep: 'level_survey',
+          consents: CONSENTS,
+        },
+      ],
+    ]);
+  });
+
+  it('keeps profile and legal readiness on one fail-closed screen while documents are unpublished', () => {
+    const onSaveProfile = vi.fn();
     const onAdvance = vi.fn();
     const onComplete = vi.fn();
     render(
@@ -240,20 +296,98 @@ describe('OnboardingFlowGate', () => {
           documents: [],
         }}
         onReload={vi.fn()}
-        onSaveProfile={vi.fn()}
+        onSaveProfile={onSaveProfile}
         onAdvance={onAdvance}
         onComplete={onComplete}
       />,
     );
 
-    expect(
-      screen.getByTestId('onboarding-legal-unavailable-gate'),
-    ).toBeTruthy();
+    expect(screen.getByTestId('onboarding-profile-gate')).toBeTruthy();
+    expect(screen.queryByTestId('onboarding-consents-gate')).toBeNull();
+    expect(screen.getByLabelText('Имя *').value).toBe('Анна');
     expect(screen.getByText(/Черновики не используются/u)).toBeTruthy();
     expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
     expect(screen.queryAllByRole('link')).toHaveLength(0);
+    expect(screen.getByRole('button', { name: 'Продолжить' }).disabled).toBe(
+      true,
+    );
+    expect(onSaveProfile).not.toHaveBeenCalled();
     expect(onAdvance).not.toHaveBeenCalled();
     expect(onComplete).not.toHaveBeenCalled();
+  });
+
+  it('keeps continue disabled until profile fields and all three consents are valid', async () => {
+    const user = userEvent.setup();
+    const onSaveProfile = vi.fn();
+    const onAdvance = vi.fn();
+    render(
+      <OnboardingFlowGate
+        onboarding={onboardingState()}
+        legalConfig={LEGAL_CONFIG}
+        onReload={vi.fn()}
+        onSaveProfile={onSaveProfile}
+        onAdvance={onAdvance}
+        onComplete={vi.fn()}
+      />,
+    );
+
+    const continueButton = screen.getByRole('button', { name: 'Продолжить' });
+    await user.type(screen.getByLabelText('Телефон *'), '89991234567');
+    await user.type(screen.getByLabelText('Email *'), 'player@example.test');
+    for (const checkbox of screen.getAllByRole('checkbox')) {
+      await user.click(checkbox);
+    }
+    expect(continueButton.disabled).toBe(true);
+
+    await user.tab();
+    expect(screen.getByText(/международном формате/u)).toBeTruthy();
+    await user.clear(screen.getByLabelText('Телефон *'));
+    await user.type(screen.getByLabelText('Телефон *'), '+79991234567');
+    expect(continueButton.disabled).toBe(false);
+    expect(onSaveProfile).not.toHaveBeenCalled();
+    expect(onAdvance).not.toHaveBeenCalled();
+  });
+
+  it('locks profile and consent controls for the complete one-click sequence', async () => {
+    const user = userEvent.setup();
+    let resolveSave;
+    const onSaveProfile = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          resolveSave = resolve;
+        }),
+    );
+    render(
+      <OnboardingFlowGate
+        onboarding={inProgressState('profile', 4)}
+        legalConfig={LEGAL_CONFIG}
+        onReload={vi.fn()}
+        onSaveProfile={onSaveProfile}
+        onAdvance={vi.fn()}
+        onComplete={vi.fn()}
+      />,
+    );
+
+    for (const checkbox of screen.getAllByRole('checkbox')) {
+      await user.click(checkbox);
+    }
+    const continueButton = screen.getByRole('button', { name: 'Продолжить' });
+    await user.click(continueButton);
+
+    await waitFor(() => expect(onSaveProfile).toHaveBeenCalledTimes(1));
+    expect(
+      screen.getAllByRole('textbox').every((input) => input.disabled),
+    ).toBe(true);
+    expect(
+      screen
+        .getAllByRole('checkbox')
+        .every((checkbox) => checkbox.matches(':disabled')),
+    ).toBe(true);
+    expect(continueButton.getAttribute('aria-busy')).toBe('true');
+    expect(screen.getAllByRole('link')).toHaveLength(3);
+
+    resolveSave({ outcome: 'reconciled' });
+    await waitFor(() => expect(continueButton.disabled).toBe(false));
   });
 
   it('reports a saved profile truthfully when the following progress call fails', async () => {
@@ -279,40 +413,44 @@ describe('OnboardingFlowGate', () => {
 
     await user.type(screen.getByLabelText('Телефон *'), '+79991234567');
     await user.type(screen.getByLabelText('Email *'), 'synthetic@example.test');
-    await user.click(screen.getByRole('button', { name: 'Сохранить профиль' }));
+    for (const checkbox of screen.getAllByRole('checkbox')) {
+      await user.click(checkbox);
+    }
+    await user.click(screen.getByRole('button', { name: 'Продолжить' }));
 
     await waitFor(() => expect(onAdvance).toHaveBeenCalledTimes(1));
     expect(screen.getByRole('alert').textContent).toContain(
-      'Профиль сохранён, но перейти дальше не удалось',
+      'Данные сохранены, но перейти дальше не удалось',
     );
     expect(
       screen.getByRole('button', { name: 'Обновить данные' }),
     ).toBeTruthy();
   });
 
-  it('requires all documents and reports stale reconciliation without replaying progress', async () => {
+  it('resumes consents on the combined screen and stops after stale reconciliation', async () => {
     const user = userEvent.setup();
+    const saved = inProgressState('consents', 9);
+    const onSaveProfile = vi.fn().mockResolvedValue({
+      outcome: 'saved',
+      onboarding: saved,
+    });
     const onAdvance = vi.fn().mockResolvedValue({ outcome: 'reconciled' });
     render(
       <OnboardingFlowGate
         onboarding={inProgressState('consents', 8)}
         legalConfig={LEGAL_CONFIG}
         onReload={vi.fn()}
-        onSaveProfile={vi.fn()}
+        onSaveProfile={onSaveProfile}
         onAdvance={onAdvance}
         onComplete={vi.fn()}
       />,
     );
 
-    await user.click(screen.getByRole('button', { name: 'Продолжить' }));
-    const validationAlert = screen.getByRole('alert');
-    expect(validationAlert.textContent).toContain('Подтвердите ознакомление');
+    expect(screen.getByTestId('onboarding-profile-gate')).toBeTruthy();
+    expect(screen.queryByTestId('onboarding-consents-gate')).toBeNull();
+    expect(screen.getByLabelText('Телефон *').value).toBe('+79991234567');
     const checkboxes = screen.getAllByRole('checkbox');
     expect(checkboxes.every((checkbox) => checkbox.required)).toBe(true);
-    expect(checkboxes[0].getAttribute('aria-invalid')).toBe('true');
-    expect(checkboxes[0].getAttribute('aria-describedby')).toBe(
-      validationAlert.id,
-    );
     expect(
       screen.getByRole('checkbox', {
         name: /Условия использования, версия terms-2026-08-26/u,
@@ -323,13 +461,26 @@ describe('OnboardingFlowGate', () => {
         name: /Политика конфиденциальности, версия privacy-2026-08-26/u,
       }),
     ).toBeTruthy();
+    const continueButton = screen.getByRole('button', { name: 'Продолжить' });
+    expect(continueButton.disabled).toBe(true);
+    await user.click(continueButton);
+    expect(onSaveProfile).not.toHaveBeenCalled();
     expect(onAdvance).not.toHaveBeenCalled();
 
     for (const checkbox of checkboxes) {
       await user.click(checkbox);
     }
-    await user.click(screen.getByRole('button', { name: 'Продолжить' }));
+    expect(continueButton.disabled).toBe(false);
+    await user.click(continueButton);
+    await waitFor(() => expect(onSaveProfile).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(onAdvance).toHaveBeenCalledTimes(1));
+    expect(onSaveProfile.mock.calls[0][0].expectedRevision).toBe(8);
+    expect(onAdvance).toHaveBeenCalledWith({
+      expectedRevision: 9,
+      flowVersion: 'tma_v1',
+      nextStep: 'level_survey',
+      consents: CONSENTS,
+    });
     expect(screen.getByRole('status').textContent).toContain(
       'более новая версия',
     );
@@ -337,9 +488,13 @@ describe('OnboardingFlowGate', () => {
 
   it('resumes level survey and fails closed for changed legal versions or a different completion', async () => {
     const user = userEvent.setup();
-    const onComplete = vi
-      .fn()
-      .mockResolvedValue({ outcome: 'rejected', reason: 'conflict' });
+    let resolveCompletion;
+    const onComplete = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          resolveCompletion = resolve;
+        }),
+    );
     const { rerender } = render(
       <OnboardingFlowGate
         onboarding={inProgressState('level_survey', 3, {
@@ -369,6 +524,20 @@ describe('OnboardingFlowGate', () => {
       screen.getByRole('button', { name: 'Завершить настройку' }),
     );
     await waitFor(() => expect(onComplete).toHaveBeenCalledTimes(1));
+    expect(
+      screen.getAllByRole('radio').every((radio) => radio.matches(':disabled')),
+    ).toBe(true);
+    expect(
+      screen
+        .getByRole('button', { name: 'Завершаем…' })
+        .getAttribute('aria-busy'),
+    ).toBe('true');
+    resolveCompletion({ outcome: 'rejected', reason: 'conflict' });
+    await waitFor(() =>
+      expect(screen.getByRole('alert').textContent).toContain(
+        'отличается от уже обработанного',
+      ),
+    );
     expect(screen.getByRole('alert').textContent).toContain(
       'отличается от уже обработанного',
     );
