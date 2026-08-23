@@ -6458,3 +6458,53 @@
   installed or changed by either retry.
 - Independent read-only review of this exact one-file closeout diff passed with
   `P0=0, P1=0` and no findings.
+
+### 2026-08-23 — D5.1 authenticated test-only full onboarding smoke on Selectel test
+
+- The one-time PII-free authenticated smoke ran against host
+  `prosto-padel-test-01`, Compose project `prosto-padel-test`, for integrated
+  exact `main` commit `f7565d2e91987b245a79b121f0c5be3f99fdc54b`, whose
+  runtime tree is identical to deployed exact commit
+  `16006c0b6e885e56a2479887996cd505bb48aa69`. Preflight reconfirmed the clean
+  exact server checkout, migration 037 as `applied_verified` without repeat
+  apply, exactly thirteen configured test-only legal keys without displaying
+  values, internal health `200`, and all four containers healthy with restart
+  count `0`.
+- The syntax-checked in-memory runner had SHA-256
+  `1F068C45E9D45CF3A978C1D3E11879F18DC81122E364AC4F158A6BCAA5C24D2A`.
+  It was streamed once into the existing backend container, was not persisted,
+  and started at `2026-08-23T19:13:31.069Z`. No secret, bearer, initData,
+  identifier, contact value, request/response body or other PII was printed.
+- The exact API-backed sequence passed: `login/new -> GET required/null -> PATCH
+  profile/1 -> progress consents/2 -> GET resume consents/2 -> progress
+  level_survey/3 -> GET resume level_survey/3 -> completion/4 -> exact completion
+  retry completed/4 -> different completion request 409 -> GET completed/4 ->
+  logout 204 -> old bearer 401 -> login existing -> GET completed/4 without
+  repeated onboarding -> logout 204 -> second old bearer 401`.
+- The permitted writes retained one PII-free synthetic player fixture with
+  declared contacts, no notification permission, the test flow/survey answer
+  and the exact temporary Terms, Privacy and Cancellation test-policy consent
+  records. Those records are test-only evidence and are not represented as real
+  user consent. No rollback, delete or anonymisation was performed.
+- Post-smoke verification reconfirmed the clean unchanged checkout and the exact
+  unchanged backend, frontend, nginx and PostgreSQL containers, images, healthy
+  state and restart count `0`; internal health remained `200`. From the smoke
+  start, bounded backend, frontend and nginx critical counts were `0` and HTTP
+  5xx counts were `0`. Files, containers, DB schema/migrations, runtime,
+  env/secrets, TLS/nginx configuration, provider state and production were
+  unchanged.
+- Mandatory root gates passed for this exact documentation-only closeout. The
+  first E2E invocation stopped before executing tests because the isolated
+  worktree had no local `node_modules`; the existing dependency tree was then
+  verified against the identical lockfile Git blob
+  `a5db96ca2068b6020b181a05c9461bbf7e3f49e1` and attached temporarily. The
+  unchanged candidate passed `npm.cmd run test:e2e` with `99 passed / 1
+  intentional skip` and `npm.cmd run build` with `1623` modules transformed and
+  the existing large-chunk advisory. The junction was removed afterward; no
+  dependency or lockfile was installed or changed.
+- Deployment status is
+  `deployment=applied_verified_with_authenticated_test_only_full_onboarding_smoke_pass`.
+  This append-only closeout is documentation-only with deployment `not_needed`;
+  its commit and integration remain separate gates. The future replacement
+  legal versions still require the separately approved re-consent lifecycle for
+  already-completed players; immutable accepted versions must not be overwritten.
