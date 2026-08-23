@@ -6021,3 +6021,63 @@
   owner contacts/versions/URLs remain follow-up docs gates. The next independent
   D5 slice that does not require those facts is NotificationPreferences/privacy
   settings readiness; it must start under a separate owner command.
+
+### 2026-08-23 — D5.3 NP1 notification-preference migration 038 local candidate
+
+- Continued from the clean local D5.3 checkpoint branch
+  codex/d5-3-compliance-drafts at exact HEAD
+  864727d02bec93a44e17491570667f65bc7fbe06; main and origin/main
+  remained 3b26099413325982a5dbc476d2ffb9434a2efffc. Exact scope is one
+  focused migration-contract test, the five migration-038 artifacts and this
+  append-only WORKLOG entry. No frontend or runtime source file changed.
+- The runtime-disconnected migration candidate creates empty
+  backend_auth.account_notification_preferences with one account-owned
+  boolean, telegram_match_notifications_enabled, canonical timestamps and an
+  optimistic version. It has no default and no backfill: the later runtime
+  contract must interpret no row as effective enabled, while an explicit false
+  row remains independent from Telegram destination permission and later
+  Telegram logins.
+- The only existing-schema change in the candidate extends the
+  backend_match.telegram_notification_outbox terminal allowlist with
+  preference_disabled, valid only for an abandoned delivery. Existing
+  destination/outbox rows are not changed. The current covered Telegram
+  sources are match invitations and waitlist-promotion match notifications;
+  the in-app feed, other reservation notifications, email/SMS/marketing/native
+  push, private-booking notifications and profile-visibility settings remain
+  outside NP1.
+- PRECHECK and POSTCHECK are read-only and end in ROLLBACK. The application
+  role receives table SELECT plus exact column-scoped INSERT/UPDATE only; no
+  chat ID, external identity, contact or message/provider payload is added.
+  Fail-closed rollback is allowed only before the first preference row and
+  before any preference_disabled outbox evidence, and restores the exact
+  migration-030 constraints and fingerprint without CASCADE.
+- Focused migration-contract test PASS:
+  backend-account-notification-preferences-migration.spec.ts passed 9 / 9.
+  Mandatory backend gates PASS: typecheck; unit 150 / 150 suites and
+  3616 / 3616 tests; e2e 2 / 2 suites and 4 / 4 tests; build. Mandatory root
+  stable gates PASS: test:e2e with four workers passed
+  99 / 1 intentional skip; build passed with 1621 modules transformed and the
+  existing large-chunk advisory.
+- The first default nine-worker root E2E run reached
+  94 passed / 1 intentional skip and five unrelated UI tests timed out; all
+  five passed in the complete four-worker stability rerun. Initial sandboxed
+  stable E2E and build attempts could not traverse the existing external
+  dependency junction; approved local retries outside the filesystem sandbox
+  passed. No dependency was installed or changed. The new test file passes its
+  exact Prettier check; unrelated pre-existing format findings were not edited.
+- Migration 038 was not applied. The exact auth-integration inventory still
+  models the pre-038 catalog and is intentionally deferred to the later
+  repository/runtime slice after the separate test-database migration gate.
+  Deployment is not_needed for this runtime-disconnected local candidate.
+  No commit, push, merge, DB/schema write, Selectel/provider/API call,
+  rollout/restart, server/env/secret change or production action occurred.
+- Independent exact-candidate P0/P1 review follows this factual gate record.
+  The next authorised action, if this candidate passes review, is a separate
+  local commit gate only; integration/push and test-database application remain
+  later separate owner commands.
+- Independent read-only review of the exact NP1 candidate completed with
+  P0 = 0 and P1 = 0. It accepted the runtime-disconnected scope, bounded ACL,
+  read-only PRECHECK/POSTCHECK, fail-closed exact rollback, and terminal-only
+  preference_disabled outcome. The README additionally makes the operator
+  rollback boundary explicit: rollback is unavailable after a
+  preference-aware runtime has been deployed.
