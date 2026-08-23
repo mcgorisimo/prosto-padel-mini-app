@@ -6405,3 +6405,56 @@
 - Independent read-only P0/P1 review of the exact 27-file candidate passed with
   `P0=0, P1=0`. The re-consent lifecycle is recorded as explicit remaining
   scope rather than hidden inside or falsely claimed by this candidate.
+
+### 2026-08-23 — D5.1 temporary test-only legal alignment deployed on Selectel test
+
+- The separate Selectel test env/config gate added exactly thirteen onboarding
+  legal keys to the canonical `infra/test/.env.test`; every key was present
+  exactly once after the write. File mode `600` and owner
+  `prostopadel:prostopadel` were preserved, no secret value was printed, and no
+  container or runtime was changed by the configuration-only gate.
+- Rollout preflight passed on host `prosto-padel-test-01`, Compose project
+  `prosto-padel-test`. The clean detached checkout advanced from exact
+  `1184868880750e4634de10517a12bb34d121f1ba` to clean integrated exact
+  `16006c0b6e885e56a2479887996cd505bb48aa69`. Compose `config --quiet` passed;
+  the backend/frontend build started at `2026-08-23T18:27:51Z`, and the
+  two-container recreate started at `2026-08-23T18:29:04Z`.
+- Only backend and frontend containers changed. Backend became
+  `f9039bbf87f2f388f33a701484e9bb51c23c5a82b08609ac06855f1d590333d4`, image
+  `sha256:85d5af96570f39a96bbe0200fb0fca6ddeef80f42da15f62235ce4fe8083f3b8`;
+  frontend became
+  `bf22f74874bd0064126b89fa4777da02ddecb95602fcb8f6550e180b6d003443`, image
+  `sha256:32a5ae5a0359bfa0ec9d722ed160d360f6ae8d11ffb08b5d4b52c1d021e79e80`.
+  Both were healthy with restart count `0`. Nginx
+  `e5b98b53a385aef67465e097753fb54b060596d3c620af3cfb484a175d624be7` and
+  PostgreSQL
+  `5e36d4dc1a5c3e2fa658382cfc4a8dff7fe3ea2ba1a9834bb89cc83df743f7be`
+  retained their exact IDs, healthy state and restart count `0`.
+- Public frontend and `/api/v1/health` returned HTTP `200` with mandatory TLS
+  verification result `0`. Terms, Privacy and Cancellation test-only URLs each
+  returned `200` with `no-store`, `noindex` and an explicit temporary
+  Selectel-test marker. Unauthorized onboarding GET, PATCH, progress and
+  completion checks each returned `401 no-store`; authenticated requests and
+  consent/progress/completion writes counted `0`.
+- The full rollout window contained one explicitly retained transient nginx
+  event at `2026-08-23T18:29:06.334331343Z`:
+  `GET /api/v1/health -> 502`, during backend recreation. The separate stable
+  window from `2026-08-23T18:29:07Z` passed with backend, frontend and nginx
+  critical counts `0` and 5xx counts `0`; the final checkout remained clean and
+  all four containers remained healthy with restart count `0`.
+- No DB/schema, TLS/nginx configuration, provider/API or production change was
+  made, and no rollback was run. Deployment status is
+  `deployment=applied_verified_with_transient_rollout_502_and_stable_window_pass`.
+  This append-only closeout is documentation-only with deployment
+  `not_needed`; the future replacement versions still require the separately
+  approved re-consent lifecycle for already-completed players.
+- Mandatory root gates completed on the exact one-file closeout. The first
+  parallel WebKit E2E run reported four unrelated UI timeouts (`95 passed / 1
+  intentional skip / 4 timed out`); one clean rerun against the unchanged
+  candidate and dependency tree passed `99 / 1 intentional skip`. The first
+  sandboxed build could not traverse the verified external dependency junction;
+  the exact unsandboxed retry passed with `1623` modules transformed and the
+  existing large-chunk advisory. No dependency, lockfile or runtime file was
+  installed or changed by either retry.
+- Independent read-only review of this exact one-file closeout diff passed with
+  `P0=0, P1=0` and no findings.
