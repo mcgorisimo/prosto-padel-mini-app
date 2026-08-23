@@ -8,6 +8,8 @@ const LOGIN_ROUTE = '**/api/v1/auth/telegram/login';
 const SESSION_ME_ROUTE = '**/api/v1/auth/session/me';
 const PROFILE_ROUTE = '**/api/v1/profile/me';
 const ONBOARDING_ROUTE = '**/api/v1/onboarding/me';
+const ONBOARDING_PROGRESS_ROUTE = '**/api/v1/onboarding/me/progress';
+const ONBOARDING_COMPLETE_ROUTE = '**/api/v1/onboarding/me/complete';
 const TELEGRAM_SDK_ROUTE = 'https://telegram.org/js/telegram-web-app.js';
 const SYNTHETIC_INIT_DATA =
   'query_id=synthetic-login&auth_date=1700000000&hash=synthetic-hash';
@@ -402,7 +404,7 @@ test.describe('Telegram backend login feature enabled', () => {
     expect(legacyProviderRequests).toBe(0);
   });
 
-  test('shows first-run profile onboarding and sends one canonical revisioned PATCH without persisting PII', async ({
+  test('saves first-run profile, advances to fail-closed legal gate and persists no PII', async ({
     page,
   }) => {
     const phone = '+7 (999) 123-45-67';
@@ -410,7 +412,10 @@ test.describe('Telegram backend login feature enabled', () => {
     const email = 'PLAYER@EXAMPLE.COM';
     let readCalls = 0;
     let patchCalls = 0;
+    let progressCalls = 0;
+    let completionCalls = 0;
     let patchContract = null;
+    let progressContract = null;
     let piiConsoleLeak = false;
 
     page.on('console', (message) => {
@@ -465,6 +470,27 @@ test.describe('Telegram backend login feature enabled', () => {
         surveyAnswers: {},
       }));
     });
+    await page.route(ONBOARDING_PROGRESS_ROUTE, async (route) => {
+      progressCalls += 1;
+      progressContract = route.request().postDataJSON();
+      await fulfillOnboardingJson(route, 200, onboardingState({
+        status: 'in_progress',
+        currentStep: 'consents',
+        revision: 2,
+        profile: { firstName: 'Анна', lastName: 'Петрова' },
+        contacts: {
+          phone: canonicalPhone,
+          normalizedEmail: 'player@example.com',
+          assurance: 'declared',
+        },
+        consents: [],
+        surveyAnswers: {},
+      }));
+    });
+    await page.route(ONBOARDING_COMPLETE_ROUTE, async (route) => {
+      completionCalls += 1;
+      await route.abort();
+    });
     await prepareBrowser(page);
     await page.route(LOGIN_ROUTE, async (route) => {
       await fulfillJson(route, 200, successBody('new'));
@@ -483,9 +509,14 @@ test.describe('Telegram backend login feature enabled', () => {
     await page.getByLabel('Email *').fill(email);
     await page.getByRole('button', { name: 'Сохранить профиль' }).click();
 
-    await expect(gate.getByRole('status')).toContainText('Профиль сохранён.');
+    await expect(
+      page.getByTestId('onboarding-legal-unavailable-gate'),
+    ).toBeVisible();
+    await expect(page.getByText(/Черновики не используются/u)).toBeVisible();
     expect(readCalls).toBe(1);
     expect(patchCalls).toBe(1);
+    expect(progressCalls).toBe(1);
+    expect(completionCalls).toBe(0);
     expect(patchContract).toEqual({
       body: {
         expectedRevision: null,
@@ -497,6 +528,11 @@ test.describe('Telegram backend login feature enabled', () => {
       },
       bearerMatches: true,
       noCookie: true,
+    });
+    expect(progressContract).toEqual({
+      expectedRevision: 1,
+      flowVersion: 'tma_v1',
+      nextStep: 'consents',
     });
     const persistence = await page.evaluate(({ phoneValue, emailValue }) => ({
       localStorage: Object.values(window.localStorage).some(
@@ -514,6 +550,7 @@ test.describe('Telegram backend login feature enabled', () => {
     page,
   }) => {
     let submittedRevision = null;
+    let progressCalls = 0;
     const resume = onboardingState({
       status: 'in_progress',
       currentStep: 'profile',
@@ -534,6 +571,14 @@ test.describe('Telegram backend login feature enabled', () => {
       }
       await fulfillOnboardingJson(route, 200, resume);
     });
+    await page.route(ONBOARDING_PROGRESS_ROUTE, async (route) => {
+      progressCalls += 1;
+      await fulfillOnboardingJson(route, 200, onboardingState({
+        ...resume,
+        currentStep: 'consents',
+        revision: 7,
+      }));
+    });
     await prepareBrowser(page);
     await page.route(LOGIN_ROUTE, async (route) => {
       await fulfillJson(route, 200, successBody('existing'));
@@ -544,9 +589,10 @@ test.describe('Telegram backend login feature enabled', () => {
     await expect(page.getByLabel('Телефон *')).toHaveValue('+79990001122');
     await page.getByRole('button', { name: 'Сохранить профиль' }).click();
     await expect(
-      page.getByTestId('onboarding-profile-gate').getByRole('status'),
-    ).toContainText('Профиль сохранён.');
+      page.getByTestId('onboarding-legal-unavailable-gate'),
+    ).toBeVisible();
     expect(submittedRevision).toBe(6);
+    expect(progressCalls).toBe(1);
   });
 
   test('reconciles a stale profile PATCH with one GET and does not replay the write', async ({

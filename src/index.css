@@ -1526,6 +1526,107 @@ textarea {
   line-height: 1.5;
 }
 
+.onboarding-step-indicator {
+  margin: 0 0 16px;
+  color: var(--accent-light);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.4;
+}
+
+.onboarding-legal-list {
+  display: grid;
+  gap: 12px;
+}
+
+.onboarding-legal-item {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid rgba(245, 241, 232, 0.16);
+  border-radius: 12px;
+  background: rgba(245, 241, 232, 0.04);
+}
+
+.onboarding-legal-link {
+  display: grid;
+  align-content: center;
+  min-height: 48px;
+  color: #f5f1e8;
+  font-size: 15px;
+  font-weight: 750;
+  line-height: 1.4;
+  text-decoration-color: rgba(216, 243, 74, 0.56);
+  text-underline-offset: 4px;
+  touch-action: manipulation;
+}
+
+.onboarding-legal-link small {
+  color: rgba(245, 241, 232, 0.66);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.onboarding-consent-check,
+.onboarding-survey-option {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  color: #f5f1e8;
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.45;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.onboarding-consent-check input,
+.onboarding-survey-option input {
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  accent-color: var(--accent-light);
+}
+
+.onboarding-consent-check:focus-within,
+.onboarding-survey-option:focus-within,
+.onboarding-legal-link:focus-visible {
+  border-radius: 8px;
+  outline: 3px solid rgba(216, 243, 74, 0.36);
+  outline-offset: 3px;
+}
+
+.onboarding-survey-fieldset {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.onboarding-survey-fieldset legend {
+  margin-bottom: 8px;
+  color: #f5f1e8;
+  font-size: 16px;
+  font-weight: 750;
+  line-height: 1.5;
+}
+
+.onboarding-survey-option {
+  padding: 10px 12px;
+  border: 1px solid rgba(245, 241, 232, 0.16);
+  border-radius: 12px;
+  background: rgba(245, 241, 232, 0.04);
+}
+
+.onboarding-survey-option:has(input:checked) {
+  border-color: rgba(216, 243, 74, 0.56);
+  background: rgba(216, 243, 74, 0.08);
+}
+
 .onboarding-profile-notice {
   display: grid;
   gap: 8px;

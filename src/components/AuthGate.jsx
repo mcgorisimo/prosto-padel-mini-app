@@ -10,7 +10,7 @@ import Toast from './Toast'; // Correct path for Toast
 import { useTelegramBackendLogin } from '../hooks/useTelegramBackendLogin';
 import TelegramBackendLoginStatus from './auth/TelegramBackendLoginStatus';
 import BallLoader from './BallLoader'; // Если мяч лежит в папке components
-import OnboardingProfileGate from './OnboardingProfileGate';
+import OnboardingFlowGate from './OnboardingFlowGate';
 
 export function resolveOwnProfileGate({
   backendRequired,
@@ -271,6 +271,58 @@ export default function AuthGate() {
     telegramBackendLogin.saveOwnOnboardingDraft,
   ]);
 
+  const handlePlayerOnboardingAdvance = useCallback(async (progress) => {
+    playerOnboardingRequestRef.current += 1;
+    const result = await telegramBackendLogin.advanceOwnOnboarding(progress);
+    if (result.outcome === 'advanced') {
+      setPlayerOnboarding(result.onboarding);
+      setPlayerOnboardingStatus('ready');
+      return result;
+    }
+    if (
+      result.outcome === 'rejected' &&
+      result.reason === 'stale_revision'
+    ) {
+      const refreshed = await loadPlayerOnboarding({ showLoading: false });
+      return refreshed.outcome === 'loaded'
+        ? Object.freeze({
+            outcome: 'reconciled',
+            onboarding: refreshed.onboarding,
+          })
+        : refreshed;
+    }
+    return result;
+  }, [
+    loadPlayerOnboarding,
+    telegramBackendLogin.advanceOwnOnboarding,
+  ]);
+
+  const handlePlayerOnboardingComplete = useCallback(async (completion) => {
+    playerOnboardingRequestRef.current += 1;
+    const result = await telegramBackendLogin.completeOwnOnboarding(completion);
+    if (result.outcome === 'completed') {
+      setPlayerOnboarding(result.onboarding);
+      setPlayerOnboardingStatus('ready');
+      return result;
+    }
+    if (
+      result.outcome === 'rejected' &&
+      result.reason === 'stale_revision'
+    ) {
+      const refreshed = await loadPlayerOnboarding({ showLoading: false });
+      return refreshed.outcome === 'loaded'
+        ? Object.freeze({
+            outcome: 'reconciled',
+            onboarding: refreshed.onboarding,
+          })
+        : refreshed;
+    }
+    return result;
+  }, [
+    loadPlayerOnboarding,
+    telegramBackendLogin.completeOwnOnboarding,
+  ]);
+
   const handleBackendProfileSave = useCallback(async (changes) => {
     backendProfileRequestRef.current += 1;
     const result = await telegramBackendLogin.updateOwnProfile(changes);
@@ -449,28 +501,14 @@ export default function AuthGate() {
   }
 
   if (playerOnboarding.status !== 'completed') {
-    if (
-      playerOnboarding.currentStep === 'profile' ||
-      playerOnboarding.currentStep === 'contacts'
-    ) {
-      return (
-        <OnboardingProfileGate
-          onboarding={playerOnboarding}
-          onReload={loadPlayerOnboarding}
-          onSave={handlePlayerOnboardingSave}
-        />
-      );
-    }
     return (
-      <main className="onboarding-profile-screen" data-testid="player-onboarding-next-step-gate">
-        <section className="onboarding-profile-card" aria-labelledby="onboarding-next-step-title">
-          <p className="onboarding-profile-eyebrow">Просто Падел</p>
-          <h1 id="onboarding-next-step-title">Профиль сохранён</h1>
-          <p className="onboarding-profile-intro">
-            Следующий шаг анкеты пока недоступен в этой версии приложения.
-          </p>
-        </section>
-      </main>
+      <OnboardingFlowGate
+        onboarding={playerOnboarding}
+        onReload={loadPlayerOnboarding}
+        onSaveProfile={handlePlayerOnboardingSave}
+        onAdvance={handlePlayerOnboardingAdvance}
+        onComplete={handlePlayerOnboardingComplete}
+      />
     );
   }
 

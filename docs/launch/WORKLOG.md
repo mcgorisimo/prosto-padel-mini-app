@@ -6230,3 +6230,76 @@
   they were not rerun during rollout. This append-only Markdown closeout is the
   only local change and has deployment `not_needed`; commit/push of the
   closeout remains a separate gate.
+
+### 2026-08-23 — D5.1 full frontend onboarding flow local candidate
+
+- Started from the clean detached exact `main` commit
+  `050c5b0a9157437ec34be14d0913f4df889e492a`. The candidate changes only the
+  existing Telegram-authenticated frontend onboarding boundary, its focused
+  tests, test-build public configuration wiring and this append-only WORKLOG
+  entry. No second login/registration flow, Supabase call, backend/schema,
+  dependency or payment/rating/contact-verification change was added.
+- The existing auth gate now routes the current owner through resumable
+  `profile -> consents -> level_survey -> completed` states. Profile PATCH is
+  followed by the existing progress contract; consent progress and completion
+  use the existing credential-bound lifecycle. Expected revisions are preserved,
+  stale conflicts reconcile with one read and never replay a write, and an
+  already completed onboarding renders the application without showing the
+  onboarding flow again.
+- Legal presentation is configurable through public Vite build settings for a
+  published/policy-aligned flag plus the Terms, Privacy and Cancellation HTTPS
+  URLs and versions. The default test configuration is fail-closed with empty
+  URLs and both flags disabled: drafts are not presented as published documents,
+  checkboxes and consent/completion writes are unavailable. Backend policy value
+  `2026-08-01` remains test-only and is not evidence of a real acceptance. The
+  later live gate requires owner-approved public documents and versions after
+  the `2026-08-26` requisites, plus explicit backend-policy alignment.
+- The available UI uses the existing TMA shell/tokens and safe areas, 48 px
+  controls, keyboard-safe scrolling, visible inline errors and linked required
+  checkbox/radio semantics. No PII, Telegram init data or bearer is stored in
+  browser storage or written to logs. No real Selectel consent/completion request
+  or other API/DB/provider write was performed.
+- Focused frontend tests PASS: `23 / 23` across the onboarding policy, full-flow,
+  profile-gate and client suites. Mandatory root gates PASS:
+  `npm.cmd run test:e2e` passed `99 / 1 intentional skip`; `npm.cmd run build`
+  passed with `1623` modules transformed and the existing large-chunk advisory.
+  The first sandboxed build could not traverse the pre-existing external
+  dependency junction; the approved retry against the same installed dependency
+  tree passed. No dependency or lockfile was installed or changed.
+- Two independent bounded reviews covered mobile UI/accessibility and the
+  auth/state/test/PII boundary. Their P1 findings for historical consent resume,
+  form semantics, backend-policy alignment and container build propagation were
+  corrected. The final independent read-only review of the exact complete
+  candidate, including new files, build configuration and this WORKLOG entry,
+  passed with `P0=0, P1=0`.
+- This candidate changes the frontend bundle and test Compose build inputs, so
+  deployment is `deployment_deferred_by_user`. No commit, push, integration,
+  SSH, checkout/container change, Selectel rollout/restart, DB/schema,
+  TLS/nginx, env/secret, provider/API or production action occurred. The deployed
+  test environment, deployed commits, containers, health/HTTP, manual smoke and
+  logs remain unchanged from their latest separately recorded state.
+
+### 2026-08-23 — D5.1 full frontend onboarding flow rebased local checkpoint
+
+- Local `main` and local `origin/main` had advanced to exact
+  `23fc0544bbf5520edfda1a801c7d74921d9ceee6`, a descendant of the original
+  candidate base. In the clean isolated worktree, exact reviewed commit
+  `a9dc0a75085ed42762a09b6b582332cb6382a9e9` was reapplied with
+  `cherry-pick --no-commit` onto detached `23fc0544bbf5520edfda1a801c7d74921d9ceee6`.
+  No `main`/`origin` ref changed and no replacement commit was created.
+- The only merge conflict was this append-only WORKLOG. All NP2 implementation
+  and rollout record content from current `main` was preserved in its existing
+  order, the D5.1 record was retained after it, and all conflict
+  markers were removed. The other fourteen D5.1 files applied without conflict;
+  no D5.3 backend/runtime source was edited by the resolution.
+- Focused onboarding tests passed `23 / 23`. Mandatory root gates on the rebased
+  candidate passed: `npm.cmd run test:e2e` returned `99 passed / 1 intentional
+  skip`, and `npm.cmd run build` transformed `1623` modules with the existing
+  large-chunk advisory. The external dependency tree had the same Git lockfile
+  blob `a5db96ca2068b6020b181a05c9461bbf7e3f49e1`; no dependency or lockfile was
+  installed or changed, and the temporary local junction was removed afterward.
+- Deployment remains `deployment_deferred_by_user`. No commit, push,
+  integration, SSH, Selectel/container action, consent/completion API request,
+  DB/schema, TLS/nginx, env/secret, provider/API or production action occurred.
+  Independent read-only review of this exact rebased diff passed with
+  `P0=0, P1=0` and no findings.

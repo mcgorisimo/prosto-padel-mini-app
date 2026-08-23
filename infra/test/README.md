@@ -58,6 +58,23 @@ environment file, then rebuild and recreate only `frontend` with the base
 Compose file followed by `compose.runtime-backend.yaml`. Do not perform a
 deployment while preparing or reviewing this repository change.
 
+## Frontend onboarding legal build settings
+
+The `VITE_ONBOARDING_*` values are public build-time settings, not secrets.
+The legal gate stays fail-closed unless both
+`VITE_ONBOARDING_LEGAL_PUBLISHED=true` and
+`VITE_ONBOARDING_LEGAL_POLICY_ALIGNED=true`. The second flag may be enabled
+only after the backend policy accepts the exact configured Terms, Privacy and
+Cancellation versions. Each document also requires its own public HTTPS URL
+and version. Missing or invalid values keep consent and completion controls
+unavailable; repository draft files are never used as a fallback.
+
+The current backend `2026-08-01` versions remain test policy only. Do not set
+either flag to `true` or run a consent/completion smoke until approved documents
+are published and a separate backend-policy/config gate has verified exact
+version alignment. Changing these settings requires rebuilding and recreating
+only `frontend` through the normal test Compose files.
+
 ## Guard model
 
 Every wrapper requires `ALLOW_LOCAL_TEST_DB_OPERATIONS=YES`, exact host

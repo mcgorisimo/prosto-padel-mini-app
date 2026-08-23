@@ -1183,6 +1183,21 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
     );
   }
 
+  function completeOwnOnboarding(completion) {
+    return runMatchOperation(
+      (credential, signal) =>
+        onboarding.complete(credential, completion, { signal }),
+      (result) => {
+        const nextState = readPlayerOnboardingState(result?.onboarding);
+        return (
+          result?.outcome === 'completed' &&
+          nextState?.status === 'completed' &&
+          nextState.currentStep === 'completed'
+        );
+      },
+    );
+  }
+
   function listBookingServices() {
     return runMatchOperation(
       (credential, signal) =>
@@ -1794,6 +1809,7 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
     loadOwnOnboarding,
     saveOwnOnboardingDraft,
     advanceOwnOnboarding,
+    completeOwnOnboarding,
     listBookingServices,
     listBookingCourts,
     listBookingDates,
@@ -1933,6 +1949,16 @@ export function useTelegramBackendLogin() {
       }));
     }
     return telegramBackendLoginLifecycle.advanceOwnOnboarding(progress);
+  }, []);
+
+  const completeOwnOnboarding = useCallback((completion) => {
+    if (!FEATURE_ENABLED) {
+      return Promise.resolve(Object.freeze({
+        outcome: 'rejected',
+        reason: 'not_authenticated',
+      }));
+    }
+    return telegramBackendLoginLifecycle.completeOwnOnboarding(completion);
   }, []);
 
   const listBookingServices = useCallback(() => {
@@ -2405,6 +2431,7 @@ export function useTelegramBackendLogin() {
     loadOwnOnboarding,
     saveOwnOnboardingDraft,
     advanceOwnOnboarding,
+    completeOwnOnboarding,
     listBookingServices,
     listBookingCourts,
     listBookingDates,

@@ -5,10 +5,31 @@ FROM ${NODE_IMAGE} AS build
 WORKDIR /app
 
 ARG VITE_TELEGRAM_BACKEND_LOGIN_ENABLED=true
+ARG VITE_ONBOARDING_LEGAL_PUBLISHED=false
+ARG VITE_ONBOARDING_LEGAL_POLICY_ALIGNED=false
+ARG VITE_ONBOARDING_TERMS_URL=
+ARG VITE_ONBOARDING_TERMS_VERSION=
+ARG VITE_ONBOARDING_PRIVACY_URL=
+ARG VITE_ONBOARDING_PRIVACY_VERSION=
+ARG VITE_ONBOARDING_CANCELLATION_URL=
+ARG VITE_ONBOARDING_CANCELLATION_VERSION=
 
 RUN if [ "${VITE_TELEGRAM_BACKEND_LOGIN_ENABLED}" != "true" ] && \
        [ "${VITE_TELEGRAM_BACKEND_LOGIN_ENABLED}" != "false" ]; then \
       echo "VITE_TELEGRAM_BACKEND_LOGIN_ENABLED must be true or false" >&2; \
+      exit 1; \
+    fi
+
+RUN for value in "${VITE_ONBOARDING_LEGAL_PUBLISHED}" \
+                 "${VITE_ONBOARDING_LEGAL_POLICY_ALIGNED}"; do \
+      if [ "${value}" != "true" ] && [ "${value}" != "false" ]; then \
+        echo "Onboarding legal publication flags must be true or false" >&2; \
+        exit 1; \
+      fi; \
+    done && \
+    if [ "${VITE_ONBOARDING_LEGAL_PUBLISHED}" != \
+         "${VITE_ONBOARDING_LEGAL_POLICY_ALIGNED}" ]; then \
+      echo "Published legal documents require an aligned backend policy" >&2; \
       exit 1; \
     fi
 

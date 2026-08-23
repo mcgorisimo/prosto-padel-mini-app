@@ -2091,7 +2091,7 @@ test.describe('backend session credential lifecycle', () => {
     });
   });
 
-  test('advances onboarding through the private credential boundary and fails closed for conflicts or malformed state', async ({
+  test('advances and completes onboarding through the private credential boundary', async ({
     page,
   }) => {
     await prepareTelegramWithSecureStorage(page, null, '');
@@ -2127,7 +2127,15 @@ test.describe('backend session credential lifecycle', () => {
         });
       const consentsState = onboardingState('consents', 2);
       const surveyState = onboardingState('level_survey', 3, consents);
+      const completedState = Object.freeze({
+        ...surveyState,
+        status: 'completed',
+        currentStep: 'completed',
+        revision: 4,
+        surveyAnswers: Object.freeze({ experience: 'beginner' }),
+      });
       const calls = [];
+      const completionCalls = [];
       let storedCredential = null;
       const lifecycle = createTelegramBackendLoginLifecycle({
         fingerprint: async () => 'onboarding-progress-fingerprint',
@@ -2188,6 +2196,19 @@ test.describe('backend session credential lifecycle', () => {
                 return { outcome: 'rejected', reason: 'invalid' };
             }
           },
+          async complete(credential, completion, options) {
+            completionCalls.push({
+              credentialMatched: credential === parameters.credential,
+              completion,
+              signalPresent: options.signal instanceof AbortSignal,
+            });
+            return completionCalls.length <= 2
+              ? { outcome: 'completed', onboarding: completedState }
+              : {
+                  outcome: 'completed',
+                  onboarding: { ...completedState, revision: 'unsafe' },
+                };
+          },
         },
         credentialStorage: {
           async read() {
@@ -2221,6 +2242,15 @@ test.describe('backend session credential lifecycle', () => {
         nextStep: 'level_survey',
         consents,
       });
+      const completionRequest = Object.freeze({
+        expectedRevision: 3,
+        flowVersion: 'tma_v1',
+        consents,
+        survey: Object.freeze({
+          version: 'initial_level_v1',
+          answers: Object.freeze({ experience: 'beginner' }),
+        }),
+      });
       const first = await lifecycle.advanceOwnOnboarding(toConsents);
       const survey = await lifecycle.advanceOwnOnboarding(toSurvey);
       const idempotentRetry = await lifecycle.advanceOwnOnboarding(toSurvey);
@@ -2233,6 +2263,15 @@ test.describe('backend session credential lifecycle', () => {
         })),
       });
       const malformed = await lifecycle.advanceOwnOnboarding(toSurvey);
+      const completed = await lifecycle.completeOwnOnboarding(
+        completionRequest,
+      );
+      const completedRetry = await lifecycle.completeOwnOnboarding(
+        completionRequest,
+      );
+      const malformedCompletion = await lifecycle.completeOwnOnboarding(
+        completionRequest,
+      );
       const credentialStayedBeforeUnauthorized =
         storedCredential === parameters.credential;
       const unauthorized = await lifecycle.advanceOwnOnboarding(toSurvey);
@@ -2253,6 +2292,9 @@ test.describe('backend session credential lifecycle', () => {
         stale,
         different,
         malformed,
+        completed,
+        completedRetry,
+        malformedCompletion,
         unauthorized,
       ]);
 
@@ -2262,12 +2304,25 @@ test.describe('backend session credential lifecycle', () => {
           ({ credentialMatched }) => credentialMatched,
         ),
         everySignalPresent: calls.every(({ signalPresent }) => signalPresent),
+        completionCalls: completionCalls.length,
+        everyCompletionCredentialMatched: completionCalls.every(
+          ({ credentialMatched }) => credentialMatched,
+        ),
+        everyCompletionSignalPresent: completionCalls.every(
+          ({ signalPresent }) => signalPresent,
+        ),
         exactFirstProgress:
           JSON.stringify(calls[0].progress) === JSON.stringify(toConsents),
         exactSurveyProgress:
           JSON.stringify(calls[1].progress) === JSON.stringify(toSurvey),
         exactIdempotentRetry:
           JSON.stringify(calls[2].progress) === JSON.stringify(toSurvey),
+        exactCompletion:
+          JSON.stringify(completionCalls[0].completion) ===
+          JSON.stringify(completionRequest),
+        exactCompletionRetry:
+          JSON.stringify(completionCalls[1].completion) ===
+          JSON.stringify(completionRequest),
         firstOutcome: first.outcome,
         firstStep: first.onboarding?.currentStep,
         surveyOutcome: survey.outcome,
@@ -2277,6 +2332,10 @@ test.describe('backend session credential lifecycle', () => {
         stale,
         different,
         malformed,
+        completedOutcome: completed.outcome,
+        completedStep: completed.onboarding?.currentStep,
+        completedRetryOutcome: completedRetry.outcome,
+        malformedCompletion,
         unauthorized,
         boundaryCleared:
           !lifecycle.hasCredential() && !lifecycle.hasPrincipal(),
@@ -2304,9 +2363,14 @@ test.describe('backend session credential lifecycle', () => {
       calls: 7,
       everyCredentialMatched: true,
       everySignalPresent: true,
+      completionCalls: 3,
+      everyCompletionCredentialMatched: true,
+      everyCompletionSignalPresent: true,
       exactFirstProgress: true,
       exactSurveyProgress: true,
       exactIdempotentRetry: true,
+      exactCompletion: true,
+      exactCompletionRetry: true,
       firstOutcome: 'advanced',
       firstStep: 'consents',
       surveyOutcome: 'advanced',
@@ -2316,6 +2380,10 @@ test.describe('backend session credential lifecycle', () => {
       stale: { outcome: 'rejected', reason: 'stale_revision' },
       different: { outcome: 'rejected', reason: 'conflict' },
       malformed: { outcome: 'rejected', reason: 'internal_error' },
+      completedOutcome: 'completed',
+      completedStep: 'completed',
+      completedRetryOutcome: 'completed',
+      malformedCompletion: { outcome: 'rejected', reason: 'internal_error' },
       unauthorized: { outcome: 'rejected', reason: 'session_invalid' },
       boundaryCleared: true,
       storedCredentialCleared: true,

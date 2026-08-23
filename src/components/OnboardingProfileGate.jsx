@@ -130,6 +130,9 @@ export default function OnboardingProfileGate({
     setNotice(null);
     try {
       const result = await onSave(validation.draft);
+      if (result.outcome === 'advanced') {
+        return;
+      }
       if (result.outcome === 'saved') {
         setNotice({ tone: 'success', message: 'Профиль сохранён.' });
         return;
@@ -139,6 +142,15 @@ export default function OnboardingProfileGate({
           tone: 'warning',
           message:
             'На сервере уже есть более новая версия. Поля обновлены — проверьте их и сохраните снова.',
+        });
+        return;
+      }
+      if (result.profileSaved === true) {
+        setNotice({
+          tone: 'error',
+          message:
+            'Профиль сохранён, но перейти дальше не удалось. Обновите анкету перед повтором.',
+          canReload: true,
         });
         return;
       }
