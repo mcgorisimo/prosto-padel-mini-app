@@ -6577,3 +6577,43 @@
   the prior deployed runtime and successful API-level full-onboarding smoke
   remain unchanged. Manual TMA verification must target the corrected frontend
   only after its separately approved test rollout.
+
+### 2026-08-23 — D5.1 combined profile and legal-consent frontend rollout on Selectel test
+
+- Read-only preflight passed on host `prosto-padel-test-01`, Compose project
+  `prosto-padel-test`. The canonical test env contained exactly one occurrence
+  of each of the thirteen required onboarding legal key names; no value or
+  secret was printed. The clean detached server checkout advanced from exact
+  `16006c0b6e885e56a2479887996cd505bb48aa69` to clean integrated exact
+  `4a32831eed8ed4c3c3683f1a199b22de0b8747df`.
+- Compose `config --quiet` passed. The frontend-only build started at
+  `2026-08-23T20:44:56Z`, and the frontend-only forced recreate started at
+  `2026-08-23T20:45:04Z`. Previous frontend container
+  `bf22f74874bd0064126b89fa4777da02ddecb95602fcb8f6550e180b6d003443`
+  was replaced by
+  `483b97ed5ef72b3dfd359a9fd918ec97586621a6c207414b8e2bbb82c594e6a9`,
+  image
+  `sha256:28b2512addbb0f86665c7cfd8f2ec0bc7f196768980f047491b6664620fdfe79`.
+  The new frontend is healthy with restart count `0`.
+- Backend
+  `f9039bbf87f2f388f33a701484e9bb51c23c5a82b08609ac06855f1d590333d4`,
+  nginx
+  `e5b98b53a385aef67465e097753fb54b060596d3c620af3cfb484a175d624be7`
+  and PostgreSQL
+  `5e36d4dc1a5c3e2fa658382cfc4a8dff7fe3ea2ba1a9834bb89cc83df743f7be`
+  retained their exact container IDs, healthy state and restart count `0`.
+- Public frontend and `/api/v1/health` returned HTTP `200` with mandatory TLS
+  verification result `0`. The exact temporary Terms, Privacy and Cancellation
+  test-only URLs each returned HTTP `200` with TLS verification result `0`.
+  Bounded frontend and nginx logs since `2026-08-23T20:45:04Z` contained
+  critical count `0` and 5xx count `0` for both containers.
+- Authenticated onboarding requests and consent/progress/completion writes were
+  not executed (`0`). Environment/secrets, DB/schema, TLS/nginx configuration,
+  provider/API and production were unchanged. Deployment status is
+  `deployment=applied_with_manual_tma_combined_onboarding_smoke_pending`;
+  manual authenticated TMA verification remains a separate owner-approved gate.
+- Mandatory local root gates passed against this exact one-file closeout diff:
+  `npm.cmd run test:e2e` completed with `99 passed / 1 intentional skip`, and
+  `npm.cmd run build` completed with `1623` modules transformed and only the
+  existing large-chunk advisory. This WORKLOG-only closeout does not alter a
+  runtime artifact, so its own deployment impact is `deployment=not_needed`.
