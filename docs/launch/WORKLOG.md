@@ -6180,3 +6180,53 @@
   Independent exact-diff review completed after correcting the focused-test
   count in this record: `P0=0`, `P1=0`, acceptance PASS and
   `git diff --check` PASS. The reviewer made no file or external-state change.
+
+### 2026-08-23 — D5.3 NP2 backend deployed to Selectel test
+
+- Selectel test host `prosto-padel-test-01` was updated from the already
+  integrated exact commit
+  `8f09e6c207eb51f5501ea95dab0777f01b39688e`, tree
+  `3642fb2837348f5d488b36f27936104f27b47607`. The server checkout was clean
+  before rollout and remained clean at that exact detached commit afterward.
+- Before the image build, the canonical migration-038 POSTCHECK artifact
+  SHA-256
+  `1ebc0e2a3cf1ef13de47d3b88e740acd197a8a14a85011e1e8b57d069400a8ce`
+  ran read-only and ended with `ROLLBACK`: `verified=true`, preference rows
+  `0`, accounts `8`, Telegram destinations `3`, outbox `1`. Migration 038 was
+  not reapplied and no direct DB/schema/migration command changed state.
+- Only the backend image and container changed. Backend container
+  `490ab45823b7f4f2900e55616a0741ac2d4f34fbb91cd4ea73044e26de0d5a55`,
+  image
+  `sha256:1550ae332d2ee8e5875bd8a1992a42f44ec8b3f91ff1c3514fe2ceac3c624615`
+  was replaced by container
+  `d1a105a92f28dd602667a27ad3ff9edfdfe0cc451d11b6eb9f302644d902ad3c`,
+  image
+  `sha256:4fd3eca202f08af8e4413d61c28590184569f5dee680d463d5db7616add24230`.
+  It is `running/healthy`, restart count `0`.
+- Frontend container
+  `b6e4954d503b9eed986607f8997ba5743b1177306b0e547473edcb60726398ee`,
+  nginx `e5b98b53a385aef67465e097753fb54b060596d3c620af3cfb484a175d624be7`
+  and PostgreSQL
+  `5e36d4dc1a5c3e2fa658382cfc4a8dff7fe3ea2ba1a9834bb89cc83df743f7be`
+  retained their exact IDs, images, healthy state and restart count `0`.
+  Compose config, env/secrets, nginx/TLS, PostgreSQL, provider and production
+  were not changed.
+- Internal health and public
+  `https://test-app.prostopdl.ru/api/v1/health` returned `200`; public TLS
+  verification was `0` and the resolved remote IP was `135.106.155.112`.
+  Stable post-healthy logs had backend critical `0`, nginx 5xx `0` and nginx
+  critical `0`.
+- The bearer smoke used a fresh PII-free synthetic Telegram subject and
+  locally signed initData inside the unchanged backend secret boundary; no
+  token, bearer, subject or contact value was printed or saved, and no Telegram
+  provider API was called. It passed unauthorised GET/PATCH `401`, missing-row
+  `true/version=null`, PATCH `false/version=1`, persistence across a second
+  login, PATCH `true/version=2`, stale-version `409`, final GET and logout with
+  revoked-bearer `401`. The required application-level smoke evidence retains
+  one synthetic preference row in enabled state at version `2`; both synthetic
+  sessions were revoked.
+- NP2 test rollout is `done` for this exact commit. The exact implementation
+  gates and independent `P0=0`, `P1=0` review were completed before commit;
+  they were not rerun during rollout. This append-only Markdown closeout is the
+  only local change and has deployment `not_needed`; commit/push of the
+  closeout remains a separate gate.
