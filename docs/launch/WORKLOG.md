@@ -6081,3 +6081,56 @@
   preference_disabled outcome. The README additionally makes the operator
   rollback boundary explicit: rollback is unavailable after a
   preference-aware runtime has been deployed.
+
+### 2026-08-23 — D5.3 NP1 migration 038 applied on Selectel test
+
+- Exact reviewed source commit
+  `cf90e366318f50e0bbc9d1f7baf049d1a5c9ebe2` was already integrated in local
+  and remote `main`. Canonical streamed artifact SHA-256 values were PRECHECK
+  `9669413c3793d7cd96a295aa2de5427ae20337846f9227ebf26127b00ebf6a1b`,
+  migration `230dcf399c71ddf446a3ee4d2b149948febe65de1d32f9cfeb2d6b3d753d9f3a`,
+  POSTCHECK `1ebc0e2a3cf1ef13de47d3b88e740acd197a8a14a85011e1e8b57d069400a8ce`
+  and unused ROLLBACK
+  `958a4d9fee4cb287231afde1d330fd4d860e44ebfd5d5bea6558631f2ae0ccb6`.
+- The confirmed target was Selectel test host `prosto-padel-test-01`, Compose
+  project `prosto-padel-test`, PostgreSQL `14.23`, primary database
+  `prosto_padel_test_migration_cycle`. The clean server checkout remained
+  unchanged at `3b26099413325982a5dbc476d2ffb9434a2efffc`; exact reviewed SQL was
+  streamed without creating a server checkout artifact or changing runtime.
+- Only the existing backend container was stopped for the constraint window.
+  A verified custom-format database backup was created at root-only directory
+  `/root/prosto-padel-db-backups/migration038_20260823T132840Z_ORobg0`:
+  `714122` bytes, owner `root:root`, mode `0600`, SHA-256
+  `f317a3ceba7af0a8d9d479c0491f3ede1f8bf06cda9ec7d0b0fdd1267989a2c8`;
+  `pg_restore --list` passed without restoring data.
+- Exact read-only PRECHECK exited `0`, ended with `ROLLBACK`, returned
+  `ready=true` and recorded counts accounts `8`, Telegram destinations `3`,
+  outbox `1`. Its root-only evidence output SHA-256 is
+  `5e02884e452c246d7f149c32ebbae79bf577736ab30c00a94ab2ac16b67bfadd`.
+- Exact migration 038 exited `0`, reached `COMMIT` and created the empty
+  `backend_auth.account_notification_preferences` contract plus the terminal
+  `preference_disabled` outbox outcome. Apply-output SHA-256 is
+  `2fdb9e8dbda951717e12b94b9afa7e076d47efa37e1f5f93ffa50a94b19aa1c2`.
+  The ROLLBACK artifact was not run.
+- Exact read-only POSTCHECK exited `0`, ended with `ROLLBACK` and returned
+  `verified=true`, `runtime_connected=false`, preference rows `0`, with the
+  original counts unchanged at accounts `8`, destinations `3`, outbox `1`.
+  A separate read-only count confirmed zero `preference_disabled` outcomes.
+  POSTCHECK-output SHA-256 is
+  `761d232d08571f8dbf228f77dd0fd0dab7b85aab2aaa5f18dbb02c0619b1bdf1`.
+- The same backend container
+  `490ab45823b7f4f2900e55616a0741ac2d4f34fbb91cd4ea73044e26de0d5a55`
+  and image
+  `sha256:1550ae332d2ee8e5875bd8a1992a42f44ec8b3f91ff1c3514fe2ceac3c624615`
+  restarted `running/healthy` with restart count `0`. HTTPS health returned
+  `200`, TLS verification `0`, remote IP `135.106.155.112`. The maintenance
+  window contained expected nginx 5xx while backend was stopped and one during
+  health startup; the stable post-healthy window had backend critical `0`,
+  nginx 5xx `0` and nginx critical `0`.
+- Migration status is `applied_verified_runtime_unchanged`; all four original
+  containers are running/healthy with restart count `0`. No image, runtime,
+  frontend, nginx/TLS, checkout, config, env/secret, provider/API or production
+  change occurred. This append-only closeout is Markdown-only; automated tests
+  are `not_run/not_needed`, deployment rollout is `not_needed`, and its next
+  gate is a separate local commit before the dependent repository/runtime
+  preference slice starts.
