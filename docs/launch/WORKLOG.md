@@ -6303,3 +6303,53 @@
   DB/schema, TLS/nginx, env/secret, provider/API or production action occurred.
   Independent read-only review of this exact rebased diff passed with
   `P0=0, P1=0` and no findings.
+
+### 2026-08-23 — D5.1 full onboarding frontend deployed fail-closed on Selectel test
+
+- Selectel test preflight passed on host `prosto-padel-test-01`, Compose project
+  `prosto-padel-test`. The clean detached server checkout advanced from exact
+  `8f09e6c207eb51f5501ea95dab0777f01b39688e` to integrated exact
+  `1184868880750e4634de10517a12bb34d121f1ba` and remained clean afterward.
+  Remote `origin/main` was confirmed at that exact target before checkout update.
+- The canonical `infra/test/.env.test` contained none of the eight onboarding
+  legal build keys: neither publication/policy-alignment flag was enabled and no
+  legal URL or version was defined. No env file was edited. Compose
+  `config --quiet` passed; the frontend image built `1623` modules with the
+  legal flags visibly resolved to `false/false` and empty URL/version defaults.
+- Only the frontend container changed. Previous container
+  `b6e4954d503b9eed986607f8997ba5743b1177306b0e547473edcb60726398ee`
+  was replaced by
+  `3935b73b770917830e8e867a289f09b4a22fd58ecbc26178fb80d35be65259ef`,
+  image
+  `sha256:81c9b6d22e81c1daa4c9fcca8383a69ce9730ebcf5870fd18a4f5c19d70c6b12`.
+  It is running/healthy with restart count `0`.
+- Backend container
+  `d1a105a92f28dd602667a27ad3ff9edfdfe0cc451d11b6eb9f302644d902ad3c`,
+  nginx `e5b98b53a385aef67465e097753fb54b060596d3c620af3cfb484a175d624be7`
+  and PostgreSQL
+  `5e36d4dc1a5c3e2fa658382cfc4a8dff7fe3ea2ba1a9834bb89cc83df743f7be`
+  retained their exact IDs, images, running/healthy state and restart count `0`.
+  DB/schema, env/secrets and TLS/nginx configuration were unchanged.
+- Public frontend and `/api/v1/health` both returned HTTP `200` with mandatory
+  TLS verification result `0` at `135.106.155.112`. A browser smoke loaded the
+  deployed bundle while locally intercepting every `/api/v1/**` route. A
+  synthetic mocked session resumed directly at `consents`; the fail-closed legal
+  unavailable gate was visible, while published legal links, checkboxes and the
+  enabled consent gate each counted `0`. Progress, completion and unexpected API
+  request counts were all `0`. No real credential or PII was used or printed,
+  and no authenticated backend or consent/completion write occurred.
+- From rollout start `2026-08-23T15:58:33Z`, bounded frontend critical and 5xx
+  counts were `0/0`; bounded nginx critical and 5xx counts were also `0/0`.
+  Deployment status is
+  `deployment=applied_verified_with_legal_gate_fail_closed`.
+- Mandatory root gates for this exact one-file closeout passed:
+  `npm.cmd run test:e2e` returned `99 passed / 1 intentional skip`, and
+  `npm.cmd run build` transformed `1623` modules with the existing large-chunk
+  advisory. The temporary dependency junction used the identical lockfile Git
+  blob `a5db96ca2068b6020b181a05c9461bbf7e3f49e1`, changed no dependency or
+  lockfile, and was removed after the gates.
+- This closeout itself is local documentation only. No commit, push,
+  integration, additional SSH/DB/schema command, restart/rebuild/rollout,
+  provider/API write, secret/env change or production action occurred after the
+  recorded rollout. Independent read-only review of this exact one-file diff
+  passed with `P0=0, P1=0` and no findings.
