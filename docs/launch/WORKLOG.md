@@ -5839,3 +5839,185 @@
 - Independent read-only review of the exact three-file candidate found no
   scope, auth-boundary, PII-safety, contract or deployment-status issue:
   acceptance PASS with `P0=0, P1=0`.
+
+### 2026-08-23 — D5.3 legal documents v0.2 local draft candidate
+
+- Started from clean detached `main`
+  `3b26099413325982a5dbc476d2ffb9434a2efffc`. Created only the dedicated
+  `docs/legal/` catalog with `README.md`, `TERMS_DRAFT.md`,
+  `PRIVACY_POLICY_DRAFT.md`, `CANCELLATION_POLICY_DRAFT.md` and
+  `PERSONAL_DATA_CONSENT_DRAFT.md`. Every file begins with the required
+  unpublished/unapproved/legal-review draft banner.
+- The files are the canonical working v0.2; earlier chat-rendered long text is
+  explicitly non-canonical. Unknown company details, contacts, document
+  versions/effective dates, provider/OFD roles, retention, cross-border facts
+  and public URLs remain machine-findable `{{UPPER_SNAKE_CASE}}` placeholders.
+  Competitor documents were not used as legal sources or copied.
+- The draft keeps two short UI actions but separates their semantics: the first
+  binds `terms`, `privacy` acknowledgement and `cancellation`; the second is a
+  voluntary consent only for optional profile functions and requires a future
+  independent `personal_data_processing` evidence key. The existing backend
+  `2026-08-01` policy remains test-only and is not presented as a published
+  version. Completed onboarding remains immutable; any later re-consent needs a
+  separate append-only lifecycle.
+- Public/versioned legal URLs, routing before and after auth, publication,
+  BotFather/store metadata and publication smoke remain separate gates. The
+  current draft marks prospective identified match roster, unresolved provider
+  facts, recipient-by-recipient cross-border mapping, retention/deletion and
+  mobile publication as blocked/not ready rather than promising implementation.
+- Independent official-source legal review and independent D5.1
+  consent/product-contract review initially returned bounded P1 findings. The
+  main agent corrected consent voluntariness and scope, minor-account boundary,
+  profile recipient boundary, all-recipient cross-border mapping, cancellation
+  remedies/actual-expense safeguards, mobile blockers, public access and
+  re-consent lifecycle. Final exact-file re-reviews both passed with
+  `P0=0, P1=0`.
+- Tests and build are `not_run/not_needed`: the candidate changes Markdown only
+  and has no runtime, bundle, backend, schema, dependency, config or
+  infrastructure impact. Deployment is `not_needed`. No commit, push, merge,
+  API/DB/schema/provider write, SSH, REG.RU/DNS/TLS action, Selectel rollout,
+  secret/env change or production action occurred.
+- D5.1 real consent UI remains blocked until the owner fills and approves the
+  remaining facts and versions and a later separately authorised code/schema
+  candidate satisfies the four-key evidence, public URL and re-consent
+  contracts. Notification settings, account deletion/session revoke,
+  UGC/moderation and D5.4 Admin Backoffice remain outside this slice.
+
+### 2026-08-23 — D5.3 data-processing matrix and owner-input checklist
+
+- Continued the local Markdown-only legal candidate at exact detached
+  `main`/`origin/main` base `3b26099413325982a5dbc476d2ffb9434a2efffc`.
+  Added `docs/legal/DATA_PROCESSING_MATRIX_DRAFT.md` and
+  `docs/legal/OWNER_INPUT_CHECKLIST.md`; linked both canonical working
+  registers from `docs/legal/README.md`. The four v0.2 Terms, Privacy,
+  Cancellation and personal-data-consent drafts were not revised in this
+  slice.
+- The matrix is an evidence-backed inventory of current code/schema contracts,
+  not a published policy or final legal classification. It separates Telegram,
+  Selectel/PostgreSQL and YCLIENTS/YPLACES flows; leaves Sber acquiring,
+  online-KKT and OFD as future/contract facts; and records unresolved legal
+  basis, localization/cross-border, retention, deletion/anonymization and
+  audit/log boundaries without PII, secrets or new Supabase contracts.
+- The checklist uses only `known`, `pending_26_aug`, `requires_contract`,
+  `owner_decision` and `legal_review`. It requests the corporate/contact,
+  provider-contract and owner-decision facts authorised for this slice and
+  explicitly prohibits passwords, API tokens, merchant credentials, keys,
+  certificates, cabinet access and document scans. New ООО details remain
+  `pending_26_aug` until `2026-08-26`.
+- Independent privacy/data-map and D5.1/product reviews initially returned
+  bounded P1 findings. The exact candidate was corrected to inventory ingress
+  IP/header forwarding while leaving runtime access/error-log fields and
+  retention unknown, classify YCLIENTS `book_staff`/resource data
+  conditionally, and distinguish the current in-app waitlist/match-reservation
+  feed from the narrower Telegram waitlist/invitation outbox while leaving new
+  and private-booking notification categories `future_unknown`. After all
+  corrections and mandatory gates, both final exact-candidate re-reviews
+  passed with `P0=0, P1=0`.
+- Only Markdown files changed, with no code, runtime, frontend bundle, backend,
+  schema, dependency, config or infrastructure impact. Deployment is
+  `not_needed`; deployed environment and commit, containers, health/HTTP,
+  manual smoke and logs are unchanged and not applicable to this local
+  docs-only slice. Mandatory root test/build results are recorded below.
+- Mandatory root gates PASS. Two default nine-worker E2E runs reached
+  `97 passed / 1 intentional skip` but ended with unrelated UI click/timeouts;
+  every failed case passed its exact focused rerun. A complete stability rerun
+  with four workers passed `99 / 1 intentional skip`. `npm.cmd run build`
+  passed with `1621` modules transformed and the existing large-chunk advisory.
+  Sandbox-only Vite/esbuild attempts could not traverse the external dependency
+  junction; the successful retries used an existing dependency tree whose
+  lockfile Git blob exactly matched this worktree
+  (`a5db96ca2068b6020b181a05c9461bbf7e3f49e1`). No dependency or lockfile was
+  installed or changed, and the temporary junction was removed after the gates.
+- No commit, push, merge, publication, API/DB/schema/provider write, SSH,
+  REG.RU/DNS/TLS action, Selectel rollout, secret/env change or production
+  action occurred. Next gate is another separately authorised local docs-only
+  update after the owner supplies the confirmed `2026-08-26` corporate and
+  contractual facts; D5.1 consent UI remains blocked meanwhile.
+
+### 2026-08-23 — D5.3 owner decisions and age-model supersession
+
+- Continued the uncommitted Markdown-only legal candidate at exact detached
+  `main`/`origin/main` base `3b26099413325982a5dbc476d2ffb9434a2efffc`.
+  Updated the seven canonical `docs/legal/` draft/index/register files only;
+  no legal document was approved or published.
+- The final owner age decision replaces the earlier 18+-only model. Minors may
+  register and use social functions with a legal representative's consent;
+  paid orders and payments are made by an adult user or with such consent, and
+  a minor may be a participant. No mandatory 18+ checkbox, age verification,
+  verified-age/verified-parental-consent claim, DOB, passport/document or
+  parental-verification field was added. The old decision remains in the
+  decision history as `superseded_by_owner_2026_08_23`; exact wording and
+  sufficiency of consent evidence remain a final legal-review blocker.
+- Confirmed contacts are represented without fallback invention:
+  `info@prostopdl.ru` is working only for privacy/personal-data requests and
+  consent withdrawal; support email is absent; official support phone and
+  social links remain pending. Training cancellation/transfer has the
+  owner-approved 24-hour customer-facing full-refund boundary.
+- The target authenticated visibility and retention/deletion policy are
+  recorded as owner-approved product candidates, not as current implementation
+  or universal statutory rules. Broad profile/history visibility remains
+  `publication_blocked` pending legal basis/evidence and exact field/runtime
+  alignment. Account deletion/revoke-all, inactivity cleanup, processor
+  propagation and backup deletion replay remain separate future gates.
+- Independent official-source/legal consistency and D5.1/product-contract
+  read-only reviews of the exact seven-file candidate both passed with
+  `P0=0, P1=0`. This is draft consistency review, not a legal opinion.
+- Mandatory root gates PASS: `npm.cmd run test:e2e -- --workers=4` passed
+  `99 / 1 intentional skip`; `npm.cmd run build` passed with `1621` modules and
+  the existing large-chunk advisory. The first sandbox-only E2E start could not
+  traverse the external dependency junction; the successful gate used the
+  pre-existing dependency tree whose lockfile Git blob exactly matched this
+  worktree (`a5db96ca2068b6020b181a05c9461bbf7e3f49e1`). No dependency or
+  lockfile was installed or changed, and the temporary junction was removed.
+- Deployment is `not_needed`: only local Markdown changed. No commit, push,
+  merge, publication, code/schema/migration/runtime/env change, DB/provider/API
+  write, SSH, REG.RU/DNS/TLS action, Selectel rollout or production action
+  occurred. Company facts remain pending until `2026-08-26`; provider/OFD and
+  cross-border facts remain pending contracts/legal review.
+
+### 2026-08-23 — D5.3 preparation closure checkpoint
+
+- Continued from exact detached `main`/`origin/main` base
+  `3b26099413325982a5dbc476d2ffb9434a2efffc`. Exact scope is limited to the
+  seven canonical Markdown files under `docs/legal/` and this append-only
+  `docs/launch/WORKLOG.md`; no unrelated working-tree change was present or
+  touched.
+- D5.3 preparation checkpoint is `done`, while D5.3 overall remains `not_done`.
+  The legal candidate remains
+  `draft_not_published_not_legally_approved`; all implementation, final
+  approval and publication actions are separate future gates.
+- Unresolved facts remain visible and machine-findable:
+  `pending_26_aug` covers ООО requisites and official addresses;
+  `requires_contract` covers Sber/online-KKT/OFD, YCLIENTS/YPLACES and Selectel
+  entity/region/cross-border facts; `pending_owner_later` covers support
+  phone/social links, effective versions and public legal URLs. Placeholders
+  were not removed or replaced by assumptions.
+- The checkpoint retains the latest owner decisions: privacy-only
+  `info@prostopdl.ru` with no support email; the minor/representative-consent
+  model without a mandatory 18+ checkbox or verified-age claim; allowlisted
+  authenticated profile/rating/public-match-history visibility with contact,
+  private-booking, payment and service-ID exclusions plus a legal/evidence
+  publication blocker; the 24-hour training cancellation boundary; and the
+  owner-approved retention/deletion policy candidate.
+- Independent legal/source-consistency and D5.1/product-contract read-only
+  reviews of the exact legal candidate both passed with `P0=0, P1=0`.
+  Required banners, local Markdown links, placeholder format, table structure,
+  final newlines, whitespace and secret-pattern scans passed. Official
+  reference URLs were checked read-only; the future public legal hostname
+  remains an explicit untested placeholder. `git diff --check` passed apart
+  from the existing line-ending advisory for WORKLOG.
+- Tests are `not_run/not_needed` for this closure checkpoint because it changes
+  Markdown status/documentation only and has no runtime, frontend bundle,
+  backend, schema, dependency, config or infrastructure impact. Previous gate
+  results remain historical evidence and were not re-run or re-labelled as a
+  test of this metadata-only checkpoint.
+- Deployment is `not_needed`; deployed environment/commit, containers,
+  health/HTTP, manual smoke and logs are unchanged and not applicable. One
+  local docs-only checkpoint commit is authorised on
+  `codex/d5-3-compliance-drafts`; exact SHA is reported in the handoff. No
+  push, merge, publication, deploy, code/runtime/DB/schema/server/REG.RU/env,
+  provider/API or production action is authorised by this checkpoint.
+- Company/address facts return after `2026-08-26`; contract facts and later
+  owner contacts/versions/URLs remain follow-up docs gates. The next independent
+  D5 slice that does not require those facts is NotificationPreferences/privacy
+  settings readiness; it must start under a separate owner command.
