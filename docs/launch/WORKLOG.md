@@ -6617,3 +6617,106 @@
   `npm.cmd run build` completed with `1623` modules transformed and only the
   existing large-chunk advisory. This WORKLOG-only closeout does not alter a
   runtime artifact, so its own deployment impact is `deployment=not_needed`.
+
+### 2026-08-24 — D5.1 combined onboarding manual smoke FAIL and survey gap
+
+- The owner's live Telegram Mini App check supersedes the pending-smoke
+  closeout above. The combined profile/consent screen advanced to a survey that
+  contained only the `experience` question. Submitting that answer showed an
+  error with `Обновить анкету`; after the owner selected reload, the completed
+  state was read and the application opened. This is a manual smoke `FAIL`, not
+  a completed D5.1 acceptance. The applied frontend rollout remains intact, but
+  its status is corrected append-only to
+  `deployment=applied_with_manual_tma_combined_onboarding_smoke_failed_investigation_required`.
+- Read-only contract inspection proves the submit-error/reload-completed cause.
+  `POST /api/v1/onboarding/me/complete` lacks an explicit
+  `@HttpCode(HttpStatus.OK)`, and its backend controller regression therefore
+  expects Nest's default HTTP `201`. The frontend onboarding client accepts a
+  successful response only when `status === 200`; a valid completed body paired
+  with `201` falls through to `rejected/internal_error`. The database transaction
+  has already committed, so the following owner-scoped GET reads `completed` and
+  the gate enters the application. Existing unit tests mock the frontend success
+  as `200` and separately assert backend `201`, so they did not cover the real
+  cross-boundary status mismatch.
+- PII-safe runtime preflight reconfirmed clean exact deployed checkout
+  `4a32831eed8ed4c3c3683f1a199b22de0b8747df`. No request was repeated and no
+  credential, body, contact or identifier was read. A new access-event aggregate
+  could not be obtained under the existing SSH identity: host nginx logs require
+  the `adm` group, non-interactive sudo requires a password, and the Docker socket
+  rejects that identity. No credential was requested and no privilege boundary
+  was bypassed; the cause above is established by the exact producer/consumer
+  contract and the owner's observed committed-state reconciliation.
+- The current `initial_level_v1` policy is a one-question temporary contract and
+  is superseded; it is not the final initial-level survey. The approved target is
+  five code-only questions: match count, rally stability, glass play,
+  serve/return/net play and match experience during the year. Every option maps
+  server-side to `0..4`; the deterministic total `0..20` maps to
+  `D / D+ / C / C+ / B / B+ / A` buckets and applies the approved match-count,
+  glass, technical-answer and tournament-experience caps. Those labels match the
+  canonical order and boundaries in `ratingEngine`, but the result remains a
+  separate initial self-assessment: it does not write numeric player rating or
+  `isVerified`. Because completed `initial_level_v1` evidence already exists, the
+  final five-question contract must use a new immutable survey/scoring version
+  rather than reinterpret stored answers.
+- Applied migration 035, with migration 037's current transition guard, can
+  safely retain five bounded answer-code pairs in `survey_answers jsonb` (limit
+  `16`), identified by `survey_version`. It has no column for the computed score
+  or initial-level label, while the completion writer stores and compares exactly
+  the client-supplied answer map. Encoding a computed result as another answer
+  would break exact retry semantics; using `player_rating_states` would violate
+  the rating boundary. A new data-preserving migration is therefore required.
+  The minimal proposal adds nullable, constrained `initial_level_score` (`0..20`)
+  and `initial_level_label` (`D`, `D+`, `C`, `C+`, `B`, `B+`, `A`) to the private
+  onboarding state, preserves legacy completed rows without backfill, grants the
+  runtime role only the needed column-level completion update, and requires both
+  fields for the new survey version. SQL, scoring code and runtime wiring remain
+  blocked pending a separate owner approval.
+- The future UI remains one question per screen with progress and back navigation.
+  Its result screen is intentionally compact: `Ваш начальный уровень: X` plus the
+  button that enters the application. Score, formula, caps and calculation reasons
+  stay internal to the versioned backend contract/tests and PII-free admin/debug
+  evidence; they are not shown to the user. No code, SQL, schema/data, API,
+  container, env/secret, provider or production change was made in this
+  diagnostic checkpoint. This append-only correction is docs-only with
+  `deployment=not_needed`.
+
+### 2026-08-24 — D5.1 migration 039 initial-level result candidate
+
+- On exact detached local base
+  `9dbac1669a046900bef6290ae6b83fd4fdf533de`, after the append-only manual-smoke
+  correction above, owner approval authorized only a runtime-disconnected
+  migration candidate. Applied migrations 035–037 remain byte-for-byte
+  unchanged; no backend/frontend runtime wiring is included.
+- Candidate `039_backend_player_onboarding_initial_level_result` adds only two
+  private nullable columns to `backend_auth.player_onboarding_states`:
+  `initial_level_score smallint` constrained to `0..20` and
+  `initial_level_label text` constrained to `D / D+ / C / C+ / B / B+ / A`.
+  Existing completed rows remain compatible with both values `NULL`; there is
+  no backfill or data mutation. Both values are required together only for a
+  completed immutable `initial_level_v2` result and are forbidden on legacy or
+  in-progress states.
+- The candidate grants `backend_auth_app` only column-level `UPDATE` on the two
+  result fields, retains no table-level `UPDATE`, retains `PUBLIC` without
+  access, pins the migration-035 relation and migration-037 guard fingerprints,
+  and leaves the guard definition, every other relation, existing columns and
+  data unchanged. PRECHECK and POSTCHECK are read-only and terminally roll back;
+  ROLLBACK refuses to discard any `initial_level_v2` or computed-result data.
+- This checkpoint creates only SQL/PRECHECK/POSTCHECK/ROLLBACK, its focused
+  migration regression and this append-only evidence. It does not implement
+  scoring or API/UI behavior, does not apply SQL to any database and changes no
+  checkout, container, runtime, environment, secret, provider or production
+  state. Deployment for this local candidate is `deployment=not_needed`; any
+  commit, integration and Selectel test schema gate remain separately blocked.
+- Focused migration regression passed (`7/7`). Mandatory backend typecheck,
+  backend E2E (`4/4`) and backend build passed. Root build passed with `1623`
+  modules and only the existing large-chunk advisory. The first two root E2E
+  runs each had a different existing match-lifecycle timeout; the bounded retry
+  with four workers passed `99` tests with `1` intentional skip.
+- The complete backend unit command ran `3694` tests: `3693` passed and the one
+  failure is the unchanged migration-038 spec's CRLF-sensitive exact substring
+  lookup in its rollback artifact. Neither that spec nor any migration-038 file
+  is in this candidate diff; the focused migration-039 regression remains green.
+  This pre-existing Windows full-suite baseline failure is recorded rather than
+  hidden or repaired outside the authorized D5.1-039 scope.
+- Independent read-only review of the exact candidate diff found no blocking
+  issues: `P0=0`, `P1=0`. No correction was required after review.
