@@ -13,6 +13,7 @@ import {
   YCLIENTS_API_DEFAULT_BASE_URL,
 } from './yclients-api.config';
 import { RESERVATION_SNAPSHOT_CONFIG_KEYS } from './reservation-snapshot.config';
+import { PLAYER_ONBOARDING_POLICY_CONFIG_KEYS } from './player-onboarding-policy.config';
 
 const SAFE_TEST_TELEGRAM_CRYPTO_CONFIG = Object.freeze({
   [TELEGRAM_LOGIN_CONFIG_KEYS.lookupPepperBase64]: Buffer.alloc(
@@ -47,6 +48,76 @@ function validate(environment: Record<string, unknown> = {}) {
 }
 
 describe('envValidationSchema', () => {
+  it('keeps the onboarding legal policy disabled and empty by default', () => {
+    const { error, value } = validate();
+
+    expect(error).toBeUndefined();
+    expect(value).toMatchObject({
+      [PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.enabled]: false,
+      [PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.termsVersion]: '',
+      [PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.privacyVersion]: '',
+      [PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.cancellationVersion]: '',
+    });
+  });
+
+  it('requires exact canonical versions and PostgreSQL for an enabled onboarding policy', () => {
+    const withoutDatabase = validate({
+      [PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.enabled]: 'true',
+      [PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.termsVersion]:
+        'terms-test-2026-08-23-v1',
+      [PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.privacyVersion]:
+        'privacy-test-2026-08-23-v1',
+      [PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.cancellationVersion]:
+        'cancellation-test-2026-08-23-v1',
+    });
+    expect(withoutDatabase.error?.message).toContain(
+      'requires DATABASE_ENABLED',
+    );
+
+    const missingVersion = validate({
+      ...SAFE_TEST_DATABASE_CONFIG,
+      [PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.enabled]: 'true',
+      [PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.termsVersion]:
+        'terms-test-2026-08-23-v1',
+      [PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.privacyVersion]:
+        'privacy-test-2026-08-23-v1',
+    });
+    expect(missingVersion.error).toBeDefined();
+
+    const invalidVersion = validate({
+      ...SAFE_TEST_DATABASE_CONFIG,
+      [PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.enabled]: 'true',
+      [PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.termsVersion]:
+        'Terms test version',
+      [PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.privacyVersion]:
+        'privacy-test-2026-08-23-v1',
+      [PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.cancellationVersion]:
+        'cancellation-test-2026-08-23-v1',
+    });
+    expect(invalidVersion.error).toBeDefined();
+
+    const enabled = validate({
+      ...SAFE_TEST_DATABASE_CONFIG,
+      [PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.enabled]: 'true',
+      [PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.termsVersion]:
+        'terms-test-2026-08-23-v1',
+      [PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.privacyVersion]:
+        'privacy-test-2026-08-23-v1',
+      [PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.cancellationVersion]:
+        'cancellation-test-2026-08-23-v1',
+    });
+    expect(enabled.error).toBeUndefined();
+    expect(enabled.value).toMatchObject({
+      [PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.enabled]: true,
+      [PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.termsVersion]:
+        'terms-test-2026-08-23-v1',
+      [PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.privacyVersion]:
+        'privacy-test-2026-08-23-v1',
+      [PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.cancellationVersion]:
+        'cancellation-test-2026-08-23-v1',
+    });
+  });
+
   it('disables YCLIENTS API and booking writes by default', () => {
     const { error, value } = validate();
 

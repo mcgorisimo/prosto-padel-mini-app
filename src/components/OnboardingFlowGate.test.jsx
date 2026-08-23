@@ -18,6 +18,22 @@ const LEGAL_CONFIG = readOnboardingLegalConfig({
   VITE_ONBOARDING_CANCELLATION_VERSION: 'cancellation-2026-08-26',
 });
 
+const TEST_ONLY_LEGAL_CONFIG = readOnboardingLegalConfig({
+  VITE_ONBOARDING_LEGAL_PUBLISHED: 'true',
+  VITE_ONBOARDING_LEGAL_POLICY_ALIGNED: 'true',
+  VITE_ONBOARDING_LEGAL_TEST_ONLY: 'true',
+  VITE_ONBOARDING_TERMS_URL:
+    'https://test-app.prostopdl.ru/legal/test-only/terms-test-2026-08-23-v1/',
+  VITE_ONBOARDING_TERMS_VERSION: 'terms-test-2026-08-23-v1',
+  VITE_ONBOARDING_PRIVACY_URL:
+    'https://test-app.prostopdl.ru/legal/test-only/privacy-test-2026-08-23-v1/',
+  VITE_ONBOARDING_PRIVACY_VERSION: 'privacy-test-2026-08-23-v1',
+  VITE_ONBOARDING_CANCELLATION_URL:
+    'https://test-app.prostopdl.ru/legal/test-only/cancellation-test-2026-08-23-v1/',
+  VITE_ONBOARDING_CANCELLATION_VERSION:
+    'cancellation-test-2026-08-23-v1',
+});
+
 const CONSENTS = Object.freeze([
   Object.freeze({ kind: 'terms', documentVersion: 'terms-2026-08-26' }),
   Object.freeze({ kind: 'privacy', documentVersion: 'privacy-2026-08-26' }),
@@ -68,6 +84,32 @@ afterEach(() => {
 });
 
 describe('OnboardingFlowGate', () => {
+  it('labels the temporary test-only documents before any acceptance control', () => {
+    render(
+      <OnboardingFlowGate
+        onboarding={inProgressState('consents', 2)}
+        legalConfig={TEST_ONLY_LEGAL_CONFIG}
+        onReload={vi.fn()}
+        onSaveProfile={vi.fn()}
+        onAdvance={vi.fn()}
+        onComplete={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByRole('complementary', {
+        name: 'Временные документы тестового контура',
+      }).textContent,
+    ).toContain('не публикация для production');
+    expect(
+      screen
+        .getByRole('link', { name: /terms-test-2026-08-23-v1/u })
+        .getAttribute('href'),
+    ).toBe(
+      'https://test-app.prostopdl.ru/legal/test-only/terms-test-2026-08-23-v1/',
+    );
+  });
+
   it('runs first-run profile, published consents, survey and completion without persisting PII', async () => {
     const user = userEvent.setup();
     const saveCalls = [];

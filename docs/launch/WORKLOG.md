@@ -6353,3 +6353,55 @@
   provider/API write, secret/env change or production action occurred after the
   recorded rollout. Independent read-only review of this exact one-file diff
   passed with `P0=0, P1=0` and no findings.
+
+### 2026-08-23 — D5.1 temporary test-only legal alignment local candidate
+
+- Started from clean detached exact `main`
+  `c809b28384e2a99731804de7a4aad4aeefee8cb4`. The candidate is bounded to the
+  existing onboarding policy/service, test-only Compose/frontend packaging,
+  focused tests and this append-only record. Migrations 035–037 remain
+  sufficient and unchanged; no DB/schema/data, credential, provider, Supabase,
+  payment, rating or contact-verification change was added.
+- Removed the runtime dependency on hardcoded consent version `2026-08-01`.
+  Backend consent/progress/completion policy is now fail-closed runtime
+  configuration, disabled by default, and accepts all three exact versions only
+  when PostgreSQL and `PLAYER_ONBOARDING_LEGAL_POLICY_ENABLED` are enabled.
+  Disabled or incomplete policy rejects level-survey progress and completion
+  before persistence while profile and resumable pre-consent work remain
+  available.
+- The temporary Selectel test contract is exact and deliberately separate from
+  production: `terms-test-2026-08-23-v1`, `privacy-test-2026-08-23-v1` and
+  `cancellation-test-2026-08-23-v1`, each under the version-matching
+  `https://test-app.prostopdl.ru/legal/test-only/` path. The test frontend image
+  packages only the current repository drafts at those paths, displays a
+  prominent test-only/non-production notice, uses `noindex` and `no-store`, and
+  renders fetched Markdown only through `textContent`. The drafts remain visibly
+  incomplete and are not represented as final or production documents.
+- Frontend legal configuration now distinguishes `test_only` from production,
+  rejects a production host, mismatched path/version or test version in a
+  production scope, and exposes consent controls only when publication,
+  backend-alignment and exact configuration gates all pass. No PII, Telegram
+  initData or bearer is stored or logged. Focused frontend tests passed `14 / 14`;
+  focused backend tests passed `128 / 128`.
+- Mandatory root gates passed: `npm.cmd run test:e2e` returned `99 passed / 1
+  intentional skip`, and `npm.cmd run build` transformed `1623` modules with the
+  existing large-chunk advisory. Backend typecheck, e2e `4 / 4` and build passed.
+  The native Windows full unit invocation passed `3686` tests and exposed one
+  pre-existing CRLF-sensitive migration-038 fixture failure in an unchanged
+  file; a bounded read-only rerun normalising CRLF only for that exact fixture
+  passed all `3687 / 3687`. Candidate-only ESLint passed. Repository-wide
+  format/lint ratchets still report pre-existing unchanged baseline files and
+  were not broadened into this D5.1 diff.
+- This local candidate does not yet edit the real `infra/test/.env.test`, commit,
+  push, integrate, publish pages, recreate backend/frontend or execute any
+  consent/completion request. Deployment is
+  `deployment_pending_separate_commit_integration_test_env_and_rollout_gates`;
+  production remains untouched.
+- A version change alone does not currently re-open onboarding for an already
+  completed player. Before the planned post-requisites document versions can
+  require renewed consent, a separate owner-approved backend/schema/frontend
+  re-consent lifecycle must be designed and reviewed; accepted immutable
+  versions must never be overwritten in place.
+- Independent read-only P0/P1 review of the exact 27-file candidate passed with
+  `P0=0, P1=0`. The re-consent lifecycle is recorded as explicit remaining
+  scope rather than hidden inside or falsely claimed by this candidate.

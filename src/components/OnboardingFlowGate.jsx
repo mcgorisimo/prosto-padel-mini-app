@@ -38,6 +38,20 @@ function LegalUnavailableGate() {
   );
 }
 
+function TestOnlyLegalNotice({ legalConfig }) {
+  if (legalConfig.scope !== 'test_only') return null;
+  return (
+    <aside
+      className="onboarding-legal-test-only-note"
+      aria-label="Временные документы тестового контура"
+    >
+      Тестовый контур: это временные версии документов, не публикация для
+      production. Новые версии нельзя считать принятыми без отдельного
+      повторного согласия.
+    </aside>
+  );
+}
+
 function OnboardingConsentsGate({
   onboarding,
   legalConfig,
@@ -134,6 +148,7 @@ function OnboardingConsentsGate({
       intro="Откройте и прочитайте каждый опубликованный документ, затем подтвердите принятие условий и ознакомление с политикой."
     >
       <p className="onboarding-step-indicator">Шаг 2 из 3</p>
+      <TestOnlyLegalNotice legalConfig={legalConfig} />
       <form
         noValidate
         aria-describedby={
@@ -252,6 +267,7 @@ function OnboardingSurveyGate({
         title="Продолжение недоступно"
         intro="Для завершения нужны опубликованные документы актуальных версий и поддерживаемая версия опроса."
       >
+        <TestOnlyLegalNotice legalConfig={legalConfig} />
         <p className="onboarding-profile-declared-note" role="alert">
           Анкета сохранена. Мы не будем отправлять ответы или завершать
           onboarding, пока конфигурация документов не станет актуальной.
@@ -332,6 +348,7 @@ function OnboardingSurveyGate({
       intro="Ответ поможет подобрать подходящие матчи. Рейтинг и верификация контактов этим ответом не подтверждаются."
     >
       <p className="onboarding-step-indicator">Шаг 3 из 3</p>
+      <TestOnlyLegalNotice legalConfig={legalConfig} />
       <form noValidate onSubmit={handleSubmit}>
         <fieldset
           className="onboarding-survey-fieldset"

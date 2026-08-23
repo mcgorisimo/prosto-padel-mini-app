@@ -1,4 +1,6 @@
 const DOCUMENT_VERSION_PATTERN = /^[a-z0-9][a-z0-9_.-]{0,63}$/u;
+const TEST_ONLY_LEGAL_HOST = 'test-app.prostopdl.ru';
+const TEST_ONLY_LEGAL_PATH_PREFIX = '/legal/test-only/';
 
 const LEGAL_DOCUMENT_DEFINITIONS = Object.freeze([
   Object.freeze({
@@ -82,6 +84,16 @@ export function readOnboardingLegalConfig(environment = import.meta.env) {
     });
   }
 
+  const testOnlyValue = environment?.VITE_ONBOARDING_LEGAL_TEST_ONLY ?? 'false';
+  if (testOnlyValue !== 'true' && testOnlyValue !== 'false') {
+    return frozen({
+      status: 'unavailable',
+      reason: 'invalid_configuration',
+      documents: frozen([]),
+    });
+  }
+  const scope = testOnlyValue === 'true' ? 'test_only' : 'production';
+
   const documents = [];
   for (const definition of LEGAL_DOCUMENT_DEFINITIONS) {
     const url = readHttpsUrl(environment?.[definition.urlKey]);
@@ -90,6 +102,23 @@ export function readOnboardingLegalConfig(environment = import.meta.env) {
       url === null ||
       typeof version !== 'string' ||
       !DOCUMENT_VERSION_PATTERN.test(version)
+    ) {
+      return frozen({
+        status: 'unavailable',
+        reason: 'invalid_configuration',
+        documents: frozen([]),
+      });
+    }
+    const parsedUrl = new URL(url);
+    const isTestOnlyVersion = version.startsWith(`${definition.kind}-test-`);
+    const isTestOnlyUrl =
+      parsedUrl.hostname === TEST_ONLY_LEGAL_HOST &&
+      parsedUrl.port === '' &&
+      parsedUrl.search === '' &&
+      parsedUrl.pathname === `${TEST_ONLY_LEGAL_PATH_PREFIX}${version}/`;
+    if (
+      (scope === 'test_only' && (!isTestOnlyVersion || !isTestOnlyUrl)) ||
+      (scope === 'production' && (isTestOnlyVersion || isTestOnlyUrl))
     ) {
       return frozen({
         status: 'unavailable',
@@ -111,6 +140,7 @@ export function readOnboardingLegalConfig(environment = import.meta.env) {
   return frozen({
     status: 'ready',
     reason: null,
+    scope,
     documents: frozen(documents),
   });
 }

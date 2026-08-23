@@ -19,6 +19,10 @@ import {
   normalizeYclientsHttpsBaseUrl,
 } from './yclients-api.config';
 import { RESERVATION_SNAPSHOT_CONFIG_KEYS } from './reservation-snapshot.config';
+import {
+  PLAYER_ONBOARDING_DOCUMENT_VERSION_PATTERN,
+  PLAYER_ONBOARDING_POLICY_CONFIG_KEYS,
+} from './player-onboarding-policy.config';
 
 const canonicalBase64Secret = Joi.string()
   .base64()
@@ -69,6 +73,16 @@ function requiredWhenProfilePhotoStorageEnabled(
   schema: Joi.StringSchema,
 ) {
   return Joi.when(PLAYER_PROFILE_PHOTO_CONFIG_KEYS.enabled, {
+    is: true,
+    then: schema.required(),
+    otherwise: schema.allow('').default(''),
+  });
+}
+
+function requiredWhenPlayerOnboardingPolicyEnabled(
+  schema: Joi.StringSchema,
+) {
+  return Joi.when(PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.enabled, {
     is: true,
     then: schema.required(),
     otherwise: schema.allow('').default(''),
@@ -212,6 +226,29 @@ export const envValidationSchema = Joi.object({
       .allow('')
       .default(''),
   }),
+  [PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.enabled]: Joi.boolean()
+    .truthy('true')
+    .falsy('false')
+    .default(false)
+    .when('DATABASE_ENABLED', {
+      is: false,
+      then: Joi.valid(false).messages({
+        'any.only':
+          'PLAYER_ONBOARDING_LEGAL_POLICY_ENABLED requires DATABASE_ENABLED to be enabled',
+      }),
+    }),
+  [PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.termsVersion]:
+    requiredWhenPlayerOnboardingPolicyEnabled(
+      Joi.string().pattern(PLAYER_ONBOARDING_DOCUMENT_VERSION_PATTERN),
+    ),
+  [PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.privacyVersion]:
+    requiredWhenPlayerOnboardingPolicyEnabled(
+      Joi.string().pattern(PLAYER_ONBOARDING_DOCUMENT_VERSION_PATTERN),
+    ),
+  [PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.cancellationVersion]:
+    requiredWhenPlayerOnboardingPolicyEnabled(
+      Joi.string().pattern(PLAYER_ONBOARDING_DOCUMENT_VERSION_PATTERN),
+    ),
   [PLAYER_PROFILE_PHOTO_CONFIG_KEYS.enabled]: Joi.boolean()
     .truthy('true')
     .falsy('false')

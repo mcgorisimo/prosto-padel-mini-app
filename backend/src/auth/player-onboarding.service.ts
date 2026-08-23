@@ -27,6 +27,7 @@ import {
   CompleteOwnPlayerOnboardingInput,
   CompleteOwnPlayerOnboardingResult,
   OwnPlayerOnboarding,
+  OwnPlayerOnboardingConsent,
   ReadOwnPlayerOnboardingInput,
   ReadOwnPlayerOnboardingResult,
   SaveOwnPlayerOnboardingDraftInput,
@@ -38,12 +39,12 @@ import {
   isSaveOwnPlayerOnboardingDraftInput,
 } from './player-onboarding.types';
 import {
-  CURRENT_PLAYER_ONBOARDING_POLICY,
   PLAYER_ONBOARDING_FLOW_VERSION,
   PLAYER_ONBOARDING_SURVEY_VERSION,
-  areCurrentPlayerOnboardingConsents,
-  hasCurrentPlayerOnboardingConsents,
-  isCurrentPlayerOnboardingCompletion,
+  arePlayerOnboardingConsents,
+  hasPlayerOnboardingConsents,
+  isPlayerOnboardingCompletion,
+  type PlayerOnboardingPolicy,
 } from './player-onboarding.policy';
 import { SessionAuthenticationClock } from './session-authentication.guard';
 
@@ -60,6 +61,7 @@ export interface PlayerOnboardingServiceDependencies {
   readonly progressWriter: PlayerOnboardingProgressWriter;
   readonly completionWriter: PlayerOnboardingCompletionWriter;
   readonly clock: SessionAuthenticationClock;
+  readonly policy: PlayerOnboardingPolicy | null;
 }
 
 type RejectionReason = Extract<
@@ -286,6 +288,7 @@ function completedMatches(
   onboarding: OwnPlayerOnboarding,
   input: CompleteOwnPlayerOnboardingInput,
   revision: number,
+  policy: PlayerOnboardingPolicy,
 ): boolean {
   if (
     onboarding.status !== 'completed' ||
@@ -297,7 +300,7 @@ function completedMatches(
   ) {
     return false;
   }
-  return CURRENT_PLAYER_ONBOARDING_POLICY.consents.every((required) =>
+  return policy.consents.every((required) =>
     onboarding.consents.some(
       (consent) =>
         consent.kind === required.kind &&
@@ -310,6 +313,7 @@ function progressMatches(
   onboarding: OwnPlayerOnboarding,
   input: AdvanceOwnPlayerOnboardingInput,
   revision: number,
+  policy: PlayerOnboardingPolicy | null,
 ): boolean {
   return (
     onboarding.status === 'in_progress' &&
@@ -317,7 +321,8 @@ function progressMatches(
     onboarding.revision === revision &&
     onboarding.flowVersion === input.progress.flowVersion &&
     (input.progress.nextStep === 'consents' ||
-      hasCurrentPlayerOnboardingConsents(onboarding.consents))
+      (policy !== null &&
+        hasPlayerOnboardingConsents(policy, onboarding.consents)))
   );
 }
 
@@ -461,19 +466,21 @@ export class PlayerOnboardingService {
     if (input.role !== 'player') {
       return rejected('onboarding_not_found');
     }
-    if (
-      input.progress.flowVersion !==
-        CURRENT_PLAYER_ONBOARDING_POLICY.flowVersion ||
-      (input.progress.nextStep === 'level_survey' &&
-        !areCurrentPlayerOnboardingConsents(input.progress.consents))
-    ) {
+    if (input.progress.flowVersion !== PLAYER_ONBOARDING_FLOW_VERSION) {
       return rejected('progress_conflict');
     }
 
-    const consents =
-      input.progress.nextStep === 'level_survey'
-        ? CURRENT_PLAYER_ONBOARDING_POLICY.consents
-        : Object.freeze([]);
+    const policy = this.dependencies.policy;
+    let consents: readonly OwnPlayerOnboardingConsent[] = Object.freeze([]);
+    if (input.progress.nextStep === 'level_survey') {
+      if (
+        policy === null ||
+        !arePlayerOnboardingConsents(policy, input.progress.consents)
+      ) {
+        return rejected('progress_conflict');
+      }
+      consents = policy.consents;
+    }
     try {
       const result =
         await this.dependencies.transactions.run<ProgressTransactionResult>(
@@ -483,7 +490,7 @@ export class PlayerOnboardingService {
               {
                 accountId: input.accountId,
                 expectedRevision: input.progress.expectedRevision,
-                flowVersion: CURRENT_PLAYER_ONBOARDING_POLICY.flowVersion,
+                flowVersion: PLAYER_ONBOARDING_FLOW_VERSION,
                 nextStep: input.progress.nextStep,
                 consents,
                 advancedAt: this.dependencies.clock.nowEpochSeconds(),
@@ -506,7 +513,12 @@ export class PlayerOnboardingService {
             );
             if (
               onboarding === undefined ||
-              !progressMatches(onboarding, input, advanced.revision)
+              !progressMatches(
+                onboarding,
+                input,
+                advanced.revision,
+                policy,
+              )
             ) {
               throw storageInvariantFailure();
             }
@@ -546,7 +558,11 @@ export class PlayerOnboardingService {
     if (input.role !== 'player') {
       return rejected('onboarding_not_found');
     }
-    if (!isCurrentPlayerOnboardingCompletion(input.completion)) {
+    const policy = this.dependencies.policy;
+    if (
+      policy === null ||
+      !isPlayerOnboardingCompletion(policy, input.completion)
+    ) {
       return rejected('completion_conflict');
     }
 
@@ -559,9 +575,9 @@ export class PlayerOnboardingService {
               {
                 accountId: input.accountId,
                 expectedRevision: input.completion.expectedRevision,
-                flowVersion: CURRENT_PLAYER_ONBOARDING_POLICY.flowVersion,
-                consents: CURRENT_PLAYER_ONBOARDING_POLICY.consents,
-                surveyVersion: CURRENT_PLAYER_ONBOARDING_POLICY.survey.version,
+                flowVersion: policy.flowVersion,
+                consents: policy.consents,
+                surveyVersion: policy.survey.version,
                 surveyAnswers: input.completion.survey.answers,
                 completedAt: this.dependencies.clock.nowEpochSeconds(),
               },
@@ -583,7 +599,12 @@ export class PlayerOnboardingService {
             );
             if (
               onboarding === undefined ||
-              !completedMatches(onboarding, input, completed.revision)
+              !completedMatches(
+                onboarding,
+                input,
+                completed.revision,
+                policy,
+              )
             ) {
               throw storageInvariantFailure();
             }

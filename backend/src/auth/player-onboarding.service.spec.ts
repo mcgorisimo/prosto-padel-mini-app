@@ -34,14 +34,26 @@ import {
   CompleteOwnPlayerOnboardingInput,
   SaveOwnPlayerOnboardingDraftInput,
 } from './player-onboarding.types';
+import {
+  PlayerOnboardingPolicy,
+  createPlayerOnboardingPolicy,
+} from './player-onboarding.policy';
 
 const ACCOUNT_ID = deterministicUuid('player-onboarding-service') as AccountId;
 const OTHER_ACCOUNT_ID = deterministicUuid(
   'player-onboarding-service-other',
 ) as AccountId;
 const NOW = unixEpochSeconds(1_800_000_000);
+const TEST_POLICY = createPlayerOnboardingPolicy({
+  terms: '2026-08-01',
+  privacy: '2026-08-01',
+  cancellation: '2026-08-01',
+});
 
-function createHarness(result: ReadPlayerOnboardingResult = firstRunResult()) {
+function createHarness(
+  result: ReadPlayerOnboardingResult = firstRunResult(),
+  policy: PlayerOnboardingPolicy | null = TEST_POLICY,
+) {
   const transaction = {} as PostgresTransaction;
   const run = jest.fn<
     ReturnType<PlayerOnboardingTransactionExecutor['run']>,
@@ -78,6 +90,7 @@ function createHarness(result: ReadPlayerOnboardingResult = firstRunResult()) {
     progressWriter: { advance } as PlayerOnboardingProgressWriter,
     completionWriter: { complete } as PlayerOnboardingCompletionWriter,
     clock: { nowEpochSeconds: () => NOW },
+    policy,
   });
   return {
     service,
@@ -772,6 +785,36 @@ describe('PlayerOnboardingService', () => {
     expect(harness.advance).not.toHaveBeenCalled();
   });
 
+  it('fails closed before persisting level survey progress when legal policy is disabled', async () => {
+    const harness = createHarness(progressResult('consents', 2), null);
+
+    await expect(
+      harness.service.advanceOwnOnboarding(
+        progressInput({
+          expectedRevision: 2,
+          flowVersion: 'tma_v1',
+          nextStep: 'level_survey',
+          consents: [
+            { kind: 'terms', documentVersion: 'terms-test-2026-08-23-v1' },
+            {
+              kind: 'privacy',
+              documentVersion: 'privacy-test-2026-08-23-v1',
+            },
+            {
+              kind: 'cancellation',
+              documentVersion: 'cancellation-test-2026-08-23-v1',
+            },
+          ],
+        }),
+      ),
+    ).resolves.toEqual({
+      outcome: 'rejected',
+      reason: 'progress_conflict',
+    });
+    expect(harness.run).not.toHaveBeenCalled();
+    expect(harness.advance).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['stale_revision', 'stale_revision'],
     ['conflict', 'progress_conflict'],
@@ -851,6 +894,19 @@ describe('PlayerOnboardingService', () => {
     expect(JSON.stringify(harness.complete.mock.calls[0])).not.toMatch(
       /isVerified|verified|rating/iu,
     );
+  });
+
+  it('fails closed before completion persistence when legal policy is disabled', async () => {
+    const harness = createHarness(progressResult('level_survey', 4), null);
+
+    await expect(
+      harness.service.completeOwnOnboarding(completionInput()),
+    ).resolves.toEqual({
+      outcome: 'rejected',
+      reason: 'completion_conflict',
+    });
+    expect(harness.run).not.toHaveBeenCalled();
+    expect(harness.complete).not.toHaveBeenCalled();
   });
 
   it('returns an exact replay as the same completed representation without verification claims', async () => {

@@ -12,6 +12,7 @@ import {
   PlayerProfilePhotoUrlResolver,
   readPlayerProfilePhotoStorageConfiguration,
 } from '../config/player-profile-photo.config';
+import { readPlayerOnboardingPolicyConfiguration } from '../config/player-onboarding-policy.config';
 import { DatabaseModule } from '../database/database.module';
 import { ContentModerationController } from '../common/content-moderation.controller';
 import { PostgresAccountStatusReader } from '../database/postgres-account-status.reader';
@@ -77,6 +78,7 @@ import { PlayerProfileController } from './player-profile.controller';
 import { PlayerProfileService } from './player-profile.service';
 import { PlayerOnboardingController } from './player-onboarding.controller';
 import { PlayerOnboardingService } from './player-onboarding.service';
+import { createPlayerOnboardingPolicy } from './player-onboarding.policy';
 import { PublicPlayerProfileController } from './public-player-profile.controller';
 import { PublicPlayerProfileService } from './public-player-profile.service';
 import { SessionAuthenticationController } from './session-authentication.controller';
@@ -304,6 +306,7 @@ function createAccountNotificationPreferencesService(
 }
 
 function createPlayerOnboardingService(
+  config: ConfigService,
   transactions: PostgresTransactionExecutorAdapter,
   onboarding: PostgresPlayerOnboardingReader,
   draftWriter: PostgresPlayerOnboardingDraftWriter,
@@ -311,6 +314,8 @@ function createPlayerOnboardingService(
   completionWriter: PostgresPlayerOnboardingCompletionWriter,
   clock: SessionAuthenticationClock,
 ): PlayerOnboardingService {
+  const policyConfiguration =
+    readPlayerOnboardingPolicyConfiguration(config);
   return new PlayerOnboardingService({
     transactions,
     onboarding,
@@ -318,6 +323,9 @@ function createPlayerOnboardingService(
     progressWriter,
     completionWriter,
     clock,
+    policy: policyConfiguration.enabled
+      ? createPlayerOnboardingPolicy(policyConfiguration.documentVersions)
+      : null,
   });
 }
 
@@ -644,6 +652,7 @@ function createPlayerProfilePhotoService(
     {
       provide: PlayerOnboardingService,
       inject: [
+        ConfigService,
         PostgresTransactionExecutorAdapter,
         PostgresPlayerOnboardingReader,
         PostgresPlayerOnboardingDraftWriter,

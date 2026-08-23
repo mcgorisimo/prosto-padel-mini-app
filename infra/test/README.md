@@ -69,11 +69,31 @@ Cancellation versions. Each document also requires its own public HTTPS URL
 and version. Missing or invalid values keep consent and completion controls
 unavailable; repository draft files are never used as a fallback.
 
-The current backend `2026-08-01` versions remain test policy only. Do not set
-either flag to `true` or run a consent/completion smoke until approved documents
-are published and a separate backend-policy/config gate has verified exact
-version alignment. Changing these settings requires rebuilding and recreating
-only `frontend` through the normal test Compose files.
+The temporary Selectel test publication is an explicitly isolated exception:
+
+- set `VITE_ONBOARDING_LEGAL_TEST_ONLY=true` together with both publication
+  flags;
+- use only the three exact `*-test-2026-08-23-v1` versions and versioned
+  `https://test-app.prostopdl.ru/legal/test-only/.../` URLs from
+  `.env.test.example`;
+- enable `PLAYER_ONBOARDING_LEGAL_POLICY_ENABLED=true` with the same three
+  backend versions in the same separately approved test rollout;
+- never copy these values or the packaged pages to `app.prostopdl.ru` or a
+  production build.
+
+The test frontend image packages the current repository drafts only beneath
+`/legal/test-only/`, adds a prominent non-production warning and serves them
+with `no-store`. The source drafts remain visibly incomplete; the wrapper does
+not claim legal approval or fill missing organisation details. When the ООО
+requisites are added, publish three new immutable version values and obtain new
+acceptances through a separately implemented re-consent lifecycle. Replacing
+content under an accepted version is forbidden.
+
+The backend policy is runtime configuration and fails closed when disabled or
+incomplete. Changing it requires recreating only `backend`; changing the public
+Vite settings or packaged pages requires rebuilding and recreating only
+`frontend`. Config, rollout and any authenticated consent/completion smoke are
+separate approved gates.
 
 ## Guard model
 

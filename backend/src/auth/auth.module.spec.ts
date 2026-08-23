@@ -12,6 +12,7 @@ import {
   TELEGRAM_AUTH_OPERATION_TTL_SECONDS,
   TELEGRAM_SESSION_TTL_SECONDS,
 } from '../config/telegram-login.config';
+import { PLAYER_ONBOARDING_POLICY_CONFIG_KEYS } from '../config/player-onboarding-policy.config';
 import { PostgresAccountStatusReader } from '../database/postgres-account-status.reader';
 import { PostgresAccountNotificationPreferencesRepository } from '../database/postgres-account-notification-preferences.repository';
 import { PostgresAdminPlayerRatingRepository } from '../database/postgres-admin-player-rating.repository';
@@ -139,6 +140,13 @@ function enabledConfiguration(): Record<string, unknown> {
       TELEGRAM_AUTH_OPERATION_TTL_SECONDS,
     [TELEGRAM_LOGIN_CONFIG_KEYS.sessionTtlSeconds]:
       TELEGRAM_SESSION_TTL_SECONDS,
+    [PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.enabled]: true,
+    [PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.termsVersion]:
+      'terms-test-2026-08-23-v1',
+    [PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.privacyVersion]:
+      'privacy-test-2026-08-23-v1',
+    [PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.cancellationVersion]:
+      'cancellation-test-2026-08-23-v1',
   };
 }
 
@@ -479,6 +487,7 @@ describe('AuthModule Telegram login wiring', () => {
     expect(playerOnboarding.dependencies.clock).toBe(
       moduleRef.get(SESSION_AUTHENTICATION_CLOCK),
     );
+    expect(playerOnboarding.dependencies.policy).toBeNull();
     expect(
       getPlayerOnboardingControllerService(
         moduleRef.get(PlayerOnboardingController),
@@ -721,6 +730,19 @@ describe('AuthModule Telegram login wiring', () => {
     expect(
       moduleRef.get(PostgresPlayerOnboardingCompletionWriter),
     ).toBeInstanceOf(PostgresPlayerOnboardingCompletionWriter);
+    expect(
+      moduleRef.get(PlayerOnboardingService).dependencies.policy?.consents,
+    ).toEqual([
+      {
+        kind: 'cancellation',
+        documentVersion: 'cancellation-test-2026-08-23-v1',
+      },
+      {
+        kind: 'privacy',
+        documentVersion: 'privacy-test-2026-08-23-v1',
+      },
+      { kind: 'terms', documentVersion: 'terms-test-2026-08-23-v1' },
+    ]);
     expect(moduleRef.get(PostgresPlayerProfileWriter)).toBeInstanceOf(
       PostgresPlayerProfileWriter,
     );

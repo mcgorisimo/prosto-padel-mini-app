@@ -1534,6 +1534,18 @@ textarea {
   line-height: 1.4;
 }
 
+.onboarding-legal-test-only-note {
+  margin: 0 0 16px;
+  padding: 12px;
+  border: 1px solid rgba(255, 194, 71, 0.5);
+  border-radius: 12px;
+  background: rgba(255, 194, 71, 0.1);
+  color: #fff1c7;
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.5;
+}
+
 .onboarding-legal-list {
   display: grid;
   gap: 12px;
