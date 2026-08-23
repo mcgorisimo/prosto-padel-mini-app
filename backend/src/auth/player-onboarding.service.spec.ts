@@ -49,6 +49,17 @@ const TEST_POLICY = createPlayerOnboardingPolicy({
   privacy: '2026-08-01',
   cancellation: '2026-08-01',
 });
+const SURVEY_ANSWERS = Object.freeze({
+  match_count: 'thirty_one_to_ninety_nine',
+  rally_stability: 'steady_under_pressure',
+  glass_play: 'confident_returns',
+  serve_return_net: 'confident_patterns',
+  match_experience_year: 'league_or_club',
+});
+const INITIAL_LEVEL_RESULT = Object.freeze({
+  initialLevelScore: 15,
+  initialLevelLabel: 'B+' as const,
+});
 
 function createHarness(
   result: ReadPlayerOnboardingResult = firstRunResult(),
@@ -76,7 +87,12 @@ function createHarness(
       Promise<CompletePlayerOnboardingResult>,
       [PostgresTransaction, CompletePlayerOnboardingInput]
     >()
-    .mockResolvedValue({ outcome: 'completed', revision: 5, replayed: false });
+    .mockResolvedValue({
+      outcome: 'completed',
+      revision: 5,
+      replayed: false,
+      ...INITIAL_LEVEL_RESULT,
+    });
   const advance = jest
     .fn<
       Promise<AdvancePlayerOnboardingResult>,
@@ -131,8 +147,8 @@ function draftResult(): ReadPlayerOnboardingResult {
         flowVersion: 'tma_v1',
         status: 'in_progress',
         currentStep: 'level_survey',
-        surveyVersion: 'initial_level_v1',
-        surveyAnswers: { experience: 'beginner' },
+        surveyVersion: 'initial_level_v2',
+        surveyAnswers: SURVEY_ANSWERS,
         revision: 4,
       },
       consents: [
@@ -156,7 +172,7 @@ function savedDraftResult(revision: number): ReadPlayerOnboardingResult {
         flowVersion: 'tma_v1',
         status: 'in_progress',
         currentStep: 'profile',
-        surveyVersion: 'initial_level_v1',
+        surveyVersion: 'initial_level_v2',
         surveyAnswers: {},
         revision,
       },
@@ -181,7 +197,7 @@ function progressResult(
         flowVersion: 'tma_v1',
         status: 'in_progress',
         currentStep,
-        surveyVersion: 'initial_level_v1',
+        surveyVersion: 'initial_level_v2',
         surveyAnswers: {},
         revision,
       },
@@ -210,8 +226,8 @@ function completedResult(): ReadPlayerOnboardingResult {
         flowVersion: 'tma_v1',
         status: 'completed',
         currentStep: 'completed',
-        surveyVersion: 'initial_level_v1',
-        surveyAnswers: { experience: 'beginner' },
+        surveyVersion: 'initial_level_v2',
+        surveyAnswers: SURVEY_ANSWERS,
         revision: 5,
       },
       consents: [
@@ -256,8 +272,8 @@ function completionInput(
         { kind: 'cancellation', documentVersion: '2026-08-01' },
       ],
       survey: {
-        version: 'initial_level_v1',
-        answers: { experience: 'beginner' },
+        version: 'initial_level_v2',
+        answers: SURVEY_ANSWERS,
       },
     },
     ...overrides,
@@ -326,7 +342,7 @@ describe('PlayerOnboardingService', () => {
         status: 'in_progress',
         flowVersion: 'tma_v1',
         currentStep: 'level_survey',
-        surveyVersion: 'initial_level_v1',
+        surveyVersion: 'initial_level_v2',
         revision: 4,
         profile: { firstName: 'Synthetic', lastName: 'Player' },
         contacts: {
@@ -338,7 +354,7 @@ describe('PlayerOnboardingService', () => {
           { kind: 'privacy', documentVersion: '2026-08-01' },
           { kind: 'terms', documentVersion: '2026-08-01' },
         ],
-        surveyAnswers: { experience: 'beginner' },
+        surveyAnswers: SURVEY_ANSWERS,
       },
     });
     if (result.outcome === 'found') {
@@ -461,7 +477,7 @@ describe('PlayerOnboardingService', () => {
         status: 'in_progress',
         flowVersion: 'tma_v1',
         currentStep: 'profile',
-        surveyVersion: 'initial_level_v1',
+        surveyVersion: 'initial_level_v2',
         revision: 1,
         profile: { firstName: 'Updated', lastName: 'Player' },
         contacts: {
@@ -481,7 +497,7 @@ describe('PlayerOnboardingService', () => {
       phone: '+79991112233',
       normalizedEmail: 'owner@example.test',
       flowVersion: 'tma_v1',
-      surveyVersion: 'initial_level_v1',
+      surveyVersion: 'initial_level_v2',
       updatedAt: NOW,
     });
     expect(harness.findByAccountId).toHaveBeenCalledWith(harness.transaction, {
@@ -629,7 +645,7 @@ describe('PlayerOnboardingService', () => {
         status: 'in_progress',
         flowVersion: 'tma_v1',
         currentStep: 'consents',
-        surveyVersion: 'initial_level_v1',
+        surveyVersion: 'initial_level_v2',
         revision: 2,
         profile: { firstName: 'Updated', lastName: 'Player' },
         contacts: {
@@ -834,10 +850,12 @@ describe('PlayerOnboardingService', () => {
     const harness = createHarness({
       outcome: 'found',
       onboarding: {
-        ...(progressResult('consents', 2) as Extract<
-          ReadPlayerOnboardingResult,
-          { outcome: 'found' }
-        >).onboarding,
+        ...(
+          progressResult('consents', 2) as Extract<
+            ReadPlayerOnboardingResult,
+            { outcome: 'found' }
+          >
+        ).onboarding,
         accountId: OTHER_ACCOUNT_ID,
       },
     });
@@ -858,7 +876,7 @@ describe('PlayerOnboardingService', () => {
         status: 'completed',
         flowVersion: 'tma_v1',
         currentStep: 'completed',
-        surveyVersion: 'initial_level_v1',
+        surveyVersion: 'initial_level_v2',
         revision: 5,
         profile: { firstName: 'Synthetic', lastName: 'Player' },
         contacts: {
@@ -871,7 +889,7 @@ describe('PlayerOnboardingService', () => {
           { kind: 'privacy', documentVersion: '2026-08-01' },
           { kind: 'terms', documentVersion: '2026-08-01' },
         ],
-        surveyAnswers: { experience: 'beginner' },
+        surveyAnswers: SURVEY_ANSWERS,
       },
     });
     expect(harness.run).toHaveBeenCalledTimes(1);
@@ -884,8 +902,8 @@ describe('PlayerOnboardingService', () => {
         { kind: 'privacy', documentVersion: '2026-08-01' },
         { kind: 'terms', documentVersion: '2026-08-01' },
       ],
-      surveyVersion: 'initial_level_v1',
-      surveyAnswers: { experience: 'beginner' },
+      surveyVersion: 'initial_level_v2',
+      surveyAnswers: SURVEY_ANSWERS,
       completedAt: NOW,
     });
     expect(harness.findByAccountId).toHaveBeenCalledWith(harness.transaction, {
@@ -915,6 +933,7 @@ describe('PlayerOnboardingService', () => {
       outcome: 'completed',
       revision: 5,
       replayed: true,
+      ...INITIAL_LEVEL_RESULT,
     });
 
     const result =
@@ -925,6 +944,22 @@ describe('PlayerOnboardingService', () => {
       expect(result.onboarding).not.toHaveProperty('isVerified');
       expect(result.onboarding).not.toHaveProperty('rating');
     }
+  });
+
+  it('fails transactionally when persistence returns a different computed result', async () => {
+    const harness = createHarness(completedResult());
+    harness.complete.mockResolvedValueOnce({
+      outcome: 'completed',
+      revision: 5,
+      replayed: false,
+      initialLevelScore: 14,
+      initialLevelLabel: 'B',
+    });
+
+    await expect(
+      harness.service.completeOwnOnboarding(completionInput()),
+    ).resolves.toEqual({ outcome: 'rejected', reason: 'internal_failure' });
+    expect(harness.findByAccountId).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -944,8 +979,8 @@ describe('PlayerOnboardingService', () => {
       {
         ...completionInput().completion,
         survey: {
-          version: 'initial_level_v1',
-          answers: { experience: 'unsupported' },
+          version: 'initial_level_v2',
+          answers: { ...SURVEY_ANSWERS, glass_play: 'unsupported' },
         },
       },
     ],
@@ -953,7 +988,7 @@ describe('PlayerOnboardingService', () => {
       'partial survey',
       {
         ...completionInput().completion,
-        survey: { version: 'initial_level_v1', answers: {} },
+        survey: { version: 'initial_level_v2', answers: {} },
       },
     ],
   ])('rejects %s before persistence', async (_label, completion) => {

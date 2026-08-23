@@ -6773,3 +6773,55 @@
   `deployment=not_needed`.
 - Independent read-only review of the exact one-file closeout diff found no
   blocking issues: `P0=0`, `P1=0`. No correction was required after review.
+
+### 2026-08-24 — D5.1 backend initial-level v2 scoring candidate
+
+- Work started from clean exact detached main
+  `5b7e79a842611464632c9c7dea168425432f433b`. Applied-verified migration 039 is
+  sufficient: its nullable constrained `initial_level_score` and
+  `initial_level_label` columns plus exact column-level runtime ACL support the
+  required atomic completion update. No new migration or schema change is
+  needed in this slice; applied migrations 035–039 remain unchanged.
+- The backend-owned survey policy now uses immutable version
+  `initial_level_v2` and accepts exactly five code-only answers: match count,
+  rally stability, glass play, serve/return/net play and match experience in
+  the last year. Clients still submit only option IDs. Any missing, additional,
+  legacy one-question or unknown answer is rejected before persistence; no
+  client-supplied score or level is accepted.
+- Deterministic server scoring maps each answer to internal `0..4`, totals
+  `0..20` and applies the approved `D / D+ / C / C+ / B / B+ / A` buckets and
+  caps: zero matches at `D+`, up to ten matches at `C`, weak glass at `C+`,
+  `B+` only with at least 31 matches and every technical answer at least `3`,
+  and `A` only with 100+ matches, maximum technical answers and tournament
+  experience. The labels and order match the existing `ratingEngine` boundary,
+  but this result remains separate from player rating and `isVerified`.
+- The completion writer independently recalculates the result, locks the exact
+  owner/state, saves answers, score and label in one guarded revision update,
+  and verifies the returned values. An exact retry is read-only and succeeds
+  only when revision, answers, consent versions and computed result all match;
+  stale or different requests remain bounded conflicts. PII, credentials,
+  answer bodies and result details are not logged.
+- The public onboarding response shape and frontend were intentionally not
+  changed in this backend-only slice. Exposing only the server-computed label to
+  the future compact result screen, replacing the five-question frontend flow
+  and correcting completion HTTP reconciliation remain separate D5.1 gates.
+- Focused scoring/policy/service/PostgreSQL writer regressions passed `106/106`.
+  Backend typecheck, backend E2E (`4/4`) and backend build passed. The complete
+  backend unit command ran `3731` tests: `3730` passed and the sole failure is
+  the unchanged migration-038 CRLF-sensitive substring baseline outside this
+  diff. Root E2E passed `99` tests with `1` intentional skip; root build passed
+  with `1623` modules and only the existing large-chunk advisory.
+- Changed backend files were formatted directly and add no new lint or dead-code
+  finding. Repository-wide format/lint/dead-code ratchets remain blocked only
+  by the same inherited main baselines: unchanged unformatted files, the
+  unchanged `AuthGate.jsx` 13 lint findings, and a Knip issue set byte-for-byte
+  identical to current main (`Compare-Object` difference count `0`). No baseline
+  cleanup was included.
+- This candidate changes backend runtime behavior and therefore has
+  `deployment_deferred_by_user` pending separate commit,
+  integration and Selectel test backend rollout/smoke gates. No commit, push,
+  SSH/DB/schema command, container action, API/provider write, env/secret change
+  or production action occurred in this local checkpoint.
+- Independent read-only review of the exact candidate diff passed acceptance
+  with `P0=0`, `P1=0`; no correction remained after the factual test-count
+  update.

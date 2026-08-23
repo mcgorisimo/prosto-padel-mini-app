@@ -16,6 +16,17 @@ const ACCOUNT_ID = deterministicUuid(
 ) as AccountId;
 const NOW = unixEpochSeconds(1_800_000_000);
 const PRIVATE_MARKER = 'SYNTHETIC_ONBOARDING_COMPLETION_PRIVATE';
+const SURVEY_ANSWERS = Object.freeze({
+  match_count: 'thirty_one_to_ninety_nine',
+  rally_stability: 'steady_under_pressure',
+  glass_play: 'confident_returns',
+  serve_return_net: 'confident_patterns',
+  match_experience_year: 'league_or_club',
+});
+const INITIAL_LEVEL_RESULT = Object.freeze({
+  initialLevelScore: 15,
+  initialLevelLabel: 'B+' as const,
+});
 
 interface QueryCall {
   readonly text: string;
@@ -79,8 +90,10 @@ function stateRow(overrides: Record<string, unknown> = {}) {
     flow_version: 'tma_v1',
     status: 'in_progress',
     current_step: 'level_survey',
-    survey_version: 'initial_level_v1',
+    survey_version: 'initial_level_v2',
     survey_answers: {},
+    initial_level_score: null,
+    initial_level_label: null,
     revision: '4',
     created_at: '1799999900',
     updated_at: '1799999950',
@@ -124,8 +137,8 @@ function validInput(
       { kind: 'privacy', documentVersion: '2026-08-01' },
       { kind: 'terms', documentVersion: '2026-08-01' },
     ],
-    surveyVersion: 'initial_level_v1',
-    surveyAnswers: { experience: 'beginner' },
+    surveyVersion: 'initial_level_v2',
+    surveyAnswers: SURVEY_ANSWERS,
     completedAt: NOW,
     ...overrides,
   };
@@ -175,7 +188,14 @@ describe('PostgresPlayerOnboardingCompletionWriter', () => {
       queryResult([profileRow()]),
       queryResult([stateRow()]),
       queryResult([], 0),
-      queryResult([{ account_id: ACCOUNT_ID, revision: '5' }]),
+      queryResult([
+        {
+          account_id: ACCOUNT_ID,
+          revision: '5',
+          initial_level_score: 15,
+          initial_level_label: 'B+',
+        },
+      ]),
     ]);
 
     await expect(
@@ -183,7 +203,12 @@ describe('PostgresPlayerOnboardingCompletionWriter', () => {
         transaction,
         validInput(),
       ),
-    ).resolves.toEqual({ outcome: 'completed', revision: 5, replayed: false });
+    ).resolves.toEqual({
+      outcome: 'completed',
+      revision: 5,
+      replayed: false,
+      ...INITIAL_LEVEL_RESULT,
+    });
 
     expect(transaction.calls).toHaveLength(4);
     const sql = transaction.calls.map((call) => normalizeSql(call.text));
@@ -199,6 +224,8 @@ describe('PostgresPlayerOnboardingCompletionWriter', () => {
     expect(sql[2]).toContain('ON CONFLICT');
     expect(sql[3]).toContain("status = 'completed'");
     expect(sql[3]).toContain("current_step = 'completed'");
+    expect(sql[3]).toContain('initial_level_score = $7::smallint');
+    expect(sql[3]).toContain('initial_level_label = $8::text');
     expect(sql[3]).toContain('revision = revision + 1');
     expect(sql[3]).not.toMatch(/phone|normalized_email|is_verified|rating/iu);
     expect(transaction.calls[2].values).toEqual([
@@ -212,6 +239,16 @@ describe('PostgresPlayerOnboardingCompletionWriter', () => {
       'tma_v1',
       NOW,
     ]);
+    expect(transaction.calls[3].values).toEqual([
+      ACCOUNT_ID,
+      4,
+      SURVEY_ANSWERS,
+      NOW,
+      'tma_v1',
+      'initial_level_v2',
+      15,
+      'B+',
+    ]);
   });
 
   it('returns an exact completed retry read-only when revision and final payload match', async () => {
@@ -221,7 +258,9 @@ describe('PostgresPlayerOnboardingCompletionWriter', () => {
         stateRow({
           status: 'completed',
           current_step: 'completed',
-          survey_answers: { experience: 'beginner' },
+          survey_answers: SURVEY_ANSWERS,
+          initial_level_score: 15,
+          initial_level_label: 'B+',
           revision: '5',
           updated_at: '1800000000',
           completed_at: '1800000000',
@@ -235,7 +274,12 @@ describe('PostgresPlayerOnboardingCompletionWriter', () => {
         transaction,
         validInput(),
       ),
-    ).resolves.toEqual({ outcome: 'completed', revision: 5, replayed: true });
+    ).resolves.toEqual({
+      outcome: 'completed',
+      revision: 5,
+      replayed: true,
+      ...INITIAL_LEVEL_RESULT,
+    });
     expect(transaction.calls).toHaveLength(3);
     expect(normalizeSql(transaction.calls[2].text)).toMatch(/^SELECT/u);
     expect(
@@ -249,11 +293,9 @@ describe('PostgresPlayerOnboardingCompletionWriter', () => {
     ['different expected revision', validInput({ expectedRevision: 3 })],
     [
       'different survey answers',
-      validInput({ surveyAnswers: { experience: 'advanced' } }),
-    ],
-    [
-      'different survey version',
-      validInput({ surveyVersion: 'initial_level_v2' }),
+      validInput({
+        surveyAnswers: { ...SURVEY_ANSWERS, glass_play: 'uses_tactically' },
+      }),
     ],
   ])(
     'conflicts on a completed %s request without writes',
@@ -264,7 +306,9 @@ describe('PostgresPlayerOnboardingCompletionWriter', () => {
           stateRow({
             status: 'completed',
             current_step: 'completed',
-            survey_answers: { experience: 'beginner' },
+            survey_answers: SURVEY_ANSWERS,
+            initial_level_score: 15,
+            initial_level_label: 'B+',
             revision: '5',
             updated_at: '1800000000',
             completed_at: '1800000000',
@@ -290,7 +334,9 @@ describe('PostgresPlayerOnboardingCompletionWriter', () => {
         stateRow({
           status: 'completed',
           current_step: 'completed',
-          survey_answers: { experience: 'beginner' },
+          survey_answers: SURVEY_ANSWERS,
+          initial_level_score: 15,
+          initial_level_label: 'B+',
           revision: '5',
           updated_at: '1800000000',
           completed_at: '1800000000',
@@ -305,6 +351,59 @@ describe('PostgresPlayerOnboardingCompletionWriter', () => {
         validInput(),
       ),
     ).resolves.toEqual({ outcome: 'conflict' });
+  });
+
+  it('conflicts read-only when a completed retry has a different stored result', async () => {
+    const transaction = new FakeTransaction([
+      queryResult([profileRow()]),
+      queryResult([
+        stateRow({
+          status: 'completed',
+          current_step: 'completed',
+          survey_answers: SURVEY_ANSWERS,
+          initial_level_score: 14,
+          initial_level_label: 'B',
+          revision: '5',
+          updated_at: '1800000000',
+          completed_at: '1800000000',
+        }),
+      ]),
+    ]);
+
+    await expect(
+      new PostgresPlayerOnboardingCompletionWriter().complete(
+        transaction,
+        validInput(),
+      ),
+    ).resolves.toEqual({ outcome: 'conflict' });
+    expect(transaction.calls).toHaveLength(2);
+  });
+
+  it('preserves a legacy completed row and returns a read-only conflict', async () => {
+    const transaction = new FakeTransaction([
+      queryResult([profileRow()]),
+      queryResult([
+        stateRow({
+          status: 'completed',
+          current_step: 'completed',
+          survey_version: 'initial_level_v1',
+          survey_answers: { experience: 'beginner' },
+          initial_level_score: null,
+          initial_level_label: null,
+          revision: '5',
+          updated_at: '1800000000',
+          completed_at: '1800000000',
+        }),
+      ]),
+    ]);
+
+    await expect(
+      new PostgresPlayerOnboardingCompletionWriter().complete(
+        transaction,
+        validInput(),
+      ),
+    ).resolves.toEqual({ outcome: 'conflict' });
+    expect(transaction.calls).toHaveLength(2);
   });
 
   it('rejects stale and incomplete drafts before consent or state mutation', async () => {
@@ -362,6 +461,33 @@ describe('PostgresPlayerOnboardingCompletionWriter', () => {
     expect(transaction.calls).toHaveLength(4);
   });
 
+  it('throws after update when PostgreSQL returns a different computed result so the transaction rolls back', async () => {
+    const transaction = new FakeTransaction([
+      queryResult([profileRow()]),
+      queryResult([stateRow()]),
+      queryResult([], 0),
+      queryResult([
+        {
+          account_id: ACCOUNT_ID,
+          revision: '5',
+          initial_level_score: 14,
+          initial_level_label: 'B',
+        },
+      ]),
+    ]);
+
+    await expect(
+      new PostgresPlayerOnboardingCompletionWriter().complete(
+        transaction,
+        validInput(),
+      ),
+    ).rejects.toMatchObject({
+      name: 'PlayerOnboardingCompletionPersistenceError',
+      reason: 'invalid_persisted_state',
+    });
+    expect(transaction.calls).toHaveLength(4);
+  });
+
   it('rejects malformed input before SQL and never copies it into a public error', async () => {
     const transaction = new FakeTransaction([]);
     let caught: unknown;
@@ -378,6 +504,34 @@ describe('PostgresPlayerOnboardingCompletionWriter', () => {
       caught = error;
     }
     expectSafeError(caught, 'invalid_input');
+    expect(transaction.calls).toHaveLength(0);
+  });
+
+  it.each([
+    [
+      'superseded survey version',
+      validInput({ surveyVersion: 'initial_level_v1' }),
+    ],
+    [
+      'partial five-question survey',
+      validInput({
+        surveyAnswers: {
+          match_count: 'one_hundred_plus',
+          rally_stability: 'controls_pace',
+        },
+      }),
+    ],
+  ])('rejects %s before SQL', async (_label, input) => {
+    const transaction = new FakeTransaction([]);
+    await expect(
+      new PostgresPlayerOnboardingCompletionWriter().complete(
+        transaction,
+        input,
+      ),
+    ).rejects.toMatchObject({
+      name: 'PlayerOnboardingCompletionPersistenceError',
+      reason: 'invalid_input',
+    });
     expect(transaction.calls).toHaveLength(0);
   });
 

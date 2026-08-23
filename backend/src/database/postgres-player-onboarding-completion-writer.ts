@@ -1,6 +1,11 @@
 import { QueryResultRow } from 'pg';
 import { isAccountId } from '../accounts/account.types';
 import { isUnixEpochSeconds } from '../auth/auth.types';
+import {
+  PLAYER_ONBOARDING_INITIAL_LEVEL_SURVEY_VERSION,
+  PlayerOnboardingInitialLevelLabel,
+  scorePlayerOnboardingInitialLevel,
+} from '../auth/player-onboarding-initial-level';
 import { PostgresCodecError, decodePostgresBigint } from './postgres-codecs';
 import { classifyPostgresError } from './postgres-error-classifier';
 import {
@@ -28,6 +33,8 @@ const LOCK_STATE_SQL = `
     current_step,
     survey_version,
     survey_answers,
+    initial_level_score,
+    initial_level_label,
     revision,
     created_at,
     updated_at,
@@ -66,6 +73,8 @@ const COMPLETE_STATE_SQL = `
     status = 'completed',
     current_step = 'completed',
     survey_answers = $3::jsonb,
+    initial_level_score = $7::smallint,
+    initial_level_label = $8::text,
     revision = revision + 1,
     updated_at = GREATEST(updated_at, $4::bigint),
     completed_at = GREATEST(updated_at, $4::bigint)
@@ -75,7 +84,7 @@ const COMPLETE_STATE_SQL = `
     AND revision = $2::bigint
     AND flow_version = $5::text
     AND survey_version = $6::text
-  RETURNING account_id, revision
+  RETURNING account_id, revision, initial_level_score, initial_level_label
 `;
 
 const MAX_NAME_CODE_POINTS = 256;
@@ -105,6 +114,8 @@ interface StateRow extends QueryResultRow {
   readonly current_step: unknown;
   readonly survey_version: unknown;
   readonly survey_answers: unknown;
+  readonly initial_level_score: unknown;
+  readonly initial_level_label: unknown;
   readonly revision: unknown;
   readonly created_at: unknown;
   readonly updated_at: unknown;
@@ -121,6 +132,13 @@ interface ConsentRow extends QueryResultRow {
 interface CompletedRow extends QueryResultRow {
   readonly account_id: unknown;
   readonly revision: unknown;
+  readonly initial_level_score: unknown;
+  readonly initial_level_label: unknown;
+}
+
+interface ValidatedCompletionInput extends CompletePlayerOnboardingInput {
+  readonly initialLevelScore: number;
+  readonly initialLevelLabel: PlayerOnboardingInitialLevelLabel;
 }
 
 function failure(
@@ -165,7 +183,7 @@ function validAnswers(
   );
 }
 
-function validateInput(value: unknown): CompletePlayerOnboardingInput {
+function validateInput(value: unknown): ValidatedCompletionInput {
   if (
     !isPlainRecord(value) ||
     !hasExactlyKeys(value, [
@@ -187,6 +205,7 @@ function validateInput(value: unknown): CompletePlayerOnboardingInput {
     value.consents.length !== CONSENT_KINDS.length ||
     typeof value.surveyVersion !== 'string' ||
     !VERSION_PATTERN.test(value.surveyVersion) ||
+    value.surveyVersion !== PLAYER_ONBOARDING_INITIAL_LEVEL_SURVEY_VERSION ||
     !validAnswers(value.surveyAnswers) ||
     !isUnixEpochSeconds(value.completedAt)
   ) {
@@ -209,7 +228,15 @@ function validateInput(value: unknown): CompletePlayerOnboardingInput {
     kinds.add(consent.kind as PlayerOnboardingConsentKind);
   }
 
-  return value as unknown as CompletePlayerOnboardingInput;
+  const result = scorePlayerOnboardingInitialLevel(value.surveyAnswers);
+  if (result === undefined) {
+    throw failure('invalid_input');
+  }
+  return Object.freeze({
+    ...(value as unknown as CompletePlayerOnboardingInput),
+    initialLevelScore: result.score,
+    initialLevelLabel: result.label,
+  });
 }
 
 function oneRow<Row extends QueryResultRow>(
@@ -268,6 +295,28 @@ function sameAnswers(
         persistedEntries[index][1] === answer,
     )
   );
+}
+
+function initialLevelResult(
+  scoreValue: unknown,
+  labelValue: unknown,
+): Readonly<{
+  score: number;
+  label: PlayerOnboardingInitialLevelLabel;
+}> {
+  if (
+    typeof scoreValue !== 'number' ||
+    !Number.isSafeInteger(scoreValue) ||
+    scoreValue < 0 ||
+    scoreValue > 20 ||
+    !['D', 'D+', 'C', 'C+', 'B', 'B+', 'A'].includes(labelValue as string)
+  ) {
+    throw failure('invalid_persisted_state');
+  }
+  return Object.freeze({
+    score: scoreValue,
+    label: labelValue as PlayerOnboardingInitialLevelLabel,
+  });
 }
 
 function requiredConsentsPresent(
@@ -393,6 +442,16 @@ export class PostgresPlayerOnboardingCompletionWriter implements PlayerOnboardin
         ) {
           return CONFLICT;
         }
+        const persistedInitialLevel = initialLevelResult(
+          state.initial_level_score,
+          state.initial_level_label,
+        );
+        if (
+          persistedInitialLevel.score !== validated.initialLevelScore ||
+          persistedInitialLevel.label !== validated.initialLevelLabel
+        ) {
+          return CONFLICT;
+        }
         const consents = await transaction.query<ConsentRow>(
           FIND_CONSENTS_SQL,
           [validated.accountId, validated.flowVersion],
@@ -411,10 +470,17 @@ export class PostgresPlayerOnboardingCompletionWriter implements PlayerOnboardin
           outcome: 'completed',
           revision,
           replayed: true,
+          initialLevelScore: persistedInitialLevel.score,
+          initialLevelLabel: persistedInitialLevel.label,
         });
       }
 
-      if (state.status !== 'in_progress' || state.completed_at !== null) {
+      if (
+        state.status !== 'in_progress' ||
+        state.completed_at !== null ||
+        state.initial_level_score !== null ||
+        state.initial_level_label !== null
+      ) {
         throw failure('invalid_persisted_state');
       }
       if (revision !== validated.expectedRevision) {
@@ -447,18 +513,30 @@ export class PostgresPlayerOnboardingCompletionWriter implements PlayerOnboardin
           completedAt,
           validated.flowVersion,
           validated.surveyVersion,
+          validated.initialLevelScore,
+          validated.initialLevelLabel,
         ],
       );
       const completedRow = oneRow(completed.rows, completed.rowCount);
       ownedAccount(completedRow.account_id, validated.accountId);
       const completedRevision = decodePostgresBigint(completedRow.revision);
-      if (completedRevision !== validated.expectedRevision + 1) {
+      const persistedInitialLevel = initialLevelResult(
+        completedRow.initial_level_score,
+        completedRow.initial_level_label,
+      );
+      if (
+        completedRevision !== validated.expectedRevision + 1 ||
+        persistedInitialLevel.score !== validated.initialLevelScore ||
+        persistedInitialLevel.label !== validated.initialLevelLabel
+      ) {
         throw failure('invalid_persisted_state');
       }
       return Object.freeze({
         outcome: 'completed',
         revision: completedRevision,
         replayed: false,
+        initialLevelScore: persistedInitialLevel.score,
+        initialLevelLabel: persistedInitialLevel.label,
       });
     } catch (error) {
       throw mapPersistenceError(error);

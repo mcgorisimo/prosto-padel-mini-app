@@ -43,7 +43,7 @@ import {
   PLAYER_ONBOARDING_SURVEY_VERSION,
   arePlayerOnboardingConsents,
   hasPlayerOnboardingConsents,
-  isPlayerOnboardingCompletion,
+  scorePlayerOnboardingCompletion,
   type PlayerOnboardingPolicy,
 } from './player-onboarding.policy';
 import { SessionAuthenticationClock } from './session-authentication.guard';
@@ -85,10 +85,7 @@ type CompletionTransactionResult =
 
 type ProgressTransactionResult =
   | Exclude<AdvancePlayerOnboardingResult, { readonly outcome: 'advanced' }>
-  | Extract<
-      AdvanceOwnPlayerOnboardingResult,
-      { readonly outcome: 'advanced' }
-    >;
+  | Extract<AdvanceOwnPlayerOnboardingResult, { readonly outcome: 'advanced' }>;
 
 const EMAIL_PATTERN =
   /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9][a-z0-9.-]*\.[a-z]{2,63}$/u;
@@ -513,12 +510,7 @@ export class PlayerOnboardingService {
             );
             if (
               onboarding === undefined ||
-              !progressMatches(
-                onboarding,
-                input,
-                advanced.revision,
-                policy,
-              )
+              !progressMatches(onboarding, input, advanced.revision, policy)
             ) {
               throw storageInvariantFailure();
             }
@@ -559,10 +551,11 @@ export class PlayerOnboardingService {
       return rejected('onboarding_not_found');
     }
     const policy = this.dependencies.policy;
-    if (
-      policy === null ||
-      !isPlayerOnboardingCompletion(policy, input.completion)
-    ) {
+    const initialLevel =
+      policy === null
+        ? undefined
+        : scorePlayerOnboardingCompletion(policy, input.completion);
+    if (policy === null || initialLevel === undefined) {
       return rejected('completion_conflict');
     }
 
@@ -585,6 +578,12 @@ export class PlayerOnboardingService {
             if (completed.outcome !== 'completed') {
               return completed;
             }
+            if (
+              completed.initialLevelScore !== initialLevel.score ||
+              completed.initialLevelLabel !== initialLevel.label
+            ) {
+              throw storageInvariantFailure();
+            }
 
             const reread = await this.dependencies.onboarding.findByAccountId(
               transaction,
@@ -599,12 +598,7 @@ export class PlayerOnboardingService {
             );
             if (
               onboarding === undefined ||
-              !completedMatches(
-                onboarding,
-                input,
-                completed.revision,
-                policy,
-              )
+              !completedMatches(onboarding, input, completed.revision, policy)
             ) {
               throw storageInvariantFailure();
             }

@@ -3,23 +3,23 @@ import type {
   OwnPlayerOnboardingConsent,
 } from './player-onboarding.types';
 import type { PlayerOnboardingDocumentVersions } from '../config/player-onboarding-policy.config';
+import {
+  PLAYER_ONBOARDING_INITIAL_LEVEL_QUESTION_CODES,
+  PLAYER_ONBOARDING_INITIAL_LEVEL_SURVEY_VERSION,
+  PlayerOnboardingInitialLevelResult,
+  scorePlayerOnboardingInitialLevel,
+} from './player-onboarding-initial-level';
 
 export const PLAYER_ONBOARDING_FLOW_VERSION = 'tma_v1';
-export const PLAYER_ONBOARDING_SURVEY_VERSION = 'initial_level_v1';
-
-const EXPERIENCE_ANSWERS = Object.freeze([
-  'beginner',
-  'intermediate',
-  'advanced',
-] as const);
+export const PLAYER_ONBOARDING_SURVEY_VERSION =
+  PLAYER_ONBOARDING_INITIAL_LEVEL_SURVEY_VERSION;
 
 export type PlayerOnboardingPolicy = Readonly<{
   flowVersion: typeof PLAYER_ONBOARDING_FLOW_VERSION;
   consents: readonly OwnPlayerOnboardingConsent[];
   survey: Readonly<{
     version: typeof PLAYER_ONBOARDING_SURVEY_VERSION;
-    requiredQuestion: 'experience';
-    allowedAnswers: typeof EXPERIENCE_ANSWERS;
+    questionCodes: typeof PLAYER_ONBOARDING_INITIAL_LEVEL_QUESTION_CODES;
   }>;
 }>;
 
@@ -44,8 +44,7 @@ export function createPlayerOnboardingPolicy(
     ]),
     survey: Object.freeze({
       version: PLAYER_ONBOARDING_SURVEY_VERSION,
-      requiredQuestion: 'experience' as const,
-      allowedAnswers: EXPERIENCE_ANSWERS,
+      questionCodes: PLAYER_ONBOARDING_INITIAL_LEVEL_QUESTION_CODES,
     }),
   });
 }
@@ -64,13 +63,12 @@ export function hasPlayerOnboardingConsents(
   policy: PlayerOnboardingPolicy,
   consents: readonly OwnPlayerOnboardingConsent[],
 ): boolean {
-  return policy.consents.every(
-    (required) =>
-      consents.some(
-        (consent) =>
-          consent.kind === required.kind &&
-          consent.documentVersion === required.documentVersion,
-      ),
+  return policy.consents.every((required) =>
+    consents.some(
+      (consent) =>
+        consent.kind === required.kind &&
+        consent.documentVersion === required.documentVersion,
+    ),
   );
 }
 
@@ -78,25 +76,19 @@ export function isPlayerOnboardingCompletion(
   policy: PlayerOnboardingPolicy,
   completion: OwnPlayerOnboardingCompletion,
 ): boolean {
+  return scorePlayerOnboardingCompletion(policy, completion) !== undefined;
+}
+
+export function scorePlayerOnboardingCompletion(
+  policy: PlayerOnboardingPolicy,
+  completion: OwnPlayerOnboardingCompletion,
+): PlayerOnboardingInitialLevelResult | undefined {
   if (
     completion.flowVersion !== policy.flowVersion ||
-    completion.survey.version !==
-      policy.survey.version ||
-    !arePlayerOnboardingConsents(policy, completion.consents) ||
-    Object.keys(completion.survey.answers).length !== 1 ||
-    !Object.prototype.hasOwnProperty.call(
-      completion.survey.answers,
-      policy.survey.requiredQuestion,
-    )
+    completion.survey.version !== policy.survey.version ||
+    !arePlayerOnboardingConsents(policy, completion.consents)
   ) {
-    return false;
+    return undefined;
   }
-
-  const answer =
-    completion.survey.answers[
-      policy.survey.requiredQuestion
-    ];
-  return policy.survey.allowedAnswers.includes(
-    answer as (typeof EXPERIENCE_ANSWERS)[number],
-  );
+  return scorePlayerOnboardingInitialLevel(completion.survey.answers);
 }

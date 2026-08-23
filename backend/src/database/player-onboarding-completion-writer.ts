@@ -1,5 +1,6 @@
 import { AccountId } from '../accounts/account.types';
 import { UnixEpochSeconds } from '../auth/auth.types';
+import { PlayerOnboardingInitialLevelLabel } from '../auth/player-onboarding-initial-level';
 import { PlayerOnboardingConsentRecord } from './player-onboarding-reader';
 import { PostgresTransaction } from './postgres-transaction';
 
@@ -18,6 +19,8 @@ export type CompletePlayerOnboardingResult =
       readonly outcome: 'completed';
       readonly revision: number;
       readonly replayed: boolean;
+      readonly initialLevelScore: number;
+      readonly initialLevelLabel: PlayerOnboardingInitialLevelLabel;
     }
   | { readonly outcome: 'not_found' }
   | { readonly outcome: 'stale_revision' }

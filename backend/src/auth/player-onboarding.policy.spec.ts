@@ -3,6 +3,7 @@ import {
   createPlayerOnboardingPolicy,
   hasPlayerOnboardingConsents,
   isPlayerOnboardingCompletion,
+  scorePlayerOnboardingCompletion,
 } from './player-onboarding.policy';
 
 const POLICY = createPlayerOnboardingPolicy({
@@ -26,6 +27,14 @@ const CONSENTS = Object.freeze([
   }),
 ]);
 
+const SURVEY_ANSWERS = Object.freeze({
+  match_count: 'one_hundred_plus',
+  rally_stability: 'controls_pace',
+  glass_play: 'uses_tactically',
+  serve_return_net: 'advanced_patterns',
+  match_experience_year: 'tournament',
+});
+
 describe('player onboarding policy', () => {
   it('builds an immutable exact three-document policy', () => {
     expect(POLICY).toEqual({
@@ -45,9 +54,14 @@ describe('player onboarding policy', () => {
         },
       ],
       survey: {
-        version: 'initial_level_v1',
-        requiredQuestion: 'experience',
-        allowedAnswers: ['beginner', 'intermediate', 'advanced'],
+        version: 'initial_level_v2',
+        questionCodes: [
+          'match_count',
+          'rally_stability',
+          'glass_play',
+          'serve_return_net',
+          'match_experience_year',
+        ],
       },
     });
     expect(Object.isFrozen(POLICY)).toBe(true);
@@ -74,10 +88,46 @@ describe('player onboarding policy', () => {
         flowVersion: 'tma_v1',
         consents: CONSENTS,
         survey: {
-          version: 'initial_level_v1',
-          answers: { experience: 'beginner' },
+          version: 'initial_level_v2',
+          answers: SURVEY_ANSWERS,
         },
       }),
     ).toBe(true);
+    expect(
+      scorePlayerOnboardingCompletion(POLICY, {
+        expectedRevision: 3,
+        flowVersion: 'tma_v1',
+        consents: CONSENTS,
+        survey: {
+          version: 'initial_level_v2',
+          answers: SURVEY_ANSWERS,
+        },
+      }),
+    ).toEqual({ score: 20, label: 'A' });
+  });
+
+  it('rejects the superseded one-question survey and any client result fields', () => {
+    expect(
+      isPlayerOnboardingCompletion(POLICY, {
+        expectedRevision: 3,
+        flowVersion: 'tma_v1',
+        consents: CONSENTS,
+        survey: {
+          version: 'initial_level_v1',
+          answers: { experience: 'advanced' },
+        },
+      }),
+    ).toBe(false);
+    expect(
+      scorePlayerOnboardingCompletion(POLICY, {
+        expectedRevision: 3,
+        flowVersion: 'tma_v1',
+        consents: CONSENTS,
+        survey: {
+          version: 'initial_level_v2',
+          answers: { ...SURVEY_ANSWERS, score: '20' },
+        },
+      }),
+    ).toBeUndefined();
   });
 });
