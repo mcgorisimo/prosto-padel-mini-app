@@ -7085,3 +7085,47 @@
   noted below P1 that durable per-question reload resume depends on partial
   answers being present in the backend response; this scoped frontend change
   intentionally adds no browser persistence or new write contract.
+
+### 2026-08-24 — D5.1 five-question onboarding frontend rollout on Selectel test
+
+- Read-only preflight passed for test host `prosto-padel-test-01` and Compose
+  project `prosto-padel-test`: the server checkout was clean exact
+  `af526cd1429983dd9ffb13507fc1b58b36667fc0`, actual remote `origin/main` was
+  exact `f582f261633106e948ae2ef7d67a4aaa577efd40`, and all four expected
+  containers were healthy with restart count `0`. Initial hostname-alias,
+  unprivileged Docker and root Git ownership probes each stopped before their
+  gated action; the same exact host, checkout and containers were then verified
+  read-only without changing SSH, sudo or Git configuration.
+- The server checkout advanced by fast-forward to clean exact
+  `f582f261633106e948ae2ef7d67a4aaa577efd40`. Compose `config --quiet` passed
+  with the canonical `infra/test/.env.test`, `infra/test/compose.yaml` and
+  `infra/test/compose.runtime-backend.yaml`. Frontend build started at
+  `2026-08-24T14:07:48Z`, completed with `1623` modules and only the existing
+  large-chunk advisory; frontend recreate started and ended at
+  `2026-08-24T14:07:56Z` using `--no-deps --force-recreate`.
+- Only frontend container
+  `9ce1c0c8e7136331b86e2ffe0610c6db63e0ee5f67ed31845900f40ad9612933`
+  was replaced by
+  `da146cb5e3e88cd6cc2fb870cb963f90bcc3ac73131253ff6e5d088b354209a6`
+  using image
+  `sha256:6b70edceb4324b00b5bee282401921751916490d93fe11e29cb3b1c4e0123cbc`.
+  It finished healthy with restart count `0`. Backend
+  `971520a7f5e1ec5d1dd734d6c73dc38b99b9240cd8b0738abb914b22bf80559d`,
+  nginx `e5b98b53a385aef67465e097753fb54b060596d3c620af3cfb484a175d624be7`
+  and PostgreSQL
+  `5e36d4dc1a5c3e2fa658382cfc4a8dff7fe3ea2ba1a9834bb89cc83df743f7be`
+  were unchanged and remained healthy with restart count `0`.
+- Public HTTPS frontend and `/api/v1/health`, plus all three versioned
+  test-only Terms, Privacy and Cancellation URLs, returned `200` with normal
+  TLS validation and verify result `0`. Bounded count-only logs from
+  `2026-08-24T14:07:56Z` reported frontend critical `0`, frontend `5xx=0`,
+  nginx critical `0` and nginx `5xx=0`; checkout remained clean and exact.
+- No authenticated onboarding, progress or completion request was executed.
+  Backend, nginx and PostgreSQL containers, DB/schema, env/secrets, TLS/nginx
+  config, provider API and production were unchanged. Deployment status is
+  `deployment=applied_with_manual_tma_initial_level_v2_smoke_pending`. This
+  append-only closeout itself is docs-only with `deployment=not_needed`.
+- Mandatory root gates passed: E2E `99 passed` with `1` intentional skip;
+  production build passed with `1623` modules and only the existing large-chunk
+  advisory. Independent read-only review of the exact one-file diff passed
+  acceptance with `P0=0`, `P1=0`; no correction was required.
