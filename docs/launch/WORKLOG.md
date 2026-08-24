@@ -6825,3 +6825,66 @@
 - Independent read-only review of the exact candidate diff passed acceptance
   with `P0=0`, `P1=0`; no correction remained after the factual test-count
   update.
+
+### 2026-08-24 — D5.1 initial-level v2 backend rollout on Selectel test
+
+- The authorized backend-only rollout targeted host `prosto-padel-test-01` and
+  Compose project `prosto-padel-test`. The first read-only probe stopped before
+  writes because root Git rejected the checkout as a dubious ownership path and
+  the Docker metadata template used an unsupported helper. The corrected probe
+  ran Git as checkout owner `prostopadel` and used a compatible Docker format;
+  it then passed every precondition without changing Git, containers or config.
+- The clean detached server checkout advanced by fast-forward from exact
+  `4a32831eed8ed4c3c3683f1a199b22de0b8747df` to integrated exact
+  `83055aa595d6e477d6094034c60b89ba0c27b3bf` and remained clean. Actual remote
+  `origin/main` matched the target before the checkout update. The canonical
+  `.env.test` remained a regular non-symlink owned by
+  `prostopadel:prostopadel` with mode `0600`; no env or secret value was printed
+  or changed.
+- Exact migration-039 POSTCHECK SHA-256
+  `F98744A79E6C3F4363CD4F7F49502327FFD567286799897562B7A8A6C523035D`
+  passed with exit `0`, empty stderr, `applied=true` and terminal `ROLLBACK`.
+  Migration 039 was not applied again and no DB/schema write occurred.
+- Compose `config --quiet` passed using the canonical `.env.test`,
+  `infra/test/compose.yaml` and `infra/test/compose.runtime-backend.yaml` without
+  printing expanded configuration. Backend-only build ran from
+  `2026-08-24T08:45:09Z` through `2026-08-24T08:45:31Z`; backend recreate ran
+  from `2026-08-24T08:45:43Z` through `2026-08-24T08:45:44Z` with
+  `--no-deps --force-recreate`.
+- Only backend container
+  `f9039bbf87f2f388f33a701484e9bb51c23c5a82b08609ac06855f1d590333d4`
+  was replaced, by
+  `319a43559bbdb094746a534196bb1a166d2e5c6926d7394ab96db68f72bcdf3d`
+  using image
+  `sha256:df19c39cf6948cfbd6373c529367382fb2d41bb4b8fb3169bf36b7a7ba42cd95`.
+  The new backend was healthy with restart count `0`. Frontend
+  `483b97ed5ef72b3dfd359a9fd918ec97586621a6c207414b8e2bbb82c594e6a9`,
+  nginx `e5b98b53a385aef67465e097753fb54b060596d3c620af3cfb484a175d624be7`
+  and PostgreSQL
+  `5e36d4dc1a5c3e2fa658382cfc4a8dff7fe3ea2ba1a9834bb89cc83df743f7be`
+  remained unchanged, healthy and at restart count `0`.
+- Internal backend health and public HTTPS `/api/v1/health` returned `200`; the
+  public check used normal certificate validation with TLS verify result `0`.
+  Unauthorized GET/PATCH `/api/v1/onboarding/me`, POST
+  `/api/v1/onboarding/me/progress` and POST
+  `/api/v1/onboarding/me/complete` each returned `401` with `no-store` and no
+  response body was emitted. No authenticated onboarding request was executed.
+- Bounded count-only logs from recreate start `2026-08-24T08:45:43Z` reported
+  backend critical `0`, backend `5xx=0`, nginx critical `0` and nginx `5xx=0`.
+  Checkout stayed clean at the exact target; frontend/nginx/PostgreSQL, DB/schema,
+  env/secrets, TLS/nginx config, provider API and production were unchanged.
+- Runtime deployment status is
+  `deployment=applied_with_authenticated_initial_level_v2_smoke_pending`;
+  `authenticated initial_level_v2 smoke=pending_separate_api_write_approval`.
+  This append-only closeout itself is docs-only with `deployment=not_needed` and
+  performs no commit, push, integration, SSH/DB/schema command, container action,
+  API/provider write, env/secret change or production action.
+- Required local root gates passed: E2E completed with `99` passed and `1`
+  intentional skip; build completed with `1623` modules and only the existing
+  large-chunk advisory. The first build invocation stopped before compilation
+  because the sandbox could not traverse the verified dependency junction; the
+  identical read-enabled retry passed. The temporary junction was removed, no
+  dependency or lockfile changed, and the final Git scope remained only this
+  WORKLOG file.
+- Independent read-only review of the exact one-file closeout diff passed
+  acceptance with `P0=0`, `P1=0`; no correction was required.
