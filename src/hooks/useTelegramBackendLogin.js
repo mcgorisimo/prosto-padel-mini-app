@@ -6,6 +6,10 @@ import {
 } from '../lib/backendSessionClient';
 import { bookingAvailabilityClient } from '../lib/bookingAvailabilityClient';
 import {
+  playerInitialLevelReassessmentClient,
+  readPlayerInitialLevelReassessment,
+} from '../lib/playerInitialLevelReassessmentClient';
+import {
   playerOnboardingClient,
   readPlayerOnboardingState,
 } from '../lib/playerOnboardingClient';
@@ -73,6 +77,9 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
   const bookings = dependencies.bookings ?? bookingAvailabilityClient;
   const onboarding =
     dependencies.onboarding ?? playerOnboardingClient;
+  const initialLevelReassessments =
+    dependencies.initialLevelReassessments ??
+    playerInitialLevelReassessmentClient;
   const credentialStorage =
     dependencies.credentialStorage ?? telegramSecureCredentialStorage;
   const fingerprint = dependencies.fingerprint ?? fingerprintInitData;
@@ -1198,6 +1205,34 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
     );
   }
 
+  function loadOwnInitialLevelReassessment() {
+    return runMatchOperation(
+      (credential, signal) =>
+        initialLevelReassessments.read(credential, { signal }),
+      (result) =>
+        result?.outcome === 'loaded' &&
+        readPlayerInitialLevelReassessment(result.reassessment) !== null,
+    );
+  }
+
+  function completeOwnInitialLevelReassessment(completion) {
+    return runMatchOperation(
+      (credential, signal) =>
+        initialLevelReassessments.complete(credential, completion, {
+          signal,
+        }),
+      (result) => {
+        const reassessment = readPlayerInitialLevelReassessment(
+          result?.reassessment,
+        );
+        return (
+          result?.outcome === 'completed' &&
+          reassessment?.status === 'completed'
+        );
+      },
+    );
+  }
+
   function listBookingServices() {
     return runMatchOperation(
       (credential, signal) =>
@@ -1810,6 +1845,8 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
     saveOwnOnboardingDraft,
     advanceOwnOnboarding,
     completeOwnOnboarding,
+    loadOwnInitialLevelReassessment,
+    completeOwnInitialLevelReassessment,
     listBookingServices,
     listBookingCourts,
     listBookingDates,
@@ -1959,6 +1996,28 @@ export function useTelegramBackendLogin() {
       }));
     }
     return telegramBackendLoginLifecycle.completeOwnOnboarding(completion);
+  }, []);
+
+  const loadOwnInitialLevelReassessment = useCallback(() => {
+    if (!FEATURE_ENABLED) {
+      return Promise.resolve(Object.freeze({
+        outcome: 'rejected',
+        reason: 'not_authenticated',
+      }));
+    }
+    return telegramBackendLoginLifecycle.loadOwnInitialLevelReassessment();
+  }, []);
+
+  const completeOwnInitialLevelReassessment = useCallback((completion) => {
+    if (!FEATURE_ENABLED) {
+      return Promise.resolve(Object.freeze({
+        outcome: 'rejected',
+        reason: 'not_authenticated',
+      }));
+    }
+    return telegramBackendLoginLifecycle.completeOwnInitialLevelReassessment(
+      completion,
+    );
   }, []);
 
   const listBookingServices = useCallback(() => {
@@ -2432,6 +2491,8 @@ export function useTelegramBackendLogin() {
     saveOwnOnboardingDraft,
     advanceOwnOnboarding,
     completeOwnOnboarding,
+    loadOwnInitialLevelReassessment,
+    completeOwnInitialLevelReassessment,
     listBookingServices,
     listBookingCourts,
     listBookingDates,

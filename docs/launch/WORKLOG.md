@@ -7601,3 +7601,46 @@
   before build output. Generated `dist`, Playwright report/results and local
   dependencies were removed after the gates; the Git scope remains the exact
   one-file append-only WORKLOG diff.
+
+### 2026-08-25 — D5.1 legacy initial_level_v1 reassessment frontend-client foundation candidate
+
+- Work started from clean exact main
+  `2367c79f1ddff816a2f7dc8fa855b30d1f663801` with the Selectel test backend
+  reassessment contract already rolled out and its authenticated write smoke
+  still pending separate approval. This local slice adds strict owner-scoped
+  client contracts for
+  `GET /api/v1/onboarding/me/initial-level-reassessment` and
+  `POST /api/v1/onboarding/me/initial-level-reassessment/complete`; no UI was
+  added.
+- The client accepts only exact `required`, `completed` and `not_eligible`
+  response shapes. Completion accepts the immutable `initial_level_v1`
+  source snapshot and exactly five canonical `initial_level_v2` option IDs;
+  missing, invalid and extra request or response fields fail closed. Public UI
+  state receives only the server-computed `initialLevelLabel`, never score,
+  answers, formula, caps, rating state or private diagnostics.
+- Both operations reuse the existing Telegram bearer credential lifecycle and
+  player-role boundary. No second login/session flow or browser persistence was
+  introduced. Unauthorized responses clear the private credential boundary;
+  not-eligible, stale-source and different/concurrent conflicts remain
+  distinct. A completion body is normalized and serialized once, so a bounded
+  transport retry replays byte-identical evidence.
+- Focused client unit tests passed `16/16`; the focused browser lifecycle test
+  passed `1/1`, covering required/completed/not-eligible states, exact
+  idempotent replay, conflict, stale source, malformed/extra-field rejection,
+  unauthorized session clearing and credential/scoring-data non-disclosure.
+  The new client files passed targeted Prettier, targeted ESLint passed for the
+  exact code/test scope, and the root dead-code check passed. The
+  repository-wide format/lint helpers remain blocked by inherited formatting
+  and lint findings in unchanged main files; the one candidate lint finding
+  was corrected before the targeted checks and final gates.
+- Mandatory root E2E passed `100` tests with `1` intentional skip. The root
+  production build passed with `1625` modules and only the existing large-chunk
+  advisory. No real reassessment, onboarding or other API request/write was
+  executed. Independent read-only review of the exact five-file candidate diff
+  passed with `P0=0`, `P1=0`; no correction was required.
+- This candidate changes the frontend client/lifecycle bundle and therefore
+  requires separate commit, integration and Selectel test frontend rollout
+  gates before deployment can be verified. Backend, schema, rating,
+  `rating.isVerified`, history, UI, DB, SSH, server, containers, env/secrets,
+  provider API and production were unchanged; no commit, push or integration
+  occurred and `deployment=deployment_deferred_by_user`.

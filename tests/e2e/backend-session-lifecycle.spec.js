@@ -2406,6 +2406,280 @@ test.describe('backend session credential lifecycle', () => {
     });
   });
 
+  test('reads and completes initial-level reassessment through the private credential boundary', async ({
+    page,
+  }) => {
+    await prepareTelegramWithSecureStorage(page, null, '');
+    await page.goto('/');
+
+    const summary = await page.evaluate(async (parameters) => {
+      const { createTelegramBackendLoginLifecycle } = await import(
+        '/src/hooks/useTelegramBackendLogin.js'
+      );
+      const source = Object.freeze({
+        flowVersion: 'tma_v1',
+        surveyVersion: 'initial_level_v1',
+        revision: 4,
+      });
+      const answers = Object.freeze({
+        match_count: 'thirty_one_to_ninety_nine',
+        rally_stability: 'steady_under_pressure',
+        glass_play: 'confident_returns',
+        serve_return_net: 'confident_patterns',
+        match_experience_year: 'league_or_club',
+      });
+      const completion = Object.freeze({
+        source,
+        survey: Object.freeze({
+          version: 'initial_level_v2',
+          answers,
+        }),
+      });
+      const differentCompletion = Object.freeze({
+        ...completion,
+        survey: Object.freeze({
+          ...completion.survey,
+          answers: Object.freeze({
+            ...answers,
+            match_count: 'one_hundred_plus',
+          }),
+        }),
+      });
+      const required = Object.freeze({
+        status: 'required',
+        source,
+        surveyVersion: 'initial_level_v2',
+      });
+      const completed = Object.freeze({
+        status: 'completed',
+        surveyVersion: 'initial_level_v2',
+        initialLevelLabel: 'B+',
+      });
+      const readCalls = [];
+      const completionCalls = [];
+      let storedCredential = null;
+      const lifecycle = createTelegramBackendLoginLifecycle({
+        fingerprint: async () => 'initial-level-reassessment-fingerprint',
+        client: {
+          async login() {
+            return {
+              outcome: 'authenticated',
+              credential: parameters.credential,
+              expiresAt: Math.floor(Date.now() / 1_000) + 3_600,
+              accountKind: 'existing',
+            };
+          },
+        },
+        sessions: {
+          async refresh() {
+            throw new Error('must not refresh');
+          },
+          async authenticate(credential) {
+            if (credential !== parameters.credential) {
+              return { outcome: 'rejected', reason: 'internal_error' };
+            }
+            return {
+              outcome: 'authenticated',
+              principal: {
+                accountId: parameters.accountId,
+                role: 'player',
+                expiresAt: Math.floor(Date.now() / 1_000) + 3_600,
+              },
+            };
+          },
+          async logout() {
+            throw new Error('must not logout');
+          },
+        },
+        initialLevelReassessments: {
+          async read(credential, options) {
+            readCalls.push({
+              credentialMatched: credential === parameters.credential,
+              signalPresent: options.signal instanceof AbortSignal,
+            });
+            switch (readCalls.length) {
+              case 1:
+                return { outcome: 'loaded', reassessment: required };
+              case 2:
+                return { outcome: 'loaded', reassessment: completed };
+              case 3:
+                return {
+                  outcome: 'loaded',
+                  reassessment: { status: 'not_eligible' },
+                };
+              case 4:
+                return {
+                  outcome: 'loaded',
+                  reassessment: { ...completed, initialLevelScore: 16 },
+                };
+              default:
+                return { outcome: 'rejected', reason: 'invalid' };
+            }
+          },
+          async complete(credential, request, options) {
+            completionCalls.push({
+              credentialMatched: credential === parameters.credential,
+              request,
+              signalPresent: options.signal instanceof AbortSignal,
+            });
+            switch (completionCalls.length) {
+              case 1:
+              case 2:
+                return { outcome: 'completed', reassessment: completed };
+              case 3:
+                return { outcome: 'rejected', reason: 'conflict' };
+              case 4:
+                return { outcome: 'rejected', reason: 'stale_source' };
+              default:
+                return {
+                  outcome: 'completed',
+                  reassessment: { ...completed, initialLevelScore: 16 },
+                };
+            }
+          },
+        },
+        credentialStorage: {
+          async read() {
+            return { outcome: 'empty' };
+          },
+          async write(credential) {
+            storedCredential = credential;
+            return { outcome: 'stored' };
+          },
+          async remove() {
+            storedCredential = null;
+            return { outcome: 'removed' };
+          },
+        },
+      });
+
+      const detach = lifecycle.attach(parameters.initData, () => {});
+      for (let attempt = 0; attempt < 50; attempt += 1) {
+        if (lifecycle.hasPrincipal()) break;
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+
+      const requiredResult = await lifecycle.loadOwnInitialLevelReassessment();
+      const completedResult =
+        await lifecycle.completeOwnInitialLevelReassessment(completion);
+      const idempotentRetry =
+        await lifecycle.completeOwnInitialLevelReassessment(completion);
+      const conflict =
+        await lifecycle.completeOwnInitialLevelReassessment(
+          differentCompletion,
+        );
+      const staleSource =
+        await lifecycle.completeOwnInitialLevelReassessment(completion);
+      const malformedCompletion =
+        await lifecycle.completeOwnInitialLevelReassessment(completion);
+      const completedRead =
+        await lifecycle.loadOwnInitialLevelReassessment();
+      const notEligibleRead =
+        await lifecycle.loadOwnInitialLevelReassessment();
+      const malformedRead =
+        await lifecycle.loadOwnInitialLevelReassessment();
+      const credentialStayedBeforeUnauthorized =
+        storedCredential === parameters.credential;
+      const unauthorized =
+        await lifecycle.loadOwnInitialLevelReassessment();
+      for (let attempt = 0; attempt < 50; attempt += 1) {
+        if (storedCredential === null) break;
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      detach();
+
+      const localValues = Array.from(
+        { length: localStorage.length },
+        (_, index) => localStorage.getItem(localStorage.key(index)),
+      ).filter((value) => typeof value === 'string');
+      const serializedResults = JSON.stringify([
+        requiredResult,
+        completedResult,
+        idempotentRetry,
+        conflict,
+        staleSource,
+        malformedCompletion,
+        completedRead,
+        notEligibleRead,
+        malformedRead,
+        unauthorized,
+      ]);
+
+      return {
+        readCalls: readCalls.length,
+        completionCalls: completionCalls.length,
+        everyCredentialMatched: [...readCalls, ...completionCalls].every(
+          ({ credentialMatched }) => credentialMatched,
+        ),
+        everySignalPresent: [...readCalls, ...completionCalls].every(
+          ({ signalPresent }) => signalPresent,
+        ),
+        exactCompletion:
+          JSON.stringify(completionCalls[0].request) ===
+          JSON.stringify(completion),
+        exactIdempotentRetry:
+          JSON.stringify(completionCalls[1].request) ===
+          JSON.stringify(completion),
+        exactConflictRequest:
+          JSON.stringify(completionCalls[2].request) ===
+          JSON.stringify(differentCompletion),
+        requiredStatus: requiredResult.reassessment?.status,
+        completedLabel: completedResult.reassessment?.initialLevelLabel,
+        retryLabel: idempotentRetry.reassessment?.initialLevelLabel,
+        conflict,
+        staleSource,
+        malformedCompletion,
+        completedReadLabel:
+          completedRead.reassessment?.initialLevelLabel,
+        notEligibleStatus: notEligibleRead.reassessment?.status,
+        malformedRead,
+        unauthorized,
+        boundaryCleared:
+          !lifecycle.hasCredential() && !lifecycle.hasPrincipal(),
+        storedCredentialCleared: storedCredential === null,
+        credentialStayedBeforeUnauthorized,
+        resultExposesCredential: serializedResults.includes(
+          parameters.credential,
+        ),
+        resultExposesPrivateScoring:
+          /initialLevelScore|score|formula|caps/iu.test(serializedResults),
+        localStorageExposesPrivateData: localValues.some((value) =>
+          value.includes(parameters.credential),
+        ),
+      };
+    }, {
+      credential: LOGIN_CREDENTIAL,
+      accountId: SYNTHETIC_ACCOUNT_ID,
+      initData: SYNTHETIC_INIT_DATA,
+    });
+
+    expect(summary).toEqual({
+      readCalls: 5,
+      completionCalls: 5,
+      everyCredentialMatched: true,
+      everySignalPresent: true,
+      exactCompletion: true,
+      exactIdempotentRetry: true,
+      exactConflictRequest: true,
+      requiredStatus: 'required',
+      completedLabel: 'B+',
+      retryLabel: 'B+',
+      conflict: { outcome: 'rejected', reason: 'conflict' },
+      staleSource: { outcome: 'rejected', reason: 'stale_source' },
+      malformedCompletion: { outcome: 'rejected', reason: 'internal_error' },
+      completedReadLabel: 'B+',
+      notEligibleStatus: 'not_eligible',
+      malformedRead: { outcome: 'rejected', reason: 'internal_error' },
+      unauthorized: { outcome: 'rejected', reason: 'session_invalid' },
+      boundaryCleared: true,
+      storedCredentialCleared: true,
+      credentialStayedBeforeUnauthorized: true,
+      resultExposesCredential: false,
+      resultExposesPrivateScoring: false,
+      localStorageExposesPrivateData: false,
+    });
+  });
+
   test('profile rejection invalidates the private credential and SecureStorage boundary', async ({
     page,
   }) => {
