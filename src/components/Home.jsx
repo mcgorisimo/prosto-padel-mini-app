@@ -5,6 +5,7 @@ import PadelCard from './ui/PadelCard';
 import TrainingModal from './TrainingModal';
 import { CLUB } from '../lib/clubConfig';
 import { getBackendBookingStatusPresentation } from '../lib/backendBookingHomeAdapter';
+import { resolvePlayerLevelPresentation } from '../lib/playerLevelPresentation';
 
 const getDisplayDate = (dateISO) => {
   if (!dateISO || typeof dateISO !== 'string') return 'Дата не указана';
@@ -207,7 +208,11 @@ export default function Home({
   const personalBookings = upcomingMatches.filter(m => m.type === 'private' && !m.isTraining);
   const featuredEvent = [...gamesWithPartners, ...myTrainings, ...personalBookings]
     .sort((a, b) => new Date(`${a.dateISO}T${a.time || '00:00'}:00`) - new Date(`${b.dateISO}T${b.time || '00:00'}:00`))[0];
-  const rating = user?.numericRating || 3.0;
+  const levelPresentation = resolvePlayerLevelPresentation({
+    numericRating: user?.numericRating,
+    isVerified: user?.isVerified,
+    initialLevelLabel: user?.initialLevelLabel,
+  });
   const playerName = user?.firstName || 'Игрок';
   const myEvents = [...personalBookings, ...gamesWithPartners, ...myTrainings]
     .sort((a, b) => new Date(`${a.dateISO}T${a.time || '00:00'}:00`) - new Date(`${b.dateISO}T${b.time || '00:00'}:00`));
@@ -267,9 +272,16 @@ export default function Home({
         <div className="flex items-end justify-between gap-4">
           <div>
             <div className="mb-2 text-[10px] font-extrabold uppercase tracking-[0.16em] text-warm-white/48">
-              Уровень игрока
+              <span data-testid="home-player-level-label">
+                {levelPresentation.homeLabel}
+              </span>
             </div>
-            <div className="text-4xl font-black tabular-nums text-accent-light">{rating.toFixed(2)}</div>
+            <div
+              className="text-4xl font-black tabular-nums text-accent-light"
+              data-testid="home-player-level-value"
+            >
+              {levelPresentation.homeValue}
+            </div>
           </div>
           <div className="text-right">
             <div className="text-sm font-semibold text-warm-white">{upcomingMatches.length}</div>

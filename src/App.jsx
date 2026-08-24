@@ -14,6 +14,7 @@ import { supabase } from './lib/supabaseClient';
 import { useTelegram } from './hooks/useTelegram';
 import { isPrimeTime, normalizeStoredPrice } from './lib/pricing';
 import { calculateRatingChange, getLevelForRating, MIN_RATING, MAX_RATING } from './lib/ratingEngine';
+import { normalizeInitialLevelLabel } from './lib/playerLevelPresentation';
 import { isRatingMatch } from './lib/matchRating';
 import {
   BACKEND_PRIVATE_MATCH_CREATION_ENABLED,
@@ -341,6 +342,7 @@ export function mergeProfileSources(profile, backendProfile, metadata = {}) {
 
 export default function App({
   backendProfile = null,
+  playerOnboardingInitialLevelLabel = null,
   backendMatchRequired = false,
   backendMatchLifecycleStatus = 'disabled',
   backendProfileStatus = backendProfile ? 'ready' : 'inactive',
@@ -1189,8 +1191,17 @@ export default function App({
       accountId: backendProfile?.accountId ?? null,
       role: p.role,
       isAdmin: p.is_admin === true,
+      initialLevelLabel: normalizeInitialLevelLabel(
+        playerOnboardingInitialLevelLabel,
+      ),
     };
-  }, [backendProfile, profile, user?.username, usesBackendMatches]);
+  }, [
+    backendProfile,
+    playerOnboardingInitialLevelLabel,
+    profile,
+    user?.username,
+    usesBackendMatches,
+  ]);
 
   const backendMatchCurrentUser = useMemo(() => ({
     ...currentUser,

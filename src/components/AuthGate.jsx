@@ -526,6 +526,11 @@ export default function AuthGate() {
     <>
       <App
         backendProfile={backendProfile}
+        playerOnboardingInitialLevelLabel={
+          playerOnboarding.surveyVersion === 'initial_level_v2'
+            ? playerOnboarding.initialLevelLabel
+            : null
+        }
         backendMatchRequired={backendProfileRequired}
         backendMatchLifecycleStatus={telegramBackendLogin.status}
         backendProfileStatus={effectiveBackendProfileStatus}

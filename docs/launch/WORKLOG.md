@@ -7129,3 +7129,35 @@
   production build passed with `1623` modules and only the existing large-chunk
   advisory. Independent read-only review of the exact one-file diff passed
   acceptance with `P0=0`, `P1=0`; no correction was required.
+
+### 2026-08-24 — D5.1 post-onboarding initial-level presentation correction candidate
+
+- Work started from clean exact detached main
+  `7437910f9d997b5649fb31176f3d0a11c339636c`. Manual TMA v2 acceptance passed
+  the onboarding flow but exposed a P1 presentation mismatch after entry: the
+  server-computed initial level was `D+`, while Home and Profile independently
+  rendered the unverified club-rating default `3.00`, whose derived level is
+  `C`.
+- Completed `initial_level_v2` state now carries only the strict
+  `initialLevelLabel` through the existing AuthGate/App state boundary. Home and
+  Profile use it for unverified players as `Начальный уровень`; the persisted
+  numeric club rating, `rating.isVerified`, rating history and match logic remain
+  unchanged. Verified club-rating presentation keeps priority, and completed
+  legacy onboarding without a v2 label retains its previous fallback.
+- Focused presentation regressions passed `8/8`; existing onboarding
+  completion/resume regressions passed `9/9`; the focused relogin browser
+  regression passed `1/1` and verifies Home/Profile rendering plus absence of
+  credential/contact values in console and localStorage. The first full E2E run
+  had one unrelated notification-poll timing failure (`98 passed`, `1` skip);
+  that exact test passed alone and the repeated mandatory full gate passed
+  `99` tests with `1` intentional skip. Production build passed with `1624`
+  modules and only the existing large-chunk advisory.
+- Focused ESLint introduced no new finding; repository files touched by the
+  slice retain `29` inherited findings on main outside this bounded correction.
+  Backend/schema, DB data, env/secrets, provider API and production were not
+  changed. This candidate changes the frontend bundle, so deployment is
+  `deployment_deferred_by_user` pending separate commit, integration and
+  Selectel test frontend rollout/manual verification gates. No commit, push,
+  SSH, API write, restart, rebuild or rollout occurred in this checkpoint.
+- Independent read-only review of the exact candidate diff passed acceptance
+  with `P0=0`, `P1=0`; no correction was required.

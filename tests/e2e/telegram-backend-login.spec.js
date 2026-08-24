@@ -379,6 +379,14 @@ test.describe('Telegram backend login feature enabled', () => {
     page,
   }) => {
     let legacyProviderRequests = 0;
+    const privateDataDetector = createSensitiveTextDetector([
+      SYNTHETIC_CREDENTIAL,
+      '+79991234567',
+      'synthetic@example.com',
+    ]);
+    page.on('console', (message) => {
+      privateDataDetector.inspect(message.text());
+    });
     await prepareBrowser(page);
     await page.unroute(ONBOARDING_ROUTE);
     await page.route(ONBOARDING_ROUTE, async (route) => {
@@ -394,7 +402,7 @@ test.describe('Telegram backend login feature enabled', () => {
             serve_return_net: 'advanced_patterns',
             match_experience_year: 'tournament',
           },
-          initialLevelLabel: 'A',
+          initialLevelLabel: 'D+',
         }),
       );
     });
@@ -421,6 +429,31 @@ test.describe('Telegram backend login feature enabled', () => {
     await expect(
       page.getByTestId('onboarding-initial-level-result-gate'),
     ).toHaveCount(0);
+    await expect(page.getByTestId('home-player-level-label')).toHaveText(
+      'Начальный уровень',
+    );
+    await expect(page.getByTestId('home-player-level-value')).toHaveText('D+');
+    await page.getByRole('button', { name: 'Профиль' }).click();
+    await expect(page.getByTestId('profile-avatar-rating')).toHaveText('D+');
+    await expect(page.getByTestId('profile-player-level-summary')).toHaveText(
+      'Начальный уровень · D+',
+    );
+    const localValues = await page.evaluate(() =>
+      Array.from(
+        { length: localStorage.length },
+        (_, index) => localStorage.getItem(localStorage.key(index)),
+      ).filter((value) => typeof value === 'string'),
+    );
+    expect(
+      localValues.some((value) =>
+        [
+          '+79991234567',
+          'synthetic@example.com',
+          SYNTHETIC_CREDENTIAL,
+        ].some((privateValue) => value.includes(privateValue)),
+      ),
+    ).toBe(false);
+    expect(privateDataDetector.detected()).toBe(false);
     expect(legacyProviderRequests).toBe(0);
   });
 

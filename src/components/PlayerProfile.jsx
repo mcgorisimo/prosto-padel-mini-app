@@ -3,9 +3,10 @@ import { createPortal } from 'react-dom';
 import { Settings as SettingsIcon } from 'lucide-react';
 import RatingChart from './RatingChart';
 import PadelButton from './ui/PadelButton';
-import { RATING_CONFIG, getLevelForRating } from '../lib/ratingEngine';
+import { RATING_CONFIG } from '../lib/ratingEngine';
 import { PRICING } from '../lib/clubConfig';
 import { formatParticipationPrice, getParticipationPrice } from '../lib/pricing';
+import { resolvePlayerLevelPresentation } from '../lib/playerLevelPresentation';
 
 // ─── Count-up animation ──────────────────────────────────────────────────────
 // Eases from previous value to current target using requestAnimationFrame.
@@ -400,11 +401,10 @@ function NotificationsSection({ notifications, invitations, loading, loadError, 
   );
 }
 
-function Avatar({ user, level, rating, onManagePhoto }) {
+function Avatar({ user, level, badgeValue, onManagePhoto }) {
   const fullName  = [user?.firstName, user?.lastName].filter(Boolean).join(' ');
   const initials  = [user?.firstName?.[0], user?.lastName?.[0]].filter(Boolean).join('') || '?';
   const ringColor = level?.color || C.accent;
-  const ratingStr = Number.isFinite(rating) ? rating.toFixed(1) : '—';
   const sideBadge = getSideBadge(user?.side_preference || user?.sidePreference);
 
   return (
@@ -452,7 +452,7 @@ function Avatar({ user, level, rating, onManagePhoto }) {
         }}
       >
         <span style={{ color: C.gold, fontSize: '9px', fontWeight: 900, lineHeight: 1 }}>
-          {ratingStr}
+          {badgeValue}
         </span>
       </div>
 
@@ -1199,11 +1199,16 @@ function FamilyBonusBlock() {
 export default function PlayerProfile({ user, stats, upcomingMatches = [], completedMatches = [], resultMatches = completedMatches, onViewDetails, notifications = [], notificationsLoading = false, notificationsLoadError = '', invitations = [], invitationActions = new Set(), onRetryNotifications, onViewNotification, onAcceptInvitation, onDeclineInvitation, onCreateMatch, onBookCourt, onOpenSettings, onOpenAdmin, onPhotoUpload, onPhotoDelete, showToast, onLogout, isVerified: initVerified = false, hasFamilyMembership = false }) {
   // Numbers come from the App-level computed stats (single source of truth: allMatches + dp_rating_history).
   const currentRating = stats?.numericRating ?? 0;
-  const currentLevel  = getLevelForRating(currentRating);
+  const isVerified = user?.isVerified ?? initVerified;
+  const levelPresentation = resolvePlayerLevelPresentation({
+    numericRating: currentRating,
+    isVerified,
+    initialLevelLabel: user?.initialLevelLabel,
+  });
+  const currentLevel = levelPresentation.displayLevel;
 
   // Animated displays — kick in when underlying stats change.
   const animRating  = useAnimatedNumber(currentRating);
-  const isVerified = user?.isVerified ?? initVerified;
   const [verifPath, setVerifPath]       = useState(null);
   const [showTraining, setShowTraining] = useState(false);
 
@@ -1248,7 +1253,11 @@ export default function PlayerProfile({ user, stats, upcomingMatches = [], compl
               <Avatar
                 user={user}
                 level={currentLevel}
-                rating={animRating}
+                badgeValue={
+                  levelPresentation.isInitialLevel
+                    ? levelPresentation.avatarValue
+                    : animRating.toFixed(1)
+                }
                 onManagePhoto={
                   typeof onPhotoUpload === 'function' || user?.photo_url
                     ? open
@@ -1267,10 +1276,13 @@ export default function PlayerProfile({ user, stats, upcomingMatches = [], compl
               background: `${currentLevel.color}26`, borderRadius: '6px',
               padding: '3px 8px', marginBottom: '6px',
             }}>
-              <span style={{ color: currentLevel.color, fontSize: '11px', fontWeight: 700, letterSpacing: '0.06em', fontVariantNumeric: 'tabular-nums' }}>
+              <span
+                data-testid="profile-player-level-summary"
+                style={{ color: currentLevel.color, fontSize: '11px', fontWeight: 700, letterSpacing: '0.06em', fontVariantNumeric: 'tabular-nums' }}
+              >
                 {isVerified
                   ? `Клубный рейтинг · ${currentLevel.label} · ${animRating.toFixed(2)}`
-                  : `Рейтинг пока не подтверждён · примерный уровень ${currentLevel.label}`}
+                  : levelPresentation.profileSummary}
               </span>
             </div>
             {user?.username && (
