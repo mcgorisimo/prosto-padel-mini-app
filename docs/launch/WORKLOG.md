@@ -7352,3 +7352,55 @@
   two rating concepts.
 - Independent read-only review of the exact final candidate diff passed with
   `P0=0`, `P1=0`; no correction was required.
+
+### 2026-08-24 — D5.1 numeric initial-level presentation rollout verification
+
+- Selectel test preflight passed after two safe read-only probe corrections:
+  the checkout was correctly treated as detached instead of requiring a branch
+  name, and Docker metadata was read through the administrative SSH context
+  while Git checks continued to run as the `prostopadel` checkout owner. The
+  earlier probes stopped before any checkout or container write. Target host
+  was `prosto-padel-test-01`, compose project `prosto-padel-test`.
+- The clean server checkout advanced from
+  `2262a52e0744796579ab6c4e192c22a570c6fe84` to clean exact
+  `039a1f52b81a2e71e6591487d7328a8fb54042d3`. Compose `config --quiet`
+  passed with the canonical `infra/test/.env.test`,
+  `infra/test/compose.yaml` and
+  `infra/test/compose.runtime-backend.yaml`. Frontend build ran from
+  `2026-08-24T19:36:17Z` to `2026-08-24T19:36:25Z`, transformed `1624`
+  modules and emitted only the existing large-chunk advisory. Frontend
+  recreate ran from `2026-08-24T19:36:59Z` to
+  `2026-08-24T19:37:00Z` using `--no-deps --force-recreate`.
+- Only frontend container
+  `a4d00d97e0836bfcde4ae3816f415fa9e725d8c7ad0a9d4180f1914a8f3dae69`
+  was replaced by
+  `07f5ca8ab966a3772f0e74099c257bdea2d421063660f67d055c684d541643c4`
+  using image
+  `sha256:b55a2547a87f2db942ff05de8837caf1e5aa47e453a79d9f9dc645cf3df2e892`.
+  It finished healthy with restart count `0`. Backend
+  `971520a7f5e1ec5d1dd734d6c73dc38b99b9240cd8b0738abb914b22bf80559d`,
+  nginx `e5b98b53a385aef67465e097753fb54b060596d3c620af3cfb484a175d624be7`
+  and PostgreSQL
+  `5e36d4dc1a5c3e2fa658382cfc4a8dff7fe3ea2ba1a9834bb89cc83df743f7be`
+  were unchanged, healthy and at restart count `0`.
+- Public HTTPS frontend, `/api/v1/health` and all three versioned test-only
+  Terms, Privacy and Cancellation URLs returned `200` with normal TLS
+  validation and verify result `0`. Bounded count-only logs from
+  `2026-08-24T19:36:59Z` reported frontend critical `0`, frontend `5xx=0`,
+  nginx critical `0` and nginx `5xx=0`; checkout remained clean and exact.
+- No authenticated onboarding request was executed. DB/schema, env/secrets,
+  TLS/nginx configuration, provider API and production were unchanged.
+  Deployment status is
+  `deployment=applied_with_manual_tma_numeric_initial_level_smoke_pending`.
+  This append-only closeout itself is docs-only with
+  `deployment=not_needed`; the remaining acceptance gate is the owner's manual
+  TMA verification that the completed `D+` result renders as compact `2.0` on
+  the avatar and as `2.00 · D+` on Home/profile without presenting the
+  unrelated unverified club default as the questionnaire result.
+- Mandatory root E2E passed `99` tests with `1` intentional skip. The root
+  production build passed with `1624` modules and only the existing
+  large-chunk advisory. The temporary dependency junction, generated `dist`,
+  Playwright report and test-results directories were removed, leaving the
+  exact one-file WORKLOG diff.
+- Independent read-only review of the exact final append-only diff passed with
+  `P0=0`, `P1=0`; no correction was required.
