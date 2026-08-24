@@ -7542,3 +7542,62 @@
   integration, SSH/DB/schema command, runtime/container action, API/provider
   write, env/secret change or production action occurred;
   `deployment=deployment_deferred_by_user`.
+
+### 2026-08-25 — D5.1 legacy initial_level_v1 reassessment backend rollout verification
+
+- Selectel test preflight passed on host `prosto-padel-test-01`, Compose project
+  `prosto-padel-test`, for exact integrated commit
+  `bf1e1062b0319d37d812b6c37a2c5bd5ef1348f7`. The server checkout was clean
+  at `039a1f52b81a2e71e6591487d7328a8fb54042d3`, the actual remote
+  `origin/main` was exact `bf1e1062b0319d37d812b6c37a2c5bd5ef1348f7`,
+  and all four expected containers were healthy with restart count `0`.
+- Exact read-only migration-040 POSTCHECK SHA-256
+  `79D2B8714DAB9DD92FBBA1BF92EEE6684411061F369794F791E06F3268EC2CE3`
+  passed again with exit `0`, empty stderr, `applied=true` and terminal
+  `ROLLBACK`. Migration 040 remains `applied_verified`; it was not applied
+  again and must not be reapplied.
+- The clean detached checkout advanced by fast-forward from
+  `039a1f52b81a2e71e6591487d7328a8fb54042d3` to clean exact
+  `bf1e1062b0319d37d812b6c37a2c5bd5ef1348f7`. Compose `config --quiet`
+  passed with the canonical `infra/test/.env.test`, `infra/test/compose.yaml`
+  and `infra/test/compose.runtime-backend.yaml`; only backend was built and
+  recreated with `--no-deps --force-recreate`.
+- Backend container
+  `971520a7f5e1ec5d1dd734d6c73dc38b99b9240cd8b0738abb914b22bf80559d`
+  was replaced by
+  `ab732d5d43294409c620abd4abcf14eb660f970074b3b72ab9b8afae3ef80fae`
+  using image
+  `sha256:e807806a6768cbb76aab96a0409079ed07f3243e42b2e2ed02c1c61927a6da35`.
+  The new backend finished healthy with restart count `0`; internal and public
+  HTTPS `/api/v1/health` returned `200`, and public TLS verification returned
+  result `0`.
+- Unauthorized
+  `GET /api/v1/onboarding/me/initial-level-reassessment` and
+  `POST /api/v1/onboarding/me/initial-level-reassessment/complete` both
+  returned `401` with `Cache-Control: no-store`; response bodies were not
+  printed. No authenticated reassessment request or API write was executed.
+- Bounded count-only logs from
+  `2026-08-24T22:09:20.897815458Z` through
+  `2026-08-24T22:11:19Z` reported backend critical `0`, backend `5xx=0`,
+  nginx critical `0` and nginx `5xx=0`. Frontend
+  `07f5ca8ab966a3772f0e74099c257bdea2d421063660f67d055c684d541643c4`,
+  nginx `e5b98b53a385aef67465e097753fb54b060596d3c620af3cfb484a175d624be7`
+  and PostgreSQL
+  `5e36d4dc1a5c3e2fa658382cfc4a8dff7fe3ea2ba1a9834bb89cc83df743f7be`
+  remained unchanged, healthy and at restart count `0`.
+- DB/schema, environment/secrets, TLS/nginx configuration, provider API,
+  frontend and production were unchanged. Authenticated reassessment smoke is
+  `pending_separate_api_write_approval`; deployment status is
+  `deployment=applied_with_authenticated_reassessment_smoke_pending`. This
+  append-only closeout is docs-only and requires no additional rollout.
+- Mandatory root E2E covered all `99` active tests with `1` intentional skip:
+  the full nine-worker run passed `96` and timed out in three unrelated UI
+  cases, then those exact three cases passed `3/3` sequentially through the
+  same owned-Vite wrapper. The first gate attempt stopped before tests because
+  this isolated worktree had no dependencies; exact lockfile dependencies were
+  installed locally with `npm ci` before the successful coverage run.
+- The root production build passed with `1624` modules and only the existing
+  large-chunk advisory after the initial filesystem-sandbox attempt stopped
+  before build output. Generated `dist`, Playwright report/results and local
+  dependencies were removed after the gates; the Git scope remains the exact
+  one-file append-only WORKLOG diff.
