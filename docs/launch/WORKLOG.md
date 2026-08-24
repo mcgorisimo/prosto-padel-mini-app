@@ -7161,3 +7161,47 @@
   SSH, API write, restart, rebuild or rollout occurred in this checkpoint.
 - Independent read-only review of the exact candidate diff passed acceptance
   with `P0=0`, `P1=0`; no correction was required.
+
+### 2026-08-24 — D5.1 post-onboarding initial-level presentation rollout on Selectel test
+
+- Read-only preflight passed for test host `prosto-padel-test-01` and Compose
+  project `prosto-padel-test`: the checkout was clean exact
+  `f582f261633106e948ae2ef7d67a4aaa577efd40`, actual remote `origin/main` was
+  exact `b704a3911a79433b570bee7471a8d110c56567f6`, and all four expected
+  containers were healthy with restart count `0`. An initial unprivileged
+  `sudo -n` probe stopped before reading gated metadata or making writes; the
+  established root operational path then completed the same bounded preflight
+  without changing SSH, sudo or Git configuration.
+- The server checkout advanced by fast-forward to clean exact
+  `b704a3911a79433b570bee7471a8d110c56567f6`. Compose `config --quiet` passed
+  with the canonical `infra/test/.env.test`, `infra/test/compose.yaml` and
+  `infra/test/compose.runtime-backend.yaml`. Frontend build started at
+  `2026-08-24T15:58:55Z`, completed with `1624` modules and only the existing
+  large-chunk advisory; frontend recreate ran from `2026-08-24T15:59:03Z` to
+  `2026-08-24T15:59:04Z` using `--no-deps --force-recreate`.
+- Only frontend container
+  `da146cb5e3e88cd6cc2fb870cb963f90bcc3ac73131253ff6e5d088b354209a6`
+  was replaced by
+  `399835c65edf6bf8cd3caa2c0706cecdef4ff05517c19e6e550e788ed9860c81`
+  using image
+  `sha256:8a5f512555c1d7d5166cac2ef17c7280ab6c23b53d5f85682d07e2996eb8cbed`.
+  It finished healthy with restart count `0`. Backend
+  `971520a7f5e1ec5d1dd734d6c73dc38b99b9240cd8b0738abb914b22bf80559d`,
+  nginx `e5b98b53a385aef67465e097753fb54b060596d3c620af3cfb484a175d624be7`
+  and PostgreSQL
+  `5e36d4dc1a5c3e2fa658382cfc4a8dff7fe3ea2ba1a9834bb89cc83df743f7be`
+  were unchanged and remained healthy with restart count `0`.
+- Public HTTPS frontend, `/api/v1/health` and all three versioned test-only
+  Terms, Privacy and Cancellation URLs returned `200` with normal TLS
+  validation and verify result `0`. Bounded count-only logs from
+  `2026-08-24T15:59:03Z` reported frontend critical `0`, frontend `5xx=0`,
+  nginx critical `0` and nginx `5xx=0`; checkout remained clean and exact.
+- No authenticated onboarding request was executed. DB/schema, env/secrets,
+  TLS/nginx config, provider API and production were unchanged. Deployment
+  status is
+  `deployment=applied_with_manual_tma_initial_level_presentation_smoke_pending`.
+  This append-only closeout itself is docs-only with `deployment=not_needed`.
+- Mandatory root gates passed: `npm.cmd run test:e2e` reported `99 passed` and
+  `1 skipped`, and `npm.cmd run build` completed with `1624` modules and only
+  the existing large-chunk advisory. Independent read-only review of this
+  exact one-file diff passed with `P0=0`, `P1=0`.
