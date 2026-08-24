@@ -7404,3 +7404,55 @@
   exact one-file WORKLOG diff.
 - Independent read-only review of the exact final append-only diff passed with
   `P0=0`, `P1=0`; no correction was required.
+
+### 2026-08-24 — D5.1 legacy initial_level_v1 reassessment migration candidate
+
+- Work started from clean exact main
+  `7a087e754b4d2a3d56b3ed8ef7896c7d2f4c7872`. Read-only contract research
+  proved that a completed `initial_level_v1` onboarding row, its
+  `survey_version` and its evidence cannot be reopened or rewritten without
+  violating the migration-037 immutable-completion guard and the existing
+  completion contract.
+- Runtime-disconnected migration 040 therefore adds a separate private
+  `backend_auth.player_initial_level_reassessments` relation for exactly one
+  completed `initial_level_v2` reassessment per eligible account. Its primary
+  key provides the concurrency boundary; an insert guard requires an exact
+  completed-v1 source flow/version/revision and the five canonical question
+  codes. The evidence timestamp cannot predate the immutable source completion.
+  The original onboarding row and legacy evidence remain unchanged and no data
+  is backfilled.
+- Reassessment evidence is immutable after insert. `PUBLIC` receives no
+  access; `backend_auth_app` receives table `SELECT` plus column-scoped
+  `INSERT` only, with no table `INSERT`, `UPDATE`, `DELETE`, `TRUNCATE` or
+  direct function execution. The existing deterministic backend scorer remains
+  authoritative for option IDs, score and label; migration 040 does not copy
+  scoring rules into SQL. The migration normalizes inherited/default ACLs on
+  its new relation and insert guard before applying the exact allowlist, then
+  asserts the complete table, column and function ACL catalogs including
+  grantees, grantors and grant options.
+- PRECHECK and POSTCHECK are read-only and end in `ROLLBACK`; both pin the
+  migration-039 onboarding relation, migration-037 transition guard,
+  migrations-035/036 answer validator ACL, migration-015 immutable guard and
+  migration-027 rating relation. Migration, PRECHECK and POSTCHECK also pin the
+  exact owner, language, volatility, strictness, security mode, search path,
+  result type and complete EXECUTE ACL of all three reused functions. ROLLBACK
+  takes an access-exclusive lock and refuses to remove the relation after any
+  immutable reassessment evidence exists. Rating, `isVerified`, rating history,
+  profile/contact PII, Supabase, backend/frontend wiring and applied migrations
+  035–039 are unchanged.
+- Focused migration regression passed `9/9`. Backend typecheck passed, backend
+  E2E passed `4/4`, and backend build passed. The complete backend unit gate
+  reported `3747 passed` and one inherited migration-038 fixture failure; the
+  same unchanged HEAD files reproduce that isolated result (`8 passed`,
+  `1 failed`) and `git diff --exit-code` confirms neither migration 038 nor its
+  spec is part of this candidate.
+- Mandatory root E2E passed `99` tests with `1` intentional skip. The root
+  production build passed with `1624` modules and only the existing large-chunk
+  advisory after granting the established local dependency-junction read
+  boundary; the first sandboxed build stopped before output because that
+  external dependency path was inaccessible.
+- No SQL was applied and no DB, API, SSH, server, container, runtime,
+  env/secret, provider or production action occurred. No commit, push or
+  integration occurred. This candidate requires separate commit, integration
+  and Selectel test migration gates, so
+  `deployment=deployment_deferred_by_user`.
