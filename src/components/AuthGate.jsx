@@ -11,6 +11,7 @@ import { useTelegramBackendLogin } from '../hooks/useTelegramBackendLogin';
 import TelegramBackendLoginStatus from './auth/TelegramBackendLoginStatus';
 import BallLoader from './BallLoader'; // Если мяч лежит в папке components
 import OnboardingFlowGate from './OnboardingFlowGate';
+import InitialLevelReassessmentGate from './InitialLevelReassessmentGate';
 
 export function resolveOwnProfileGate({
   backendRequired,
@@ -107,6 +108,10 @@ export function createBackendBookingAvailabilityActions(telegramBackendLogin) {
 
 export default function AuthGate() {
   const telegramBackendLogin = useTelegramBackendLogin();
+  const {
+    completeOwnInitialLevelReassessment,
+    loadOwnInitialLevelReassessment,
+  } = telegramBackendLogin;
   const [toastMessage, setToastMessage] = useState(null);
   const [backendProfile, setBackendProfile] = useState(null);
   const [backendProfileStatus, setBackendProfileStatus] =
@@ -116,6 +121,11 @@ export default function AuthGate() {
   const [playerOnboardingStatus, setPlayerOnboardingStatus] =
     useState('inactive');
   const playerOnboardingRequestRef = useRef(0);
+  const [initialLevelReassessment, setInitialLevelReassessment] =
+    useState(null);
+  const [initialLevelReassessmentStatus, setInitialLevelReassessmentStatus] =
+    useState('inactive');
+  const initialLevelReassessmentRequestRef = useRef(0);
 
   useEffect(() => {
     if (!telegramBackendLogin.sessionReady) {
@@ -210,6 +220,75 @@ export default function AuthGate() {
     playerOnboardingRequestRef.current += 1;
   }, []);
 
+  const loadInitialLevelReassessment = useCallback(async ({
+    showLoading = true,
+  } = {}) => {
+    if (!telegramBackendLogin.sessionReady) {
+      return Object.freeze({
+        outcome: 'rejected',
+        reason: 'not_authenticated',
+      });
+    }
+    const requestToken = initialLevelReassessmentRequestRef.current + 1;
+    initialLevelReassessmentRequestRef.current = requestToken;
+    if (showLoading) setInitialLevelReassessmentStatus('loading');
+    try {
+      const result = await loadOwnInitialLevelReassessment();
+      if (initialLevelReassessmentRequestRef.current !== requestToken) {
+        return result;
+      }
+      if (result.outcome === 'loaded') {
+        setInitialLevelReassessment(result.reassessment);
+        setInitialLevelReassessmentStatus('ready');
+      } else if (result.outcome !== 'cancelled') {
+        setInitialLevelReassessment(null);
+        setInitialLevelReassessmentStatus('error');
+      }
+      return result;
+    } catch {
+      if (initialLevelReassessmentRequestRef.current === requestToken) {
+        setInitialLevelReassessment(null);
+        setInitialLevelReassessmentStatus('error');
+      }
+      return Object.freeze({
+        outcome: 'rejected',
+        reason: 'internal_error',
+      });
+    }
+  }, [
+    loadOwnInitialLevelReassessment,
+    telegramBackendLogin.sessionReady,
+  ]);
+
+  useEffect(() => {
+    if (
+      !telegramBackendLogin.sessionReady ||
+      playerOnboardingStatus !== 'ready' ||
+      playerOnboarding?.status !== 'completed'
+    ) {
+      initialLevelReassessmentRequestRef.current += 1;
+      setInitialLevelReassessment(null);
+      setInitialLevelReassessmentStatus('inactive');
+      return;
+    }
+    if (playerOnboarding.surveyVersion !== 'initial_level_v1') {
+      initialLevelReassessmentRequestRef.current += 1;
+      setInitialLevelReassessment(Object.freeze({ status: 'not_eligible' }));
+      setInitialLevelReassessmentStatus('ready');
+      return;
+    }
+    void loadInitialLevelReassessment();
+  }, [
+    loadInitialLevelReassessment,
+    playerOnboarding,
+    playerOnboardingStatus,
+    telegramBackendLogin.sessionReady,
+  ]);
+
+  useEffect(() => () => {
+    initialLevelReassessmentRequestRef.current += 1;
+  }, []);
+
   const handleBackendProfileRefresh = useCallback(async () => {
     if (!telegramBackendLogin.sessionReady) {
       return Object.freeze({ outcome: 'rejected' });
@@ -235,10 +314,13 @@ export default function AuthGate() {
   const handleAppLogout = useCallback(async () => {
     backendProfileRequestRef.current += 1;
     playerOnboardingRequestRef.current += 1;
+    initialLevelReassessmentRequestRef.current += 1;
     setBackendProfile(null);
     setBackendProfileStatus('inactive');
     setPlayerOnboarding(null);
     setPlayerOnboardingStatus('inactive');
+    setInitialLevelReassessment(null);
+    setInitialLevelReassessmentStatus('inactive');
     const backendResult = await telegramBackendLogin.logout();
     if (backendResult.outcome !== 'logged_out') {
       throw new Error('Backend session logout failed');
@@ -331,6 +413,32 @@ export default function AuthGate() {
     setPlayerOnboarding(completedOnboarding);
     setPlayerOnboardingStatus('ready');
   }, []);
+
+  const handleInitialLevelReassessmentComplete = useCallback(
+    (completion) => completeOwnInitialLevelReassessment(completion),
+    [completeOwnInitialLevelReassessment],
+  );
+
+  const handleInitialLevelReassessmentReconcile = useCallback(
+    () => loadOwnInitialLevelReassessment(),
+    [loadOwnInitialLevelReassessment],
+  );
+
+  const handleInitialLevelReassessmentEnterApp = useCallback(
+    (completedReassessment) => {
+      if (
+        completedReassessment !== null &&
+        completedReassessment?.status !== 'completed'
+      ) {
+        return;
+      }
+      setInitialLevelReassessment(
+        completedReassessment ?? Object.freeze({ status: 'not_eligible' }),
+      );
+      setInitialLevelReassessmentStatus('ready');
+    },
+    [],
+  );
 
   const handleBackendProfileSave = useCallback(async (changes) => {
     backendProfileRequestRef.current += 1;
@@ -522,14 +630,78 @@ export default function AuthGate() {
     );
   }
 
+  if (
+    initialLevelReassessmentStatus !== 'ready' ||
+    initialLevelReassessment === null
+  ) {
+    if (initialLevelReassessmentStatus === 'error') {
+      return (
+        <>
+          <main
+            className="onboarding-profile-screen"
+            data-testid="initial-level-reassessment-load-gate"
+            data-state="error"
+          >
+            <section
+              className="onboarding-profile-card"
+              aria-labelledby="initial-level-reassessment-load-error-title"
+            >
+              <p className="onboarding-profile-eyebrow">Просто Падел</p>
+              <h1 id="initial-level-reassessment-load-error-title">
+                Не удалось проверить начальный уровень
+              </h1>
+              <p className="onboarding-profile-intro" role="alert">
+                Проверьте соединение и попробуйте снова.
+              </p>
+              <button
+                type="button"
+                className="onboarding-profile-submit"
+                onClick={() => void loadInitialLevelReassessment()}
+              >
+                Попробовать снова
+              </button>
+            </section>
+          </main>
+          {telegramBackendStatus}
+        </>
+      );
+    }
+    return (
+      <div
+        data-testid="initial-level-reassessment-load-gate"
+        data-state="loading"
+      >
+        <BallLoader />
+        {telegramBackendStatus}
+      </div>
+    );
+  }
+
+  if (initialLevelReassessment.status === 'required') {
+    return (
+      <InitialLevelReassessmentGate
+        reassessment={initialLevelReassessment}
+        onComplete={handleInitialLevelReassessmentComplete}
+        onReconcile={handleInitialLevelReassessmentReconcile}
+        onEnterApp={handleInitialLevelReassessmentEnterApp}
+      />
+    );
+  }
+
+  const reassessedInitialLevelLabel =
+    initialLevelReassessment.status === 'completed'
+      ? initialLevelReassessment.initialLevelLabel
+      : null;
+
   return (
     <>
       <App
         backendProfile={backendProfile}
         playerOnboardingInitialLevelLabel={
-          playerOnboarding.surveyVersion === 'initial_level_v2'
+          reassessedInitialLevelLabel ??
+          (playerOnboarding.surveyVersion === 'initial_level_v2'
             ? playerOnboarding.initialLevelLabel
-            : null
+            : null)
         }
         backendMatchRequired={backendProfileRequired}
         backendMatchLifecycleStatus={telegramBackendLogin.status}

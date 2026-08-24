@@ -10,6 +10,8 @@ const PROFILE_ROUTE = '**/api/v1/profile/me';
 const ONBOARDING_ROUTE = '**/api/v1/onboarding/me';
 const ONBOARDING_PROGRESS_ROUTE = '**/api/v1/onboarding/me/progress';
 const ONBOARDING_COMPLETE_ROUTE = '**/api/v1/onboarding/me/complete';
+const REASSESSMENT_ROUTE =
+  '**/api/v1/onboarding/me/initial-level-reassessment';
 const TELEGRAM_SDK_ROUTE = 'https://telegram.org/js/telegram-web-app.js';
 const SYNTHETIC_INIT_DATA =
   'query_id=synthetic-login&auth_date=1700000000&hash=synthetic-hash';
@@ -228,6 +230,9 @@ test.describe('Telegram backend login feature enabled', () => {
     });
     await page.route(ONBOARDING_ROUTE, async (route) => {
       await fulfillOnboardingJson(route, 200, onboardingState());
+    });
+    await page.route(REASSESSMENT_ROUTE, async (route) => {
+      await fulfillOnboardingJson(route, 200, { status: 'not_eligible' });
     });
   });
 

@@ -7690,3 +7690,50 @@
   production build passed with `1625` modules and only the existing large-chunk
   advisory. This append-only closeout is docs-only and requires no additional
   rollout.
+### 2026-08-25 — D5.1 legacy initial_level_v1 reassessment frontend UI candidate
+
+- Work started from clean exact main
+  `53ce22499d947920575d7d3e0bef8b2706cde7d7`, with migration 040 and the
+  owner-scoped backend/client reassessment contracts already deployed to
+  Selectel test. This local frontend-only slice connects those existing
+  lifecycle methods to the current `AuthGate`; it does not create a second
+  login, registration or credential flow.
+- A completed `initial_level_v1` owner now receives the server-declared
+  `required` five-question `initial_level_v2` reassessment one question at a
+  time, with progress, Back and in-memory answer preservation. No answers,
+  credential or profile data are written to `localStorage`, `sessionStorage`
+  or logs. A completed response shows only `Ваш начальный уровень: X` from the
+  server-computed label and an explicit application-entry action; score,
+  formula, caps and scoring reasons remain private.
+- `completed` skips the questionnaire and carries only the server label into
+  the existing Home/Profile presentation after login; `not_eligible` opens
+  the application unchanged. Different/concurrent and stale-source outcomes
+  reconcile through the read contract, exact retry reuses immutable evidence,
+  malformed responses fail closed and unauthorized responses clear the
+  existing private session boundary. Club rating, `rating.isVerified`, rating
+  history, backend and schema are unchanged.
+- Focused component tests passed `5/5`, covering one-question-at-a-time
+  progress, Back state, memory-only answers, label-only result, exact
+  idempotent retry, different/stale reconciliation, inline validation and
+  PII/credential-safe behavior. Focused Playwright passed `6/6`, covering
+  required/completed/not-eligible, relogin bypass, exact bearer completion,
+  conflict reconciliation, malformed fail-closed recovery, unauthorized
+  clearing, 375px layout, 48px option targets and storage/log non-disclosure.
+- Focused component tests passed `5/5`; focused reassessment Playwright passed
+  `6/6`; the existing Telegram auth-flow regression passed `32` tests with `1`
+  intentional skip after its legacy fixture received an explicit
+  `not_eligible` reassessment response. The exact final-scope mandatory root
+  E2E passed `106` tests with `1` intentional skip. The exact final-scope
+  production build passed with `1626` modules and only the existing
+  large-chunk advisory. Targeted Prettier and ESLint pass for the new
+  component, component tests and isolated browser spec; `git diff --check`
+  passes. Repository-wide format/lint and dead-code ratchets remain non-green
+  on their existing baseline findings/location-sensitive issue digest; no
+  baseline, unrelated file or historical formatting was changed.
+- Independent read-only review of the exact six-file diff found no critical or
+  high-priority issues (`P0=0`, `P1=0`).
+- This candidate changes the frontend runtime bundle and therefore requires
+  separate commit, integration and Selectel test frontend rollout/manual TMA
+  gates. No commit, push, integration, SSH/DB/API command, runtime/container
+  action, provider write, environment/secret change or production action was
+  performed; `deployment=deployment_deferred_by_user`.
