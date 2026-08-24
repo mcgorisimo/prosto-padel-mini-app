@@ -380,6 +380,24 @@ test.describe('Telegram backend login feature enabled', () => {
   }) => {
     let legacyProviderRequests = 0;
     await prepareBrowser(page);
+    await page.unroute(ONBOARDING_ROUTE);
+    await page.route(ONBOARDING_ROUTE, async (route) => {
+      await fulfillOnboardingJson(
+        route,
+        200,
+        onboardingState({
+          surveyVersion: 'initial_level_v2',
+          surveyAnswers: {
+            match_count: 'one_hundred_plus',
+            rally_stability: 'controls_pace',
+            glass_play: 'uses_tactically',
+            serve_return_net: 'advanced_patterns',
+            match_experience_year: 'tournament',
+          },
+          initialLevelLabel: 'A',
+        }),
+      );
+    });
     await page.route(LOGIN_ROUTE, async (route) => {
       await fulfillJson(route, 200, successBody('existing'));
     });
@@ -400,6 +418,9 @@ test.describe('Telegram backend login feature enabled', () => {
     const status = page.getByTestId('telegram-backend-login-status');
     await expect(status).toHaveAttribute('data-status', 'authenticated');
     await expectBackendApp(page);
+    await expect(
+      page.getByTestId('onboarding-initial-level-result-gate'),
+    ).toHaveCount(0);
     expect(legacyProviderRequests).toBe(0);
   });
 

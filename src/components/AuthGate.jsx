@@ -301,8 +301,6 @@ export default function AuthGate() {
     playerOnboardingRequestRef.current += 1;
     const result = await telegramBackendLogin.completeOwnOnboarding(completion);
     if (result.outcome === 'completed') {
-      setPlayerOnboarding(result.onboarding);
-      setPlayerOnboardingStatus('ready');
       return result;
     }
     if (
@@ -322,6 +320,17 @@ export default function AuthGate() {
     loadPlayerOnboarding,
     telegramBackendLogin.completeOwnOnboarding,
   ]);
+
+  const handlePlayerOnboardingEnterApp = useCallback((completedOnboarding) => {
+    if (
+      completedOnboarding?.status !== 'completed' ||
+      completedOnboarding.currentStep !== 'completed'
+    ) {
+      return;
+    }
+    setPlayerOnboarding(completedOnboarding);
+    setPlayerOnboardingStatus('ready');
+  }, []);
 
   const handleBackendProfileSave = useCallback(async (changes) => {
     backendProfileRequestRef.current += 1;
@@ -508,6 +517,7 @@ export default function AuthGate() {
         onSaveProfile={handlePlayerOnboardingSave}
         onAdvance={handlePlayerOnboardingAdvance}
         onComplete={handlePlayerOnboardingComplete}
+        onEnterApp={handlePlayerOnboardingEnterApp}
       />
     );
   }

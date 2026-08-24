@@ -2111,7 +2111,7 @@ test.describe('backend session credential lifecycle', () => {
           status: 'in_progress',
           flowVersion: 'tma_v1',
           currentStep,
-          surveyVersion: 'initial_level_v1',
+          surveyVersion: 'initial_level_v2',
           revision,
           profile: Object.freeze({
             firstName: 'Synthetic',
@@ -2132,7 +2132,14 @@ test.describe('backend session credential lifecycle', () => {
         status: 'completed',
         currentStep: 'completed',
         revision: 4,
-        surveyAnswers: Object.freeze({ experience: 'beginner' }),
+        surveyAnswers: Object.freeze({
+          match_count: 'one_hundred_plus',
+          rally_stability: 'controls_pace',
+          glass_play: 'uses_tactically',
+          serve_return_net: 'advanced_patterns',
+          match_experience_year: 'tournament',
+        }),
+        initialLevelLabel: 'A',
       });
       const calls = [];
       const completionCalls = [];
@@ -2247,8 +2254,14 @@ test.describe('backend session credential lifecycle', () => {
         flowVersion: 'tma_v1',
         consents,
         survey: Object.freeze({
-          version: 'initial_level_v1',
-          answers: Object.freeze({ experience: 'beginner' }),
+          version: 'initial_level_v2',
+          answers: Object.freeze({
+            match_count: 'one_hundred_plus',
+            rally_stability: 'controls_pace',
+            glass_play: 'uses_tactically',
+            serve_return_net: 'advanced_patterns',
+            match_experience_year: 'tournament',
+          }),
         }),
       });
       const first = await lifecycle.advanceOwnOnboarding(toConsents);

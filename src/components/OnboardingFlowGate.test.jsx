@@ -42,6 +42,14 @@ const CONSENTS = Object.freeze([
   }),
 ]);
 
+const INITIAL_LEVEL_V2_ANSWERS = Object.freeze({
+  match_count: 'one_to_ten',
+  rally_stability: 'steady_slow',
+  glass_play: 'basic_returns',
+  serve_return_net: 'stable_basics',
+  match_experience_year: 'regular_social',
+});
+
 function onboardingState(overrides = {}) {
   return Object.freeze({
     status: 'required',
@@ -66,7 +74,7 @@ function inProgressState(currentStep, revision, overrides = {}) {
     status: 'in_progress',
     flowVersion: 'tma_v1',
     currentStep,
-    surveyVersion: 'initial_level_v1',
+    surveyVersion: 'initial_level_v2',
     revision,
     profile: Object.freeze({ firstName: 'Анна', lastName: 'Петрова' }),
     contacts: Object.freeze({
@@ -154,11 +162,12 @@ describe('OnboardingFlowGate', () => {
             const next = inProgressState('completed', 4, {
               status: 'completed',
               consents: CONSENTS,
-              surveyAnswers: Object.freeze({ experience: 'beginner' }),
+              surveyAnswers: INITIAL_LEVEL_V2_ANSWERS,
+              initialLevelLabel: 'C',
             });
-            setOnboarding(next);
             return { outcome: 'completed', onboarding: next };
           }}
+          onEnterApp={setOnboarding}
         />
       );
     }
@@ -200,29 +209,54 @@ describe('OnboardingFlowGate', () => {
       consents: CONSENTS,
     });
     const surveyGroup = screen.getByRole('group', {
-      name: /Какой у вас опыт игры в падел/u,
+      name: /Сколько матчей в падел вы сыграли/u,
     });
     expect(surveyGroup.getAttribute('aria-required')).toBe('true');
     expect(screen.getAllByRole('radio').every((radio) => radio.required)).toBe(
       true,
     );
-    await user.click(screen.getByLabelText('Начинаю играть'));
+    expect(screen.getByText('Вопрос 1 из 5')).toBeTruthy();
+    await user.click(screen.getByLabelText('1–10 матчей'));
+    await user.click(screen.getByRole('button', { name: 'Далее' }));
     await user.click(
-      screen.getByRole('button', { name: 'Завершить настройку' }),
+      screen.getByLabelText('Стабильно играю в спокойном темпе'),
+    );
+    await user.click(screen.getByRole('button', { name: 'Далее' }));
+    await user.click(
+      screen.getByLabelText('Возвращаю простые мячи после стекла'),
+    );
+    await user.click(screen.getByRole('button', { name: 'Далее' }));
+    await user.click(
+      screen.getByLabelText('Стабильно выполняю базовые действия'),
+    );
+    await user.click(screen.getByRole('button', { name: 'Далее' }));
+    await user.click(
+      screen.getByLabelText('Регулярные любительские матчи'),
+    );
+    await user.click(
+      screen.getByRole('button', { name: 'Узнать уровень' }),
     );
 
-    await screen.findByTestId('authenticated-app');
+    const result = await screen.findByTestId(
+      'onboarding-initial-level-result',
+    );
+    expect(result.textContent).toContain('Ваш начальный уровень: C');
+    expect(result.textContent).not.toMatch(/балл|формул|огранич/u);
     expect(completionCalls).toEqual([
       {
         expectedRevision: 3,
         flowVersion: 'tma_v1',
         consents: CONSENTS,
         survey: {
-          version: 'initial_level_v1',
-          answers: { experience: 'beginner' },
+          version: 'initial_level_v2',
+          answers: INITIAL_LEVEL_V2_ANSWERS,
         },
       },
     ]);
+    await user.click(
+      screen.getByRole('button', { name: 'Перейти в приложение' }),
+    );
+    await screen.findByTestId('authenticated-app');
     expect(storageWrite).not.toHaveBeenCalled();
     expect(consoleLog).not.toHaveBeenCalled();
     expect(consoleError).not.toHaveBeenCalled();
@@ -486,7 +520,7 @@ describe('OnboardingFlowGate', () => {
     );
   });
 
-  it('resumes level survey and fails closed for changed legal versions or a different completion', async () => {
+  it('resumes five-question progress, supports back and fails closed for a different completion', async () => {
     const user = userEvent.setup();
     let resolveCompletion;
     const onComplete = vi.fn(
@@ -499,31 +533,65 @@ describe('OnboardingFlowGate', () => {
       <OnboardingFlowGate
         onboarding={inProgressState('level_survey', 3, {
           consents: CONSENTS,
+          surveyAnswers: Object.freeze({
+            match_count: 'one_to_ten',
+            rally_stability: 'steady_slow',
+          }),
         })}
         legalConfig={LEGAL_CONFIG}
         onReload={vi.fn()}
         onSaveProfile={vi.fn()}
         onAdvance={vi.fn()}
         onComplete={onComplete}
+        onEnterApp={vi.fn()}
       />,
     );
 
     expect(screen.getByTestId('onboarding-level-survey-gate')).toBeTruthy();
-    await user.click(
-      screen.getByRole('button', { name: 'Завершить настройку' }),
-    );
+    expect(screen.getByText('Вопрос 3 из 5')).toBeTruthy();
+    expect(
+      screen.getByRole('group', {
+        name: /Как вы играете мяч после отскока от стекла/u,
+      }),
+    ).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Назад' }));
+    expect(screen.getByText('Вопрос 2 из 5')).toBeTruthy();
+    expect(
+      screen.getByLabelText('Стабильно играю в спокойном темпе').checked,
+    ).toBe(true);
+    await user.click(screen.getByRole('button', { name: 'Далее' }));
+    await user.click(screen.getByRole('button', { name: 'Далее' }));
     const surveyAlert = screen.getByRole('alert');
     const surveyGroup = screen.getByRole('group', {
-      name: /Какой у вас опыт игры в падел/u,
+      name: /Как вы играете мяч после отскока от стекла/u,
     });
     expect(surveyGroup.getAttribute('aria-invalid')).toBe('true');
     expect(surveyGroup.getAttribute('aria-describedby')).toBe(surveyAlert.id);
     expect(onComplete).not.toHaveBeenCalled();
-    await user.click(screen.getByLabelText('Играю регулярно'));
     await user.click(
-      screen.getByRole('button', { name: 'Завершить настройку' }),
+      screen.getByLabelText('Возвращаю простые мячи после стекла'),
+    );
+    await user.click(screen.getByRole('button', { name: 'Далее' }));
+    await user.click(
+      screen.getByLabelText('Стабильно выполняю базовые действия'),
+    );
+    await user.click(screen.getByRole('button', { name: 'Далее' }));
+    await user.click(
+      screen.getByLabelText('Регулярные любительские матчи'),
+    );
+    await user.click(
+      screen.getByRole('button', { name: 'Узнать уровень' }),
     );
     await waitFor(() => expect(onComplete).toHaveBeenCalledTimes(1));
+    expect(onComplete).toHaveBeenCalledWith({
+      expectedRevision: 3,
+      flowVersion: 'tma_v1',
+      consents: CONSENTS,
+      survey: {
+        version: 'initial_level_v2',
+        answers: INITIAL_LEVEL_V2_ANSWERS,
+      },
+    });
     expect(
       screen.getAllByRole('radio').every((radio) => radio.matches(':disabled')),
     ).toBe(true);
@@ -563,6 +631,7 @@ describe('OnboardingFlowGate', () => {
         onSaveProfile={vi.fn()}
         onAdvance={vi.fn()}
         onComplete={onComplete}
+        onEnterApp={vi.fn()}
       />,
     );
     expect(

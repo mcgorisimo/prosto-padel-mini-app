@@ -188,14 +188,64 @@ describe('player onboarding UI policy', () => {
   });
 
   it('exposes only the supported versioned level survey', () => {
-    expect(readOnboardingSurveyDefinition('initial_level_v1')).toMatchObject({
-      version: 'initial_level_v1',
-      answers: [
-        { code: 'beginner' },
-        { code: 'intermediate' },
-        { code: 'advanced' },
+    const survey = readOnboardingSurveyDefinition('initial_level_v2');
+
+    expect(survey).toMatchObject({
+      version: 'initial_level_v2',
+      questions: [
+        {
+          code: 'match_count',
+          answers: [
+            { code: 'none' },
+            { code: 'one_to_ten' },
+            { code: 'eleven_to_thirty' },
+            { code: 'thirty_one_to_ninety_nine' },
+            { code: 'one_hundred_plus' },
+          ],
+        },
+        {
+          code: 'rally_stability',
+          answers: [
+            { code: 'learning_contact' },
+            { code: 'short_rallies' },
+            { code: 'steady_slow' },
+            { code: 'steady_under_pressure' },
+            { code: 'controls_pace' },
+          ],
+        },
+        {
+          code: 'glass_play',
+          answers: [
+            { code: 'not_used' },
+            { code: 'rarely_returns' },
+            { code: 'basic_returns' },
+            { code: 'confident_returns' },
+            { code: 'uses_tactically' },
+          ],
+        },
+        {
+          code: 'serve_return_net',
+          answers: [
+            { code: 'learning_basics' },
+            { code: 'inconsistent' },
+            { code: 'stable_basics' },
+            { code: 'confident_patterns' },
+            { code: 'advanced_patterns' },
+          ],
+        },
+        {
+          code: 'match_experience_year',
+          answers: [
+            { code: 'none' },
+            { code: 'casual_few' },
+            { code: 'regular_social' },
+            { code: 'league_or_club' },
+            { code: 'tournament' },
+          ],
+        },
       ],
     });
-    expect(readOnboardingSurveyDefinition('future_level_v2')).toBeNull();
+    expect(readOnboardingSurveyDefinition('initial_level_v1')).toBeNull();
+    expect(readOnboardingSurveyDefinition('future_level_v3')).toBeNull();
   });
 });

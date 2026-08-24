@@ -206,12 +206,39 @@ function OnboardingSurveyGate({
   legalConfig,
   onReload,
   onComplete,
+  onEnterApp,
 }) {
-  const [answer, setAnswer] = useState('');
+  const survey = readOnboardingSurveyDefinition(onboarding.surveyVersion);
+  const initialProgress = useMemo(() => {
+    const answers = {};
+    if (survey === null) return { answers, questionIndex: 0 };
+    for (const question of survey.questions) {
+      const persistedAnswer = onboarding.surveyAnswers?.[question.code];
+      if (question.answers.some(({ code }) => code === persistedAnswer)) {
+        answers[question.code] = persistedAnswer;
+      }
+    }
+    const firstUnanswered = survey.questions.findIndex(
+      ({ code }) => answers[code] === undefined,
+    );
+    return {
+      answers,
+      questionIndex:
+        firstUnanswered === -1
+          ? Math.max(survey.questions.length - 1, 0)
+          : firstUnanswered,
+    };
+  }, [onboarding.surveyAnswers, survey]);
+  const [answers, setAnswers] = useState(initialProgress.answers);
+  const [questionIndex, setQuestionIndex] = useState(
+    initialProgress.questionIndex,
+  );
   const [notice, setNotice] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const [completedOnboarding, setCompletedOnboarding] = useState(null);
+  const [shouldFocusQuestion, setShouldFocusQuestion] = useState(false);
   const firstAnswerRef = useRef(null);
-  const survey = readOnboardingSurveyDefinition(onboarding.surveyVersion);
+  const questionTitleRef = useRef(null);
   const consents = legalConsentContract(legalConfig);
   const canComplete =
     survey !== null &&
@@ -219,9 +246,17 @@ function OnboardingSurveyGate({
     hasCurrentLegalConsents(onboarding, legalConfig);
 
   useEffect(() => {
-    setAnswer('');
+    setAnswers(initialProgress.answers);
+    setQuestionIndex(initialProgress.questionIndex);
     setNotice(null);
-  }, [onboarding.revision]);
+    setCompletedOnboarding(null);
+  }, [initialProgress]);
+
+  useEffect(() => {
+    if (!shouldFocusQuestion) return;
+    questionTitleRef.current?.focus();
+    setShouldFocusQuestion(false);
+  }, [questionIndex, shouldFocusQuestion]);
 
   if (!canComplete) {
     return (
@@ -239,16 +274,82 @@ function OnboardingSurveyGate({
     );
   }
 
+  if (completedOnboarding !== null) {
+    return (
+      <OnboardingShell
+        testId="onboarding-initial-level-result-gate"
+        title="Анкета завершена"
+        intro="Можно переходить в приложение."
+      >
+        <p
+          className="onboarding-initial-level-result"
+          data-testid="onboarding-initial-level-result"
+          role="status"
+        >
+          Ваш начальный уровень:{' '}
+          <strong>{completedOnboarding.initialLevelLabel}</strong>
+        </p>
+        <button
+          type="button"
+          className="onboarding-profile-submit"
+          onClick={() => onEnterApp(completedOnboarding)}
+        >
+          Перейти в приложение
+        </button>
+      </OnboardingShell>
+    );
+  }
+
+  const currentQuestion = survey.questions[questionIndex];
+  const currentAnswer = answers[currentQuestion.code];
+  const isLastQuestion = questionIndex === survey.questions.length - 1;
+
   const handleSubmit = async (event) => {
     event.preventDefault();
     if (submitting) return;
-    if (!survey.answers.some(({ code }) => code === answer)) {
+    if (
+      !currentQuestion.answers.some(({ code }) => code === currentAnswer)
+    ) {
       setNotice({
         tone: 'error',
         kind: 'validation',
         message: 'Выберите один вариант.',
       });
       queueMicrotask(() => firstAnswerRef.current?.focus());
+      return;
+    }
+
+    if (!isLastQuestion) {
+      setQuestionIndex((previous) => previous + 1);
+      setNotice(null);
+      setShouldFocusQuestion(true);
+      return;
+    }
+
+    const completedAnswers = Object.fromEntries(
+      survey.questions.map(({ code }) => [code, answers[code]]),
+    );
+    if (
+      survey.questions.some(
+        (question) =>
+          !question.answers.some(
+            ({ code }) => code === completedAnswers[question.code],
+          ),
+      )
+    ) {
+      const firstUnanswered = survey.questions.findIndex(
+        (question) =>
+          !question.answers.some(
+            ({ code }) => code === completedAnswers[question.code],
+          ),
+      );
+      setQuestionIndex(Math.max(firstUnanswered, 0));
+      setNotice({
+        tone: 'error',
+        kind: 'validation',
+        message: 'Ответьте на каждый вопрос.',
+      });
+      setShouldFocusQuestion(true);
       return;
     }
 
@@ -261,10 +362,14 @@ function OnboardingSurveyGate({
         consents,
         survey: {
           version: survey.version,
-          answers: { experience: answer },
+          answers: completedAnswers,
         },
       });
-      if (result.outcome === 'completed' || result.outcome === 'cancelled') {
+      if (result.outcome === 'completed') {
+        setCompletedOnboarding(result.onboarding);
+        return;
+      }
+      if (result.outcome === 'cancelled') {
         return;
       }
       if (result.outcome === 'reconciled') {
@@ -294,6 +399,13 @@ function OnboardingSurveyGate({
     }
   };
 
+  const handleBack = () => {
+    if (submitting || questionIndex === 0) return;
+    setQuestionIndex((previous) => previous - 1);
+    setNotice(null);
+    setShouldFocusQuestion(true);
+  };
+
   const handleReload = async () => {
     if (submitting) return;
     setSubmitting(true);
@@ -313,6 +425,16 @@ function OnboardingSurveyGate({
       <p className="onboarding-step-indicator">Шаг 2 из 2</p>
       <TestOnlyLegalNotice legalConfig={legalConfig} />
       <form noValidate onSubmit={handleSubmit}>
+        <div className="onboarding-survey-progress" aria-live="polite">
+          <span>
+            Вопрос {questionIndex + 1} из {survey.questions.length}
+          </span>
+          <progress
+            aria-label="Прогресс анкеты"
+            max={survey.questions.length}
+            value={questionIndex + 1}
+          />
+        </div>
         <fieldset
           className="onboarding-survey-fieldset"
           disabled={submitting}
@@ -324,19 +446,24 @@ function OnboardingSurveyGate({
               : undefined
           }
         >
-          <legend>{survey.question} *</legend>
-          {survey.answers.map((option, index) => (
+          <legend ref={questionTitleRef} tabIndex="-1">
+            {currentQuestion.question} *
+          </legend>
+          {currentQuestion.answers.map((option, index) => (
             <label className="onboarding-survey-option" key={option.code}>
               <input
                 ref={index === 0 ? firstAnswerRef : undefined}
                 type="radio"
                 required
                 aria-required="true"
-                name="onboarding-experience"
+                name={`onboarding-${currentQuestion.code}`}
                 value={option.code}
-                checked={answer === option.code}
+                checked={currentAnswer === option.code}
                 onChange={(event) => {
-                  setAnswer(event.target.value);
+                  setAnswers((previous) => ({
+                    ...previous,
+                    [currentQuestion.code]: event.target.value,
+                  }));
                   setNotice(null);
                 }}
               />
@@ -366,14 +493,30 @@ function OnboardingSurveyGate({
           </div>
         )}
 
-        <button
-          type="submit"
-          className="onboarding-profile-submit"
-          disabled={submitting}
-          aria-busy={submitting || undefined}
-        >
-          {submitting ? 'Завершаем…' : 'Завершить настройку'}
-        </button>
+        <div className="onboarding-survey-actions">
+          {questionIndex > 0 && (
+            <button
+              type="button"
+              className="onboarding-profile-reload"
+              onClick={handleBack}
+              disabled={submitting}
+            >
+              Назад
+            </button>
+          )}
+          <button
+            type="submit"
+            className="onboarding-profile-submit"
+            disabled={submitting}
+            aria-busy={submitting || undefined}
+          >
+            {submitting
+              ? 'Завершаем…'
+              : isLastQuestion
+                ? 'Узнать уровень'
+                : 'Далее'}
+          </button>
+        </div>
       </form>
     </OnboardingShell>
   );
@@ -386,6 +529,7 @@ export default function OnboardingFlowGate({
   onSaveProfile,
   onAdvance,
   onComplete,
+  onEnterApp,
 }) {
   if (
     onboarding.currentStep === 'profile' ||
@@ -409,6 +553,7 @@ export default function OnboardingFlowGate({
         legalConfig={legalConfig}
         onReload={onReload}
         onComplete={onComplete}
+        onEnterApp={onEnterApp}
       />
     );
   }

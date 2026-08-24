@@ -7046,3 +7046,42 @@
   the existing large-chunk advisory.
 - Independent read-only review of the exact one-file closeout diff passed
   acceptance with `P0=0`, `P1=0`; no correction was required.
+
+### 2026-08-24 — D5.1 five-question initial-level frontend correction candidate
+
+- Work started from clean exact detached main
+  `8d08e2b4790533c1cd2b044fe8fdb7aa613e18f0`. The deployed/current frontend
+  still used the superseded one-question `initial_level_v1` contract while the
+  deployed backend requires immutable `initial_level_v2` with five answers;
+  this P1 compatibility blocker prevented a new user from completing onboarding.
+- The frontend policy now defines the exact five backend-owned v2 questions and
+  option IDs for match count, rally stability, glass play, serve/return/net and
+  match experience during the last year. The UI presents one question at a
+  time with progress, accessible post-navigation focus and Back/Next controls.
+  Valid server-provided partial answers resume at the first unanswered question;
+  in-page navigation remains memory-only and no answer, PII or credential is
+  written to browser storage or logs.
+- Completion sends only the five exact option IDs under
+  `survey.version=initial_level_v2`. A successful response remains behind the
+  existing Telegram session boundary and shows only `Ваш начальный уровень: X`
+  from the strict server-computed `initialLevelLabel`, followed by one explicit
+  enter-app action. Score, formula, caps and calculation reasons are not exposed.
+  Re-login with an already completed v2 state bypasses onboarding, while legacy
+  completed states retain their existing bypass behavior.
+- Focused policy/component regressions passed `14/14`; focused lifecycle and
+  completed-v2 browser regressions each passed `1/1`. Mandatory root E2E passed
+  `99` tests with `1` intentional skip, and root production build passed with
+  `1623` modules and only the existing large-chunk advisory. Direct lint of the
+  changed JavaScript files found no new finding outside the exact 13 inherited
+  `AuthGate.jsx` baseline findings. Repository-wide format/lint/dead-code
+  ratchets remain blocked by inherited/stale main baselines outside this slice.
+- This candidate changes the frontend bundle, so deployment is
+  `deployment_deferred_by_user` pending separate commit, integration and
+  Selectel test frontend rollout/manual TMA gates. Backend/schema, DB data,
+  env/secrets, provider API and production were not changed; no commit, push,
+  SSH, API write, restart, rebuild or rollout occurred in this checkpoint.
+- Independent read-only review of the exact nine-file candidate diff passed
+  acceptance with `P0=0`, `P1=0`; no correction was required. The reviewer
+  noted below P1 that durable per-question reload resume depends on partial
+  answers being present in the backend response; this scoped frontend change
+  intentionally adds no browser persistence or new write contract.
