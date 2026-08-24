@@ -70,10 +70,31 @@ function firstRunRow(overrides: Record<string, unknown> = {}): QueryResultRow {
     current_step: null,
     survey_version: null,
     survey_answers: null,
+    initial_level_label: null,
     revision: null,
     consents: [],
     ...overrides,
   };
+}
+
+function completedV2Row(
+  overrides: Record<string, unknown> = {},
+): QueryResultRow {
+  return draftRow({
+    status: 'completed',
+    current_step: 'completed',
+    survey_version: 'initial_level_v2',
+    survey_answers: {
+      match_count: 'one_hundred_plus',
+      rally_stability: 'controls_pace',
+      glass_play: 'uses_tactically',
+      serve_return_net: 'advanced_patterns',
+      match_experience_year: 'tournament',
+    },
+    initial_level_label: 'A',
+    revision: '4',
+    ...overrides,
+  });
 }
 
 function draftRow(overrides: Record<string, unknown> = {}): QueryResultRow {
@@ -142,6 +163,7 @@ describe('PostgresPlayerOnboardingReader', () => {
       'FROM backend_auth.player_profile_details AS details LEFT JOIN backend_auth.player_onboarding_states AS state',
     );
     expect(sql).toContain('WHERE details.account_id = $1');
+    expect(sql).toContain('state.initial_level_label');
     expect(sql).toContain(
       'acceptance.account_id = details.account_id AND acceptance.flow_version = state.flow_version',
     );
@@ -200,6 +222,7 @@ describe('PostgresPlayerOnboardingReader', () => {
           currentStep: 'consents',
           surveyVersion: 'initial_level_v1',
           surveyAnswers: { experience: 'beginner' },
+          initialLevelLabel: null,
           revision: 3,
         },
         consents: [
@@ -216,6 +239,28 @@ describe('PostgresPlayerOnboardingReader', () => {
         true,
       );
     }
+  });
+
+  it('hydrates only the persisted label for a completed initial-level v2 owner', async () => {
+    const result = await new PostgresPlayerOnboardingReader().findByAccountId(
+      new FakeTransaction([queryResult([completedV2Row()])]),
+      { accountId: ACCOUNT_ID },
+    );
+
+    expect(result).toMatchObject({
+      outcome: 'found',
+      onboarding: {
+        accountId: ACCOUNT_ID,
+        state: {
+          status: 'completed',
+          currentStep: 'completed',
+          surveyVersion: 'initial_level_v2',
+          initialLevelLabel: 'A',
+          revision: 4,
+        },
+      },
+    });
+    expect(JSON.stringify(result)).not.toContain('initialLevelScore');
   });
 
   it('returns not_found only for a missing owner profile row', async () => {
@@ -249,6 +294,9 @@ describe('PostgresPlayerOnboardingReader', () => {
     ['numeric revision', { revision: 3 }],
     ['completed step in draft', { current_step: 'completed' }],
     ['malformed survey', { survey_answers: { experience: 'Not Bounded' } }],
+    ['label on draft', { initial_level_label: 'C' }],
+    ['invalid v2 label', completedV2Row({ initial_level_label: 'S' })],
+    ['missing v2 label', completedV2Row({ initial_level_label: null })],
     [
       'unsorted consents',
       {

@@ -109,13 +109,21 @@ function completedOnboarding(): OwnPlayerOnboarding {
     ...foundOnboarding(),
     status: 'completed',
     currentStep: 'completed',
+    surveyVersion: 'initial_level_v2',
     revision: 5,
     consents: [
       { kind: 'cancellation', documentVersion: '2026-08-01' },
       { kind: 'privacy', documentVersion: '2026-08-01' },
       { kind: 'terms', documentVersion: '2026-08-01' },
     ],
-    surveyAnswers: { experience: 'beginner' },
+    surveyAnswers: {
+      match_count: 'thirty_one_to_ninety_nine',
+      rally_stability: 'steady_under_pressure',
+      glass_play: 'confident_returns',
+      serve_return_net: 'confident_patterns',
+      match_experience_year: 'league_or_club',
+    },
+    initialLevelLabel: 'B+',
   };
 }
 
@@ -166,7 +174,11 @@ async function createHarness(): Promise<Harness> {
     >()
     .mockResolvedValue({
       outcome: 'advanced',
-      onboarding: { ...foundOnboarding(), currentStep: 'consents', revision: 3 },
+      onboarding: {
+        ...foundOnboarding(),
+        currentStep: 'consents',
+        revision: 3,
+      },
     });
   const nowEpochSeconds = jest.fn<
     ReturnType<SessionAuthenticationClock['nowEpochSeconds']>,
@@ -270,8 +282,14 @@ function completionBody(expectedRevision = 4) {
       { kind: 'cancellation', documentVersion: '2026-08-01' },
     ],
     survey: {
-      version: 'initial_level_v1',
-      answers: { experience: 'beginner' },
+      version: 'initial_level_v2',
+      answers: {
+        match_count: 'thirty_one_to_ninety_nine',
+        rally_stability: 'steady_under_pressure',
+        glass_play: 'confident_returns',
+        serve_return_net: 'confident_patterns',
+        match_experience_year: 'league_or_club',
+      },
     },
   };
 }
@@ -307,11 +325,7 @@ function levelSurveyProgressBody(
   };
 }
 
-function postProgress(
-  harness: Harness,
-  body: unknown,
-  authorization?: string,
-) {
+function postProgress(harness: Harness, body: unknown, authorization?: string) {
   const headers: Record<string, string> = {};
   if (authorization !== undefined) {
     headers.authorization = authorization;
@@ -390,6 +404,21 @@ describe('PlayerOnboardingController HTTP boundary', () => {
     const logs = JSON.stringify(harness.logs);
     expect(logs).not.toContain(PHONE_MARKER);
     expect(logs).not.toContain(EMAIL_MARKER);
+  });
+
+  it('returns only the completed owner initial-level label on relogin', async () => {
+    harness.readOwnOnboarding.mockResolvedValueOnce({
+      outcome: 'found',
+      onboarding: completedOnboarding(),
+    });
+
+    const response = await inject(harness, `Bearer ${CREDENTIAL}`);
+
+    expect(response.statusCode).toBe(200);
+    expectNoStore(response);
+    expect(response.json()).toEqual(completedOnboarding());
+    expect(response.json()).toMatchObject({ initialLevelLabel: 'B+' });
+    expect(response.body).not.toMatch(/initialLevelScore|isVerified|rating/iu);
   });
 
   it.each([
@@ -679,12 +708,12 @@ describe('PlayerOnboardingController HTTP boundary', () => {
   });
 
   it.each([
-    ['extra owner selector', { ...progressBody(), accountId: OTHER_ACCOUNT_ID }],
-    ['unsafe revision', progressBody(0)],
     [
-      'silent skip payload',
-      { ...progressBody(), nextStep: 'level_survey' },
+      'extra owner selector',
+      { ...progressBody(), accountId: OTHER_ACCOUNT_ID },
     ],
+    ['unsafe revision', progressBody(0)],
+    ['silent skip payload', { ...progressBody(), nextStep: 'level_survey' }],
     [
       'duplicate consent kind',
       {
@@ -780,7 +809,7 @@ describe('PlayerOnboardingController HTTP boundary', () => {
       completionBody(),
       `Bearer ${CREDENTIAL}`,
     );
-    expect(response.statusCode).toBe(201);
+    expect(response.statusCode).toBe(200);
     expectNoStore(response);
     expect(harness.completeOwnOnboarding).toHaveBeenCalledWith({
       accountId: ACCOUNT_ID,
@@ -794,8 +823,14 @@ describe('PlayerOnboardingController HTTP boundary', () => {
           { kind: 'terms', documentVersion: '2026-08-01' },
         ],
         survey: {
-          version: 'initial_level_v1',
-          answers: { experience: 'beginner' },
+          version: 'initial_level_v2',
+          answers: {
+            match_count: 'thirty_one_to_ninety_nine',
+            rally_stability: 'steady_under_pressure',
+            glass_play: 'confident_returns',
+            serve_return_net: 'confident_patterns',
+            match_experience_year: 'league_or_club',
+          },
         },
       },
     });
@@ -803,8 +838,11 @@ describe('PlayerOnboardingController HTTP boundary', () => {
       status: 'completed',
       revision: 5,
       contacts: { assurance: 'declared' },
+      initialLevelLabel: 'B+',
     });
-    expect(response.body).not.toMatch(/isVerified|verified|rating/iu);
+    expect(response.body).not.toMatch(
+      /initialLevelScore|isVerified|verified|rating/iu,
+    );
   });
 
   it('rejects unauthorized completion before the service', async () => {

@@ -73,6 +73,22 @@ function completedState() {
   };
 }
 
+function completedV2State(initialLevelLabel = 'B+') {
+  return {
+    ...progressState('completed', 4, CONSENTS),
+    status: 'completed',
+    surveyVersion: 'initial_level_v2',
+    surveyAnswers: {
+      match_count: 'thirty_one_to_ninety_nine',
+      rally_stability: 'steady_under_pressure',
+      glass_play: 'confident_returns',
+      serve_return_net: 'confident_patterns',
+      match_experience_year: 'league_or_club',
+    },
+    initialLevelLabel,
+  };
+}
+
 function publicError(statusCode, code) {
   return {
     statusCode,
@@ -104,8 +120,14 @@ function completion(expectedRevision = 3) {
     flowVersion: 'tma_v1',
     consents: INPUT_CONSENTS,
     survey: {
-      version: 'initial_level_v1',
-      answers: { experience: 'beginner' },
+      version: 'initial_level_v2',
+      answers: {
+        match_count: 'thirty_one_to_ninety_nine',
+        rally_stability: 'steady_under_pressure',
+        glass_play: 'confident_returns',
+        serve_return_net: 'confident_patterns',
+        match_experience_year: 'league_or_club',
+      },
     },
   };
 }
@@ -184,7 +206,7 @@ describe('playerOnboardingClient', () => {
       .fn()
       .mockResolvedValueOnce(response(consentState))
       .mockResolvedValueOnce(response(surveyState))
-      .mockResolvedValueOnce(response(completedState()));
+      .mockResolvedValueOnce(response(completedV2State()));
     const client = clientFor(fetchImpl);
 
     await expect(client.read(CREDENTIAL)).resolves.toEqual({
@@ -196,7 +218,7 @@ describe('playerOnboardingClient', () => {
     ).resolves.toEqual({ outcome: 'advanced', onboarding: surveyState });
     await expect(client.complete(CREDENTIAL, completion())).resolves.toEqual({
       outcome: 'completed',
-      onboarding: completedState(),
+      onboarding: completedV2State(),
     });
 
     expect(fetchImpl.mock.calls.map(([url]) => url)).toEqual([
@@ -221,14 +243,54 @@ describe('playerOnboardingClient', () => {
       flowVersion: 'tma_v1',
       consents: progressBody.consents,
       survey: {
-        version: 'initial_level_v1',
-        answers: { experience: 'beginner' },
+        version: 'initial_level_v2',
+        answers: {
+          match_count: 'thirty_one_to_ninety_nine',
+          rally_stability: 'steady_under_pressure',
+          glass_play: 'confident_returns',
+          serve_return_net: 'confident_patterns',
+          match_experience_year: 'league_or_club',
+        },
       },
     });
     expect(JSON.stringify({ progressBody, completionBody })).not.toMatch(
       /requestKey|verified|rating/iu,
     );
     expect(surveyState.consents).toHaveLength(4);
+  });
+
+  it('loads and reloads only the server-computed label for a completed v2 owner', async () => {
+    const completed = completedV2State('C+');
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(response(completed))
+      .mockResolvedValueOnce(response(completed));
+    const client = clientFor(fetchImpl);
+
+    await expect(client.read(CREDENTIAL)).resolves.toEqual({
+      outcome: 'loaded',
+      onboarding: completed,
+    });
+    await expect(client.read(CREDENTIAL)).resolves.toEqual({
+      outcome: 'loaded',
+      onboarding: completed,
+    });
+    expect(JSON.stringify(completed)).not.toMatch(
+      /initialLevelScore|isVerified|verified|rating/iu,
+    );
+  });
+
+  it('keeps legacy completed states compatible without an initial-level label', async () => {
+    const legacyCompleted = completedState();
+    const client = clientFor(
+      vi.fn().mockResolvedValue(response(legacyCompleted)),
+    );
+
+    await expect(client.read(CREDENTIAL)).resolves.toEqual({
+      outcome: 'loaded',
+      onboarding: legacyCompleted,
+    });
+    expect(readPlayerOnboardingState(legacyCompleted)).toEqual(legacyCompleted);
   });
 
   it('maps unauthorized without retrying or exposing the credential', async () => {
@@ -368,6 +430,37 @@ describe('playerOnboardingClient', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     expect(readPlayerOnboardingState(expandedState)).toBeNull();
   });
+
+  it.each([
+    [
+      'missing completed v2 label',
+      (() => {
+        const { initialLevelLabel: _label, ...state } = completedV2State();
+        return state;
+      })(),
+    ],
+    ['invalid completed v2 label', completedV2State('S')],
+    ['private score field', { ...completedV2State(), initialLevelScore: 14 }],
+    [
+      'label on in-progress state',
+      { ...progressState('profile', 1), initialLevelLabel: 'C' },
+    ],
+    [
+      'label on legacy completion',
+      { ...completedState(), initialLevelLabel: 'C' },
+    ],
+  ])(
+    'rejects a malformed or expanded response with %s',
+    async (_label, state) => {
+      const client = clientFor(vi.fn().mockResolvedValue(response(state)));
+
+      await expect(client.read(CREDENTIAL)).resolves.toEqual({
+        outcome: 'rejected',
+        reason: 'internal_error',
+      });
+      expect(readPlayerOnboardingState(state)).toBeNull();
+    },
+  );
 
   it('rejects invalid owner inputs before fetch and requires no-store responses', async () => {
     const fetchImpl = vi

@@ -1,5 +1,9 @@
 import { QueryResultRow } from 'pg';
 import { isAccountId } from '../accounts/account.types';
+import {
+  PLAYER_ONBOARDING_INITIAL_LEVEL_SURVEY_VERSION,
+  type PlayerOnboardingInitialLevelLabel,
+} from '../auth/player-onboarding-initial-level';
 import { PostgresCodecError, decodePostgresBigint } from './postgres-codecs';
 import { classifyPostgresError } from './postgres-error-classifier';
 import {
@@ -29,6 +33,7 @@ const FIND_PLAYER_ONBOARDING_SQL = `
     state.current_step,
     state.survey_version,
     state.survey_answers,
+    state.initial_level_label,
     state.revision,
     COALESCE((
       SELECT jsonb_agg(
@@ -71,6 +76,15 @@ const CONSENT_KINDS = Object.freeze([
   'privacy',
   'cancellation',
 ] as const);
+const INITIAL_LEVEL_LABELS = Object.freeze([
+  'D',
+  'D+',
+  'C',
+  'C+',
+  'B',
+  'B+',
+  'A',
+] as const);
 
 interface PlayerOnboardingRow extends QueryResultRow {
   readonly account_id: unknown;
@@ -84,6 +98,7 @@ interface PlayerOnboardingRow extends QueryResultRow {
   readonly current_step: unknown;
   readonly survey_version: unknown;
   readonly survey_answers: unknown;
+  readonly initial_level_label: unknown;
   readonly revision: unknown;
   readonly consents: unknown;
 }
@@ -209,6 +224,7 @@ function readState(
       row.current_step !== null ||
       row.survey_version !== null ||
       row.survey_answers !== null ||
+      row.initial_level_label !== null ||
       row.revision !== null
     ) {
       throw failure('invalid_persisted_state');
@@ -237,8 +253,22 @@ function readState(
 
   const revision = decodePostgresBigint(row.revision);
   const surveyAnswers = readSurveyAnswers(row.survey_answers);
+  const exposesInitialLevel =
+    row.status === 'completed' &&
+    row.survey_version === PLAYER_ONBOARDING_INITIAL_LEVEL_SURVEY_VERSION;
+  const initialLevelLabel = exposesInitialLevel
+    ? typeof row.initial_level_label === 'string' &&
+      INITIAL_LEVEL_LABELS.includes(
+        row.initial_level_label as PlayerOnboardingInitialLevelLabel,
+      )
+      ? (row.initial_level_label as PlayerOnboardingInitialLevelLabel)
+      : undefined
+    : row.initial_level_label === null
+      ? null
+      : undefined;
   if (
     revision < 1 ||
+    initialLevelLabel === undefined ||
     (row.status === 'completed'
       ? row.current_step !== 'completed' ||
         Object.keys(surveyAnswers).length === 0
@@ -253,6 +283,7 @@ function readState(
     currentStep: row.current_step as PlayerOnboardingStep,
     surveyVersion: row.survey_version,
     surveyAnswers,
+    initialLevelLabel,
     revision,
   });
 }

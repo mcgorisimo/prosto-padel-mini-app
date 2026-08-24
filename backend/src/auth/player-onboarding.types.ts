@@ -1,5 +1,9 @@
 import { AccountId, UserRole, isAccountId } from '../accounts/account.types';
 import {
+  PLAYER_ONBOARDING_INITIAL_LEVEL_SURVEY_VERSION,
+  type PlayerOnboardingInitialLevelLabel,
+} from './player-onboarding-initial-level';
+import {
   PlayerOnboardingConsentKind,
   PlayerOnboardingStep,
 } from '../database/player-onboarding-reader';
@@ -84,6 +88,7 @@ export interface OwnPlayerOnboarding {
   }>;
   readonly consents: readonly OwnPlayerOnboardingConsent[];
   readonly surveyAnswers: Readonly<Record<string, string>>;
+  readonly initialLevelLabel?: PlayerOnboardingInitialLevelLabel;
 }
 
 export type ReadOwnPlayerOnboardingResult =
@@ -169,6 +174,26 @@ const CONSENT_KINDS = Object.freeze([
   'terms',
   'privacy',
   'cancellation',
+] as const);
+const INITIAL_LEVEL_LABELS = Object.freeze([
+  'D',
+  'D+',
+  'C',
+  'C+',
+  'B',
+  'B+',
+  'A',
+] as const);
+const OWN_ONBOARDING_KEYS = Object.freeze([
+  'status',
+  'flowVersion',
+  'currentStep',
+  'surveyVersion',
+  'revision',
+  'profile',
+  'contacts',
+  'consents',
+  'surveyAnswers',
 ] as const);
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
@@ -287,19 +312,18 @@ function isSurveyAnswers(value: unknown): value is Record<string, string> {
 export function isOwnPlayerOnboarding(
   value: unknown,
 ): value is OwnPlayerOnboarding {
+  const exposesInitialLevel =
+    isPlainRecord(value) &&
+    value.status === 'completed' &&
+    value.surveyVersion === PLAYER_ONBOARDING_INITIAL_LEVEL_SURVEY_VERSION;
   if (
     !isPlainRecord(value) ||
-    !hasExactlyKeys(value, [
-      'status',
-      'flowVersion',
-      'currentStep',
-      'surveyVersion',
-      'revision',
-      'profile',
-      'contacts',
-      'consents',
-      'surveyAnswers',
-    ]) ||
+    !hasExactlyKeys(
+      value,
+      exposesInitialLevel
+        ? [...OWN_ONBOARDING_KEYS, 'initialLevelLabel']
+        : OWN_ONBOARDING_KEYS,
+    ) ||
     !['required', 'in_progress', 'completed'].includes(
       value.status as string,
     ) ||
@@ -310,7 +334,12 @@ export function isOwnPlayerOnboarding(
     !isProfile(value.profile) ||
     !isContacts(value.contacts) ||
     !isConsents(value.consents) ||
-    !isSurveyAnswers(value.surveyAnswers)
+    !isSurveyAnswers(value.surveyAnswers) ||
+    (exposesInitialLevel &&
+      (typeof value.initialLevelLabel !== 'string' ||
+        !INITIAL_LEVEL_LABELS.includes(
+          value.initialLevelLabel as PlayerOnboardingInitialLevelLabel,
+        )))
   ) {
     return false;
   }

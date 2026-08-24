@@ -27,6 +27,27 @@ const ONBOARDING_STEPS = Object.freeze([
   'completed',
 ]);
 const CONSENT_KINDS = Object.freeze(['terms', 'privacy', 'cancellation']);
+const INITIAL_LEVEL_SURVEY_VERSION = 'initial_level_v2';
+const INITIAL_LEVEL_LABELS = Object.freeze([
+  'D',
+  'D+',
+  'C',
+  'C+',
+  'B',
+  'B+',
+  'A',
+]);
+const ONBOARDING_STATE_KEYS = Object.freeze([
+  'status',
+  'flowVersion',
+  'currentStep',
+  'surveyVersion',
+  'revision',
+  'profile',
+  'contacts',
+  'consents',
+  'surveyAnswers',
+]);
 
 function frozen(outcome, extra = {}) {
   return Object.freeze({ outcome, ...extra });
@@ -139,18 +160,17 @@ function readSurveyAnswers(value, requireAnswers = false) {
 }
 
 export function readPlayerOnboardingState(value) {
+  const exposesInitialLevel =
+    isPlainObject(value) &&
+    value.status === 'completed' &&
+    value.surveyVersion === INITIAL_LEVEL_SURVEY_VERSION;
   if (
-    !hasExactKeys(value, [
-      'status',
-      'flowVersion',
-      'currentStep',
-      'surveyVersion',
-      'revision',
-      'profile',
-      'contacts',
-      'consents',
-      'surveyAnswers',
-    ]) ||
+    !hasExactKeys(
+      value,
+      exposesInitialLevel
+        ? [...ONBOARDING_STATE_KEYS, 'initialLevelLabel']
+        : ONBOARDING_STATE_KEYS,
+    ) ||
     !['required', 'in_progress', 'completed'].includes(value.status) ||
     !ONBOARDING_STEPS.includes(value.currentStep) ||
     !hasExactKeys(value.profile, ['firstName', 'lastName']) ||
@@ -169,7 +189,9 @@ export function readPlayerOnboardingState(value) {
       value.contacts.normalizedEmail === null ||
       isCanonicalEmail(value.contacts.normalizedEmail)
     ) ||
-    value.contacts.assurance !== 'declared'
+    value.contacts.assurance !== 'declared' ||
+    (exposesInitialLevel &&
+      !INITIAL_LEVEL_LABELS.includes(value.initialLevelLabel))
   ) {
     return null;
   }
@@ -218,6 +240,9 @@ export function readPlayerOnboardingState(value) {
     }),
     consents,
     surveyAnswers,
+    ...(exposesInitialLevel
+      ? { initialLevelLabel: value.initialLevelLabel }
+      : {}),
   });
 }
 

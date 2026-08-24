@@ -186,6 +186,7 @@ function publicOnboarding(
       'currentStep',
       'surveyVersion',
       'surveyAnswers',
+      'initialLevelLabel',
       'revision',
     ])
   ) {
@@ -206,6 +207,9 @@ function publicOnboarding(
       },
       consents: copyConsents(value.consents),
       surveyAnswers: copyAnswers(value.state.surveyAnswers),
+      ...(value.state.initialLevelLabel === null
+        ? {}
+        : { initialLevelLabel: value.state.initialLevelLabel }),
     };
   } else {
     return undefined;
@@ -598,6 +602,7 @@ export class PlayerOnboardingService {
             );
             if (
               onboarding === undefined ||
+              onboarding.initialLevelLabel !== completed.initialLevelLabel ||
               !completedMatches(onboarding, input, completed.revision, policy)
             ) {
               throw storageInvariantFailure();

@@ -149,6 +149,7 @@ function draftResult(): ReadPlayerOnboardingResult {
         currentStep: 'level_survey',
         surveyVersion: 'initial_level_v2',
         surveyAnswers: SURVEY_ANSWERS,
+        initialLevelLabel: null,
         revision: 4,
       },
       consents: [
@@ -174,6 +175,7 @@ function savedDraftResult(revision: number): ReadPlayerOnboardingResult {
         currentStep: 'profile',
         surveyVersion: 'initial_level_v2',
         surveyAnswers: {},
+        initialLevelLabel: null,
         revision,
       },
       consents: [],
@@ -199,6 +201,7 @@ function progressResult(
         currentStep,
         surveyVersion: 'initial_level_v2',
         surveyAnswers: {},
+        initialLevelLabel: null,
         revision,
       },
       consents:
@@ -228,6 +231,7 @@ function completedResult(): ReadPlayerOnboardingResult {
         currentStep: 'completed',
         surveyVersion: 'initial_level_v2',
         surveyAnswers: SURVEY_ANSWERS,
+        initialLevelLabel: 'B+',
         revision: 5,
       },
       consents: [
@@ -235,6 +239,25 @@ function completedResult(): ReadPlayerOnboardingResult {
         { kind: 'privacy', documentVersion: '2026-08-01' },
         { kind: 'terms', documentVersion: '2026-08-01' },
       ],
+    },
+  };
+}
+
+function legacyCompletedResult(): ReadPlayerOnboardingResult {
+  const completed = completedResult();
+  if (completed.outcome !== 'found' || completed.onboarding.state === null) {
+    throw new Error('Expected completed fixture');
+  }
+  return {
+    outcome: 'found',
+    onboarding: {
+      ...completed.onboarding,
+      state: {
+        ...completed.onboarding.state,
+        surveyVersion: 'initial_level_v1',
+        surveyAnswers: { experience: 'beginner' },
+        initialLevelLabel: null,
+      },
     },
   };
 }
@@ -375,6 +398,64 @@ describe('PlayerOnboardingService', () => {
         expect(serialized).not.toContain(forbidden);
       }
     }
+  });
+
+  it('returns only the server-computed label when the owner rereads completed initial-level v2', async () => {
+    const harness = createHarness(completedResult());
+    const result = await harness.service.readOwnOnboarding({
+      accountId: ACCOUNT_ID,
+      role: 'player',
+    });
+
+    expect(result.outcome).toBe('found');
+    if (result.outcome === 'found') {
+      expect(result.onboarding.initialLevelLabel).toBe('B+');
+      expect(result.onboarding).not.toHaveProperty('initialLevelScore');
+      expect(JSON.stringify(result.onboarding)).not.toMatch(
+        /isVerified|verified|rating/iu,
+      );
+    }
+  });
+
+  it('keeps a legacy completed owner compatible without exposing an initial-level label', async () => {
+    const harness = createHarness(legacyCompletedResult());
+    const result = await harness.service.readOwnOnboarding({
+      accountId: ACCOUNT_ID,
+      role: 'player',
+    });
+
+    expect(result.outcome).toBe('found');
+    if (result.outcome === 'found') {
+      expect(result.onboarding.status).toBe('completed');
+      expect(result.onboarding.surveyVersion).toBe('initial_level_v1');
+      expect(result.onboarding).not.toHaveProperty('initialLevelLabel');
+    }
+  });
+
+  it('fails closed when completed initial-level v2 persistence omits its label', async () => {
+    const completed = completedResult();
+    if (completed.outcome !== 'found' || completed.onboarding.state === null) {
+      throw new Error('Expected completed fixture');
+    }
+    const stateWithoutLabel = Object.fromEntries(
+      Object.entries(completed.onboarding.state).filter(
+        ([key]) => key !== 'initialLevelLabel',
+      ),
+    );
+    const harness = createHarness({
+      outcome: 'found',
+      onboarding: {
+        ...completed.onboarding,
+        state: stateWithoutLabel,
+      },
+    } as never);
+
+    await expect(
+      harness.service.readOwnOnboarding({
+        accountId: ACCOUNT_ID,
+        role: 'player',
+      }),
+    ).resolves.toEqual({ outcome: 'rejected', reason: 'internal_failure' });
   });
 
   it('rejects a club admin before opening a player onboarding transaction', async () => {
@@ -890,6 +971,7 @@ describe('PlayerOnboardingService', () => {
           { kind: 'terms', documentVersion: '2026-08-01' },
         ],
         surveyAnswers: SURVEY_ANSWERS,
+        initialLevelLabel: 'B+',
       },
     });
     expect(harness.run).toHaveBeenCalledTimes(1);

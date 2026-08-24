@@ -579,6 +579,7 @@ export class PlayerOnboardingController {
   }
 
   @Post('me/complete')
+  @HttpCode(HttpStatus.OK)
   @UseGuards(SessionBearerGuard)
   async complete(
     @Body() body: unknown,

@@ -1,4 +1,5 @@
 import { AccountId } from '../accounts/account.types';
+import type { PlayerOnboardingInitialLevelLabel } from '../auth/player-onboarding-initial-level';
 import { PostgresTransaction } from './postgres-transaction';
 
 export type PlayerOnboardingStep =
@@ -12,6 +13,7 @@ export interface PlayerOnboardingStateRecord {
   readonly currentStep: PlayerOnboardingStep;
   readonly surveyVersion: string;
   readonly surveyAnswers: Readonly<Record<string, string>>;
+  readonly initialLevelLabel: PlayerOnboardingInitialLevelLabel | null;
   readonly revision: number;
 }
 

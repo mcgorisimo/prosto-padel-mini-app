@@ -6948,3 +6948,41 @@
   and no dependency, lockfile or runtime artifact remains changed.
 - Independent read-only review of the exact one-file closeout diff passed
   acceptance with `P0=0`, `P1=0`; no correction was required.
+
+### 2026-08-24 — D5.1 completed initial-level label response contract candidate
+
+- Work started from clean exact detached main
+  `c4c4ecf6d5fcaf5346976394b020a4de4e6312c1`. Applied-verified migration 039
+  already persists the constrained server-computed label, so no migration or
+  schema change is needed for this slice; applied migrations remain unchanged.
+- The owner-scoped PostgreSQL onboarding reader now loads only
+  `initial_level_label` in addition to the existing state fields and validates
+  it fail-closed. Authenticated GET and completion responses expose
+  `initialLevelLabel` only when the persisted state is `completed` with survey
+  version `initial_level_v2`. The response never exposes the score, formula,
+  caps, calculation reasons, rating or `isVerified`.
+- Required, in-progress and legacy completed states retain their previous exact
+  response shape without `initialLevelLabel`. The frontend onboarding client
+  accepts only the seven allowed labels for completed `initial_level_v2`,
+  requires the label there, and rejects missing, invalid or extra response
+  fields including `initialLevelScore`. No UI, browser storage or logging path
+  was changed.
+- Completion now explicitly returns HTTP `200`, matching the existing strict
+  frontend client contract and avoiding a false client error after a successful
+  atomic completion. Authentication, owner scoping, declared contact assurance,
+  PII-safe errors and no-store behavior remain unchanged.
+- Focused backend controller/service/PostgreSQL-reader regressions passed
+  `151/151`; focused frontend-client regressions passed `15/15`. Backend
+  typecheck, backend E2E (`4/4`) and backend build passed. The complete backend
+  unit command ran `3739` tests: `3738` passed and its only failure is the
+  unchanged migration-038 CRLF-sensitive substring baseline outside this diff.
+  Root E2E passed `99` tests with `1` intentional skip; root build passed with
+  `1623` modules and only the existing large-chunk advisory.
+- This candidate changes backend runtime behavior and the frontend client
+  contract. Deployment is `deployment_deferred_by_user` pending separate
+  commit, integration and Selectel test backend+frontend rollout/smoke gates.
+  No commit, push, integration, SSH/DB/schema command, container action,
+  API/provider write, env/secret change or production action occurred in this
+  local checkpoint.
+- Independent read-only review of the exact 11-file candidate diff passed
+  acceptance with `P0=0`, `P1=0`; no correction was required.
