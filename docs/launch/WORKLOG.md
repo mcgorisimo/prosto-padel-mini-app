@@ -6888,3 +6888,63 @@
   WORKLOG file.
 - Independent read-only review of the exact one-file closeout diff passed
   acceptance with `P0=0`, `P1=0`; no correction was required.
+
+### 2026-08-24 — D5.1 authenticated initial-level v2 backend smoke on Selectel test
+
+- The one-time PII-free authenticated smoke targeted Selectel test host
+  `prosto-padel-test-01` and Compose project `prosto-padel-test`. Preflight
+  confirmed the clean exact deployed checkout
+  `83055aa595d6e477d6094034c60b89ba0c27b3bf`, whose backend tree is identical
+  to integrated main `0bbccb154fdaea273c72954825a8636f6371c614`, backend container
+  `319a43559bbdb094746a534196bb1a166d2e5c6926d7394ab96db68f72bcdf3d`,
+  image `sha256:df19c39cf6948cfbd6373c529367382fb2d41bb4b8fb3169bf36b7a7ba42cd95`,
+  healthy status, restart count `0` and internal health `200`.
+- Exact migration-039 POSTCHECK SHA-256
+  `F98744A79E6C3F4363CD4F7F49502327FFD567286799897562B7A8A6C523035D`
+  passed again read-only with exit `0`, empty stderr, `applied=true` and terminal
+  `ROLLBACK`. Migration 039 remained `applied_verified` and was not applied
+  again.
+- The syntax-checked in-memory runner SHA-256
+  `D10A274C64E62D5B28256BE3B5C14189D18018BB2B4DD289DF71A117618FF34E`
+  ran remotely exactly once, from `2026-08-24T09:10:26.437Z` through
+  `2026-08-24T09:10:26.746Z`, with exit `0` and empty stderr. Local orchestration
+  and syntax guards stopped two earlier preparation attempts before SSH/API/DB
+  execution, so they created no session or fixture and did not duplicate the
+  authorized runner.
+- The complete sequence passed: `login/new` -> `GET required/null` ->
+  `PATCH profile/revision 1` -> `progress consents/revision 2` -> `progress
+  level_survey` with the exact three test-only legal versions at revision `3` ->
+  `completion` for `tma_v1` plus five `initial_level_v2` option IDs at revision
+  `4` -> exact completion retry returning the same completed revision `4` ->
+  different completion request returning `409` -> `GET completed/4` -> logout
+  `204` -> old bearer `401` -> second login as existing -> `GET completed/4`
+  without repeated onboarding -> logout `204` -> second old bearer `401`.
+- Read-only fixture evidence confirmed `status=completed`, `revision=4`,
+  `survey_version=initial_level_v2`, `initial_level_score=20` and
+  `initial_level_label=A`. Player rating and `isVerified` remained unchanged.
+  Exactly one PII-free synthetic fixture remains with declared synthetic contacts
+  and three test-only consent records that are not real user acceptances;
+  notification permission was not requested.
+- Secret material, bearer tokens, Telegram init data, request/response bodies,
+  identifiers, contacts and PII were not emitted. Final bounded count-only logs
+  from the runner start reported backend critical `0`, backend `5xx=0`, nginx
+  critical `0` and nginx `5xx=0`.
+- The checkout remained clean and exact; backend stayed healthy at restart count
+  `0`. Frontend, nginx and PostgreSQL container identities remained unchanged.
+  No checkout/file, container, DB schema/migration, runtime, env/secret,
+  TLS/nginx, provider API or production change occurred during the smoke.
+  Deployment status is
+  `deployment=applied_verified_with_authenticated_initial_level_v2_smoke_pass`.
+  This append-only closeout itself is docs-only with `deployment=not_needed`.
+- Required local root build passed with `1623` modules and only the existing
+  large-chunk advisory. The full root E2E run completed with `98` passed, `1`
+  intentional skip and one 30-second timeout in the unchanged backend-chat draft
+  scenario; the exact timed-out scenario then passed `1/1` sequentially through
+  the repository's server-owning E2E wrapper. Earlier local gate attempts stopped
+  before test execution because the isolated worktree had no dependency tree and
+  sandboxed esbuild could not traverse the verified dependency junction. The
+  identical read-enabled runs above used the installed tree whose `package.json`
+  and lockfile content matched this checkout; the temporary junction was removed
+  and no dependency, lockfile or runtime artifact remains changed.
+- Independent read-only review of the exact one-file closeout diff passed
+  acceptance with `P0=0`, `P1=0`; no correction was required.
