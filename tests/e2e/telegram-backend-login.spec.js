@@ -438,6 +438,36 @@ test.describe('Telegram backend login feature enabled', () => {
     await expect(page.getByTestId('profile-player-level-summary')).toHaveText(
       'Начальный уровень · D+',
     );
+    await expect(page.getByTestId('profile-club-rating-pending')).toHaveText(
+      'Клубный рейтинг пока не сформирован',
+    );
+    await expect(
+      page.getByText('Текущий клубный рейтинг: 3.00 · C'),
+    ).toHaveCount(0);
+    const selectedInitialLevel = page.getByTestId('profile-level-d-plus');
+    await expect(selectedInitialLevel).toHaveAttribute('aria-current', 'true');
+    await expect(selectedInitialLevel).toHaveAttribute('data-active', 'true');
+    const selectedStyle = await selectedInitialLevel.evaluate((element) => {
+      const style = window.getComputedStyle(element);
+      return {
+        backgroundColor: style.backgroundColor,
+        borderWidth: style.borderTopWidth,
+        boxShadow: style.boxShadow,
+        fontWeight: style.fontWeight,
+      };
+    });
+    expect(selectedStyle.backgroundColor).toBe('rgba(216, 243, 74, 0.16)');
+    expect(selectedStyle.borderWidth).toBe('1px');
+    expect(selectedStyle.boxShadow).not.toBe('none');
+    expect(Number(selectedStyle.fontWeight)).toBeGreaterThanOrEqual(700);
+    expect(await selectedInitialLevel.evaluate((element) => element.tabIndex)).toBe(-1);
+    const inactiveLevel = page.getByTestId('profile-level-c');
+    await expect(inactiveLevel).not.toHaveAttribute('aria-current');
+    expect(
+      await inactiveLevel.evaluate(
+        (element) => window.getComputedStyle(element).color,
+      ),
+    ).toBe('rgba(245, 241, 232, 0.62)');
     const localValues = await page.evaluate(() =>
       Array.from(
         { length: localStorage.length },

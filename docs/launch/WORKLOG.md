@@ -7205,3 +7205,52 @@
   `1 skipped`, and `npm.cmd run build` completed with `1624` modules and only
   the existing large-chunk advisory. Independent read-only review of this
   exact one-file diff passed with `P0=0`, `P1=0`.
+
+### 2026-08-24 — D5.1 unverified initial-level profile presentation correction candidate
+
+- Work started from clean exact main
+  `cb491f5bea76c11c0bf1bc756c214bb30d054c66`. Owner mobile screenshots
+  confirmed two remaining P1 presentation defects after the previous rollout:
+  Home and the profile header correctly showed the server-computed initial
+  level `D+`, while the lower rating card still presented the separate
+  unverified club default as `3.00 · C`, and the current `D+` cell had lost its
+  visible selected-state highlight. Visible owner PII was not copied into code,
+  tests, WORKLOG or logs.
+- The rating card now receives only a boolean presentation state derived from
+  the existing completed-v2 initial-level boundary. When that state is active
+  and no trusted rating-match history exists, it shows the neutral
+  `Клубный рейтинг пока не сформирован` state and omits the default numeric
+  value. Verified/trusted numeric club-rating presentation and the legacy
+  no-v2 fallback remain unchanged; persisted rating, `rating.isVerified`,
+  rating history and backend contracts are not modified.
+- The read-only profile level scale now marks exactly one item with
+  `aria-current` and uses one explicit valid accent background, border, glow
+  and stronger weight. This removes the invalid `rgba(...)cc`/`rgba(...)66`
+  construction that made `D+` lose its background and shadow, keeps the scale
+  non-interactive, and makes the selected state distinguishable without relying
+  on text color alone.
+- Focused RatingChart regressions passed `3/3`, existing pure presentation
+  regressions passed `8/8`, and the focused mobile Home/Profile regression
+  passed `1/1`, including absence of the misleading default, valid selected
+  styling, completed-v2 display and PII/credential storage/log safety.
+  Mandatory root E2E passed `99` tests with `1` intentional skip; production
+  build passed with `1624` modules and only the existing large-chunk advisory.
+- Focused ESLint introduced no new finding: the changed RatingChart and test
+  files pass, while `PlayerProfile.jsx` retains its four inherited main-branch
+  findings outside this bounded correction.
+- The first independent UI/accessibility review found one P1 in the candidate:
+  inactive level labels used a roughly `2.9:1` dark-mode text pair. The exact
+  issue was corrected to the existing muted token (roughly `6.7:1`), and the
+  focused browser regression now locks both that computed color and the
+  non-focusable read-only semantics. After that correction, the focused mobile
+  regression repeated `1/1`, root E2E repeated `99` passed with `1` intentional
+  skip, and the production build repeated with `1624` modules.
+- This candidate changes the frontend bundle, so deployment is
+  `deployment_deferred_by_user` pending separate commit, integration, Selectel
+  test frontend rollout and manual TMA verification gates. Backend/schema, DB
+  data, rating state/history, env/secrets, provider API and production were not
+  changed; no commit, push, SSH, API write, restart, rebuild or rollout occurred
+  in this checkpoint.
+- Final independent contract/state and mobile UI/accessibility reviews of the
+  corrected exact candidate diff both passed with `P0=0`, `P1=0`; no further
+  correction was required.

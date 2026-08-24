@@ -982,22 +982,36 @@ export function ProfilePhotoManager({
 
 function LevelSelector({ currentLevel }) {
   return (
-    <div style={{ display: 'flex', gap: '6px' }}>
+    <div
+      aria-label="Шкала уровня игры"
+      role="list"
+      style={{ display: 'flex', gap: '6px' }}
+    >
       {RATING_CONFIG.levels.map((lvl) => {
         const active = lvl.label === currentLevel?.label;
+        const testId = lvl.label.toLowerCase().replace('+', '-plus');
         return (
           <div
+            aria-current={active ? 'true' : undefined}
+            aria-label={active ? `${lvl.label}, текущий уровень` : lvl.label}
+            data-active={active ? 'true' : 'false'}
+            data-testid={`profile-level-${testId}`}
             key={lvl.label}
+            role="listitem"
             style={{
               flex: 1, padding: '10px 0',
               borderRadius: '10px', textAlign: 'center',
-              border: active ? 'none' : `1px solid ${C.border}`,
+              border: active
+                ? '1px solid rgba(216,243,74,0.72)'
+                : `1px solid ${C.border}`,
               background: active
-                ? `linear-gradient(135deg, ${lvl.color}, ${lvl.color}cc)`
+                ? 'rgba(216,243,74,0.16)'
                 : C.card,
-              color: active ? '#fff' : '#334155',
+              color: active ? C.accent : C.muted,
               fontSize: '13px', fontWeight: active ? 800 : 500,
-              boxShadow: active ? `0 4px 12px ${lvl.color}66` : 'none',
+              boxShadow: active
+                ? 'inset 0 0 0 1px rgba(216,243,74,0.14), 0 0 16px rgba(216,243,74,0.18)'
+                : 'none',
               userSelect: 'none',
             }}
           >
@@ -1386,6 +1400,7 @@ export default function PlayerProfile({ user, stats, upcomingMatches = [], compl
         <RatingChart
           currentRating={currentRating}
           completedMatches={completedMatches}
+          isClubRatingPending={levelPresentation.isInitialLevel && !isVerified}
           userId={user?.id}
         />
 

@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import { useMemo } from 'react';
 import { getLevelForRating } from '../lib/ratingEngine';
 import { isRatingMatch } from '../lib/matchRating';
 
@@ -38,7 +38,12 @@ function buildPath(points, minVal, maxVal) {
   }).join(' ');
 }
 
-export default function RatingChart({ currentRating, completedMatches = [], userId }) {
+export default function RatingChart({
+  currentRating,
+  completedMatches = [],
+  userId,
+  isClubRatingPending = false,
+}) {
   const points = useMemo(() => {
     if (!userId) return [];
 
@@ -70,6 +75,7 @@ export default function RatingChart({ currentRating, completedMatches = [], user
   const max = Math.max(...values);
   const path = hasTrustedHistory ? buildPath(points, min, max) : '';
   const totalDelta = hasTrustedHistory && points.length > 1 ? points[points.length - 1].rating - points[0].rating : 0;
+  const hideUnverifiedDefault = isClubRatingPending && !hasTrustedHistory;
 
   return (
     <div style={{
@@ -92,11 +98,25 @@ export default function RatingChart({ currentRating, completedMatches = [], user
 
       {!hasTrustedHistory ? (
         <>
-          <div style={{ color: C.text, fontSize: '15px', fontWeight: 700, marginBottom: '6px' }}>
-            Текущий клубный рейтинг: {fmt2(currentRating)} · {level.label}
-          </div>
+          {hideUnverifiedDefault ? (
+            <div
+              data-testid="profile-club-rating-pending"
+              style={{ color: C.text, fontSize: '15px', fontWeight: 700, marginBottom: '6px' }}
+            >
+              Клубный рейтинг пока не сформирован
+            </div>
+          ) : (
+            <div
+              data-testid="profile-club-rating-current"
+              style={{ color: C.text, fontSize: '15px', fontWeight: 700, marginBottom: '6px' }}
+            >
+              Текущий клубный рейтинг: {fmt2(currentRating)} · {level.label}
+            </div>
+          )}
           <div style={{ color: C.muted, fontSize: '13px', lineHeight: 1.55 }}>
-            Динамика рейтинга появится после рейтинговых матчей клуба.
+            {hideUnverifiedDefault
+              ? 'Числовой рейтинг появится после подтверждённых рейтинговых матчей клуба.'
+              : 'Динамика рейтинга появится после рейтинговых матчей клуба.'}
           </div>
         </>
       ) : (
