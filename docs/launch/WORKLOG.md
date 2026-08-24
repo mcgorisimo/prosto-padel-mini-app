@@ -7456,3 +7456,46 @@
   integration occurred. This candidate requires separate commit, integration
   and Selectel test migration gates, so
   `deployment=deployment_deferred_by_user`.
+
+### 2026-08-25 — D5.1 migration 040 Selectel test verification
+
+- The schema gate used exact integrated commit
+  `f428d602316acc4b8a416bffdb3aa2f7352d64cb` and the owner-confirmed Selectel
+  test PostgreSQL target `database=prosto_padel_test_migration_cycle`,
+  `user=prosto_padel_test` on `prosto-padel-test-01`. The first read-only target
+  probe stopped before PRECHECK on an invalid qualification of `current_user`;
+  the corrected probe then stopped on locally assumed database/user names.
+  Both stops occurred before any schema write, and the owner explicitly
+  confirmed the observed test target before the gate continued.
+- Exact PRECHECK
+  `040_backend_player_initial_level_reassessment_PRECHECK.sql` SHA-256
+  `E9EE7C1C23F891D782ADFB0B78D9952477EE07456D24645C93AC4BEE3D1FBE71`
+  passed with exit `0`, empty stderr, `ready=true` and terminal `ROLLBACK`.
+  It observed the migration-040 target absent, migration 039 current, three
+  completed `initial_level_v2` rows and two eligible completed
+  `initial_level_v1` rows.
+- Exact migration
+  `040_backend_player_initial_level_reassessment.sql` SHA-256
+  `120285E5CC42B90B7103799A83DC758187F4CC721640E8755AE0C1F173D5F438`
+  was applied exactly once. PostgreSQL emitted a separate case-sensitive
+  `COMMIT` line before the migration's intentional trailing result `SELECT`.
+  A local evidence parser initially treated the later `(1 row)` terminal line
+  as a failure and stopped; migration apply was not repeated, no rollback was
+  attempted and no further write followed.
+- Exact read-only POSTCHECK
+  `040_backend_player_initial_level_reassessment_POSTCHECK.sql` SHA-256
+  `79D2B8714DAB9DD92FBBA1BF92EEE6684411061F369794F791E06F3268EC2CE3`
+  then passed under a separate approval with exit `0`, empty stderr,
+  `applied=true` and terminal `ROLLBACK`. Migration 040 is
+  `applied_verified` and must not be applied again. It reported
+  `reassessment_rows_observed=0` and
+  `eligible_without_reassessment_rows_observed=2`.
+- POSTCHECK confirmed one reassessment per account, immutable source evidence,
+  no legacy backfill and unchanged rating state. `PUBLIC` has no access;
+  `backend_auth_app` has exact table `SELECT` and column-scoped `INSERT`, with
+  no table `INSERT`, `UPDATE`, `DELETE`, `TRUNCATE`, `REFERENCES` or `TRIGGER`
+  and no direct insert-guard function execution. Rollback was not executed.
+- Server checkout, containers, runtime, environment/secrets, provider API and
+  production were unchanged. No HTTP health, runtime smoke or log gate was
+  needed for this runtime-disconnected schema change. Deployment status is
+  `deployment=applied_verified_runtime_unchanged`.
