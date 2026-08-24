@@ -7254,3 +7254,60 @@
 - Final independent contract/state and mobile UI/accessibility reviews of the
   corrected exact candidate diff both passed with `P0=0`, `P1=0`; no further
   correction was required.
+
+### 2026-08-24 — D5.1 initial and club rating presentation rollout on Selectel test
+
+- The frontend-only rollout preflight passed for test host
+  `prosto-padel-test-01` and Compose project `prosto-padel-test`. The first
+  read-only Git probe ran as `root` and stopped with exit `128` on Git's
+  dubious-ownership protection before any checkout or container change. The
+  same checks then passed as the established checkout owner `prostopadel`,
+  without changing Git configuration: server checkout was clean exact
+  `b704a3911a79433b570bee7471a8d110c56567f6`, and actual remote
+  `origin/main` was exact
+  `2262a52e0744796579ab6c4e192c22a570c6fe84`.
+- The server checkout advanced by fast-forward to clean exact
+  `2262a52e0744796579ab6c4e192c22a570c6fe84`. Compose `config --quiet`
+  passed with the canonical `infra/test/.env.test`,
+  `infra/test/compose.yaml` and
+  `infra/test/compose.runtime-backend.yaml`. Frontend build ran from
+  `2026-08-24T18:02:38Z` to `2026-08-24T18:02:46Z`, completed with `1624`
+  modules and only the existing large-chunk advisory; frontend recreate ran
+  from `2026-08-24T18:02:57Z` to `2026-08-24T18:02:58Z` using
+  `--no-deps --force-recreate`.
+- Only frontend container
+  `399835c65edf6bf8cd3caa2c0706cecdef4ff05517c19e6e550e788ed9860c81`
+  was replaced by
+  `a4d00d97e0836bfcde4ae3816f415fa9e725d8c7ad0a9d4180f1914a8f3dae69`
+  using image
+  `sha256:e95ea6a3eade7f57bea615c1a5b55000ba07b3f8e066d6fd2ef6327158f40e0a`.
+  It finished healthy with restart count `0`. Backend
+  `971520a7f5e1ec5d1dd734d6c73dc38b99b9240cd8b0738abb914b22bf80559d`,
+  nginx `e5b98b53a385aef67465e097753fb54b060596d3c620af3cfb484a175d624be7`
+  and PostgreSQL
+  `5e36d4dc1a5c3e2fa658382cfc4a8dff7fe3ea2ba1a9834bb89cc83df743f7be`
+  were unchanged and remained healthy with restart count `0`.
+- Public HTTPS frontend, `/api/v1/health` and all three versioned test-only
+  Terms, Privacy and Cancellation URLs returned `200` with normal TLS
+  validation and verify result `0`. Bounded count-only logs from
+  `2026-08-24T18:02:57Z` reported frontend critical `0`, frontend `5xx=0`,
+  nginx critical `0` and nginx `5xx=0`; checkout remained clean and exact.
+- No authenticated onboarding request was executed. DB/schema, env/secrets,
+  TLS/nginx configuration, provider API and production were unchanged.
+  Deployment status is
+  `deployment=applied_with_manual_tma_initial_and_club_rating_smoke_pending`.
+  This append-only closeout itself is docs-only with
+  `deployment=not_needed`; the remaining acceptance gate is the owner's
+  manual TMA verification of the initial-level label, suppression of the
+  untrusted default club rating and visible selected-level highlight.
+- Mandatory root E2E passed `99` tests with `1` intentional skip. Two build
+  attempts in the clean primary worktree transformed all `1624` modules but
+  stopped before output on a local Windows `EPERM` lock held on the existing
+  `dist/assets`; no source file changed. The exact root build then passed in
+  the isolated worktree with `1624` modules and only the existing large-chunk
+  advisory. One initial sandboxed dependency-junction attempt was denied while
+  resolving Vite, after which the same bounded build passed with the required
+  filesystem permission. The temporary dependency junction and generated
+  `dist` were removed, leaving the exact one-file WORKLOG diff.
+- Independent read-only review of the exact final append-only diff passed with
+  `P0=0`, `P1=0`; no correction was required.
