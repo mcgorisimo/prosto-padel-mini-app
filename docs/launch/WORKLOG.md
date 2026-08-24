@@ -6986,3 +6986,63 @@
   local checkpoint.
 - Independent read-only review of the exact 11-file candidate diff passed
   acceptance with `P0=0`, `P1=0`; no correction was required.
+
+### 2026-08-24 — D5.1 initial-level label contract rollout on Selectel test
+
+- Read-only preflight passed on test host `prosto-padel-test-01`, Compose
+  project `prosto-padel-test`. The clean checkout was exact
+  `83055aa595d6e477d6094034c60b89ba0c27b3bf`, actual remote `origin/main` was
+  exact `af526cd1429983dd9ffb13507fc1b58b36667fc0`, and the expected backend,
+  frontend, nginx and PostgreSQL containers were healthy with restart count
+  `0` before any rollout write.
+- Exact migration-039 POSTCHECK SHA-256
+  `F98744A79E6C3F4363CD4F7F49502327FFD567286799897562B7A8A6C523035D`
+  passed read-only with exit `0`, empty stderr, `applied=true` and terminal
+  `ROLLBACK`. Migration 039 was not applied again. An earlier local byte check
+  stopped before SSH because the working-tree LF representation did not match
+  the recorded CRLF stream hash; the verified exact CRLF stream above was the
+  only POSTCHECK executed remotely.
+- The server checkout advanced by fast-forward from exact
+  `83055aa595d6e477d6094034c60b89ba0c27b3bf` to clean exact
+  `af526cd1429983dd9ffb13507fc1b58b36667fc0`. Compose `config --quiet` passed
+  using the canonical `.env.test`, `infra/test/compose.yaml` and
+  `infra/test/compose.runtime-backend.yaml` without printing expanded config.
+  Backend and frontend build ran from `2026-08-24T10:28:36Z` through
+  `2026-08-24T10:29:03Z`; their recreate ran from `2026-08-24T10:29:03Z`
+  through `2026-08-24T10:29:05Z` with `--no-deps --force-recreate`.
+- Backend container
+  `319a43559bbdb094746a534196bb1a166d2e5c6926d7394ab96db68f72bcdf3d`
+  was replaced by
+  `971520a7f5e1ec5d1dd734d6c73dc38b99b9240cd8b0738abb914b22bf80559d`
+  using image
+  `sha256:fc8499b1a632adb455b73b86a6d7de89afcf89c950d17b463fd5d406d4a4f60b`.
+  Frontend container
+  `483b97ed5ef72b3dfd359a9fd918ec97586621a6c207414b8e2bbb82c594e6a9`
+  was replaced by
+  `9ce1c0c8e7136331b86e2ffe0610c6db63e0ee5f67ed31845900f40ad9612933`
+  using image
+  `sha256:6fa5aaa8829a70e0fa2836e5985e6284efe2678d3f96794d2db147523e5f2ac7`.
+  Nginx `e5b98b53a385aef67465e097753fb54b060596d3c620af3cfb484a175d624be7`
+  and PostgreSQL
+  `5e36d4dc1a5c3e2fa658382cfc4a8dff7fe3ea2ba1a9834bb89cc83df743f7be`
+  were unchanged. All four containers finished healthy with restart count `0`.
+- Internal backend health and public HTTPS frontend/API health returned `200`;
+  public checks used normal TLS validation with verify result `0`. Unauthorized
+  onboarding GET/PATCH/progress/complete requests each returned `401` with
+  `no-store`, and no response body was emitted. No authenticated request was
+  executed.
+- Bounded logs from recreate start contained backend/frontend critical `0` and
+  `5xx=0`, nginx critical `0`, and one transitional nginx `502` for
+  `GET /api/v1/health` at `2026-08-24T10:29:05Z` while the backend was being
+  recreated. The stable window from `2026-08-24T10:29:06Z` passed with
+  backend/frontend/nginx critical `0` and `5xx=0`; checkout remained clean and
+  exact.
+- DB/schema, env/secrets, TLS/nginx config, provider API and production were not
+  changed. Deployment status is
+  `deployment=applied_with_transient_rollout_502_stable_window_pass_and_authenticated_label_smoke_pending`.
+  This append-only closeout itself is docs-only with `deployment=not_needed`.
+- Mandatory root gates for this docs-only closeout passed: E2E `99 passed`,
+  `1` intentional skip; production build passed with `1623` modules and only
+  the existing large-chunk advisory.
+- Independent read-only review of the exact one-file closeout diff passed
+  acceptance with `P0=0`, `P1=0`; no correction was required.
