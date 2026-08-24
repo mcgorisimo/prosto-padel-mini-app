@@ -15,13 +15,40 @@ describe('player level presentation', () => {
     expect(presentation).toMatchObject({
       isInitialLevel: true,
       homeLabel: 'Начальный уровень',
-      homeValue: 'D+',
-      avatarValue: 'D+',
-      profileSummary: 'Начальный уровень · D+',
+      homeValue: '2.00 · D+',
+      avatarValue: '2.0',
+      profileSummary: 'Начальный уровень · 2.00 · D+',
     });
     expect(presentation.displayLevel.label).toBe('D+');
     expect(JSON.stringify(presentation)).not.toContain('3.00');
   });
+
+  it.each([
+    ['D', '1.00 · D', '1.0'],
+    ['D+', '2.00 · D+', '2.0'],
+    ['C', '3.00 · C', '3.0'],
+    ['C+', '3.50 · C+', '3.5'],
+    ['B', '4.00 · B', '4.0'],
+    ['B+', '4.70 · B+', '4.7'],
+    ['A', '5.50 · A', '5.5'],
+  ])(
+    'uses the canonical %s lower bound without mutating the club rating',
+    (initialLevelLabel, homeValue, avatarValue) => {
+      const presentation = resolvePlayerLevelPresentation({
+        numericRating: 9.75,
+        isVerified: false,
+        initialLevelLabel,
+      });
+
+      expect(presentation).toMatchObject({
+        homeValue,
+        avatarValue,
+        profileSummary: `Начальный уровень · ${homeValue}`,
+      });
+      expect(presentation.displayLevel.label).toBe(initialLevelLabel);
+      expect(JSON.stringify(presentation)).not.toContain('9.75');
+    },
+  );
 
   it('keeps verified club rating presentation authoritative', () => {
     const presentation = resolvePlayerLevelPresentation({

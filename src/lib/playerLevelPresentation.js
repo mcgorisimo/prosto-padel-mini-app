@@ -26,17 +26,22 @@ export function resolvePlayerLevelPresentation({
     ? null
     : INITIAL_LEVELS_BY_LABEL.get(normalizedInitialLevelLabel) ?? null;
   const displayLevel = initialLevel ?? clubLevel;
+  const initialNumericRating = initialLevel?.min ?? null;
 
   return Object.freeze({
     displayLevel,
     isInitialLevel: initialLevel !== null,
     homeLabel: initialLevel ? 'Начальный уровень' : 'Уровень игрока',
-    homeValue: initialLevel?.label ?? safeNumericRating.toFixed(2),
-    avatarValue: initialLevel?.label ?? safeNumericRating.toFixed(1),
+    homeValue: initialLevel
+      ? `${initialNumericRating.toFixed(2)} · ${initialLevel.label}`
+      : safeNumericRating.toFixed(2),
+    avatarValue: initialLevel
+      ? initialNumericRating.toFixed(1)
+      : safeNumericRating.toFixed(1),
     profileSummary: isVerified === true
       ? `Клубный рейтинг · ${clubLevel.label} · ${safeNumericRating.toFixed(2)}`
       : initialLevel
-        ? `Начальный уровень · ${initialLevel.label}`
+        ? `Начальный уровень · ${initialNumericRating.toFixed(2)} · ${initialLevel.label}`
         : `Рейтинг пока не подтверждён · примерный уровень ${clubLevel.label}`,
   });
 }

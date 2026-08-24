@@ -432,11 +432,13 @@ test.describe('Telegram backend login feature enabled', () => {
     await expect(page.getByTestId('home-player-level-label')).toHaveText(
       'Начальный уровень',
     );
-    await expect(page.getByTestId('home-player-level-value')).toHaveText('D+');
+    await expect(page.getByTestId('home-player-level-value')).toHaveText(
+      '2.00 · D+',
+    );
     await page.getByRole('button', { name: 'Профиль' }).click();
-    await expect(page.getByTestId('profile-avatar-rating')).toHaveText('D+');
+    await expect(page.getByTestId('profile-avatar-rating')).toHaveText('2.0');
     await expect(page.getByTestId('profile-player-level-summary')).toHaveText(
-      'Начальный уровень · D+',
+      'Начальный уровень · 2.00 · D+',
     );
     await expect(page.getByTestId('profile-club-rating-pending')).toHaveText(
       'Клубный рейтинг пока не сформирован',

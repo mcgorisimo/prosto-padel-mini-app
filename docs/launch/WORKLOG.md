@@ -7311,3 +7311,44 @@
   `dist` were removed, leaving the exact one-file WORKLOG diff.
 - Independent read-only review of the exact final append-only diff passed with
   `P0=0`, `P1=0`; no correction was required.
+
+### 2026-08-24 — D5.1 initial-level numeric presentation correction candidate
+
+- Owner manual TMA verification of deployed code tree
+  `2262a52e0744796579ab6c4e192c22a570c6fe84` confirmed that completed-v2
+  bypass, the `D+` label, selected-level highlight and pending club-rating copy
+  rendered correctly, but identified one remaining P1: the product convention
+  requires a numeric value together with the letter level, including a number
+  on the avatar, while the prior correction displayed only `D+`.
+- Read-only contract inspection proved that persisted unverified club default
+  `3.00` maps to `C` and must not be presented as the questionnaire's `D+`.
+  The owner approved a presentation-only mapping from every completed
+  `initial_level_v2` label to the lower bound of its existing canonical
+  `RATING_CONFIG` range: `D=1.00`, `D+=2.00`, `C=3.00`, `C+=3.50`, `B=4.00`,
+  `B+=4.70`, `A=5.50`.
+- The shared pure presentation helper now renders `2.00 · D+` on Home,
+  `Начальный уровень · 2.00 · D+` in the profile summary and compact `2.0` on
+  the avatar. The read-only level scale remains on `D+`, and the separate club
+  card remains `Клубный рейтинг пока не сформирован`. Persisted club rating,
+  `rating.isVerified`, rating history, backend contracts and schema are not
+  changed.
+- Focused regressions cover every canonical lower-bound mapping, the D+ Home,
+  profile and avatar presentation, verified and legacy compatibility, absence
+  of the unrelated unverified `3.00 · C`, and existing PII/credential safety.
+  This candidate changes the frontend bundle, so deployment is
+  `deployment_deferred_by_user` pending separate commit, integration, Selectel
+  test frontend rollout and repeated owner manual TMA smoke.
+- Focused presentation tests passed `15/15`. A first direct Playwright attempt
+  intentionally did not own a Vite server and stopped at `page.goto` before UI
+  assertions; the exact mobile regression then passed `1/1` through the
+  repository's required owned-Vite `test:e2e` wrapper. Mandatory root E2E
+  passed `99` tests with `1` intentional skip, and the production build passed
+  with `1624` modules and only the existing large-chunk advisory.
+- The temporary dependency junction and generated build output were removed;
+  only the four intended frontend/test/WORKLOG files remain modified. The
+  `ui-ux-pro-max` mobile checklist supported keeping the compact avatar at one
+  decimal, retaining the explicit letter in the larger Home/profile text and
+  preserving the separate club-rating pending state rather than conflating the
+  two rating concepts.
+- Independent read-only review of the exact final candidate diff passed with
+  `P0=0`, `P1=0`; no correction was required.
