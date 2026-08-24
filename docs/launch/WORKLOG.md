@@ -7644,3 +7644,49 @@
   `rating.isVerified`, history, UI, DB, SSH, server, containers, env/secrets,
   provider API and production were unchanged; no commit, push or integration
   occurred and `deployment=deployment_deferred_by_user`.
+
+### 2026-08-25 — D5.1 reassessment frontend-client foundation rollout verification
+
+- Selectel test preflight passed on `prosto-padel-test-01`, Compose project
+  `prosto-padel-test`: the server checkout was clean at exact
+  `bf1e1062b0319d37d812b6c37a2c5bd5ef1348f7`, actual remote `origin/main`
+  was exact `9ae7cf18fcfb523f97de259383ea0d7d4b39f53b`, and frontend, backend,
+  nginx and PostgreSQL were healthy with restart count `0`.
+- The checkout advanced by fast-forward to clean exact
+  `9ae7cf18fcfb523f97de259383ea0d7d4b39f53b`. Compose `config --quiet`
+  passed with the canonical `infra/test/.env.test`,
+  `infra/test/compose.yaml` and
+  `infra/test/compose.runtime-backend.yaml`. Frontend-only build ran from
+  `2026-08-24T23:06:00Z` through `23:06:08Z`; frontend-only recreate ran from
+  `23:06:08Z` through `23:06:09Z` with `--no-deps --force-recreate`.
+- Frontend container
+  `07f5ca8ab966a3772f0e74099c257bdea2d421063660f67d055c684d541643c4`
+  was replaced by
+  `f8332e6853beb6d8e99070af283057742f41361bf399ec08209d9a599bf59f18`
+  using image
+  `sha256:2e30c05ecf7f10c0516b3cbef9fb353f9a231543d99ae91b4c70d13f4595eb3f`.
+  The new frontend was healthy with restart count `0`.
+- Backend
+  `ab732d5d43294409c620abd4abcf14eb660f970074b3b72ab9b8afae3ef80fae`,
+  nginx `e5b98b53a385aef67465e097753fb54b060596d3c620af3cfb484a175d624be7`
+  and PostgreSQL
+  `5e36d4dc1a5c3e2fa658382cfc4a8dff7fe3ea2ba1a9834bb89cc83df743f7be`
+  remained unchanged, healthy and at restart count `0`.
+- Public HTTPS frontend and `/api/v1/health` both returned `200` from
+  `135.106.155.112` with TLS verification result `0`. Bounded count-only logs
+  from `2026-08-24T23:06:08Z` through `23:07:56Z` reported frontend critical
+  `0`, frontend `5xx=0`, nginx critical `0` and nginx `5xx=0`.
+- The first post-rollout metadata probe stopped read-only because `docker ps
+  -q` returned short IDs while the assertions used full IDs. It performed no
+  write; the corrected `--no-trunc` probe passed the same checkout, health,
+  restart, unchanged-container and bounded-log assertions.
+- Authenticated reassessment and onboarding requests were not executed.
+  Backend, nginx and PostgreSQL containers, DB/schema, environment/secrets,
+  TLS/nginx configuration, provider API and production were unchanged. The
+  reassessment client foundation is deployed but intentionally has no UI
+  connection in this slice;
+  `deployment=applied_verified_frontend_client_foundation_ui_not_connected`.
+- Mandatory root E2E passed `100` tests with `1` intentional skip. The root
+  production build passed with `1625` modules and only the existing large-chunk
+  advisory. This append-only closeout is docs-only and requires no additional
+  rollout.
