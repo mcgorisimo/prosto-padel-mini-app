@@ -32,6 +32,7 @@ import { PostgresPlayerOnboardingDraftWriter } from '../database/postgres-player
 import { PostgresPlayerOnboardingCompletionWriter } from '../database/postgres-player-onboarding-completion-writer';
 import { PostgresPlayerOnboardingProgressWriter } from '../database/postgres-player-onboarding-progress-writer';
 import { PostgresPlayerOnboardingReader } from '../database/postgres-player-onboarding-reader';
+import { PostgresPlayerInitialLevelReassessmentRepository } from '../database/postgres-player-initial-level-reassessment-repository';
 import { PostgresPlayerProfileReader } from '../database/postgres-player-profile-reader';
 import { PostgresPlayerProfileWriter } from '../database/postgres-player-profile-writer';
 import { PostgresPublicPlayerProfileSearchRepository } from '../database/postgres-public-player-profile-search.repository';
@@ -74,6 +75,8 @@ import { PlayerProfileController } from './player-profile.controller';
 import { PlayerProfileService } from './player-profile.service';
 import { PlayerOnboardingController } from './player-onboarding.controller';
 import { PlayerOnboardingService } from './player-onboarding.service';
+import { PlayerInitialLevelReassessmentController } from './player-initial-level-reassessment.controller';
+import { PlayerInitialLevelReassessmentService } from './player-initial-level-reassessment.service';
 import { PublicPlayerProfileController } from './public-player-profile.controller';
 import { PublicPlayerProfileService } from './public-player-profile.service';
 import { SessionAuthenticationController } from './session-authentication.controller';
@@ -281,6 +284,16 @@ function getPlayerOnboardingControllerService(
   return (
     controller as unknown as {
       readonly service: PlayerOnboardingService;
+    }
+  ).service;
+}
+
+function getPlayerInitialLevelReassessmentControllerService(
+  controller: PlayerInitialLevelReassessmentController,
+): PlayerInitialLevelReassessmentService {
+  return (
+    controller as unknown as {
+      readonly service: PlayerInitialLevelReassessmentService;
     }
   ).service;
 }
@@ -493,6 +506,21 @@ describe('AuthModule Telegram login wiring', () => {
         moduleRef.get(PlayerOnboardingController),
       ),
     ).toBe(playerOnboarding);
+    const reassessment = moduleRef.get(PlayerInitialLevelReassessmentService);
+    expect(reassessment.dependencies.transactions).toBe(
+      moduleRef.get(PostgresTransactionExecutorAdapter),
+    );
+    expect(reassessment.dependencies.reassessments).toBe(
+      moduleRef.get(PostgresPlayerInitialLevelReassessmentRepository),
+    );
+    expect(reassessment.dependencies.clock).toBe(
+      moduleRef.get(SESSION_AUTHENTICATION_CLOCK),
+    );
+    expect(
+      getPlayerInitialLevelReassessmentControllerService(
+        moduleRef.get(PlayerInitialLevelReassessmentController),
+      ),
+    ).toBe(reassessment);
     const publicPlayerProfile = moduleRef.get(
       PublicPlayerProfileService,
     );

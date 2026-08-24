@@ -7499,3 +7499,46 @@
   production were unchanged. No HTTP health, runtime smoke or log gate was
   needed for this runtime-disconnected schema change. Deployment status is
   `deployment=applied_verified_runtime_unchanged`.
+
+### 2026-08-25 — D5.1 legacy initial_level_v1 reassessment backend contract candidate
+
+- Work started from clean exact main
+  `3e7c4f21c02fa7ed85c0c6ceba923b3314814799` on top of migration 040
+  `applied_verified`. The backend candidate adds authenticated owner-scoped
+  `GET /api/v1/onboarding/me/initial-level-reassessment` states
+  `required`/`completed`/`not_eligible` and
+  `POST /api/v1/onboarding/me/initial-level-reassessment/complete` for exactly
+  one completed-`initial_level_v1` owner's immutable `initial_level_v2`
+  reassessment.
+- Completion accepts only the five canonical option IDs, uses the existing
+  deterministic server scorer, locks and verifies the immutable source
+  flow/version/revision, and inserts only into
+  `backend_auth.player_initial_level_reassessments`. Exact retries return the
+  same completion; stale source, different evidence and concurrent conflicts
+  fail closed. The original onboarding row, club rating, `rating.isVerified`,
+  rating history, frontend and schema are unchanged.
+- Public responses expose the source snapshot only while reassessment is
+  required and expose only the server-computed `initialLevelLabel` after
+  completion. Score, answers, formula, caps, profile/contact PII and storage
+  errors are not returned or logged. Non-player roles cannot probe another
+  player's eligibility, and all routes reuse the existing Telegram bearer
+  guard with `no-store` responses.
+- Focused controller/service/repository/module tests passed `49/49`; they cover
+  eligibility, owner binding, unauthorized requests, all five answers, stale
+  source, exact idempotency, different/concurrent conflicts, deterministic
+  result verification and PII-safe failures. Backend typecheck, backend E2E
+  `4/4` and backend build passed. The full backend unit gate reported `3784`
+  passed and one inherited migration-038 fixture failure; the unchanged
+  isolated HEAD fixture reproduces `8 passed` and `1 failed`, and neither
+  migration 038 nor its spec is changed by this candidate.
+- Mandatory root E2E passed `99` tests with `1` intentional skip when repeated
+  alone after an overloaded parallel attempt timed out in unrelated match UI
+  cases. The root production build passed with `1624` modules and only the
+  existing large-chunk advisory after granting the established dependency
+  junction read boundary. Independent read-only review of the exact final
+  candidate diff passed with `P0=0`, `P1=0`; no correction was required.
+- This candidate changes the backend runtime and requires separate commit,
+  integration and Selectel test backend rollout/smoke gates. No commit, push,
+  integration, SSH/DB/schema command, runtime/container action, API/provider
+  write, env/secret change or production action occurred;
+  `deployment=deployment_deferred_by_user`.

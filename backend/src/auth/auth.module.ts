@@ -36,6 +36,7 @@ import { PostgresPlayerOnboardingDraftWriter } from '../database/postgres-player
 import { PostgresPlayerOnboardingCompletionWriter } from '../database/postgres-player-onboarding-completion-writer';
 import { PostgresPlayerOnboardingProgressWriter } from '../database/postgres-player-onboarding-progress-writer';
 import { PostgresPlayerOnboardingReader } from '../database/postgres-player-onboarding-reader';
+import { PostgresPlayerInitialLevelReassessmentRepository } from '../database/postgres-player-initial-level-reassessment-repository';
 import { PostgresPlayerProfileReader } from '../database/postgres-player-profile-reader';
 import { PostgresPlayerProfileWriter } from '../database/postgres-player-profile-writer';
 import { PostgresPublicPlayerProfileSearchRepository } from '../database/postgres-public-player-profile-search.repository';
@@ -78,6 +79,8 @@ import { PlayerProfileController } from './player-profile.controller';
 import { PlayerProfileService } from './player-profile.service';
 import { PlayerOnboardingController } from './player-onboarding.controller';
 import { PlayerOnboardingService } from './player-onboarding.service';
+import { PlayerInitialLevelReassessmentController } from './player-initial-level-reassessment.controller';
+import { PlayerInitialLevelReassessmentService } from './player-initial-level-reassessment.service';
 import { createPlayerOnboardingPolicy } from './player-onboarding.policy';
 import { PublicPlayerProfileController } from './public-player-profile.controller';
 import { PublicPlayerProfileService } from './public-player-profile.service';
@@ -329,6 +332,18 @@ function createPlayerOnboardingService(
   });
 }
 
+function createPlayerInitialLevelReassessmentService(
+  transactions: PostgresTransactionExecutorAdapter,
+  reassessments: PostgresPlayerInitialLevelReassessmentRepository,
+  clock: SessionAuthenticationClock,
+): PlayerInitialLevelReassessmentService {
+  return new PlayerInitialLevelReassessmentService({
+    transactions,
+    reassessments,
+    clock,
+  });
+}
+
 function createAdminPlayerRatingService(
   transactions: PostgresTransactionExecutorAdapter,
   ratings: PostgresAdminPlayerRatingRepository,
@@ -505,6 +520,7 @@ function createPlayerProfilePhotoService(
     AccountNotificationPreferencesController,
     PlayerProfileController,
     PlayerOnboardingController,
+    PlayerInitialLevelReassessmentController,
     PublicPlayerProfileController,
     MatchController,
     MatchReservationController,
@@ -663,6 +679,15 @@ function createPlayerProfilePhotoService(
       useFactory: createPlayerOnboardingService,
     },
     {
+      provide: PlayerInitialLevelReassessmentService,
+      inject: [
+        PostgresTransactionExecutorAdapter,
+        PostgresPlayerInitialLevelReassessmentRepository,
+        SESSION_AUTHENTICATION_CLOCK,
+      ],
+      useFactory: createPlayerInitialLevelReassessmentService,
+    },
+    {
       provide: PlayerProfileService,
       inject: [
         PostgresTransactionExecutorAdapter,
@@ -713,6 +738,7 @@ function createPlayerProfilePhotoService(
     AdminPlayerRatingService,
     PlayerProfileService,
     PlayerOnboardingService,
+    PlayerInitialLevelReassessmentService,
     PlayerProfilePhotoService,
     PublicPlayerProfileService,
     MatchApiService,
