@@ -12,13 +12,17 @@ DRAFT — НЕ ОПУБЛИКОВАНО — НЕ УТВЕРЖДЕНО ВЛАДЕ
 - Публикация: `not_published`.
 - Финальное утверждение legal documents владельцем: `not_given`.
 - Юридическая проверка: `required`.
+- Регистрационные реквизиты: `owner_supplied_2026_08_25`; формат и контрольные
+  цифры ИНН/ОГРН проверены, сверка с электронной выпиской ЕГРЮЛ до публикации
+  остаётся `pending`.
 - Язык: `ru-RU`.
 - Runtime/deployment impact: `not_needed` до отдельного code/publication gate.
 - Тексты, ранее выведенные в чат, не являются каноническими. Каноническая рабочая версия находится только в файлах этого каталога.
 
 Незакрытые fact buckets сохранены явно:
 
-- `pending_26_aug` — реквизиты ООО и официальные адреса;
+- `owner_decision` — физический почтовый адрес либо подтверждение, что он
+  совпадает с юридическим; `info@prostopdl.ru` не является почтовым адресом;
 - `requires_contract` — Сбербанк/online-ККТ/ОФД, YCLIENTS/YPLACES и
   Selectel entity/region/cross-border facts;
 - `pending_owner_later` — support phone/social links, effective versions и
@@ -40,7 +44,7 @@ DRAFT — НЕ ОПУБЛИКОВАНО — НЕ УТВЕРЖДЕНО ВЛАДЕ
 | Реестр | Версия | Статус |
 |---|---|---|
 | [DATA_PROCESSING_MATRIX_DRAFT.md](./DATA_PROCESSING_MATRIX_DRAFT.md) | `data_processing_matrix_draft_v0.1` | code/schema inventory; owner/contract/legal decisions pending |
-| [OWNER_INPUT_CHECKLIST.md](./OWNER_INPUT_CHECKLIST.md) | `owner_input_checklist_v0.1` | ООО facts `pending_26_aug`; no credentials requested |
+| [OWNER_INPUT_CHECKLIST.md](./OWNER_INPUT_CHECKLIST.md) | `owner_input_checklist_v0.2` | регистрационные facts `known`; postal address и official extract check pending; no credentials requested |
 
 Эти два файла поддерживают подготовку Privacy/Terms/Cancellation/Consent, но не
 являются опубликованными политиками. Owner decisions могут уточнять содержание
@@ -93,6 +97,12 @@ Completed D5.1 onboarding не переоткрывается и не измен
 ## Подтверждённые решения владельца
 
 - Бренд и рабочее наименование приложения: «Просто Падел».
+- Зарегистрированное лицо по данным владельца: ОБЩЕСТВО С ОГРАНИЧЕННОЙ
+  ОТВЕТСТВЕННОСТЬЮ "ПРОСТО ПАДЕЛ" (ООО "ПРОСТО ПАДЕЛ"), ИНН `7716262810`,
+  КПП `771601001`, ОГРН `1267700285093`; юридический адрес: 129323, Г.МОСКВА,
+  ВН.ТЕР.Г. МУНИЦИПАЛЬНЫЙ ОКРУГ СВИБЛОВО, УЛ СНЕЖНАЯ, Д. 17, К. 1,
+  ПОМЕЩ. 18П. Официальный адрес Клуба по данным владельца: Пятницкое шоссе
+  1с1, ТП Отрада.
 - Услуги на старте: корт, приватное бронирование, открытые матчи, турниры и тренировки.
 - ООО самостоятельно оказывает услуги своего Клуба; сторонние клубы на старте отсутствуют.
 - Использование приложения бесплатно; оплачиваются услуги Клуба и мероприятия.
@@ -133,7 +143,9 @@ reported/disputed content 3 года; bookings 3 года; consent evidence 3 г
 
 ## Решения владельца до candidate v0.3
 
-1. Утвердить точные сведения нового ООО из ЕГРЮЛ, банковские реквизиты и полный адрес Клуба.
+1. Сверить owner-supplied реквизиты и адреса с электронной выпиской ЕГРЮЛ и
+   документом на адрес Клуба; отдельно подтвердить физический почтовый адрес и
+   позднее заполнить банковские реквизиты.
 2. После заключения договоров указать юридическое лицо и продукт Сбербанка, online-ККТ, ОФД и фактический чековый процесс.
 3. Подтвердить юридическое лицо/роль YCLIENTS и точный набор передаваемых данных, включая сведения об оплате.
 4. Утвердить официальный телефон, социальные сети и иной работающий support channel; support email сейчас отсутствует.
@@ -154,7 +166,8 @@ reported/disputed content 3 года; bookings 3 года; consent evidence 3 г
 публикацией поиск `rg -n '\{\{[A-Z0-9_]+\}\}' docs/legal` обязан вернуть пустой
 результат. Основные группы:
 
-- company: `{{LEGAL_ENTITY_FULL_NAME}}`, `{{INN}}`, `{{OGRN}}`, адреса и банковские реквизиты;
+- company remaining: `{{POSTAL_ADDRESS}}` и банковские реквизиты; наименование,
+  ИНН, КПП, ОГРН, юридический адрес и owner-supplied адрес Клуба заполнены;
 - document metadata: `{{*_VERSION}}`, `{{*_EFFECTIVE_DATE}}`, `{{PUBLIC_LEGAL_BASE_URL}}`;
 - providers: `{{SELECTEL_LEGAL_ENTITY}}`, `{{YCLIENTS_*}}`, `{{SBER_*}}`, `{{ONLINE_KKT_MODEL}}`, `{{OFD_LEGAL_NAME}}`;
 - remaining category/runtime retention facts: `{{*_RETENTION_PERIOD}}`,
@@ -165,6 +178,7 @@ reported/disputed content 3 года; bookings 3 года; consent evidence 3 г
 
 ## Официальные первичные источники
 
+- [ФНС: получение электронной выписки из ЕГРЮЛ](https://egrul.nalog.ru/)
 - [Федеральный закон № 152-ФЗ «О персональных данных»](https://government.ru/docs/all/98196/)
 - [Федеральный закон № 156-ФЗ: отдельное оформление согласия](https://government.ru/docs/all/159592/)
 - [Закон РФ «О защите прав потребителей»](https://zpp.rospotrebnadzor.ru/npa/federal/192115)

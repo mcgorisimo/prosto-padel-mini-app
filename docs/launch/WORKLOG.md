@@ -7812,3 +7812,32 @@
   `git diff --check` passed.
 - This append-only closeout is docs-only and requires no additional rollout;
   `deployment=applied_verified_with_manual_legacy_reassessment_smoke_pass`.
+
+### 2026-08-25 — D5.3 legal company requisites local draft update
+
+- Continued from clean base `23fc0544bbf5520edfda1a801c7d74921d9ceee6`.
+  Owner-supplied registered-company facts were inserted into the four canonical
+  draft documents: full and shortened names, INN `7716262810`, KPP
+  `771601001`, OGRN `1267700285093` and the supplied legal address. The supplied
+  Club address `Пятницкое шоссе 1с1, ТП Отрада` was inserted into Terms and the
+  owner checklist.
+- Local format validation passed for the 10-digit INN, 9-digit KPP and 13-digit
+  OGRN; the INN and OGRN control digits passed and the INN/KPP tax-authority
+  prefix is consistently `7716`. These checks do not replace the required
+  pre-publication comparison with an official signed electronic EGRUL extract.
+- `info@prostopdl.ru` remains the confirmed privacy-only email. It was not used
+  as a physical postal address; `{{POSTAL_ADDRESS}}` remains explicit pending an
+  owner decision to provide a postal address or confirm that it equals the
+  legal address. Bank/provider/OFD facts, support phone/socials, document
+  versions, effective dates and public URLs remain unchanged placeholders.
+- Scope is Markdown-only: the four legal drafts, `docs/legal/README.md`,
+  `docs/legal/OWNER_INPUT_CHECKLIST.md` and this append-only record. The data
+  matrix, code, tests, schema/migrations, runtime, DB, Selectel, provider and
+  production were not changed. Documents remain
+  `draft_not_published_not_legally_approved`; deployment is `not_needed`.
+- Automated runtime tests are `not_run/not_needed` because this slice changes
+  only unpublished Markdown facts. Independent read-only exact-diff review
+  completed with `P0=0`, `P1=0` and acceptance PASS. Final company-placeholder,
+  DRAFT-banner, local-link and whitespace checks passed; the reviewer changed
+  no file, Git state or external system. A local checkpoint commit remains a
+  separate gate.
