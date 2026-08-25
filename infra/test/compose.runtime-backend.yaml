@@ -1,6 +1,8 @@
 services:
   backend:
     environment:
+      APP_RELEASE_SHA_REQUIRED: "true"
+      APP_RELEASE: ${APP_RELEASE:?APP_RELEASE must be an exact lowercase 40-character commit SHA}
       DATABASE_URL: !reset null
       DATABASE_PASSWORD: !reset null
       DATABASE_ENABLED: "true"

@@ -129,6 +129,28 @@ is selected explicitly with both files:
 -f infra/test/compose.runtime-backend.yaml
 ```
 
+Before every runtime validation or rollout, require a clean checkout and export
+the exact commit that will be built. Keep the same shell session for all Compose
+commands below:
+
+```bash
+test -z "$(git status --porcelain)" || {
+  echo 'STOP: runtime checkout is not clean' >&2
+  exit 1
+}
+APP_RELEASE="$(git rev-parse HEAD)"
+export APP_RELEASE
+printf '%s' "$APP_RELEASE" | grep -Eq '^[0-9a-f]{40}$' || {
+  echo 'STOP: APP_RELEASE is not an exact lowercase commit SHA' >&2
+  exit 1
+}
+```
+
+The runtime override requires `APP_RELEASE` and hard-codes the backend's exact
+SHA gate. Backend startup rejects `local`, missing, short, or uppercase release
+values in that contour. The base disposable/local contour may continue to use
+`release=local`.
+
 The override changes only `backend`. PostgreSQL and `db-tools` continue to use
 `prosto_padel_test`; the backend connects to
 `prosto_padel_test_migration_cycle` as `backend_auth_app`. The override uses the
@@ -159,7 +181,7 @@ Never run or share unfiltered `docker compose config` output on the server. It
 can expand and print existing database environment credentials. Do not enable
 shell tracing around any runtime-secret operation.
 
-The eight required files are:
+The nine required files are:
 
 - the `backend_auth_app` password;
 - the Telegram bot token;
@@ -168,13 +190,14 @@ The eight required files are:
 - the profile-photo S3 Access Key ID;
 - the profile-photo S3 Secret Access Key;
 - the YCLIENTS Partner Bearer token;
-- the YCLIENTS application User token.
+- the YCLIENTS application User token;
+- the reservation snapshot master key in canonical base64.
 
 Create them manually through the approved server secret process, outside the
 Git repository. Each file must be a regular, non-symlink file owned by
 `prostopadel` with mode `600`. Put only its corresponding secret in the file;
 the backend removes a final CR/LF itself. Configure only their non-secret host
-paths in `infra/test/.env.test`, using the eight `*_FILE_HOST` variables from the
+paths in `infra/test/.env.test`, using the nine `*_FILE_HOST` variables from the
 example. Never put the file contents in that env file, Compose, an image build
 argument, or Git.
 
@@ -253,7 +276,8 @@ for secret_path in \
   "$PROFILE_PHOTO_STORAGE_ACCESS_KEY_ID_FILE_HOST" \
   "$PROFILE_PHOTO_STORAGE_SECRET_ACCESS_KEY_FILE_HOST" \
   "$YCLIENTS_PARTNER_TOKEN_FILE_HOST" \
-  "$YCLIENTS_USER_TOKEN_FILE_HOST"
+  "$YCLIENTS_USER_TOKEN_FILE_HOST" \
+  "$RESERVATION_SNAPSHOT_MASTER_KEY_BASE64_FILE_HOST"
 do
   test -f "$secret_path" &&
     test ! -L "$secret_path" &&
@@ -282,7 +306,8 @@ docker compose \
     '/run/secrets/profile-photo-access-key-id',
     '/run/secrets/profile-photo-secret-access-key',
     '/run/secrets/yclients-partner-token',
-    '/run/secrets/yclients-user-token'
+    '/run/secrets/yclients-user-token',
+    '/run/secrets/reservation-snapshot-master-key-base64'
   ]) fs.accessSync(p, fs.constants.R_OK)"
 ```
 

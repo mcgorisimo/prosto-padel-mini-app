@@ -1,9 +1,16 @@
 name: prosto-padel-test
 
+x-bounded-logging: &bounded-logging
+  driver: local
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   postgres:
     image: ${TEST_POSTGRES_IMAGE:-postgres:14-bookworm}
     restart: unless-stopped
+    logging: *bounded-logging
     environment:
       POSTGRES_DB: ${TEST_POSTGRES_DB:-prosto_padel_test_migration_cycle}
       POSTGRES_USER: ${TEST_POSTGRES_USER:-prosto_padel_test}
@@ -29,6 +36,7 @@ services:
       args:
         NODE_IMAGE: ${TEST_NODE_IMAGE:-node:20.11.0-bookworm-slim}
     restart: unless-stopped
+    logging: *bounded-logging
     environment:
       NODE_ENV: test
       HOST: 0.0.0.0
@@ -81,6 +89,7 @@ services:
         VITE_ONBOARDING_PERSONAL_DATA_CONSENT_URL: ${VITE_ONBOARDING_PERSONAL_DATA_CONSENT_URL:-}
         VITE_ONBOARDING_PERSONAL_DATA_CONSENT_VERSION: ${VITE_ONBOARDING_PERSONAL_DATA_CONSENT_VERSION:-}
     restart: unless-stopped
+    logging: *bounded-logging
     expose:
       - "8080"
     healthcheck:
@@ -97,6 +106,7 @@ services:
   nginx:
     image: ${TEST_NGINX_IMAGE:-nginx:1.27.4-alpine}
     restart: unless-stopped
+    logging: *bounded-logging
     ports:
       - "127.0.0.1:8080:8080"
     volumes:
@@ -127,6 +137,7 @@ services:
     profiles:
       - auth-integration
     init: true
+    logging: *bounded-logging
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=256m
@@ -146,6 +157,7 @@ services:
     profiles:
       - tools
     restart: "no"
+    logging: *bounded-logging
     environment:
       EXPECTED_TEST_DATABASE_HOST: ${EXPECTED_TEST_DATABASE_HOST:-postgres}
       DATABASE_HOST: ${DATABASE_HOST:-postgres}

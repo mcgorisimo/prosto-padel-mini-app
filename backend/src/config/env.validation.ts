@@ -125,10 +125,23 @@ function requiredWhenYclientsApiEnabled(schema: Joi.StringSchema) {
   });
 }
 
+const exactAppRelease = Joi.string().pattern(/^[0-9a-f]{40}$/u);
+
 export const envValidationSchema = Joi.object({
   NODE_ENV: Joi.string()
     .valid('development', 'test', 'production')
     .default('development'),
+  APP_RELEASE_SHA_REQUIRED: Joi.boolean()
+    .truthy('true')
+    .falsy('false')
+    .default(false),
+  APP_RELEASE: Joi.when('APP_RELEASE_SHA_REQUIRED', {
+    is: true,
+    then: exactAppRelease.required(),
+    otherwise: Joi.string()
+      .pattern(/^(?:local|[0-9a-f]{40})$/u)
+      .default('local'),
+  }),
   HOST: Joi.string().hostname().default('127.0.0.1'),
   PORT: Joi.number().port().default(3000),
   CRM_PROVIDER: Joi.string().valid('disabled').default('disabled'),

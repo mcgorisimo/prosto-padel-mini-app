@@ -8755,3 +8755,64 @@
   backend, DB/schema/migration, nginx/DNS/TLS, env/secret, provider or
   production change occurred. Deployment status is
   `deployment=applied_verified` for this UI-polish slice.
+### 2026-08-25 — Observability backend logging core candidate
+
+- On `codex/observability-backend-core` from exact `85e8768`, added one-line
+  backend JSON logs, server-generated request IDs, AsyncLocalStorage request
+  context, request completion events, safe `5xx` diagnostics and successful
+  health-log suppression. `App.jsx`, payment fields and Supabase were not
+  changed.
+- The HTTP allowlist contains only service, environment, exact release,
+  request ID, method, route template, status, duration and outcome. Raw body,
+  query, Authorization, error message, stack and client request IDs are not
+  logged. Unexpected responses remain the generic public `500` contract.
+- Selectel test runtime Compose now requires an exact lowercase SHA-40 and
+  hard-codes the backend SHA gate. Docker `local` logging is bounded to
+  `10m x 5` for all six services. The runtime static check also covers those
+  contracts and the previously omitted ninth reservation-key secret mount.
+- Focused logging/config tests passed `66/66`; backend typecheck, E2E `4/4`,
+  build, root build, scoped Prettier, `git diff --check` and the runtime Compose
+  static check passed. Docker CLI is unavailable locally, so native
+  `docker compose config --quiet` was not run.
+- The mandatory full backend unit gate remains red at `3812/3813`: the existing
+  migration 038 notification-preferences contract cannot find its expected
+  outbox constraint section. No database, migration or related test path is in
+  this candidate.
+- The mandatory full root E2E run reported `107` passed, `1` skipped and four
+  booking timeouts under nine workers. All four failures passed `4/4` in the
+  sequential focused rerun. No frontend, booking or booking-test path is in
+  this candidate; the existing full-suite instability is not hidden or changed.
+- Independent runtime and security reviews were repeated after remediation;
+  both returned `P0=0`, `P1=0`, Acceptance PASS. The checkpoint commit is the
+  commit containing this handoff. No push, merge-main, Selectel rollout,
+  production action or external configuration change occurred.
+- Deployment status is `not_deployed_test_gate_blocked`. Deployed environment
+  and commit: none; changed containers: none; remote health/business smoke/log
+  checks: not run. Next gate is to resolve or explicitly classify the two
+  external test blockers, then integrate into `main` and roll out that exact
+  commit to Selectel test before this stage can be marked done.
+
+### 2026-08-25 — Observability backend logging integration transfer
+
+- After the preceding handoff identified the migration 038 contract and
+  parallel booking E2E instability as outside the logging diff, the owner
+  directed this chat to set the objective of completing integration and the
+  Selectel rollout and to proceed. They remain explicitly classified as
+  external gates for this slice; neither assertion nor runtime path was
+  changed or weakened.
+- A guarded fetch observed exact `origin/main`
+  `64d0d966ef0a5c9eb7a07a0668533aa2b0f5064c`. The final integration branch
+  was created from that commit. All `18` non-WORKLOG logging/runtime blobs
+  match reviewed checkpoint `883a7144e00f341395ae8b1cd9a787b21257ad76`;
+  this append-only WORKLOG resolution preserves the intervening D5.3 rollout
+  record before the observability records.
+- On the integrated candidate, backend typecheck, E2E `4/4` and build passed;
+  full backend unit reported `3813/3814` with only the unchanged migration 038
+  contract failure. Root build passed with `1627` modules and only the existing
+  large-chunk advisory. Full root E2E reported `110` passed, `1` intentional
+  skip and one parallel booking click timeout; that exact case passed `1/1`
+  in the sequential focused rerun.
+- The integrated candidate awaits final exact-diff review, merge-main and
+  rollout. Deployment remains `not_deployed_pending_final_review`; no Selectel,
+  container, environment, secret, database/schema, provider or production
+  action occurred in this transfer.

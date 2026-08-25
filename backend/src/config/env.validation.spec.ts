@@ -462,6 +462,8 @@ describe('envValidationSchema', () => {
     expect(error).toBeUndefined();
     expect(value).toMatchObject({
       NODE_ENV: 'development',
+      APP_RELEASE_SHA_REQUIRED: false,
+      APP_RELEASE: 'local',
       HOST: '127.0.0.1',
       PORT: 3000,
       CRM_PROVIDER: 'disabled',
@@ -474,6 +476,40 @@ describe('envValidationSchema', () => {
     const { error } = validate({ NODE_ENV: 'staging' });
 
     expect(error).toBeDefined();
+  });
+
+  it('accepts only a local marker or an exact lowercase commit as APP_RELEASE', () => {
+    const exactCommit = '0123456789abcdef0123456789abcdef01234567';
+
+    expect(validate({ APP_RELEASE: exactCommit }).error).toBeUndefined();
+    expect(validate({ APP_RELEASE: exactCommit }).value.APP_RELEASE).toBe(
+      exactCommit,
+    );
+    expect(validate({ APP_RELEASE: '85e8768' }).error).toBeDefined();
+    expect(
+      validate({ APP_RELEASE: exactCommit.toUpperCase() }).error,
+    ).toBeDefined();
+    expect(
+      validate({ APP_RELEASE: 'release-secret marker' }).error,
+    ).toBeDefined();
+  });
+
+  it('requires an exact commit when the runtime release gate is enabled', () => {
+    const exactCommit = '0123456789abcdef0123456789abcdef01234567';
+
+    expect(
+      validate({
+        APP_RELEASE_SHA_REQUIRED: 'true',
+        APP_RELEASE: exactCommit,
+      }).error,
+    ).toBeUndefined();
+    expect(
+      validate({
+        APP_RELEASE_SHA_REQUIRED: 'true',
+        APP_RELEASE: 'local',
+      }).error,
+    ).toBeDefined();
+    expect(validate({ APP_RELEASE_SHA_REQUIRED: 'true' }).error).toBeDefined();
   });
 
   it('still requires a PostgreSQL URL when the database is enabled', () => {

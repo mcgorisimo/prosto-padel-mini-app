@@ -148,6 +148,8 @@ function Assert-RuntimeBackendContract {
         -ServiceBlock $ServiceBlock `
         -ChildName 'environment'
     $expectedEnvironment = [ordered]@{
+        APP_RELEASE_SHA_REQUIRED = '"true"'
+        APP_RELEASE = '${APP_RELEASE:?APP_RELEASE must be an exact lowercase 40-character commit SHA}'
         DATABASE_URL = '!reset null'
         DATABASE_PASSWORD = '!reset null'
         DATABASE_ENABLED = '"true"'
@@ -197,7 +199,7 @@ function Assert-RuntimeBackendContract {
         -ServiceBlock $ServiceBlock `
         -ChildName 'volumes'
     $mountBlocks = @(Get-MountBlocks -VolumesBlock $volumes)
-    if ($mountBlocks.Count -ne 8) {
+    if ($mountBlocks.Count -ne 9) {
         throw "RUNTIME_BACKEND_COMPOSE_MOUNT_INVALID"
     }
 
@@ -210,6 +212,7 @@ function Assert-RuntimeBackendContract {
         '${PROFILE_PHOTO_STORAGE_SECRET_ACCESS_KEY_FILE_HOST:?PROFILE_PHOTO_STORAGE_SECRET_ACCESS_KEY_FILE_HOST is required}' = '/run/secrets/profile-photo-secret-access-key'
         '${YCLIENTS_PARTNER_TOKEN_FILE_HOST:?YCLIENTS_PARTNER_TOKEN_FILE_HOST is required}' = '/run/secrets/yclients-partner-token'
         '${YCLIENTS_USER_TOKEN_FILE_HOST:?YCLIENTS_USER_TOKEN_FILE_HOST is required}' = '/run/secrets/yclients-user-token'
+        '${RESERVATION_SNAPSHOT_MASTER_KEY_BASE64_FILE_HOST:?RESERVATION_SNAPSHOT_MASTER_KEY_BASE64_FILE_HOST is required}' = '/run/secrets/reservation-snapshot-master-key-base64'
     }
     $seenSources = @{}
     $seenTargets = @{}
@@ -315,6 +318,23 @@ Assert-Line $baseBackend 'DATABASE_URL: postgresql://${TEST_POSTGRES_USER:-prost
 Assert-Line $baseBackend '- test_internal'
 Assert-Line $baseBackend '- test_egress'
 Assert-Line $baseEgressNetwork 'driver: bridge'
+
+foreach ($service in @(
+    $basePostgres,
+    $baseBackend,
+    $baseFrontend,
+    $baseNginx,
+    $baseRunner,
+    $baseDbTools
+)) {
+    Assert-Line $service 'logging: *bounded-logging'
+}
+
+if (
+    ($baseCompose -replace "`r`n", "`n") -notmatch '(?ms)^x-bounded-logging: &bounded-logging\n  driver: local\n  options:\n    max-size: "10m"\n    max-file: "5"$'
+) {
+    throw "RUNTIME_BACKEND_COMPOSE_LOG_ROTATION_INVALID"
+}
 
 if (
     ($basePostgres -join "`n") -match '(^|\n)- test_egress($|\n)' -or
