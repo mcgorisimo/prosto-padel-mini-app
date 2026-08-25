@@ -8852,3 +8852,40 @@
   Acceptance PASS. Current deployed commit remains `42bc733`; the warning
   correction awaits its checkpoint, fast-forward integration and backend-only
   rollout. No production, database/schema, secret or provider change occurred.
+
+### 2026-08-25 — Observability backend logging test rollout closeout
+
+- Warning correction commit
+  `b457c2f79110d07b2e364749c607d87657b6a3e2` was fast-forward pushed to
+  `main`, and the clean Selectel test checkout advanced to that exact commit.
+  Compose validation passed with the exact `APP_RELEASE`.
+- The backend-only rollout ran from `2026-08-25T19:39:30Z` to `19:39:59Z`.
+  Backend container
+  `7675d30060136137c83b163e5ffa56b446e44e05da82f7cd4ea37393b05968dd`
+  was replaced by
+  `2633a25ac3c710c5213330121b1672a8c9104a32e30887594bd0b4fb62be68a2`
+  using image
+  `sha256:749da720f8891c0e05f28d80e6f442e83e37ecf3622784fca88d90816fb89db6`.
+  Frontend `bf725daabc54434485c180381143ee98fcd34abfb05b7f1930880946644a9423`,
+  nginx `7f866e6dfa8176b7305bdb2d0949e3f648fc72fa0c1c6130e538541a2daba3f3`
+  and PostgreSQL
+  `5a74c2cc5056585991df20c20ccd300fc65eca327f7538a285d79a54ea440ef1`
+  retained their exact identities.
+- All four containers are healthy with restart count `0`, Docker `local`
+  logging, `max-size=10m` and `max-file=5`. Internal and public backend health
+  returned HTTP `200`, and public TLS verification returned `0`.
+- The no-write business-boundary smoke used a canonical nonexistent bearer on
+  the match feed and returned the expected `401 session_invalid`. Its generated
+  request ID correlated with exactly one allowlisted event for route template
+  `/api/v1/matches`; the successful health completion event remained
+  suppressed.
+- Strict log audit since rollout start passed with `95` JSON lines, `0`
+  non-JSON lines, `1` bounded process-warning event, `1` business HTTP event,
+  `0` health events, `0` HTTP 5xx and `0` error/fatal events. The dummy
+  credential and query marker were absent. The backend reported exact release
+  `b457c2f79110d07b2e364749c607d87657b6a3e2`.
+- Deployment status is `deployment=applied_verified` for Selectel test at
+  exact runtime commit `b457c2f79110d07b2e364749c607d87657b6a3e2`.
+  Production, database/schema, secret and provider state were not changed.
+  This closeout entry is docs-only, so its later documentation commit has
+  `deployment=not_needed`; the deployed runtime commit remains `b457c2f`.
