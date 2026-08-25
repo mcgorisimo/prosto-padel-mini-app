@@ -7841,3 +7841,41 @@
   DRAFT-banner, local-link and whitespace checks passed; the reviewer changed
   no file, Git state or external system. A local checkpoint commit remains a
   separate gate.
+
+### 2026-08-25 — D5.3 personal-data-processing consent migration 041 candidate
+
+- Started from clean exact main
+  `4d07f4099d5f48088ee3fc33f8b08c19181d7dc6` (tree
+  `89b285e0ce4345ede6aaffe87b330703dfbbdc79`). The candidate changes only
+  unapplied migration 041 artifacts, one focused migration-contract test and
+  this append-only record; frontend/backend runtime code is unchanged.
+- Migration 041 keeps historical `privacy` evidence immutable and adds the
+  distinct `personal_data_processing` kind. The onboarding guard no longer
+  relies on a count-only check: for the same account, flow and existing time
+  window it accepts exactly the legacy `cancellation/privacy/terms` set, the
+  new `cancellation/personal_data_processing/terms` set, or the all-four
+  transition set. Other three-of-four subsets remain rejected.
+- PRECHECK and POSTCHECK are read-only and expose row counts, by-kind counts
+  and a deterministic evidence digest for the separately gated apply window.
+  The rollback locks both affected relations and refuses before and after the
+  lock if any `personal_data_processing` evidence exists; it never deletes or
+  rewrites consent evidence. PK/FK, immutable trigger, existing rows and
+  least-privilege ACL boundaries are preserved.
+- The exact auth-integration catalog was intentionally not changed: its bounded
+  inventory excludes the onboarding ledger and transition guard. Runtime
+  policy/types, two-checkbox UI, re-consent endpoint and evidence writes remain
+  separate future slices.
+- Focused migration-contract regression passed `9/9`. Mandatory backend gates
+  passed: typecheck, unit `3794/3794` across `162` suites, E2E `4/4` across `2`
+  suites, and build. The first root E2E run, executed concurrently with build,
+  had two unrelated UI timeouts (`104` passed, `1` skipped); the required
+  isolated rerun passed `106` with `1` intentional skip. The first sandboxed
+  root build could not read the linked dependency directory; the exact rerun
+  outside that restriction passed with `1626` modules and only the existing
+  large-chunk advisory.
+- Independent read-only review of the exact candidate completed with `P0=0`,
+  `P1=0` and acceptance PASS. No migration was applied; no commit, push, merge,
+  DB/Selectel/provider/API/runtime/environment/secret or production action was
+  performed. This runtime-disconnected candidate has
+  `deployment=not_applied_not_needed_for_candidate`; DB/schema apply is a
+  separate future gate.
