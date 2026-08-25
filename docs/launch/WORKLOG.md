@@ -8916,3 +8916,38 @@
   requires guarded fast-forward integration and a backend-only Selectel test
   rollout of the exact runtime commit, followed by health, authenticated
   business smoke and strict JSON/domain-event log verification.
+
+### 2026-08-25 — Observability domain events Selectel test closeout
+
+- Runtime commit `f4a2c8e82606cfa6c83ec92cbc01c1c3f3d6581c` was
+  fast-forward pushed to `main`. The clean Selectel test checkout advanced from
+  deployed `b457c2f79110d07b2e364749c607d87657b6a3e2` to that exact commit and
+  Compose validation passed with the exact `APP_RELEASE`.
+- The backend-only rollout ran from `2026-08-25T20:36:20Z` to healthy at
+  `20:37:12Z`. Backend container/image changed from
+  `2633a25ac3c710c5213330121b1672a8c9104a32e30887594bd0b4fb62be68a2` /
+  `sha256:749da720f8891c0e05f28d80e6f442e83e37ecf3622784fca88d90816fb89db6`
+  to `31bee1bdb8e12a56c931aae5e2b71be76d7b90b8c1e61d6e5d0697582bb2f2fe` /
+  `sha256:5e855b7e7cf7a84b850a07c39800bd8aac7d887d15109816c31a9097ce8121bf`.
+  Frontend `bf725daabc54434485c180381143ee98fcd34abfb05b7f1930880946644a9423`,
+  nginx `7f866e6dfa8176b7305bdb2d0949e3f648fc72fa0c1c6130e538541a2daba3f3`
+  and PostgreSQL
+  `5a74c2cc5056585991df20c20ccd300fc65eca327f7538a285d79a54ea440ef1`
+  retained their exact identities. All four are healthy with restart count `0`.
+- Internal and public health returned HTTP `200`; public TLS verification was
+  `0`. A PII-free authenticated smoke passed login/feed `200`, safe nonexistent
+  match slot/chat rejections `404`, pre-provider booking `contact_incomplete`
+  `422` and logout `204`. An earlier bounded attempt stopped on a safe private
+  match-create `400`; it produced the expected match rejection event and no
+  match, chat, booking or provider write. One synthetic test account remains;
+  no real identity/contact value was used or printed.
+- Strict audit since rollout start passed across `110` JSON lines: `0` non-JSON,
+  `7` domain events, `0` rejected logging inputs, `9` HTTP events, `0` HTTP 5xx,
+  `0` error/fatal, `0` release mismatches and `0` uncorrelated domain request
+  IDs. Auth, match, match-slot, match-chat and private-booking events were all
+  observed. Forbidden key and private-marker hits were both `0`.
+- Deployment status is `deployment=applied_verified` on Selectel test at exact
+  runtime commit `f4a2c8e82606cfa6c83ec92cbc01c1c3f3d6581c`. Production,
+  frontend, nginx/TLS, database schema/migrations, secrets and YCLIENTS state
+  were not changed. This append-only closeout is docs-only with
+  `deployment=not_needed`; metrics and alerts remain the next separate stage.
