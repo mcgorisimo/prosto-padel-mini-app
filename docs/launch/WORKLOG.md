@@ -8143,3 +8143,20 @@
   therefore remain unchanged from the prior rollout;
   `deployment=deployment_deferred_by_user` pending a separate clean-review,
   commit/integration and Selectel test rollout authorization.
+
+### 2026-08-25 — D2.1 slot presentation follow-up Git integration
+
+- The owner separately authorized commit and push, but did not authorize a
+  Selectel rollout. The clean reviewed runtime candidate was committed as
+  `2acc2c852795c6d6bc825a3317693962e6d29af5` and fast-forward pushed from
+  `bb148eda0cf5df9320e1a42374abf89301eb78f5` to remote `main` without conflict.
+- The integrated candidate retains the verified gates from the immediately
+  preceding record: focused E2E `2/2`, unit `116/116`, production build pass,
+  full E2E `107` with `1` intentional skip, `git diff --check` pass and final
+  independent review `P0=0`, `P1=0`.
+- This append-only closeout is docs-only. No Selectel, backend/DB/schema,
+  YCLIENTS/provider or production action occurred. The Selectel test frontend
+  therefore still runs the prior D2.1 bundle from
+  `2cf2cae0f836a425ba70e06658b7548fa89edd1f`;
+  `deployment=deployment_deferred_by_user` pending a separate test rollout,
+  health/HTTP, authenticated TMA smoke and bounded-log authorization.
