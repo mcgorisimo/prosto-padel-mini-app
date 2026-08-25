@@ -201,6 +201,7 @@ services:
       start_period: 10s
     networks:
       - observability_internal
+      - observability_ingest
 
   node-exporter:
     image: ${TEST_NODE_EXPORTER_IMAGE:-prom/node-exporter:v1.11.1}
@@ -393,6 +394,10 @@ networks:
     driver: bridge
   observability_internal:
     internal: true
+  observability_ingest:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.enable_ip_masquerade: "false"
 
 volumes:
   postgres_data:

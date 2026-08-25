@@ -43,6 +43,8 @@ Assert-Contains $compose 'gelf-address:\s+"udp://127\.0\.0\.1:12201"' 'OBSERVABI
 Assert-Contains $compose 'mode:\s+"non-blocking"' 'OBSERVABILITY_GELF_NOT_NON_BLOCKING'
 Assert-Contains $compose '127\.0\.0\.1:3001:3000' 'OBSERVABILITY_GRAFANA_NOT_LOOPBACK'
 Assert-Contains $compose 'observability_internal:\s*\r?\n\s+internal:\s+true' 'OBSERVABILITY_NETWORK_NOT_INTERNAL'
+Assert-Contains $compose 'observability_ingest:\s*\r?\n\s+driver:\s+bridge\s*\r?\n\s+driver_opts:\s*\r?\n\s+com\.docker\.network\.bridge\.enable_ip_masquerade:\s+"false"' 'OBSERVABILITY_INGEST_NETWORK_EGRESS_INVALID'
+Assert-Contains $compose '(?ms)^  vector:.*?networks:\s*\r?\n\s+- observability_internal\s*\r?\n\s+- observability_ingest' 'OBSERVABILITY_VECTOR_INGEST_NETWORK_MISSING'
 Assert-Contains $compose '(?ms)^  loki:.*?healthcheck:\s*\r?\n\s+test:\s*\r?\n\s+- CMD\s*\r?\n\s+- /usr/bin/loki\s*\r?\n\s+- -verify-config=true' 'OBSERVABILITY_LOKI_DISTROLESS_HEALTHCHECK_INVALID'
 if ($compose -match 'docker\.sock') {
     throw 'OBSERVABILITY_DOCKER_SOCKET_FORBIDDEN'

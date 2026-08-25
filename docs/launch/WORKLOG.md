@@ -8991,3 +8991,11 @@
   the pinned distroless image has no `/bin/sh`; the container logs showed Loki
   ready. The candidate healthcheck was corrected to the image-native Loki
   config verifier before any application container was recreated.
+- After healthy Loki and Vector startup, both a real Docker GELF probe and a
+  raw loopback UDP probe remained absent from Vector counters. Docker inspection
+  showed the configured UDP HostConfig but no NAT binding because Vector was
+  attached only to an `internal` bridge; nginx on an ordinary bridge retained
+  its expected loopback NAT rule. The candidate now adds a Vector-only ingest
+  bridge with IP masquerading disabled: it permits host-loopback delivery from
+  the Docker daemon without attaching application/data services or granting
+  ordinary internet NAT. Application containers still have not been recreated.
