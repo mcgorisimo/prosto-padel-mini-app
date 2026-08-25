@@ -7785,3 +7785,30 @@
   TLS/nginx configuration, provider API and production were unchanged. Manual
   TMA reassessment remains a separate owner gate;
   `deployment=applied_with_manual_tma_reassessment_smoke_pending`.
+
+### 2026-08-25 — D5.1 manual legacy initial_level_v1 reassessment smoke
+
+- The owner completed the separate manual Telegram Mini App smoke on Selectel
+  test for integrated main `a69b99f48fd5edbfd61a19ff47958aa5b8d270af`
+  and deployed runtime tree `f456965877fe6f617c5e50552d1bd9e70a6cf4e0`.
+  Automatic Telegram authentication passed, and the eligible completed
+  `initial_level_v1` account received the one-time five-question
+  `initial_level_v2` reassessment as expected.
+- Five-question progress, Back navigation and in-memory answer preservation all
+  passed. Completion returned the server-computed result `C+`; the application
+  rendered its approved numeric presentation as `3.50`. Home and Profile both
+  passed the post-completion presentation check.
+- The club rating, `rating.isVerified` and rating history remained unchanged.
+  Reopening the Mini App bypassed the completed reassessment, and the owner
+  reported no error.
+- Only the owner's explicitly authorized manual reassessment writes were made
+  through the test UI. The owner supplied no credential or PII in the smoke
+  result, none was copied to files or logs, and the agent performed no SSH, DB
+  or API write during this gate.
+- Mandatory root E2E passed `106` tests with `1` intentional skip. The first
+  sandboxed build attempt stopped before loading the Vite config because of
+  sandbox filesystem access; the exact build rerun outside that restriction
+  passed with `1626` modules and only the existing large-chunk advisory.
+  `git diff --check` passed.
+- This append-only closeout is docs-only and requires no additional rollout;
+  `deployment=applied_verified_with_manual_legacy_reassessment_smoke_pass`.
