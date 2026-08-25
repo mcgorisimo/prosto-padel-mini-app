@@ -309,6 +309,9 @@ $runtimeBackendBlock = Get-ServiceBlock `
     -Yaml $runtimeCompose `
     -ServiceName 'backend'
 $runtimeBackend = Get-NormalizedLines $runtimeBackendBlock
+$runtimeGrafana = Get-NormalizedLines (
+    Get-ServiceBlock -Yaml $runtimeCompose -ServiceName 'grafana'
+)
 
 Assert-Line $basePostgres 'POSTGRES_USER: ${TEST_POSTGRES_USER:-prosto_padel_test}'
 Assert-Line $basePostgres 'POSTGRES_PASSWORD: ${TEST_POSTGRES_PASSWORD:-local_test_password_only}'
@@ -324,10 +327,12 @@ foreach ($service in @(
     $basePostgres,
     $baseBackend,
     $baseFrontend,
-    $baseNginx,
-    $baseRunner,
-    $baseDbTools
+    $baseNginx
 )) {
+    Assert-Line $service 'logging: *centralized-logging'
+}
+
+foreach ($service in @($baseRunner, $baseDbTools)) {
     Assert-Line $service 'logging: *bounded-logging'
 }
 
@@ -336,6 +341,16 @@ if (
 ) {
     throw "RUNTIME_BACKEND_COMPOSE_LOG_ROTATION_INVALID"
 }
+
+if (
+    ($baseCompose -replace "`r`n", "`n") -notmatch '(?ms)^x-centralized-logging: &centralized-logging\n  driver: gelf\n  options:\n    gelf-address: "udp://127\.0\.0\.1:12201"\n    gelf-compression-type: "none"\n    tag: "\{\{\.Name\}\}"\n    mode: "non-blocking"\n    max-buffer-size: "4m"\n    cache-max-size: "10m"\n    cache-max-file: "5"\n    cache-compress: "true"$'
+) {
+    throw "RUNTIME_BACKEND_CENTRALIZED_LOGGING_INVALID"
+}
+
+Assert-Line $runtimeGrafana 'GF_SECURITY_ADMIN_PASSWORD: !reset null'
+Assert-Line $runtimeGrafana 'GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana-admin-password'
+Assert-Line $runtimeGrafana 'source: ${GRAFANA_ADMIN_PASSWORD_FILE_HOST:?GRAFANA_ADMIN_PASSWORD_FILE_HOST is required}'
 
 if (
     ($basePostgres -join "`n") -match '(^|\n)- test_egress($|\n)' -or

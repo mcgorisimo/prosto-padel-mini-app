@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { isInternalUuid } from '../internal-uuid';
+import { BackendMetricsService } from '../metrics/backend-metrics.service';
 import { RequestContextStore } from './request-context.store';
 
 const BACKEND_SERVICE = 'prosto-padel-backend';
@@ -407,6 +408,7 @@ export class BackendDomainEventLogger {
   constructor(
     private readonly config: ConfigService,
     private readonly requests: RequestContextStore,
+    private readonly metrics: BackendMetricsService,
   ) {}
 
   record(input: BackendDomainEvent): void {
@@ -431,6 +433,19 @@ export class BackendDomainEventLogger {
           outcome: 'invalid_logging_input',
         });
         return;
+      }
+
+      try {
+        this.metrics.recordDomain({
+          domain: String(event.domain),
+          action: String(event.action),
+          outcome: String(event.outcome),
+          ...(event.reason === undefined
+            ? {}
+            : { reason: String(event.reason) }),
+        });
+      } catch {
+        // Metrics are best-effort and must not suppress the domain log.
       }
 
       const output = Object.freeze({ ...common, ...event });

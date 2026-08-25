@@ -6,11 +6,23 @@ x-bounded-logging: &bounded-logging
     max-size: "10m"
     max-file: "5"
 
+x-centralized-logging: &centralized-logging
+  driver: gelf
+  options:
+    gelf-address: "udp://127.0.0.1:12201"
+    gelf-compression-type: "none"
+    tag: "{{.Name}}"
+    mode: "non-blocking"
+    max-buffer-size: "4m"
+    cache-max-size: "10m"
+    cache-max-file: "5"
+    cache-compress: "true"
+
 services:
   postgres:
     image: ${TEST_POSTGRES_IMAGE:-postgres:14-bookworm}
     restart: unless-stopped
-    logging: *bounded-logging
+    logging: *centralized-logging
     environment:
       POSTGRES_DB: ${TEST_POSTGRES_DB:-prosto_padel_test_migration_cycle}
       POSTGRES_USER: ${TEST_POSTGRES_USER:-prosto_padel_test}
@@ -36,7 +48,7 @@ services:
       args:
         NODE_IMAGE: ${TEST_NODE_IMAGE:-node:20.11.0-bookworm-slim}
     restart: unless-stopped
-    logging: *bounded-logging
+    logging: *centralized-logging
     environment:
       NODE_ENV: test
       NODE_OPTIONS: "--no-warnings"
@@ -71,6 +83,7 @@ services:
     networks:
       - test_internal
       - test_egress
+      - observability_internal
 
   frontend:
     build:
@@ -90,7 +103,7 @@ services:
         VITE_ONBOARDING_PERSONAL_DATA_CONSENT_URL: ${VITE_ONBOARDING_PERSONAL_DATA_CONSENT_URL:-}
         VITE_ONBOARDING_PERSONAL_DATA_CONSENT_VERSION: ${VITE_ONBOARDING_PERSONAL_DATA_CONSENT_VERSION:-}
     restart: unless-stopped
-    logging: *bounded-logging
+    logging: *centralized-logging
     expose:
       - "8080"
     healthcheck:
@@ -107,7 +120,7 @@ services:
   nginx:
     image: ${TEST_NGINX_IMAGE:-nginx:1.27.4-alpine}
     restart: unless-stopped
-    logging: *bounded-logging
+    logging: *centralized-logging
     ports:
       - "127.0.0.1:8080:8080"
     volumes:
@@ -128,6 +141,195 @@ services:
     networks:
       - test_edge
       - test_internal
+
+  loki:
+    image: ${TEST_LOKI_IMAGE:-grafana/loki:3.7.4}
+    restart: unless-stopped
+    logging: *centralized-logging
+    command:
+      - -config.file=/etc/loki/config.yaml
+    volumes:
+      - ./observability/loki.yaml:/etc/loki/config.yaml:ro
+      - loki_data:/loki
+    expose:
+      - "3100"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - wget -q -O - http://127.0.0.1:3100/ready >/dev/null
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    networks:
+      - observability_internal
+
+  vector:
+    image: ${TEST_VECTOR_IMAGE:-timberio/vector:0.56.0-alpine}
+    restart: unless-stopped
+    logging: *bounded-logging
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+    ports:
+      - "127.0.0.1:12201:12201/udp"
+    volumes:
+      - ./observability/vector.yaml:/etc/vector/vector.yaml:ro
+      - vector_data:/var/lib/vector
+    command:
+      - --config
+      - /etc/vector/vector.yaml
+    depends_on:
+      loki:
+        condition: service_healthy
+    expose:
+      - "8686"
+      - "9598"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - wget -q -O - http://127.0.0.1:8686/health >/dev/null
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    networks:
+      - observability_internal
+
+  node-exporter:
+    image: ${TEST_NODE_EXPORTER_IMAGE:-prom/node-exporter:v1.11.1}
+    restart: unless-stopped
+    logging: *centralized-logging
+    read_only: true
+    pid: host
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    command:
+      - --path.rootfs=/host
+      - --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|var/lib/docker/.+|run/docker/netns/.+)($$|/)
+    volumes:
+      - /:/host:ro,rslave
+    expose:
+      - "9100"
+    networks:
+      - observability_internal
+
+  alertmanager:
+    image: ${TEST_ALERTMANAGER_IMAGE:-prom/alertmanager:v0.32.1}
+    restart: unless-stopped
+    logging: *centralized-logging
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yaml
+      - --storage.path=/alertmanager
+    volumes:
+      - ./observability/alertmanager.yaml:/etc/alertmanager/alertmanager.yaml:ro
+      - alertmanager_data:/alertmanager
+    expose:
+      - "9093"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - wget -q -O - http://127.0.0.1:9093/-/ready >/dev/null
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    networks:
+      - observability_internal
+
+  prometheus:
+    image: ${TEST_PROMETHEUS_IMAGE:-prom/prometheus:v3.12.0}
+    restart: unless-stopped
+    logging: *centralized-logging
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    command:
+      - --config.file=/etc/prometheus/prometheus.yaml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --storage.tsdb.retention.size=2GB
+    volumes:
+      - ./observability/prometheus.yaml:/etc/prometheus/prometheus.yaml:ro
+      - ./observability/alerts.yaml:/etc/prometheus/alerts.yaml:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      backend:
+        condition: service_healthy
+      alertmanager:
+        condition: service_healthy
+      vector:
+        condition: service_healthy
+    expose:
+      - "9090"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - wget -q -O - http://127.0.0.1:9090/-/ready >/dev/null
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    networks:
+      - observability_internal
+
+  grafana:
+    image: ${TEST_GRAFANA_IMAGE:-grafana/grafana:13.1.0}
+    restart: unless-stopped
+    logging: *centralized-logging
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-observability_admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-local_observability_password_only}
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_METRICS_ENABLED: "true"
+      GF_SECURITY_COOKIE_SAMESITE: strict
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_PLUGINS_CHECK_FOR_UPDATES: "false"
+    ports:
+      - "127.0.0.1:3001:3000"
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+    depends_on:
+      loki:
+        condition: service_healthy
+      prometheus:
+        condition: service_healthy
+      alertmanager:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - wget -q -O - http://127.0.0.1:3000/api/health >/dev/null
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    networks:
+      - observability_internal
 
   auth-integration-runner:
     build:
@@ -187,6 +389,13 @@ networks:
     internal: true
   test_egress:
     driver: bridge
+  observability_internal:
+    internal: true
 
 volumes:
   postgres_data:
+  loki_data:
+  vector_data:
+  prometheus_data:
+  alertmanager_data:
+  grafana_data:

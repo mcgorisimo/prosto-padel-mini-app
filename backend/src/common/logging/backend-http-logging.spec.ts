@@ -1,5 +1,5 @@
 import { Controller, Get, HttpException, LoggerService } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import {
   FastifyAdapter,
   NestFastifyApplication,
@@ -114,21 +114,28 @@ describe('backend HTTP logging', () => {
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
-      imports: [LoggingModule],
-      controllers: [LoggingTestController],
-      providers: [
-        {
-          provide: ConfigService,
-          useValue: {
-            getOrThrow(key: string): string {
-              if (key === 'NODE_ENV') return 'test';
-              if (key === 'APP_RELEASE') return RELEASE;
-              throw new TypeError('Unexpected test configuration key');
-            },
-          },
-        },
+      imports: [
+        ConfigModule.forRoot({
+          isGlobal: true,
+          load: [() => ({ NODE_ENV: 'test', APP_RELEASE: RELEASE })],
+        }),
+        LoggingModule,
       ],
+      controllers: [LoggingTestController],
     })
+      .overrideProvider(ConfigService)
+      .useValue({
+        get(key: string): string | undefined {
+          if (key === 'NODE_ENV') return 'test';
+          if (key === 'APP_RELEASE') return RELEASE;
+          return undefined;
+        },
+        getOrThrow(key: string): string {
+          if (key === 'NODE_ENV') return 'test';
+          if (key === 'APP_RELEASE') return RELEASE;
+          throw new TypeError('Unexpected test configuration key');
+        },
+      })
       .overrideProvider(BackendDomainEventLogger)
       .useValue({ record: jest.fn() })
       .compile();
@@ -308,6 +315,24 @@ describe('backend HTTP logging', () => {
     await setImmediate();
 
     expect(response?.statusCode).toBe(200);
+    expect(entries).toEqual([]);
+  });
+
+  it('exposes bounded Prometheus metrics inside the backend', async () => {
+    entries.length = 0;
+    const response = await application?.inject({
+      method: 'GET',
+      url: '/api/v1/metrics',
+    });
+
+    expect(response?.statusCode).toBe(200);
+    expect(response?.headers['content-type']).toContain(
+      'text/plain; version=0.0.4',
+    );
+    expect(response?.headers['cache-control']).toBe('no-store');
+    expect(response?.payload).toContain('prosto_padel_backend_build_info');
+    expect(response?.payload).toContain('prosto_padel_http_requests_total');
+    await setImmediate();
     expect(entries).toEqual([]);
   });
 });

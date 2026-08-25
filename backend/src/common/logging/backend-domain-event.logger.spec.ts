@@ -12,9 +12,11 @@ const PRIVATE_MARKER = 'SYNTHETIC_DOMAIN_LOG_PRIVATE_MARKER';
 
 function harness(config: Record<string, unknown> = {}) {
   const requests = new RequestContextStore();
+  const metrics = { recordDomain: jest.fn() };
   const logger = new BackendDomainEventLogger(
     new ConfigService({ NODE_ENV: 'test', APP_RELEASE: RELEASE, ...config }),
     requests,
+    metrics as never,
   );
   const log = jest.fn();
   const warn = jest.fn();
@@ -23,7 +25,7 @@ function harness(config: Record<string, unknown> = {}) {
       logger: { log: typeof log; warn: typeof warn };
     }
   ).logger = { log, warn };
-  return { logger, requests, log, warn };
+  return { logger, requests, metrics, log, warn };
 }
 
 describe('BackendDomainEventLogger', () => {
@@ -41,6 +43,11 @@ describe('BackendDomainEventLogger', () => {
     });
 
     expect(subject.warn).not.toHaveBeenCalled();
+    expect(subject.metrics.recordDomain).toHaveBeenCalledWith({
+      domain: 'match_chat',
+      action: 'send_message',
+      outcome: 'sent',
+    });
     expect(subject.log).toHaveBeenCalledWith({
       event: 'domain_operation_completed',
       service: 'prosto-padel-backend',
@@ -68,6 +75,12 @@ describe('BackendDomainEventLogger', () => {
     } as never);
 
     expect(subject.log).not.toHaveBeenCalled();
+    expect(subject.metrics.recordDomain).toHaveBeenCalledWith({
+      domain: 'private_booking',
+      action: 'create',
+      outcome: 'rejected',
+      reason: 'provider_rejected',
+    });
     expect(subject.warn).toHaveBeenCalledWith({
       event: 'domain_operation_completed',
       service: 'prosto-padel-backend',
@@ -122,6 +135,7 @@ describe('BackendDomainEventLogger', () => {
     } as never);
 
     expect(subject.log).not.toHaveBeenCalled();
+    expect(subject.metrics.recordDomain).not.toHaveBeenCalled();
     expect(subject.warn).toHaveBeenCalledWith({
       event: 'domain_operation_log_rejected',
       service: 'prosto-padel-backend',

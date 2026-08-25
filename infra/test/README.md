@@ -1,8 +1,9 @@
 # Local Docker test contour
 
 This is an isolated, synthetic-only contour for PostgreSQL, the NestJS backend,
-nginx, and an opt-in one-shot `db-tools` container. PostgreSQL and backend have
-no host port mapping. Only nginx is reachable, at `127.0.0.1:8080`.
+nginx, the observability stack, and an opt-in one-shot `db-tools` container.
+PostgreSQL and backend have no host port mapping. Nginx is reachable at
+`127.0.0.1:8080`; Grafana is reachable only at `127.0.0.1:3001`.
 Nginx joins the ordinary `test_edge` bridge for loopback publication and the
 internal `test_internal` network for backend access. PostgreSQL and `db-tools`
 remain attached only to `test_internal`. Backend also joins the dedicated
@@ -19,15 +20,20 @@ Run from the repository root:
 ```bash
 cp infra/test/.env.test.example infra/test/.env.test
 docker compose -f infra/test/compose.yaml --env-file infra/test/.env.test config --services
-docker compose -f infra/test/compose.yaml --env-file infra/test/.env.test up --build -d postgres backend nginx
+docker compose -f infra/test/compose.yaml --env-file infra/test/.env.test up --build -d
 curl --fail http://127.0.0.1:8080/api/v1/health
 docker compose -f infra/test/compose.yaml --env-file infra/test/.env.test ps
 ```
 
-Expected: Compose configuration is valid, all three services become healthy,
-and health returns a successful response. Stop if port `5432` or `3000` is
-published, if nginx is bound beyond `127.0.0.1:8080`, or if any value is not
-synthetic.
+Expected: Compose configuration is valid, stateful application and
+observability services become healthy, and health returns a successful
+response. Stop if port `5432`, backend `3000`, Loki `3100`, Prometheus `9090`,
+Alertmanager `9093`, Vector `8686/9598`, or node-exporter `9100` is published.
+Nginx and Grafana must remain bound to loopback only.
+
+The observability topology, retention, access, queries, alert meanings,
+rollout and rollback procedures are documented in
+`docs/launch/OBSERVABILITY_RUNBOOK.md`.
 
 `db-tools` is not started by normal `up`. It is attached only to the internal
 network and receives these mounts:
@@ -181,7 +187,7 @@ Never run or share unfiltered `docker compose config` output on the server. It
 can expand and print existing database environment credentials. Do not enable
 shell tracing around any runtime-secret operation.
 
-The nine required files are:
+The ten required files are:
 
 - the `backend_auth_app` password;
 - the Telegram bot token;
@@ -191,15 +197,18 @@ The nine required files are:
 - the profile-photo S3 Secret Access Key;
 - the YCLIENTS Partner Bearer token;
 - the YCLIENTS application User token;
-- the reservation snapshot master key in canonical base64.
+- the reservation snapshot master key in canonical base64;
+- the Grafana administrator password.
 
 Create them manually through the approved server secret process, outside the
-Git repository. Each file must be a regular, non-symlink file owned by
-`prostopadel` with mode `600`. Put only its corresponding secret in the file;
-the backend removes a final CR/LF itself. Configure only their non-secret host
-paths in `infra/test/.env.test`, using the nine `*_FILE_HOST` variables from the
-example. Never put the file contents in that env file, Compose, an image build
-argument, or Git.
+Git repository. The first nine files are backend mounts: each must be a
+regular, non-symlink file owned by `prostopadel` with mode `600`. The Grafana
+password is a separate mount: determine the numeric UID/GID from the exact
+pinned Grafana image, make that identity the file owner and keep mode `600`.
+Put only the corresponding secret in each file. Configure only their
+non-secret host paths in `infra/test/.env.test`, using the ten `*_FILE_HOST`
+variables from the example. Never put file contents in that env file, Compose,
+an image build argument, or Git.
 
 Set these non-secret server values explicitly in `infra/test/.env.test`:
 
@@ -287,6 +296,23 @@ do
       exit 1
     }
 done
+```
+
+Verify the Grafana password mount separately, without reading it:
+
+```bash
+GRAFANA_UID_GID="$(
+  docker run --rm --entrypoint sh \
+    "${TEST_GRAFANA_IMAGE:-grafana/grafana:13.1.0}" \
+    -c 'printf "%s:%s" "$(id -u)" "$(id -g)"'
+)"
+test -f "$GRAFANA_ADMIN_PASSWORD_FILE_HOST" &&
+  test ! -L "$GRAFANA_ADMIN_PASSWORD_FILE_HOST" &&
+  test "$(stat -c '%u:%g:%a' "$GRAFANA_ADMIN_PASSWORD_FILE_HOST")" = \
+    "$GRAFANA_UID_GID:600" || {
+      echo 'STOP: Grafana password ownership or mode is unsafe' >&2
+      exit 1
+    }
 ```
 
 Finally, prove that the actual container user can open every read-only mount.

@@ -1,0 +1,78 @@
+groups:
+  - name: prosto-padel-availability
+    rules:
+      - alert: ProstoPadelBackendDown
+        expr: up{job="backend"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Backend metrics target is unavailable
+          description: Prometheus has not scraped the backend for two minutes.
+
+      - alert: ProstoPadelObservabilityTargetDown
+        expr: up{job=~"loki|vector|prometheus|grafana|alertmanager|node-exporter"} == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Observability target is unavailable
+          description: At least one internal observability target has been down for five minutes.
+
+  - name: prosto-padel-application
+    rules:
+      - alert: ProstoPadelBackendHttp5xx
+        expr: increase(prosto_padel_http_requests_total{status_code=~"5.."}[5m]) >= 1
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: Backend returned a 5xx response
+          description: At least one backend 5xx response occurred in the last five minutes.
+
+      - alert: ProstoPadelBackendP95LatencyHigh
+        expr: histogram_quantile(0.95, sum by (le) (rate(prosto_padel_http_request_duration_milliseconds_bucket[10m]))) > 1000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Backend p95 latency is above one second
+          description: Backend p95 request latency exceeded 1000 ms for five minutes.
+
+      - alert: ProstoPadelDomainDependencyFailure
+        expr: increase(prosto_padel_domain_operations_total{reason=~"internal_failure|temporary_unavailable|dependency_unavailable|unavailable"}[5m]) >= 1
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: Domain operation dependency failure
+          description: A bounded domain operation reported an internal or dependency failure.
+
+      - alert: ProstoPadelAuthRejectionsSpike
+        expr: increase(prosto_padel_domain_operations_total{domain="auth",outcome="rejected"}[10m]) >= 10
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: Authentication rejections increased
+          description: Ten or more authentication operations were rejected in ten minutes.
+
+  - name: prosto-padel-host
+    rules:
+      - alert: ProstoPadelHostDiskSpaceLow
+        expr: node_filesystem_avail_bytes{mountpoint="/",fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{mountpoint="/",fstype!~"tmpfs|overlay"} < 0.15
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Host root filesystem has less than 15 percent free
+          description: Free disk capacity stayed below 15 percent for ten minutes.
+
+      - alert: ProstoPadelHostMemoryLow
+        expr: node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.10
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Host available memory is below 10 percent
+          description: Available host memory stayed below 10 percent for ten minutes.

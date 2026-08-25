@@ -80,3 +80,13 @@ services:
         source: ${RESERVATION_SNAPSHOT_MASTER_KEY_BASE64_FILE_HOST:?RESERVATION_SNAPSHOT_MASTER_KEY_BASE64_FILE_HOST is required}
         target: /run/secrets/reservation-snapshot-master-key-base64
         read_only: true
+
+  grafana:
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: !reset null
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana-admin-password
+    volumes:
+      - type: bind
+        source: ${GRAFANA_ADMIN_PASSWORD_FILE_HOST:?GRAFANA_ADMIN_PASSWORD_FILE_HOST is required}
+        target: /run/secrets/grafana-admin-password
+        read_only: true

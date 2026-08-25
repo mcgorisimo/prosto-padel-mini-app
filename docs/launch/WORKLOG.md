@@ -8951,3 +8951,36 @@
   frontend, nginx/TLS, database schema/migrations, secrets and YCLIENTS state
   were not changed. This append-only closeout is docs-only with
   `deployment=not_needed`; metrics and alerts remain the next separate stage.
+
+### 2026-08-26 — Centralized observability stack candidate
+
+- Added the bounded backend Prometheus surface for route-template HTTP
+  counters/latency, domain operation outcomes, exact build identity and process
+  resources. Successful health/metrics probes are excluded from application
+  telemetry; invalid/high-cardinality labels fail closed and resource IDs,
+  request contents, credentials and contact data are never exported.
+- Added the Selectel test chain Docker GELF -> Vector -> Loki and backend/host
+  metrics -> Prometheus, with a provisioned Grafana overview and Alertmanager
+  rules for availability, 5xx, p95 latency, dependency failures, auth rejection
+  spikes, disk and memory. Data services remain internal; Grafana binds only to
+  server loopback and nginx blocks both public metrics path forms.
+- Logs retain for 14 days; Prometheus retains for 15 days with a 2 GB cap.
+  Remote Docker delivery is non-blocking with a bounded local cache and no
+  Docker socket mount. Runtime Grafana password input is a read-only external
+  file; no secret content was added to Git.
+- Focused observability tests passed `16/16`; backend typecheck, backend E2E
+  `4/4`, backend build and root build passed. Full backend unit reported
+  `3827/3828` with only the unchanged migration 038 contract failure. Full root
+  E2E reported `110` passed, `1` intentional skip and the unchanged parallel
+  same-key booking refresh failure (`3` calls instead of `2`); the exact case
+  passed `1/1` with one worker.
+- Static runtime Compose and observability contract checks passed. `App.jsx`,
+  product design, payment fields, database/schema, Supabase and provider state
+  were not changed. External alert delivery is intentionally not claimed:
+  Alertmanager evaluates/groups alerts and exposes them in Grafana, but an
+  owner-approved email/SMS/Telegram/webhook recipient is still required.
+- Deployment status is `not_deployed_pending_review`. The candidate still
+  requires exact-diff review, fast-forward integration into `main`, merged
+  Compose/config validation on Selectel test, pinned image validation, rollout,
+  health/business/log/metrics/dashboard/alert verification and exact commit
+  confirmation. Production is not authorized.

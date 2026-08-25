@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { FastifyReply, FastifyRequest } from 'fastify';
 import { InternalUuid } from '../internal-uuid';
+import { BackendMetricsService } from '../metrics/backend-metrics.service';
 import { RequestContextStore } from './request-context.store';
 import { REQUEST_ID_HEADER, newRequestId } from './request-id';
 import { SanitizedHttpExceptionFilter } from './sanitized-http-exception.filter';
@@ -51,8 +52,14 @@ function durationMilliseconds(startedAt: bigint): number {
   return Number(elapsedNanoseconds / 1_000_000n);
 }
 
-function isSuccessfulHealthCheck(route: string, statusCode: number): boolean {
-  return statusCode < 400 && route.endsWith('/health');
+function isSuccessfulObservabilityProbe(
+  route: string,
+  statusCode: number,
+): boolean {
+  return (
+    statusCode < 400 &&
+    (route.endsWith('/health') || route === '/api/v1/metrics')
+  );
 }
 
 function writeRequestLog(
@@ -62,9 +69,10 @@ function writeRequestLog(
   state: RequestState,
   environment: BackendEnvironment,
   release: string,
+  durationMs: number,
 ): void {
   const route = safeRoute(request);
-  if (isSuccessfulHealthCheck(route, reply.statusCode)) return;
+  if (isSuccessfulObservabilityProbe(route, reply.statusCode)) return;
 
   const event = Object.freeze({
     event: 'http_request_completed',
@@ -75,7 +83,7 @@ function writeRequestLog(
     method: safeMethod(request.method),
     route,
     statusCode: reply.statusCode,
-    durationMs: durationMilliseconds(state.startedAt),
+    durationMs,
     outcome: requestOutcome(reply.statusCode),
   });
 
@@ -95,6 +103,7 @@ export function registerBackendHttpLogging(
 ): void {
   const fastify = application.getHttpAdapter().getInstance();
   const requestContexts = application.get(RequestContextStore);
+  const metrics = application.get(BackendMetricsService);
   const config = application.get(ConfigService);
   const environment = config.getOrThrow<BackendEnvironment>('NODE_ENV');
   const release = config.getOrThrow<string>('APP_RELEASE');
@@ -119,8 +128,31 @@ export function registerBackendHttpLogging(
     const state = requestStates.get(request);
     requestStates.delete(request);
     if (state !== undefined) {
+      const route = safeRoute(request);
+      const durationMs = durationMilliseconds(state.startedAt);
+      if (!isSuccessfulObservabilityProbe(route, reply.statusCode)) {
+        try {
+          metrics.recordHttp({
+            method: safeMethod(request.method),
+            route,
+            statusCode: reply.statusCode,
+            durationMs,
+            outcome: requestOutcome(reply.statusCode),
+          });
+        } catch {
+          // Metrics are best-effort and must not suppress the request log.
+        }
+      }
       try {
-        writeRequestLog(logger, request, reply, state, environment, release);
+        writeRequestLog(
+          logger,
+          request,
+          reply,
+          state,
+          environment,
+          release,
+          durationMs,
+        );
       } catch {
         // Logging must never change an already completed HTTP response.
       }
