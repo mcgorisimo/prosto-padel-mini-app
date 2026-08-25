@@ -737,7 +737,7 @@ test('builds one bounded private range and keeps payment honest', async ({ page 
           30539801: 9_000,
         };
         const timesByService = {
-          30539679: ['17:00', '19:30', '22:00', '22:30', '23:00'],
+          30539679: ['17:00', '18:30', '19:30', '22:00', '22:30', '23:00'],
           30539694: ['17:00', '22:00', '22:30'],
           30539748: ['17:00', '22:00'],
           30539801: ['17:00'],
@@ -886,6 +886,7 @@ test('builds one bounded private range and keeps payment honest', async ({ page 
   const slot = (time, status = 'Свободно') => root.getByRole('button', {
     name: new RegExp(`^${time}–\\d{2}:\\d{2} ${status}$`, 'u'),
   });
+  const anyCourt = root.getByRole('button', { name: 'Любой свободный' });
   await slot('17:00').click();
   const selection = root.getByTestId('booking-selection-summary');
   await expect(selection).toContainText('17:00–17:30');
@@ -912,23 +913,28 @@ test('builds one bounded private range and keeps payment honest', async ({ page 
       summaryFollowsSlots: Boolean(
         times.compareDocumentPosition(summary) & Node.DOCUMENT_POSITION_FOLLOWING
       ),
-      selectedBackground: selectedStyle.backgroundImage,
+      selectedBackgroundColor: selectedStyle.backgroundColor,
       selectedShadow: selectedStyle.boxShadow,
       summaryBackground: summaryStyle.backgroundImage,
       summaryShadow: summaryStyle.boxShadow,
     };
   });
   expect(selectionPresentation.summaryFollowsSlots).toBe(true);
-  expect(selectionPresentation.selectedBackground).toContain('rgb(72, 230, 111)');
-  expect(selectionPresentation.selectedBackground).not.toContain('rgb(255, 128, 106)');
+  expect(selectionPresentation.selectedBackgroundColor).toBe('rgb(216, 243, 74)');
   expect(selectionPresentation.selectedShadow).not.toBe('none');
   expect(selectionPresentation.summaryBackground).toContain('radial-gradient');
   expect(selectionPresentation.summaryBackground).toContain('linear-gradient');
+  expect(selectionPresentation.summaryBackground).toContain('rgba(216, 243, 74, 0.18)');
   expect(selectionPresentation.summaryShadow).toContain('inset');
 
   await slot('18:00').click();
   await expect(selection).toContainText('17:00–18:30');
   await expect(selection).toContainText('1,5 ч · 6 600 ₽');
+  await slot('17:00', 'Выбрано').click();
+  await expect(root.getByTestId('booking-selection-hint')).toHaveText(
+    'Выбранный диапазон оставлен без изменений: после этого действия нельзя оформить непрерывную бронь.',
+  );
+  await expect(selection).toContainText('17:00–18:30');
   await slot('18:00', 'Выбрано').click();
   await expect(selection).toContainText('1 ч · 4 400 ₽');
 
@@ -944,7 +950,17 @@ test('builds one bounded private range and keeps payment honest', async ({ page 
   await expect(selection).toContainText('17:00–19:30');
   await expect(slot('20:30', 'Недоступно')).toBeDisabled();
 
-  const anyCourt = root.getByRole('button', { name: 'Любой свободный' });
+  await anyCourt.click();
+  await slot('18:30').click();
+  await slot('19:00').click();
+  const incompatibleSlot = slot('19:30', 'Не добавить');
+  await expect(incompatibleSlot).toBeEnabled();
+  await incompatibleSlot.click();
+  await expect(root.getByTestId('booking-selection-hint')).toHaveText(
+    '19:30 свободен отдельно, но весь диапазон 18:30–20:00 недоступен на одном корте.',
+  );
+  await expect(selection).toContainText('18:30–19:30');
+
   await anyCourt.click();
   await slot('23:30').click();
   await expect(root.getByTestId('booking-selection-hint')).toContainText(

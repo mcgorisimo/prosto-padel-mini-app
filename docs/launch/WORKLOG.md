@@ -8160,3 +8160,77 @@
   `2cf2cae0f836a425ba70e06658b7548fa89edd1f`;
   `deployment=deployment_deferred_by_user` pending a separate test rollout,
   health/HTTP, authenticated TMA smoke and bounded-log authorization.
+
+### 2026-08-25 — D2.1 slot presentation follow-up Selectel test rollout
+
+- The owner authorized a Selectel test rollout of exact remote `main`
+  `c2a3f3074b142700edad7142993a635b409734d6`. Read-only preflight found a
+  clean detached server checkout at the previous deployed runtime
+  `2cf2cae0f836a425ba70e06658b7548fa89edd1f`, exact remote target, valid
+  Compose config and all four test containers healthy with restart count `0`.
+- The server checkout advanced cleanly to exact `c2a3f307...`. A frontend-only
+  image build transformed `1627` modules with only the existing large-chunk
+  advisory, then replaced frontend container
+  `edefcdde3f98f86b00a9a5529c81f9a058419fbaba014da2eb9d320fea3f8411`
+  / image `sha256:923a0c6a2a2f93137439e04dbdb27f0bfc163ce60db01e542723972c85231b24`
+  with container
+  `52356f04334c2b47db0f7d6153e68f9652a330849d258dc4926a912b536df882`
+  / image `sha256:2e35f61aa10205aa1e206dfd26c6d8eab5351eccf72c1b91e52abe2d3b2c6968`.
+  Backend, nginx and PostgreSQL containers remained unchanged; all four were
+  healthy with restart count `0`. No DB/schema, environment/secret,
+  YCLIENTS/provider or production action occurred.
+- Frontend internal `/healthz`, internal nginx root, internal backend
+  `/api/v1/health`, public HTTPS frontend, public HTTPS backend health and the
+  exact public `index-Bly-9dTm.js` asset all returned `200` with successful TLS
+  verification. Bounded normalized frontend/nginx/backend logs had actual
+  `5xx=0` and critical/panic/fatal/unhandled `0`; the observed `499` requests
+  were client-cancelled reads, and one stale Telegram refresh produced `401`
+  before a fresh authenticated login succeeded with `200`.
+- Authenticated TMA Home loaded the backend profile and active matches. On the
+  Booking screen courts loaded, but availability then failed closed with
+  `Не удалось загрузить доступность...` and `Нет данных`, so live lime/range,
+  end-at-midnight and price smoke could not be accepted. No slot, continue,
+  payment, booking creation or provider/API write was clicked. The owner then
+  stopped Computer Use with Escape, so the isolated retry ended immediately.
+  Selectel test remains on exact `c2a3f307...`; production is unchanged;
+  `deployment=applied_with_tma_availability_failure_and_smoke_stopped_by_user`.
+
+### 2026-08-25 — D2.1 canonical lime and incompatible continuation checkpoint
+
+- Continued locally from clean detached exact `HEAD=origin/main`
+  `c2a3f3074b142700edad7142993a635b409734d6`. Selected tiles and the raised
+  selected-range card now use only the existing application palette,
+  including canonical lime `--accent-light=#D8F34A`, `--deep` and
+  `--surface-dark`; the explicit `Выбрано` text and the existing 3D elevation
+  remain, so state is not conveyed by color alone.
+- Root cause of the reported adjacent-slot rejection: a tile was labelled
+  `Свободно` when it was covered by any provider-returned booking option, but
+  extending the selection requires one provider option that covers the exact
+  whole range on one court. Thus a time such as `19:00` can belong to a
+  different free range while `18:00–19:30` has no valid same-court service;
+  combining shifted services or courts would invent unavailable provider
+  behavior and an unsupported price. Such an adjacent tile is now labelled
+  `Не добавить`; it remains keyboard/touch actionable only to show the exact
+  truthful explanation, while the valid selected range is unchanged and no
+  create/payment/provider action is reached.
+- Focused booking E2E passed `13/13`, root unit tests passed `116/116` across
+  `19` files, production build passed with `1627` modules and only the existing
+  large-chunk advisory, and a stable full E2E run passed `107` with `1`
+  intentional skip using `6` workers. Default high-parallel runs each exposed
+  one unrelated existing 30-second WebKit timeout after `106` passes; both
+  exact tests passed isolated, and the lower-parallel full repeat was clean.
+  `git diff --check` passed. Lint still reports the existing `31`-error legacy
+  baseline and format reports the existing `28`-file baseline; no out-of-scope
+  bulk cleanup was made.
+- Independent review first found `P0=0`, `P1=1`: the new continuation wording
+  could also be used for a rejected removal of the selected left edge. The
+  contextual message is now restricted to the `incompatible` state, edge
+  removal has a separate truthful message, and a regression proves the valid
+  range remains unchanged. Final exact-diff review is clean with `P0=0`,
+  `P1=0`; the reviewer changed no file or external state.
+- This local checkpoint changes the frontend bundle. No commit, push, merge,
+  Selectel rollout, backend/DB/schema, YCLIENTS/provider or production action
+  was performed for it. Selectel test therefore still runs exact
+  `c2a3f307...`; `deployment=pending_separate_owner_authorization` for commit,
+  push and a frontend-only test rollout followed by health, authenticated TMA
+  booking smoke and bounded logs.

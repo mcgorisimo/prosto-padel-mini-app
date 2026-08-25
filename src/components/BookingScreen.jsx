@@ -95,6 +95,7 @@ function formatDuration(duration) {
 function getSlotLabel(state) {
   if (state === 'selected') return 'Выбрано';
   if (state === 'free') return 'Свободно';
+  if (state === 'incompatible') return 'Не добавить';
   if (state === 'loading') return 'Загрузка';
   if (state === 'unknown') return 'Нет данных';
   if (state === 'outside') return 'Вне времени';
@@ -103,7 +104,7 @@ function getSlotLabel(state) {
   return 'Недоступно';
 }
 
-function getSelectionHint(reason, targetMinute) {
+function getSelectionHint(reason, targetMinute, range = null) {
   if (reason === 'maximum') return 'Можно выбрать не больше 2,5 часа.';
   if (reason === 'gap') return 'Выбирайте только соседние слоты без разрывов.';
   if (reason === 'minimum' && targetMinute === 23 * 60 + 30) {
@@ -111,6 +112,22 @@ function getSelectionHint(reason, targetMinute) {
   }
   if (reason === 'minimum') {
     return 'Этот интервал доступен только как продолжение соседнего диапазона.';
+  }
+  if (reason === 'unavailable' && range) {
+    const rangeEndMinute = getPrivateBookingRangeEndMinute(range);
+    const nextStartMinute = Math.min(range.startMinute, targetMinute);
+    const nextEndMinute = Math.max(
+      rangeEndMinute,
+      targetMinute + PRIVATE_BOOKING_SLOT_MINUTES,
+    );
+    return [
+      `${formatPrivateBookingMinute(targetMinute)} свободен отдельно,`,
+      `но весь диапазон ${formatPrivateBookingMinute(nextStartMinute)}–${formatPrivateBookingMinute(nextEndMinute)}`,
+      'недоступен на одном корте.',
+    ].join(' ');
+  }
+  if (reason === 'unavailable') {
+    return 'Выбранный диапазон оставлен без изменений: после этого действия нельзя оформить непрерывную бронь.';
   }
   return 'Этот диапазон недоступен целиком. Выберите соседний свободный слот.';
 }
@@ -761,11 +778,21 @@ export default function BookingScreen({
     }
 
     if (isSelected) return { state: 'selected' };
-    return {
-      state: isPrivateBookingTileCovered(availabilityOptions, minute)
-        ? 'free'
-        : 'unavailable',
-    };
+    const isCovered = isPrivateBookingTileCovered(availabilityOptions, minute);
+    if (isCovered && selectedRange) {
+      const continuation = updatePrivateBookingRange({
+        range: selectedRange,
+        targetMinute: minute,
+        options: availabilityOptions,
+      });
+      if (
+        continuation.outcome === 'rejected' &&
+        continuation.reason === 'unavailable'
+      ) {
+        return { state: 'incompatible' };
+      }
+    }
+    return { state: isCovered ? 'free' : 'unavailable' };
   };
 
   const sectionedSlots = TIME_SECTIONS.map((section) => ({
@@ -860,7 +887,11 @@ export default function BookingScreen({
 
   const handleSelectSlot = (time, minute) => {
     const slot = getSlotState(time, minute);
-    if (slot.state !== 'free' && slot.state !== 'selected') return;
+    if (
+      slot.state !== 'free' &&
+      slot.state !== 'selected' &&
+      slot.state !== 'incompatible'
+    ) return;
 
     setSuccessText('');
     const result = updatePrivateBookingRange({
@@ -869,7 +900,11 @@ export default function BookingScreen({
       options: availabilityOptions,
     });
     if (result.outcome === 'rejected') {
-      const hint = getSelectionHint(result.reason, minute);
+      const hint = getSelectionHint(
+        result.reason,
+        minute,
+        slot.state === 'incompatible' ? selectedRange : null,
+      );
       setSelectionHint(hint);
       showToast?.(hint, 'info');
       return;
@@ -1310,7 +1345,11 @@ export default function BookingScreen({
             <div className="booking-time-grid grid grid-cols-3">
               {section.slots.map(({ time, minute }) => {
                 const { state } = getSlotState(time, minute);
-                const disabled = state !== 'free' && state !== 'selected';
+                const disabled = ![
+                  'free',
+                  'selected',
+                  'incompatible',
+                ].includes(state);
                 const intervalEnd = formatPrivateBookingMinute(
                   minute + PRIVATE_BOOKING_SLOT_MINUTES,
                 );
@@ -1327,7 +1366,9 @@ export default function BookingScreen({
                         ? 'is-selected text-warm-white'
                         : state === 'free'
                           ? 'is-free text-warm-white'
-                          : `is-disabled is-${state} text-warm-white/28`,
+                          : state === 'incompatible'
+                            ? 'is-incompatible text-warm-white'
+                            : `is-disabled is-${state} text-warm-white/28`,
                     ].join(' ')}
                   >
                     <div className="booking-slot-time flex items-center gap-1.5 text-base font-black tabular-nums">
