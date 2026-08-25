@@ -9030,3 +9030,46 @@
   air-gap record is documented as one exact startup exception rather than
   hidden by a broad logger filter; application, datasource, dashboard and all
   other error logs remain visible.
+
+### 2026-08-26 — Centralized observability stack closeout
+
+- Review found and corrected only rollout/configuration issues: distroless Loki
+  health probing, loopback GELF/Grafana bridge access, Docker GELF metadata
+  normalization, an unavailable Grafana datasource plugin and misleading
+  Grafana error filtering. No unresolved product-code review finding remains.
+- `main` runtime commit `866570789af2524e2a0cc0a5e225ba96514b655e`
+  is deployed on Selectel test. The checkout and backend `APP_RELEASE` match
+  exactly. Final rollout recreated backend and Grafana; the preceding rollout
+  activated GELF on PostgreSQL, backend, frontend and nginx and started Vector,
+  Loki, Prometheus, Alertmanager, node-exporter and Grafana. Production was not
+  changed.
+- All `10` services are running; every configured healthcheck is healthy,
+  node-exporter is running without a container healthcheck, and every restart
+  count is `0`. Public health is `200`; both public metrics path forms are
+  `404`; nginx, Grafana and Vector GELF remain bound to server loopback only.
+  Host root disk use after rollout is `12 GB / 63 GB` (`20%`).
+- Prometheus reports `7/7` targets up with no scrape errors and all `8` alert
+  rules healthy. All six required backend metric families are present with the
+  exact deployed release. The provisioned Grafana dashboard has `8` panels;
+  Prometheus and Loki datasource health both report `OK`.
+- A bounded synthetic `ProstoPadelRolloutPreflight` alert was accepted as
+  `active` by Alertmanager and routed to `local-observability-ui`; it expires
+  automatically. External email/SMS/Telegram/webhook delivery remains an
+  explicit incomplete gate until the owner supplies a recipient and transport
+  secret.
+- No-write business smoke returned the expected `401/session_invalid`.
+  Centralized application-log audit passed `534/534` JSON records across
+  PostgreSQL, backend, frontend and nginx: `0` HTTP 5xx, `0` error/fatal,
+  `0` forbidden-key hits and `0` invalid bearer-marker hits. The ten-container
+  audit found no unexpected error/fatal records; Grafana emitted the one exact
+  documented upstream Angular-detector no-egress startup record.
+- Verification remains: observability-focused unit tests `16/16`, backend
+  typecheck/E2E/build passed, root build passed, static observability/runtime
+  Compose checks passed. Full suites retain only the two recorded pre-existing
+  failures: migration 038 contract (`3827/3828` backend unit) and the flaky
+  parallel same-key booking refresh (focused single-worker case `1/1`).
+- Deployment status is `deployment=applied_verified` for Selectel test at
+  `866570789af2524e2a0cc0a5e225ba96514b655e`. This append-only closeout is
+  docs-only with `deployment=not_needed`. Off-host Selectel Logs durability and
+  external alert notification delivery remain the next credential-dependent
+  operations steps.
