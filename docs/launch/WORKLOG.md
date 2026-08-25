@@ -7737,3 +7737,51 @@
   gates. No commit, push, integration, SSH/DB/API command, runtime/container
   action, provider write, environment/secret change or production action was
   performed; `deployment=deployment_deferred_by_user`.
+
+### 2026-08-25 — D5.1 legacy initial_level_v1 reassessment UI rollout
+
+- Selectel test preflight passed on `prosto-padel-test-01` for compose project
+  `prosto-padel-test`: the checkout was clean at
+  `9ae7cf18fcfb523f97de259383ea0d7d4b39f53b`, remote `origin/main` was exact
+  `f456965877fe6f617c5e50552d1bd9e70a6cf4e0`, all four expected containers
+  were healthy with restart count `0`, and all `13` onboarding legal key names
+  were present exactly once. No environment or secret value was printed.
+- The checkout was safely fast-forwarded to clean exact
+  `f456965877fe6f617c5e50552d1bd9e70a6cf4e0`. Compose `config --quiet`
+  passed. The frontend-only build ran from `2026-08-25T00:04:01Z` through
+  `00:04:09Z`, transformed `1626` modules and completed with only the existing
+  large-chunk advisory. Frontend recreate started and completed at
+  `2026-08-25T00:04:09Z`.
+- Only frontend container
+  `f8332e6853beb6d8e99070af283057742f41361bf399ec08209d9a599bf59f18`
+  was replaced, by
+  `e33ab30823fe1138d756c21c6a3b31fa97874d6c410834fdff53be9b50a1e05d`
+  using image
+  `sha256:8cd894ea2f250de13ca23eec0e581fa0c6f5b622125321d423fccc0aea121e5a`.
+  The new frontend was healthy with restart count `0`.
+- The first read-only internal HTTP probe used port `80` and stopped with
+  connection refused. Committed Compose/nginx metadata confirmed the service
+  listens on `8080`; the corrected `/healthz` probe returned `200`. The
+  correction performed no write and did not repeat build, recreate or rollout.
+- Backend
+  `ab732d5d43294409c620abd4abcf14eb660f970074b3b72ab9b8afae3ef80fae`,
+  nginx `e5b98b53a385aef67465e097753fb54b060596d3c620af3cfb484a175d624be7`
+  and PostgreSQL
+  `5e36d4dc1a5c3e2fa658382cfc4a8dff7fe3ea2ba1a9834bb89cc83df743f7be`
+  remained unchanged, healthy and at restart count `0`.
+- Public HTTPS frontend, `/api/v1/health` and all three versioned test-only
+  legal URLs returned `200` with TLS verification result `0`. Bounded logs from
+  `2026-08-25T00:04:09Z` through `00:07:30Z` reported frontend critical `0`,
+  frontend `5xx=0`, nginx critical `0` and nginx `5xx=0`; the stable window
+  beginning `00:04:10Z` reported the same zero counts.
+- Mandatory root E2E passed `106` tests with `1` intentional skip. The root
+  production build passed with `1626` modules and only the existing large-chunk
+  advisory; `git diff --check` passed. This closeout is docs-only and needs no
+  additional rollout.
+- Independent read-only review of the exact one-file diff found no critical or
+  high-priority issues (`P0=0`, `P1=0`).
+- Authenticated reassessment and onboarding requests were not executed.
+  Environment/secrets, backend/nginx/PostgreSQL containers, DB/schema,
+  TLS/nginx configuration, provider API and production were unchanged. Manual
+  TMA reassessment remains a separate owner gate;
+  `deployment=applied_with_manual_tma_reassessment_smoke_pending`.
