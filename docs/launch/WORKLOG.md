@@ -8314,3 +8314,42 @@
   or production action was performed. `deployment=pending_separate_owner_authorization`:
   the next gate is commit/integration and a frontend-only Selectel test rollout,
   followed by health/HTTP, owner-run authenticated TMA smoke and bounded logs.
+
+### 2026-08-25 — D2.1 two-hour availability Selectel test rollout
+
+- The owner authorized commit, push and Selectel test rollout. The exact clean
+  reviewed checkpoint was committed as
+  `b0dff18fb323a62d05dfdff1a2ce1d9509833ac0` and fast-forward pushed from
+  exact `bc78229491df88b1a43691a2575c587a691873ba` to `main`.
+- Read-only preflight on `prosto-padel-test-01`, Compose project
+  `prosto-padel-test`, confirmed a clean checkout at previous deployed exact
+  `239d4ef314915c7689d4d199285746958e29294d`, exact remote target
+  `b0dff18...`, a quiet valid Compose config, and all four expected containers
+  healthy with restart count `0`. The clean detached checkout advanced by
+  verified fast-forward to exact `b0dff18...`.
+- Frontend-only build ran from `2026-08-25T16:28:49Z`; it transformed `1627`
+  modules with only the existing large-chunk advisory and produced exact
+  `index-2YOdEKW8.js` plus `index-5eTQqx71.css`. Frontend recreate ran from
+  `16:28:57Z` through `16:28:58Z`. Previous frontend container
+  `9b456b32f042f7b632873a8641e9662a1523ae45ba6593812463b167cc5ce013`
+  / image `sha256:c6d7455617728146d1a17c75b6cc192efcc931eefde54333e4b207eeace1bf14`
+  was replaced by
+  `2e17e46a5aae4f8061d188192354def1f1707013b1e08b16acabebcd964488dd`
+  / image `sha256:b99a8a82eea64f79cda90925defb960950805180a26d2dfa8882c5c3df114b56`.
+  The new frontend is healthy with restart count `0`.
+- Backend `ab732d5d43294409c620abd4abcf14eb660f970074b3b72ab9b8afae3ef80fae`,
+  nginx `e5b98b53a385aef67465e097753fb54b060596d3c620af3cfb484a175d624be7`
+  and PostgreSQL
+  `5e36d4dc1a5c3e2fa658382cfc4a8dff7fe3ea2ba1a9834bb89cc83df743f7be`
+  remained unchanged, healthy and at restart count `0`.
+- Internal frontend and backend health returned `200`. Public HTTPS frontend,
+  backend health and both exact JS/CSS assets returned `200`; TLS verification
+  was `0` at `135.106.155.112`. Count-only logs from frontend recreate reported
+  frontend, nginx and backend critical `0` and `5xx=0`; PostgreSQL critical was
+  `0`.
+- No backend/DB/schema, environment/secret, TLS/nginx configuration,
+  YCLIENTS/provider write, payment runtime or production action occurred. The
+  owner will perform the authenticated Telegram Mini App smoke separately for
+  `1`, `1.5` and `2` hours, ending at `00:00` and pull-refresh availability.
+  Deployment is `applied_with_manual_owner_tma_smoke_pending`. This append-only
+  closeout changes documentation only and has deployment `not_needed`.
