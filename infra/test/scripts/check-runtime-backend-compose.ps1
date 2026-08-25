@@ -315,6 +315,7 @@ Assert-Line $basePostgres 'POSTGRES_PASSWORD: ${TEST_POSTGRES_PASSWORD:-local_te
 Assert-Line $baseDbTools 'DATABASE_USER: ${DATABASE_USER:-prosto_padel_test}'
 Assert-Line $baseDbTools 'PGPASSWORD: ${TEST_POSTGRES_PASSWORD:-local_test_password_only}'
 Assert-Line $baseBackend 'DATABASE_URL: postgresql://${TEST_POSTGRES_USER:-prosto_padel_test}:${TEST_POSTGRES_PASSWORD:-local_test_password_only}@postgres:5432/${TEST_POSTGRES_DB:-prosto_padel_test_migration_cycle}'
+Assert-Line $baseBackend 'NODE_OPTIONS: "--no-warnings"'
 Assert-Line $baseBackend '- test_internal'
 Assert-Line $baseBackend '- test_egress'
 Assert-Line $baseEgressNetwork 'driver: bridge'

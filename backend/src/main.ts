@@ -10,6 +10,7 @@ import { AppModule } from './app.module';
 import { PLAYER_PROFILE_PHOTO_MAX_UPLOAD_BYTES } from './config/player-profile-photo.config';
 import { registerBackendHttpLogging } from './common/logging/backend-http-logging';
 import { createBackendConsoleLogger } from './common/logging/backend-console-logger';
+import { registerBackendProcessWarningLogging } from './common/logging/backend-process-warning';
 
 export function registerPlayerProfilePhotoContentTypes(
   application: NestFastifyApplication,
@@ -50,6 +51,8 @@ async function bootstrap(): Promise<void> {
     config.getOrThrow<string>('HOST'),
   );
 }
+
+registerBackendProcessWarningLogging();
 
 bootstrap().catch((error: unknown) => {
   const logger = new Logger('Bootstrap');

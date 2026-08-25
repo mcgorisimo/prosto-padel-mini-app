@@ -8816,3 +8816,39 @@
   rollout. Deployment remains `not_deployed_pending_final_review`; no Selectel,
   container, environment, secret, database/schema, provider or production
   action occurred in this transfer.
+
+### 2026-08-25 — Observability runtime JSON warning correction
+
+- Exact `42bc7330258e993bac8738ed00ca3bc849bcaf15` was fast-forward pushed to
+  `main`. Read-only Selectel preflight found the clean detached checkout at
+  `9ae39ad`, valid Compose config and all four containers healthy with restart
+  count `0`. The checkout advanced cleanly to exact `42bc733`; Compose
+  `config --quiet` passed with that exact `APP_RELEASE`.
+- PostgreSQL, backend, frontend and nginx were rebuilt/recreated as required to
+  apply the new bounded logging driver configuration. The rollout ran from
+  `2026-08-25T19:25:56Z` to `19:26:32Z`; all four containers became healthy
+  with restart count `0`, Docker `local` logging, `max-size=10m` and
+  `max-file=5`.
+- Internal and public backend health returned HTTP `200`; public TLS
+  verification returned `0`. A canonical nonexistent bearer read against the
+  match feed returned the expected fail-closed `401 session_invalid` without a
+  write. The backend process reported exact `APP_RELEASE=42bc733...`.
+- The first JSON audit found `94` valid JSON lines plus seven raw multiline
+  Node `NodeVersionSupportWarning` lines emitted by AWS SDK. No probe credential
+  or query marker appeared, and the HTTP request event itself retained the
+  safe allowlist. The stream therefore was not yet strictly all-JSON, so the
+  observability goal remained open despite healthy runtime.
+- The minimal correction sets backend-only `NODE_OPTIONS=--no-warnings` and
+  registers a process-warning handler before bootstrap. Node still emits the
+  warning event, which is now logged once with bounded `warningKind` and no raw
+  name, message or stack. Unknown environment/release/warning values fail
+  closed to fixed labels.
+- Focused logging/config tests passed `68/68`; backend typecheck, E2E `4/4` and
+  build passed; root build passed and full root E2E passed `111` with `1`
+  intentional skip. Full backend unit reported `3815/3816` with only the
+  already classified unchanged migration 038 contract failure. Runtime
+  Compose static and diff checks passed.
+- Independent runtime and security reviews both returned `P0=0`, `P1=0`,
+  Acceptance PASS. Current deployed commit remains `42bc733`; the warning
+  correction awaits its checkpoint, fast-forward integration and backend-only
+  rollout. No production, database/schema, secret or provider change occurred.
