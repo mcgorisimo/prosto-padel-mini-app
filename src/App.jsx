@@ -342,6 +342,7 @@ export function mergeProfileSources(profile, backendProfile, metadata = {}) {
 
 export default function App({
   backendProfile = null,
+  privateBookingClient = null,
   playerOnboardingInitialLevelLabel = null,
   backendMatchRequired = false,
   backendMatchLifecycleStatus = 'disabled',
@@ -3254,12 +3255,11 @@ const handleBookSlot = async (booking) => {
             }}
             courtNamesById={backendCourtNamesById}
             onCourtCatalogChange={mergeBackendCourtCatalog}
-            bookingClient={{
-              fullName: [currentUser.firstName, currentUser.lastName]
-                .filter(Boolean)
-                .join(' '),
-              phone: currentUser.phone,
-              email: '',
+            bookingClient={privateBookingClient}
+            onOpenProfile={() => {
+              setSelectedBookingReservationId(null);
+              setSelectedBookingMatchId(null);
+              setActiveTab('profile');
             }}
             onBookSlot={handleBookSlot}
             showToast={showToast}

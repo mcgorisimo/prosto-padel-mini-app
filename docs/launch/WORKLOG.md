@@ -7987,3 +7987,54 @@
   were unchanged. This append-only closeout is Markdown-only; automated tests
   are `not_run/not_needed`, deployment is `not_needed`, and a local docs-only
   checkpoint commit remains a separate gate.
+### 2026-08-25 — D2.1 private-booking slot selection local checkpoint
+
+- Continued code-only from detached base
+  `4d07f4099d5f48088ee3fc33f8b08c19181d7dc6`; local and remote `main` were
+  `e7a93cbe813ffa7f3941f03ec69837e43697891c`, whose three newer commits are
+  unrelated consent-migration/docs work and were not integrated here.
+- Private booking now has one 30-minute tile grid from `07:00` through the
+  `23:30–00:00` tile. One contiguous range can contain `2..5` tiles; gaps,
+  occupied/unavailable crossings, a standalone `23:30` start and a sixth tile
+  fail closed with short guidance. Each exact provider duration service uses
+  the existing confirmed pricing mapping for `1/1.5/2/2.5` hours, including
+  all valid endings at `00:00`. The separate duration control was removed
+  without a broad redesign.
+- Root cause of the stale reservation card: creation mode called the owner
+  booking list, selected `reservations[0]`, exact-read that record and stored it
+  as `latestReservation`; the backend list is ordered by latest update and
+  retains terminal state-machine rows, so a recently updated `rejected`
+  attempt became the unconditional creation-screen card. Creation mode no
+  longer lists/reads/renders a previous reservation. Exact reservation-detail
+  reads and the Home adapter remain separate and unchanged; Home still keeps
+  active future bookings and filters terminal rejected/cancelled records.
+- Backend availability requests preserve each returned `serviceId/courtId`
+  relation instead of querying a service-by-union-court Cartesian product.
+  Bounds remain `16` service variants, `8` courts and `64` availability
+  requests. Because the existing times contract reports only free intervals
+  and no busy-vs-resource-schedule reason, an absent interval is truthfully
+  labelled `Недоступно`, not falsely `Занято`; known global schedule bounds
+  retain `Вне времени`.
+- The confirmation sheet keeps the selected date, interval, duration, court,
+  total/per-player price and `Частная бронь`. It has no contact form: name,
+  phone and email come only from the authenticated backend onboarding/profile
+  contract, while an incomplete profile routes back to Profile. The honest
+  `Оплатить <сумма>` action is disabled until a payment provider exists; no
+  payment runtime, payment field or create/link/provider write is reachable.
+- Focused booking Playwright passed `12/12`; mandatory root unit tests passed
+  `116/116` across `19` files; mandatory root E2E passed `106` with `1`
+  intentional skip. Production build passed with `1627` modules and only the
+  existing large-chunk advisory; `git diff --check` passed.
+- The single independent read-only reviewer first found two P1 issues: a
+  service-by-union-court Cartesian query and false `Занято` labelling without
+  a provider reason. Both were corrected and regression-covered. Final exact
+  diff review is clean with `P0=0`, `P1=0`; the reviewer changed no file or
+  external state.
+- This checkpoint changes the frontend runtime bundle. The owner explicitly
+  prohibited push, merge and deployment, so no Selectel/YCLIENTS/API/DB write,
+  provider call or runtime/container action occurred;
+  `deployment=deployment_deferred_by_user`. A future authorized gate must
+  integrate the exact checkpoint into `main`, roll that exact commit to the
+  Selectel test frontend, then verify health/HTTP, authenticated TMA slot and
+  Home-booking smoke, and bounded frontend/nginx/backend logs. Production
+  remains a separate direct authorization.

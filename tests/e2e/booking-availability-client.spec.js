@@ -652,7 +652,9 @@ test('keeps the credential private while lifecycle reads booking availability', 
   });
 });
 
-test('creates a backend booking from the availability confirmation', async ({ page }) => {
+test('builds one bounded private range and keeps payment honest', async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.clock.install({ time: new Date('2026-08-05T06:00:00.000Z') });
   await isolateComponentHarness(page);
 
@@ -672,6 +674,7 @@ test('creates a backend booking from the availability confirmation', async ({ pa
     const calls = [];
     const notifications = [];
     let writes = 0;
+    let lists = 0;
     const login = {
       sessionReady: true,
       async listBookingServices() {
@@ -680,19 +683,24 @@ test('creates a backend booking from the availability confirmation', async ({ pa
           outcome: 'services_loaded',
           services: [
             {
+              id: 30539679,
+              title: 'Аренда корта 1ч.',
+              categoryId: 27980310,
+            },
+            {
               id: 30539694,
               title: 'Аренда корта 1.5ч.',
               categoryId: 27980310,
             },
             {
               id: 30539748,
-              title: 'Аренда корта 1.5ч. Прайм',
+              title: 'Аренда корта 2ч.',
               categoryId: 27980310,
             },
             {
-              id: 30539922,
-              title: 'Индивид 1ч.',
-              categoryId: 27980391,
+              id: 30539801,
+              title: 'Аренда корта 2.5ч.',
+              categoryId: 27980310,
             },
           ],
         };
@@ -701,10 +709,12 @@ test('creates a backend booking from the availability confirmation', async ({ pa
         calls.push({ operation: 'courts', serviceId });
         return {
           outcome: 'courts_loaded',
-          courts: [
-            { id: 5730531, name: 'Корт №1' },
-            { id: 5762241, name: 'Корт №2' },
-          ],
+          courts: serviceId === 30539679
+            ? [
+                { id: 5730531, name: 'Корт №1' },
+                { id: 5762241, name: 'Корт №2' },
+              ]
+            : [{ id: 5730531, name: 'Корт №1' }],
         };
       },
       async listBookingDates(query) {
@@ -713,17 +723,25 @@ test('creates a backend booking from the availability confirmation', async ({ pa
       },
       async listBookingTimes(query) {
         calls.push({ operation: 'times', ...query });
-        if (query.serviceId === 30539694) {
-          return { outcome: 'rejected', reason: 'invalid_response' };
-        }
-        const time = '17:00';
+        const durationSecondsByService = {
+          30539679: 3_600,
+          30539694: 5_400,
+          30539748: 7_200,
+          30539801: 9_000,
+        };
+        const timesByService = {
+          30539679: ['17:00', '19:30', '22:00', '22:30', '23:00'],
+          30539694: ['17:00', '22:00', '22:30'],
+          30539748: ['17:00', '22:00'],
+          30539801: ['17:00'],
+        };
         return {
           outcome: 'times_loaded',
-          times: [{
+          times: timesByService[query.serviceId].map((time) => ({
             time,
-            durationSeconds: 5_400,
+            durationSeconds: durationSecondsByService[query.serviceId],
             datetime: `${query.date}T${time}:00+03:00`,
-          }],
+          })),
         };
       },
       async createBooking(command) {
@@ -737,7 +755,21 @@ test('creates a backend booking from the availability confirmation', async ({ pa
         } };
       },
       async listBookings() {
-        return { outcome: 'bookings_loaded', reservations: [] };
+        lists += 1;
+        return {
+          outcome: 'bookings_loaded',
+          reservations: [{
+            reservationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+            status: 'rejected', serviceId: 30539679, courtId: 5730531,
+            startsAt: '2026-08-05T12:00:00+03:00',
+            endsAt: '2026-08-05T13:00:00+03:00', stale: false,
+          }, {
+            reservationId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+            status: 'confirmed', serviceId: 30539679, courtId: 5730531,
+            startsAt: '2026-08-06T12:00:00+03:00',
+            endsAt: '2026-08-06T13:00:00+03:00', stale: false,
+          }],
+        };
       },
       async readBooking(reservationId) {
         calls.push({ operation: 'read', reservationId });
@@ -782,6 +814,7 @@ test('creates a backend booking from the availability confirmation', async ({ pa
       calls,
       notifications,
       get writes() { return writes; },
+      get lists() { return lists; },
     };
 
     return {
@@ -798,16 +831,16 @@ test('creates a backend booking from the availability confirmation', async ({ pa
 
   const root = page.getByTestId('booking-readonly-root');
   await expect(root.getByTestId('booking-availability-status')).toHaveText(
-    'Показаны доступные слоты. Часть вариантов услуги временно недоступна.',
+    'Показаны актуальные свободные слоты клуба.',
   );
   await expect(root.getByRole('button', { name: 'Корт №1' })).toBeVisible();
-  await expect(root.getByRole('button', { name: '1,5 ч' })).toBeEnabled();
-  await expect(root.getByRole('button', { name: '2,5 ч' })).toBeDisabled();
+  await expect(root.getByText('Длительность', { exact: true })).toHaveCount(0);
+  await page.setViewportSize({ width: 375, height: 667 });
 
   const alignment = await root.evaluate((container) => {
     const screen = container.querySelector('.booking-screen').getBoundingClientRect();
     const dateStrip = container.querySelector('.booking-date-strip').getBoundingClientRect();
-    const courtPanel = container.querySelectorAll('.booking-control-panel')[1]
+    const courtPanel = container.querySelector('.booking-control-panel')
       .getBoundingClientRect();
     const courtStrip = container.querySelector('.booking-court-strip').getBoundingClientRect();
     return {
@@ -815,6 +848,10 @@ test('creates a backend booking from the availability confirmation', async ({ pa
       dateRight: Math.round(screen.right - dateStrip.right),
       courtLeft: Math.round(courtStrip.left - courtPanel.left),
       courtRight: Math.round(courtPanel.right - courtStrip.right),
+      noHorizontalOverflow: container.scrollWidth <= container.clientWidth,
+      slotTouchHeight: Math.round(
+        container.querySelector('.booking-time-slot').getBoundingClientRect().height,
+      ),
     };
   });
   expect(alignment).toEqual({
@@ -822,17 +859,87 @@ test('creates a backend booking from the availability confirmation', async ({ pa
     dateRight: 16,
     courtLeft: 15,
     courtRight: 15,
+    noHorizontalOverflow: true,
+    slotTouchHeight: 70,
   });
 
-  const primeTime = root.getByRole('button', {
-    name: '17:00 Свободно',
+  const slot = (time, status = 'Свободно') => root.getByRole('button', {
+    name: new RegExp(`^${time}–\\d{2}:\\d{2} ${status}$`, 'u'),
   });
-  await expect(primeTime).toBeEnabled();
-  await expect(primeTime).toContainText('Свободно');
+  await slot('17:00').click();
+  const selection = root.getByTestId('booking-selection-summary');
+  await expect(selection).toContainText('17:00–17:30');
+  await expect(selection).toContainText('0,5 ч · добавьте соседний слот');
+  await expect(selection.getByRole('button', { name: 'Продолжить' })).toBeDisabled();
 
-  await primeTime.click();
+  await slot('18:00').click();
+  await expect(root.getByTestId('booking-selection-hint')).toContainText(
+    'только соседние слоты без разрывов',
+  );
+  await expect(selection).toContainText('17:00–17:30');
+
+  await slot('17:30').click();
+  await expect(selection).toContainText('17:00–18:00');
+  await expect(selection).toContainText('1 ч · 4 400 ₽');
+  await expect(selection.getByRole('button', { name: 'Продолжить' })).toBeEnabled();
+
+  await slot('18:00').click();
+  await expect(selection).toContainText('17:00–18:30');
+  await expect(selection).toContainText('1,5 ч · 6 600 ₽');
+  await slot('18:00', 'Выбрано').click();
+  await expect(selection).toContainText('1 ч · 4 400 ₽');
+
+  await slot('18:00').click();
+  await slot('18:30').click();
+  await slot('19:00').click();
+  await expect(selection).toContainText('17:00–19:30');
+  await expect(selection).toContainText('2,5 ч · 11 000 ₽');
+  await slot('19:30').click();
+  await expect(root.getByTestId('booking-selection-hint')).toContainText(
+    'не больше 2,5 часа',
+  );
+  await expect(selection).toContainText('17:00–19:30');
+  await expect(slot('20:30', 'Недоступно')).toBeDisabled();
+
+  const anyCourt = root.getByRole('button', { name: 'Любой свободный' });
+  await anyCourt.click();
+  await slot('23:30').click();
+  await expect(root.getByTestId('booking-selection-hint')).toContainText(
+    'Начните не позднее 23:00',
+  );
+  await expect(root.getByTestId('booking-selection-summary')).toHaveCount(0);
+
+  await slot('23:00').click();
+  await slot('23:30').click();
+  await expect(selection).toContainText('23:00–00:00');
+
+  await anyCourt.click();
+  await slot('22:30').click();
+  await slot('23:00').click();
+  await slot('23:30').click();
+  await expect(selection).toContainText('22:30–00:00');
+
+  await anyCourt.click();
+  await slot('22:00').click();
+  await slot('22:30').click();
+  await slot('23:00').click();
+  await slot('23:30').click();
+  await expect(selection).toContainText('22:00–00:00');
+  await expect(selection).toContainText('2 ч · 8 800 ₽');
+
+  await selection.getByRole('button', { name: 'Продолжить' }).click();
   const dialog = page.getByRole('dialog', { name: 'Подтверждение брони' });
   await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText('22:00–00:00 · 2 ч');
+  await expect(dialog).toContainText('Частная бронь');
+  await expect(dialog.getByTestId('booking-total-price')).toHaveText('8 800 ₽');
+  await expect(dialog.getByTestId('booking-per-player-price')).toHaveText('2 200 ₽');
+  await expect(dialog.getByTestId('booking-contact-email')).toHaveCount(0);
+  await expect(dialog).not.toContainText('Заполните контакты');
+  await expect(dialog).toContainText('Контакты будут взяты из вашего профиля.');
+  const payButton = dialog.getByRole('button', { name: 'Оплатить 8 800 ₽' });
+  await expect(payButton).toBeDisabled();
+
   const fixedSheetState = await page.evaluate(() => {
     const overlay = document.querySelector('.booking-sheet-overlay');
     const sheet = document.querySelector('.booking-sheet');
@@ -860,147 +967,34 @@ test('creates a backend booking from the availability confirmation', async ({ pa
     sheetBottomGap: 0,
     footerBottomGap: 0,
   });
-
-  const originalViewport = page.viewportSize();
-  const emailInput = dialog.getByTestId('booking-contact-email');
-  await emailInput.focus();
-  await page.setViewportSize({ width: originalViewport.width, height: 520 });
-  await emailInput.fill('test@example.test');
-  const createButton = dialog.getByRole('button', { name: 'Создать бронь' });
-  await expect(createButton).toBeEnabled();
-  await expect(createButton).toBeInViewport();
-  await expect(dialog).toContainText(
-    'Бронь появится в YCLIENTS без онлайн-оплаты.',
-  );
-  const compactSheetState = await page.evaluate(() => {
-    const sheetRect = document.querySelector('.booking-sheet').getBoundingClientRect();
-    const footerRect = document.querySelector('.booking-sheet-footer').getBoundingClientRect();
-    const body = document.querySelector('.booking-sheet-body');
-    const input = document.querySelector('[data-testid="booking-contact-email"]');
-    return {
-      sheetBottomGap: Math.round(window.innerHeight - sheetRect.bottom),
-      footerBottomGap: Math.round(sheetRect.bottom - footerRect.bottom),
-      footerVisible: footerRect.top >= 0 && footerRect.bottom <= window.innerHeight,
-      bodyOverflow: getComputedStyle(body).overflowY,
-      inputFontSize: getComputedStyle(input).fontSize,
-    };
-  });
-  expect(compactSheetState).toEqual({
-    sheetBottomGap: 0,
-    footerBottomGap: 0,
-    footerVisible: true,
-    bodyOverflow: 'auto',
-    inputFontSize: '16px',
-  });
-
-  await createButton.click();
-  await page.setViewportSize(originalViewport);
-  await expect(root.getByTestId('booking-success-message')).toContainText(
-    'Корт забронирован и подтверждён для матча.',
-  );
-  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
-  await expect(dialog).toHaveCount(0);
-  await expect.poll(() => page.evaluate(() => ({
-    htmlLocked: document.documentElement.classList.contains('booking-sheet-open'),
-    bodyLocked: document.body.classList.contains('booking-sheet-open'),
-    bodyPosition: getComputedStyle(document.body).position,
-  }))).toEqual({
-    htmlLocked: false,
-    bodyLocked: false,
-    bodyPosition: 'static',
-  });
-  const reservationCard = root.getByTestId('booking-reservation-card');
-  await expect(reservationCard).toContainText('Статус: confirmed');
-  await expect(reservationCard.getByRole('button', { name: /отмен|перенос/iu })).toHaveCount(0);
-  await expect(reservationCard.getByRole('button', { name: /Обновить/u })).toHaveCount(0);
-  const callsBeforeRefresh = await page.evaluate(
-    () => [...window.__bookingReadOnlySummary.calls],
-  );
-  await page.evaluate(() => {
-    window.scrollTo(0, 0);
-    const target = document.querySelector(
-      '[data-testid="pull-to-refresh-booking"]',
-    );
-    const dispatch = (type, touches) => {
-      const event = new Event(type, { bubbles: true, cancelable: true });
-      Object.defineProperty(event, 'touches', { value: touches });
-      target.dispatchEvent(event);
-    };
-    dispatch('touchstart', [{ clientX: 120, clientY: 12 }]);
-    dispatch('touchmove', [{ clientX: 120, clientY: 152 }]);
-    dispatch('touchend', []);
-  });
-  await expect(reservationCard).toContainText('Статус: cancelled');
-  await expect(reservationCard).toContainText('Корт №2');
-  await expect(reservationCard).toContainText(
-    'Для отмены или переноса свяжитесь с администратором клуба.',
-  );
+  await page.setViewportSize({ width: 667, height: 375 });
+  await expect(payButton).toBeInViewport();
+  expect(await dialog.evaluate((element) => (
+    element.scrollWidth <= element.clientWidth
+  ))).toBe(true);
 
   const summary = await page.evaluate(() => ({
     calls: window.__bookingReadOnlySummary.calls,
     notifications: window.__bookingReadOnlySummary.notifications,
     writes: window.__bookingReadOnlySummary.writes,
+    lists: window.__bookingReadOnlySummary.lists,
   }));
-  expect(summary.writes).toBe(1);
-  expect(summary.notifications).toEqual([]);
-  expect(callsBeforeRefresh.slice(0, -2)).toEqual([
-    { operation: 'services' },
-    { operation: 'courts', serviceId: 30539694 },
-    { operation: 'courts', serviceId: 30539748 },
-    {
-      operation: 'dates',
-      serviceId: 30539694,
-      courtId: 5730531,
-      dateFrom: '2026-08-05',
-      dateTo: '2026-08-18',
-    },
-    {
-      operation: 'dates',
-      serviceId: 30539748,
-      courtId: 5730531,
-      dateFrom: '2026-08-05',
-      dateTo: '2026-08-18',
-    },
-    {
-      operation: 'times',
-      serviceId: 30539694,
-      courtId: 5730531,
-      date: '2026-08-05',
-    },
-    {
-      operation: 'times',
-      serviceId: 30539748,
-      courtId: 5730531,
-      date: '2026-08-05',
-    },
+  expect(summary.writes).toBe(0);
+  expect(summary.lists).toBe(0);
+  expect(summary.calls.filter((call) => ['create', 'read', 'link'].includes(call.operation))).toEqual([]);
+  expect(summary.calls.filter((call) => call.operation === 'courts')).toHaveLength(4);
+  expect(summary.calls.filter((call) => call.operation === 'dates')).toHaveLength(5);
+  expect(summary.calls.filter((call) => call.operation === 'times')).toHaveLength(5);
+  expect(summary.calls.filter((call) =>
+    ['dates', 'times'].includes(call.operation) && call.courtId === 5762241,
+  )).toEqual([
+    expect.objectContaining({ operation: 'dates', serviceId: 30539679 }),
+    expect.objectContaining({ operation: 'times', serviceId: 30539679 }),
   ]);
-  expect(callsBeforeRefresh.at(-2)).toMatchObject({
-    operation: 'create',
-    command: {
-      serviceId: 30539748,
-      courtId: 5730531,
-      datetime: '2026-08-05T17:00:00+03:00',
-      email: 'test@example.test',
-    },
-  });
-  expect(callsBeforeRefresh.at(-2).command.requestKey).toMatch(
-    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
-  );
-  expect(callsBeforeRefresh.at(-2).command).not.toHaveProperty('paymentStatus');
-  expect(callsBeforeRefresh.at(-1)).toEqual({
-    operation: 'link',
-    matchId: '33333333-3333-4333-8333-333333333333',
-    reservationId: '55555555-5555-4555-8555-555555555555',
-  });
-  expect(summary.calls.filter((call) => call.operation === 'read')).toEqual([{
-    operation: 'read',
-    reservationId: '55555555-5555-4555-8555-555555555555',
-  }]);
+  await expect(root.getByTestId('booking-reservation-card')).toHaveCount(0);
 });
 
-test('preserves a future date across duration changes and only falls forward', async ({
-  page,
-}) => {
+test('uses only backend profile contacts and routes an incomplete profile out of the sheet', async ({ page }) => {
   await page.clock.install({ time: new Date('2026-08-05T06:00:00.000Z') });
   await isolateComponentHarness(page);
 
@@ -1014,20 +1008,14 @@ test('preserves a future date across duration changes and only falls forward', a
       '/src/components/BookingScreen.jsx'
     );
 
-    const services = [
-      { id: 101, title: 'Аренда корта 1ч.', categoryId: 1 },
-      { id: 102, title: 'Аренда корта 1.5ч.', categoryId: 1 },
-      { id: 103, title: 'Аренда корта 2ч.', categoryId: 1 },
-    ];
-    const datesByService = new Map([
-      [101, ['2026-08-05', '2026-08-09', '2026-08-10']],
-      [102, ['2026-08-05', '2026-08-09']],
-      [103, ['2026-08-05', '2026-08-10']],
-    ]);
-    const calls = [];
+    let profileOpens = 0;
+    let lists = 0;
     const availabilityActions = Object.freeze({
       async listServices() {
-        return { outcome: 'services_loaded', services };
+        return {
+          outcome: 'services_loaded',
+          services: [{ id: 101, title: 'Аренда корта 1ч.', categoryId: 1 }],
+        };
       },
       async listCourts() {
         return {
@@ -1036,15 +1024,9 @@ test('preserves a future date across duration changes and only falls forward', a
         };
       },
       async listDates(query) {
-        calls.push({ operation: 'dates', ...query });
-        await new Promise((resolve) => setTimeout(resolve, 20));
-        return {
-          outcome: 'dates_loaded',
-          dates: datesByService.get(query.serviceId) ?? [],
-        };
+        return { outcome: 'dates_loaded', dates: [query.dateFrom] };
       },
       async listTimes(query) {
-        calls.push({ operation: 'times', ...query });
         return {
           outcome: 'times_loaded',
           times: [{
@@ -1055,46 +1037,42 @@ test('preserves a future date across duration changes and only falls forward', a
         };
       },
       async createBooking() {
-        return { outcome: 'rejected', reason: 'unavailable' };
+        throw new Error('payment provider boundary must block create');
+      },
+      async listBookings() {
+        lists += 1;
+        return { outcome: 'bookings_loaded', reservations: [] };
       },
     });
 
     const container = document.createElement('div');
-    container.dataset.testid = 'booking-date-state-root';
+    container.dataset.testid = 'booking-profile-boundary-root';
     document.body.append(container);
     createRoot(container).render(React.createElement(BookingScreen, {
       availabilityActions,
+      bookingClient: null,
+      onOpenProfile() {
+        profileOpens += 1;
+      },
     }));
-    window.__bookingDateStateCalls = calls;
+    window.__bookingProfileBoundary = {
+      get profileOpens() { return profileOpens; },
+      get lists() { return lists; },
+    };
   });
 
-  const root = page.getByTestId('booking-date-state-root');
-  const august5 = root.getByRole('button', { name: /(?:^| )5 авг$/u });
-  const august9 = root.getByRole('button', { name: /(?:^| )9 авг$/u });
-  const august10 = root.getByRole('button', { name: /(?:^| )10 авг$/u });
+  const root = page.getByTestId('booking-profile-boundary-root');
+  await root.getByRole('button', { name: '17:00–17:30 Свободно' }).click();
+  await root.getByRole('button', { name: '17:30–18:00 Свободно' }).click();
+  await root.getByRole('button', { name: 'Продолжить' }).click();
 
-  await expect(august9).toBeEnabled();
-  await august9.click();
-  await expect(august9).toHaveClass(/is-active/u);
-
-  await root.getByRole('button', { name: '1 ч' }).click();
-  await expect(august9).toBeEnabled();
-  await expect(august9).toHaveClass(/is-active/u);
-  await expect(august5).not.toHaveClass(/is-active/u);
-
-  await root.getByRole('button', { name: '2 ч' }).click();
-  await expect(august10).toBeEnabled();
-  await expect(august10).toHaveClass(/is-active/u);
-  await expect(august5).not.toHaveClass(/is-active/u);
-
-  await root.getByRole('button', { name: '1,5 ч' }).click();
-  await expect(august10).toBeDisabled();
-  await expect(august10).toHaveClass(/is-active/u);
-  await expect(august5).not.toHaveClass(/is-active/u);
-
-  const timeDates = await page.evaluate(() =>
-    window.__bookingDateStateCalls
-      .filter((call) => call.operation === 'times')
-      .map((call) => call.date));
-  expect(timeDates.at(-1)).toBe('2026-08-10');
+  const dialog = page.getByRole('dialog', { name: 'Подтверждение брони' });
+  await expect(dialog.getByTestId('booking-contact-email')).toHaveCount(0);
+  await expect(dialog).toContainText('Заполните имя, телефон и email в профиле');
+  await expect(dialog.getByRole('button', { name: 'Оплатить 4 400 ₽' })).toBeDisabled();
+  await dialog.getByRole('button', { name: 'Перейти в профиль' }).click();
+  expect(await page.evaluate(() => window.__bookingProfileBoundary)).toEqual({
+    profileOpens: 1,
+    lists: 0,
+  });
 });

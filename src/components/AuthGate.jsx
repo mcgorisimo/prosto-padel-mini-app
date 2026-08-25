@@ -697,6 +697,14 @@ export default function AuthGate() {
     <>
       <App
         backendProfile={backendProfile}
+        privateBookingClient={{
+          fullName: [
+            playerOnboarding.profile.firstName,
+            playerOnboarding.profile.lastName,
+          ].filter(Boolean).join(' '),
+          phone: playerOnboarding.contacts.phone ?? '',
+          email: playerOnboarding.contacts.normalizedEmail ?? '',
+        }}
         playerOnboardingInitialLevelLabel={
           reassessedInitialLevelLabel ??
           (playerOnboarding.surveyVersion === 'initial_level_v2'

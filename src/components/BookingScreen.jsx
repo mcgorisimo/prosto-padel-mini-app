@@ -5,9 +5,23 @@ import PullToRefresh from './PullToRefresh';
 import { BOOKING_DURATIONS, COURTS, WORKING_HOURS, checkAvailability, fromMin } from '../lib/booking';
 import { getBackendBookingStatusPresentation } from '../lib/backendBookingHomeAdapter';
 import { getMoscowDateRange, hasMoscowSlotStarted } from '../lib/moscowDateTime';
+import {
+  MIN_PRIVATE_BOOKING_SLOTS,
+  PRIVATE_BOOKING_SLOT_MINUTES,
+  findPrivateBookingRangeOption,
+  formatPrivateBookingMinute,
+  getPrivateBookingDuration,
+  getPrivateBookingRangeEndMinute,
+  isPrivateBookingTileCovered,
+  updatePrivateBookingRange,
+} from '../lib/privateBookingSlotSelection';
 import { fmtPrice, getPerPlayerPrice, getTotalPrice } from '../lib/pricing';
 
 const ANY_COURT = 'any';
+const PAYMENT_PROVIDER_READY = false;
+const MAX_BOOKING_SERVICE_VARIANTS = 16;
+const MAX_BOOKING_QUERY_COURTS = 8;
+const MAX_BOOKING_AVAILABILITY_REQUESTS = 64;
 
 const TIME_SECTIONS = [
   { id: 'morning', title: 'Утро', from: 7 * 60, to: 12 * 60 },
@@ -85,7 +99,20 @@ function getSlotLabel(state) {
   if (state === 'unknown') return 'Нет данных';
   if (state === 'outside') return 'Вне времени';
   if (state === 'past') return 'Прошло';
-  return 'Занято';
+  if (state === 'occupied') return 'Занято';
+  return 'Недоступно';
+}
+
+function getSelectionHint(reason, targetMinute) {
+  if (reason === 'maximum') return 'Можно выбрать не больше 2,5 часа.';
+  if (reason === 'gap') return 'Выбирайте только соседние слоты без разрывов.';
+  if (reason === 'minimum' && targetMinute === 23 * 60 + 30) {
+    return 'Начните не позднее 23:00: минимум бронирования — 1 час.';
+  }
+  if (reason === 'minimum') {
+    return 'Этот интервал доступен только как продолжение соседнего диапазона.';
+  }
+  return 'Этот диапазон недоступен целиком. Выберите соседний свободный слот.';
 }
 
 function readRentalServiceDuration(title) {
@@ -193,6 +220,7 @@ export default function BookingScreen({
   onCloseReservation = null,
   courtNamesById = {},
   onCourtCatalogChange = null,
+  onOpenProfile = null,
   onBookSlot,
   showToast,
 }) {
@@ -201,15 +229,15 @@ export default function BookingScreen({
   const usesBackendAvailability = availabilityActions !== null;
   const isReservationDetailsMode =
     typeof initialReservationId === 'string' && initialReservationId.length > 0;
-  const [bookingEmail, setBookingEmail] = useState('');
   const normalizedBookingClient = useMemo(
-    () => normalizeBookingClient({ ...bookingClient, email: bookingEmail }),
-    [bookingClient?.fullName, bookingClient?.phone, bookingEmail],
+    () => normalizeBookingClient(bookingClient),
+    [bookingClient],
   );
   const [selectedDateISO, setSelectedDateISO] = useState(dates[0]?.dateISO);
-  const [duration, setDuration] = useState(1.5);
   const [courtId, setCourtId] = useState(ANY_COURT);
-  const [selectedSlot, setSelectedSlot] = useState(null);
+  const [selectedRange, setSelectedRange] = useState(null);
+  const [selectionHint, setSelectionHint] = useState('');
+  const [isBookingSheetOpen, setIsBookingSheetOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [successText, setSuccessText] = useState('');
   const [latestReservation, setLatestReservation] = useState(null);
@@ -226,6 +254,7 @@ export default function BookingScreen({
     status: 'idle',
     serviceKey: '',
     courts: [],
+    pairs: [],
   });
   const [datesState, setDatesState] = useState({
     status: 'idle',
@@ -280,48 +309,32 @@ export default function BookingScreen({
     const canReadExact =
       typeof initialReservationId === 'string' &&
       typeof availabilityActions?.readBooking === 'function';
-    if (isReservationDetailsMode && !canReadExact) {
+    if (!isReservationDetailsMode) {
+      setLatestReservation(null);
+      setReservationReadStatus('idle');
+      return undefined;
+    }
+    if (!canReadExact) {
       setLatestReservation(null);
       setReservationReadStatus('error');
       return undefined;
     }
-    if (
-      !canReadExact &&
-      typeof availabilityActions?.listBookings !== 'function'
-    ) return undefined;
     let active = true;
     void (async () => {
-      if (canReadExact) {
-        setLatestReservation(null);
-        setReservationReadStatus('loading');
-        try {
-          const refreshed = await availabilityActions.readBooking(initialReservationId);
-          if (!active) return;
-          if (refreshed?.outcome === 'booking_loaded') {
-            setLatestReservation(refreshed.reservation);
-            setReservationReadStatus('ready');
-          } else {
-            setReservationReadStatus('error');
-          }
-        } catch {
-          if (active) setReservationReadStatus('error');
+      setLatestReservation(null);
+      setReservationReadStatus('loading');
+      try {
+        const refreshed = await availabilityActions.readBooking(initialReservationId);
+        if (!active) return;
+        if (refreshed?.outcome === 'booking_loaded') {
+          setLatestReservation(refreshed.reservation);
+          setReservationReadStatus('ready');
+        } else {
+          setReservationReadStatus('error');
         }
-        return;
+      } catch {
+        if (active) setReservationReadStatus('error');
       }
-      const listed = await availabilityActions.listBookings();
-      const latest = listed?.outcome === 'bookings_loaded'
-        ? listed.reservations?.[0]
-        : null;
-      if (!active || !latest) return;
-      const refreshed = typeof availabilityActions.readBooking === 'function'
-        ? await availabilityActions.readBooking(latest.reservationId)
-        : null;
-      if (!active) return;
-      setLatestReservation(
-        refreshed?.outcome === 'booking_loaded'
-          ? refreshed.reservation
-          : latest,
-      );
     })();
     return () => { active = false; };
   }, [availabilityActions, initialReservationId, isReservationDetailsMode]);
@@ -341,9 +354,16 @@ export default function BookingScreen({
         return;
       }
       const groups = groupRentalServices(result.services);
+      const serviceVariantCount = groups.reduce(
+        (sum, group) => sum + group.services.length,
+        0,
+      );
       setServicesState({
-        status: groups.length > 0 ? 'ready' : 'error',
-        groups,
+        status:
+          groups.length > 0 && serviceVariantCount <= MAX_BOOKING_SERVICE_VARIANTS
+            ? 'ready'
+            : 'error',
+        groups: serviceVariantCount <= MAX_BOOKING_SERVICE_VARIANTS ? groups : [],
       });
     } catch {
       if (servicesRequestRef.current === requestId) {
@@ -359,21 +379,17 @@ export default function BookingScreen({
     };
   }, [loadServices]);
 
-  useEffect(() => {
-    if (isReservationDetailsMode) return;
-    if (servicesState.status !== 'ready') return;
-    if (servicesState.groups.some((group) => group.duration === duration)) {
-      return;
-    }
-    setDuration(servicesState.groups[0].duration);
-    setSelectedSlot(null);
-  }, [duration, isReservationDetailsMode, servicesState]);
-
-  const selectedServiceIds = useMemo(() => (
-    servicesState.groups
-      .find((group) => group.duration === duration)
-      ?.services.map((service) => service.id) ?? []
-  ), [duration, servicesState.groups]);
+  const selectedServices = useMemo(() => (
+    servicesState.groups.flatMap((group) =>
+      group.services.map((service) => ({
+        ...service,
+        duration: group.duration,
+      })))
+  ), [servicesState.groups]);
+  const selectedServiceIds = useMemo(
+    () => selectedServices.map((service) => service.id),
+    [selectedServices],
+  );
   const selectedServiceKey = selectedServiceIds.join(',');
 
   useEffect(() => {
@@ -386,7 +402,7 @@ export default function BookingScreen({
     }
     let active = true;
     const serviceKey = selectedServiceKey;
-    setCourtsState({ status: 'loading', serviceKey, courts: [] });
+    setCourtsState({ status: 'loading', serviceKey, courts: [], pairs: [] });
 
     void Promise.all(
       selectedServiceIds.map((serviceId) =>
@@ -394,24 +410,31 @@ export default function BookingScreen({
     ).then((results) => {
       if (!active) return;
       if (results.some((result) => result?.outcome !== 'courts_loaded')) {
-        setCourtsState({ status: 'error', serviceKey, courts: [] });
+        setCourtsState({ status: 'error', serviceKey, courts: [], pairs: [] });
         return;
       }
       const courts = mergeCourts(results);
+      const pairs = results.flatMap((result, index) =>
+        result.courts.map((court) => ({
+          serviceId: selectedServiceIds[index],
+          courtId: court.id,
+        })),
+      );
       onCourtCatalogChange?.(courts);
       setCourtsState({
-        status: courts.length > 0 ? 'ready' : 'error',
+        status: courts.length > 0 && pairs.length > 0 ? 'ready' : 'error',
         serviceKey,
         courts,
+        pairs,
       });
       setCourtId((current) => (
-        current !== ANY_COURT && courts.some((court) => court.id === current)
+        current === ANY_COURT || courts.some((court) => court.id === current)
           ? current
-          : courts[0]?.id ?? ANY_COURT
+          : ANY_COURT
       ));
     }).catch(() => {
       if (active) {
-        setCourtsState({ status: 'error', serviceKey, courts: [] });
+        setCourtsState({ status: 'error', serviceKey, courts: [], pairs: [] });
       }
     });
 
@@ -427,9 +450,11 @@ export default function BookingScreen({
     usesBackendAvailability,
   ]);
 
-  const backendCourts = courtsState.serviceKey === selectedServiceKey
-    ? courtsState.courts
-    : [];
+  const backendCourts = useMemo(() => (
+    courtsState.serviceKey === selectedServiceKey
+      ? courtsState.courts
+      : []
+  ), [courtsState.courts, courtsState.serviceKey, selectedServiceKey]);
   const latestReservationCourtName =
     courtNamesById?.[latestReservation?.courtId] ??
     backendCourts.find((court) => court.id === latestReservation?.courtId)?.name ??
@@ -441,6 +466,25 @@ export default function BookingScreen({
     return backendCourts.some((court) => court.id === courtId) ? [courtId] : [];
   }, [backendCourts, courtId]);
   const queryCourtKey = queryCourtIds.join(',');
+  const serviceDurationById = useMemo(() => new Map(
+    selectedServices.map((service) => [service.id, service.duration]),
+  ), [selectedServices]);
+  const queryServiceCourtPairs = useMemo(() => {
+    if (courtsState.serviceKey !== selectedServiceKey) return [];
+    const allowedCourtIds = new Set(queryCourtIds);
+    return courtsState.pairs.flatMap((pair) => {
+      const duration = serviceDurationById.get(pair.serviceId);
+      return allowedCourtIds.has(pair.courtId) && duration
+        ? [{ ...pair, duration }]
+        : [];
+    });
+  }, [
+    courtsState.pairs,
+    courtsState.serviceKey,
+    queryCourtIds,
+    selectedServiceKey,
+    serviceDurationById,
+  ]);
   const datesQueryKey = `${selectedServiceKey}|${queryCourtKey}`;
 
   useEffect(() => {
@@ -448,7 +492,7 @@ export default function BookingScreen({
       !usesBackendAvailability ||
       isReservationDetailsMode ||
       courtsState.status !== 'ready' ||
-      selectedServiceIds.length === 0 ||
+      queryServiceCourtPairs.length === 0 ||
       queryCourtIds.length === 0 ||
       dates.length === 0
     ) {
@@ -456,16 +500,21 @@ export default function BookingScreen({
     }
     let active = true;
     const queryKey = datesQueryKey;
+    if (
+      queryCourtIds.length > MAX_BOOKING_QUERY_COURTS ||
+      queryServiceCourtPairs.length > MAX_BOOKING_AVAILABILITY_REQUESTS
+    ) {
+      setDatesState({ status: 'error', queryKey, dates: [] });
+      return undefined;
+    }
     setDatesState({ status: 'loading', queryKey, dates: [] });
-    const requests = selectedServiceIds.flatMap((serviceId) =>
-      queryCourtIds.map((selectedCourtId) =>
-        availabilityActions.listDates({
-          serviceId,
-          courtId: selectedCourtId,
-          dateFrom: dates[0].dateISO,
-          dateTo: dates[dates.length - 1].dateISO,
-        })),
-    );
+    const requests = queryServiceCourtPairs.map(({ serviceId, courtId: selectedCourtId }) =>
+      availabilityActions.listDates({
+        serviceId,
+        courtId: selectedCourtId,
+        dateFrom: dates[0].dateISO,
+        dateTo: dates[dates.length - 1].dateISO,
+      }));
 
     void Promise.all(requests).then((results) => {
       if (!active) return;
@@ -488,13 +537,15 @@ export default function BookingScreen({
     datesQueryKey,
     isReservationDetailsMode,
     queryCourtIds,
-    selectedServiceIds,
+    queryServiceCourtPairs,
     usesBackendAvailability,
   ]);
 
-  const backendDates = datesState.queryKey === datesQueryKey
-    ? datesState.dates
-    : [];
+  const backendDates = useMemo(() => (
+    datesState.queryKey === datesQueryKey
+      ? datesState.dates
+      : []
+  ), [datesQueryKey, datesState.dates, datesState.queryKey]);
   const backendDateSet = useMemo(() => new Set(backendDates), [backendDates]);
 
   useEffect(() => {
@@ -509,7 +560,8 @@ export default function BookingScreen({
     const nextDate = nextAvailableDate(selectedDateISO, backendDates);
     if (nextDate === selectedDateISO) return;
     setSelectedDateISO(nextDate);
-    setSelectedSlot(null);
+    setSelectedRange(null);
+    setIsBookingSheetOpen(false);
   }, [
     backendDateSet,
     backendDates,
@@ -529,7 +581,7 @@ export default function BookingScreen({
       isReservationDetailsMode ||
       datesState.status !== 'ready' ||
       datesState.queryKey !== datesQueryKey ||
-      selectedServiceIds.length === 0 ||
+      queryServiceCourtPairs.length === 0 ||
       queryCourtIds.length === 0
     ) {
       return undefined;
@@ -551,10 +603,15 @@ export default function BookingScreen({
     }
     let active = true;
     const queryKey = timesQueryKey;
+    if (
+      queryCourtIds.length > MAX_BOOKING_QUERY_COURTS ||
+      queryServiceCourtPairs.length > MAX_BOOKING_AVAILABILITY_REQUESTS
+    ) {
+      setTimesState({ status: 'error', queryKey, slots: [], partial: false });
+      return undefined;
+    }
     setTimesState({ status: 'loading', queryKey, slots: [], partial: false });
-    const requests = selectedServiceIds.flatMap((serviceId) =>
-      queryCourtIds.map((selectedCourtId) => ({ serviceId, courtId: selectedCourtId })),
-    );
+    const requests = queryServiceCourtPairs;
 
     void Promise.all(requests.map(({ serviceId, courtId: selectedCourtId }) =>
       availabilityActions.listTimes({
@@ -573,25 +630,40 @@ export default function BookingScreen({
         return;
       }
       const courtById = new Map(backendCourts.map((court) => [court.id, court]));
-      const slotsByTime = new Map();
+      const slots = [];
+      let hasDurationMismatch = false;
       loadedResults.forEach(({ request, result }) => {
         for (const time of result.times) {
-          if (!slotsByTime.has(time.time)) {
-            slotsByTime.set(time.time, {
+          if (time.durationSeconds === request.duration * 3_600) {
+            const [hour, minute] = time.time.split(':').map(Number);
+            slots.push({
               ...time,
+              startMinute: hour * 60 + minute,
+              durationSlots: request.duration * 2,
               serviceId: request.serviceId,
+              duration: request.duration,
               court: courtById.get(request.courtId),
             });
+          } else {
+            hasDurationMismatch = true;
           }
         }
       });
-      const slots = [...slotsByTime.values()]
+      if (hasDurationMismatch) {
+        setTimesState({ status: 'error', queryKey, slots: [], partial: false });
+        return;
+      }
+      const validSlots = slots
         .filter((slot) => slot.court)
-        .sort((left, right) => left.time.localeCompare(right.time));
+        .sort((left, right) => (
+          left.time.localeCompare(right.time) ||
+          left.duration - right.duration ||
+          left.court.id - right.court.id
+        ));
       setTimesState({
         status: 'ready',
         queryKey,
-        slots,
+        slots: validSlots,
         partial: loadedResults.length < results.length,
       });
     }).catch(() => {
@@ -612,71 +684,88 @@ export default function BookingScreen({
     datesState.status,
     isReservationDetailsMode,
     queryCourtIds,
+    queryServiceCourtPairs,
     selectedDateISO,
-    selectedServiceIds,
     timesQueryKey,
     usesBackendAvailability,
   ]);
 
-  const backendTimeSlots = timesState.queryKey === timesQueryKey
-    ? timesState.slots
-    : [];
-  const backendTimeByValue = useMemo(
-    () => new Map(backendTimeSlots.map((slot) => [slot.time, slot])),
-    [backendTimeSlots],
-  );
+  const backendTimeSlots = useMemo(() => (
+    timesState.queryKey === timesQueryKey
+      ? timesState.slots
+      : []
+  ), [timesQueryKey, timesState.queryKey, timesState.slots]);
 
   const selectedDate = dates.find((item) => item.dateISO === selectedDateISO) ?? dates[0];
   const displayedCourts = usesBackendAvailability ? backendCourts : COURTS;
-  const selectedCourt = selectedSlot?.court ?? displayedCourts.find((court) => court.id === courtId);
-  const getAvailableCourt = (time) => {
-    if (usesBackendAvailability) {
-      return backendTimeByValue.get(time)?.court ?? null;
-    }
+  const localAvailabilityOptions = useMemo(() => {
+    if (usesBackendAvailability) return [];
     const candidates = courtId === ANY_COURT
       ? COURTS
       : COURTS.filter((court) => court.id === courtId);
-
-    return candidates.find((court) =>
-      checkAvailability(allMatches, court.id, selectedDateISO, time, duration)
+    return BOOKING_DURATIONS.flatMap((optionDuration) =>
+      times.flatMap(({ time, minute }) =>
+        candidates.flatMap((court) => (
+          checkAvailability(
+            allMatches,
+            court.id,
+            selectedDateISO,
+            time,
+            optionDuration,
+          )
+            ? [{
+                time,
+                startMinute: minute,
+                duration: optionDuration,
+                durationSlots: optionDuration * 2,
+                court,
+              }]
+            : []
+        ))),
     );
-  };
+  }, [allMatches, courtId, selectedDateISO, times, usesBackendAvailability]);
+  const availabilityOptions = useMemo(() => (
+    usesBackendAvailability ? backendTimeSlots : localAvailabilityOptions
+  ), [backendTimeSlots, localAvailabilityOptions, usesBackendAvailability]);
+  const selectedOption = selectedRange?.slotCount >= MIN_PRIVATE_BOOKING_SLOTS
+    ? findPrivateBookingRangeOption(availabilityOptions, selectedRange, {
+        exact: true,
+        preferredCourtId: selectedRange.courtId,
+      })
+    : null;
+  const selectedCourt = selectedOption?.court ?? displayedCourts.find(
+    (court) => court.id === selectedRange?.courtId,
+  );
 
   const getSlotState = (time, minute) => {
-    const endMinute = minute + duration * 60;
-    const isSelected = selectedSlot?.time === time && selectedSlot?.dateISO === selectedDateISO;
+    const selectedEndMinute = getPrivateBookingRangeEndMinute(selectedRange);
+    const isSelected = selectedRange !== null &&
+      minute >= selectedRange.startMinute &&
+      minute < selectedEndMinute;
 
-    if (endMinute > WORKING_HOURS.endHour * 60) {
-      return { state: isSelected ? 'outside' : 'outside', court: null };
+    if (minute + PRIVATE_BOOKING_SLOT_MINUTES > WORKING_HOURS.endHour * 60) {
+      return { state: 'outside' };
     }
 
     if (isPastSlot(selectedDateISO, time)) {
-      return { state: isSelected ? 'past' : 'past', court: null };
+      return { state: 'past' };
     }
 
     if (usesBackendAvailability && timesState.queryKey !== timesQueryKey) {
-      return { state: 'loading', court: null };
+      return { state: 'loading' };
     }
     if (usesBackendAvailability && timesState.status === 'loading') {
-      return { state: 'loading', court: null };
+      return { state: 'loading' };
     }
     if (usesBackendAvailability && timesState.status !== 'ready') {
-      return { state: 'unknown', court: null };
+      return { state: 'unknown' };
     }
 
-    const backendSlot = usesBackendAvailability
-      ? backendTimeByValue.get(time)
-      : null;
-    const court = backendSlot?.court ?? getAvailableCourt(time);
-    if (!court) {
-      return { state: isSelected ? 'unavailable' : 'unavailable', court: null };
-    }
-
+    if (isSelected) return { state: 'selected' };
     return {
-      state: isSelected ? 'selected' : 'free',
-      court,
-      serviceId: backendSlot?.serviceId,
-      datetime: backendSlot?.datetime,
+      state: isPrivateBookingTileCovered(availabilityOptions, minute)
+        ? 'free'
+        : 'unavailable',
     };
   };
 
@@ -695,7 +784,7 @@ export default function BookingScreen({
     : datesState.status === 'ready' &&
         datesState.queryKey === datesQueryKey &&
         backendDates.length === 0
-      ? 'Для выбранной длительности и корта нет доступных дат.'
+      ? 'Для выбранного корта нет доступных дат.'
     : timesState.status === 'ready' && timesState.queryKey === timesQueryKey
       ? timesState.partial
         ? 'Показаны доступные слоты. Часть вариантов услуги временно недоступна.'
@@ -703,36 +792,31 @@ export default function BookingScreen({
       : 'Загружаем актуальные свободные слоты…';
 
   useEffect(() => {
-    if (!selectedSlot) return;
-    const minute = Number(selectedSlot.time.split(':')[0]) * 60 + Number(selectedSlot.time.split(':')[1]);
-    const next = getSlotState(selectedSlot.time, minute);
-    if (next.state !== 'selected') {
-      setSelectedSlot(null);
-    } else if (
-      next.court?.id &&
-      (
-        next.court.id !== selectedSlot.court?.id ||
-        next.serviceId !== selectedSlot.serviceId ||
-        next.datetime !== selectedSlot.datetime
-      )
-    ) {
-      setSelectedSlot((prev) => prev ? {
-        ...prev,
-        court: next.court,
-        serviceId: next.serviceId,
-        datetime: next.datetime,
-      } : prev);
+    if (!selectedRange || (usesBackendAvailability && timesState.status !== 'ready')) return;
+    const option = findPrivateBookingRangeOption(availabilityOptions, selectedRange, {
+      preferredCourtId: selectedRange.courtId,
+    });
+    if (!option) {
+      setSelectedRange(null);
+      setIsBookingSheetOpen(false);
+      return;
+    }
+    if (option.court.id !== selectedRange.courtId) {
+      setSelectedRange((current) => current ? {
+        ...current,
+        courtId: option.court.id,
+      } : current);
     }
   }, [
     allMatches,
+    availabilityOptions,
     backendTimeSlots,
     courtId,
-    duration,
     selectedDateISO,
+    selectedRange,
     timesState.status,
+    usesBackendAvailability,
   ]);
-
-  const isBookingSheetOpen = selectedSlot !== null;
 
   useEffect(() => {
     if (!isBookingSheetOpen) return undefined;
@@ -761,11 +845,18 @@ export default function BookingScreen({
     };
   }, [isBookingSheetOpen]);
 
-  const totalPrice = selectedSlot
-    ? getTotalPrice(selectedSlot.time, duration, selectedSlot.court.type, selectedDateISO)
+  const duration = getPrivateBookingDuration(selectedRange);
+  const selectedStartTime = selectedRange
+    ? formatPrivateBookingMinute(selectedRange.startMinute)
+    : '';
+  const selectedEndTime = selectedRange
+    ? formatPrivateBookingMinute(getPrivateBookingRangeEndMinute(selectedRange))
+    : '';
+  const totalPrice = selectedOption
+    ? getTotalPrice(selectedStartTime, duration, selectedOption.court.type, selectedDateISO)
     : 0;
-  const perPlayerPrice = selectedSlot
-    ? getPerPlayerPrice(selectedSlot.time, duration, selectedSlot.court.type, selectedDateISO)
+  const perPlayerPrice = selectedOption
+    ? getPerPlayerPrice(selectedStartTime, duration, selectedOption.court.type, selectedDateISO)
     : 0;
 
   const handleSelectSlot = (time, minute) => {
@@ -773,22 +864,37 @@ export default function BookingScreen({
     if (slot.state !== 'free' && slot.state !== 'selected') return;
 
     setSuccessText('');
-    setSelectedSlot({
-      dateISO: selectedDateISO,
-      time,
-      court: slot.court,
-      serviceId: slot.serviceId,
-      datetime: slot.datetime,
+    const result = updatePrivateBookingRange({
+      range: selectedRange,
+      targetMinute: minute,
+      options: availabilityOptions,
     });
+    if (result.outcome === 'rejected') {
+      const hint = getSelectionHint(result.reason, minute);
+      setSelectionHint(hint);
+      showToast?.(hint, 'info');
+      return;
+    }
+    setSelectionHint(
+      result.range?.slotCount === 1
+        ? 'Выберите ещё один соседний слот: минимум бронирования — 1 час.'
+        : '',
+    );
+    setSelectedRange(result.range);
+    setIsBookingSheetOpen(false);
   };
 
   const handleCloseConfirm = () => {
     if (isSavingRef.current) return;
-    setSelectedSlot(null);
+    setIsBookingSheetOpen(false);
   };
 
   const handleConfirm = async () => {
-    if (!selectedSlot || isSavingRef.current) return;
+    if (!PAYMENT_PROVIDER_READY) {
+      showToast?.('Онлайн-оплата пока не подключена. Бронь не создана.', 'info');
+      return;
+    }
+    if (!selectedOption || !selectedRange || isSavingRef.current) return;
 
     const isPublicFormat = false;
 
@@ -800,45 +906,45 @@ export default function BookingScreen({
         if (
           normalizedBookingClient === null ||
           requestKey === null ||
-          !Number.isSafeInteger(selectedSlot.serviceId) ||
-          !Number.isSafeInteger(selectedSlot.court?.id) ||
-          typeof selectedSlot.datetime !== 'string' ||
+          !Number.isSafeInteger(selectedOption.serviceId) ||
+          !Number.isSafeInteger(selectedOption.court?.id) ||
+          typeof selectedOption.datetime !== 'string' ||
           typeof availabilityActions.createBooking !== 'function'
         ) {
           showToast?.(
-            'Проверьте имя и телефон в профиле и укажите email для бронирования.',
+            'Заполните имя, телефон и email в профиле перед бронированием.',
             'error',
           );
           return;
         }
         const result = await availabilityActions.createBooking({
           requestKey,
-          serviceId: selectedSlot.serviceId,
-          courtId: selectedSlot.court.id,
-          datetime: selectedSlot.datetime,
+          serviceId: selectedOption.serviceId,
+          courtId: selectedOption.court.id,
+          datetime: selectedOption.datetime,
           email: normalizedBookingClient.email,
         });
         if (result?.outcome === 'booking_created') {
           const message =
             'Бронь создана в YCLIENTS без онлайн-оплаты. Оплату подтвердит администратор клуба.';
           setSuccessText(message);
-          setLatestReservation(result.reservation);
           setTimesState((current) => ({
             ...current,
             slots: current.slots.filter((slot) =>
               !(
-                slot.time === selectedSlot.time &&
-                slot.court?.id === selectedSlot.court.id
+                slot.time === selectedStartTime &&
+                slot.court?.id === selectedOption.court.id
               )),
           }));
-          setSelectedSlot(null);
+          setSelectedRange(null);
+          setIsBookingSheetOpen(false);
           alignBookingScreenAfterCreate();
           await linkReservationToMatch(result.reservation);
           return;
         }
         if (result?.outcome === 'booking_unknown') {
-          setLatestReservation(result.reservation);
-          setSelectedSlot(null);
+          setSelectedRange(null);
+          setIsBookingSheetOpen(false);
           showToast?.(
             'Статус брони уточняется. Не повторяйте создание — обновите бронь или свяжитесь с администратором клуба.',
             'error',
@@ -846,7 +952,8 @@ export default function BookingScreen({
           return;
         }
         if (result?.reason === 'not_bookable') {
-          setSelectedSlot(null);
+          setSelectedRange(null);
+          setIsBookingSheetOpen(false);
           showToast?.(
             'Этот слот уже недоступен. Выберите другое время.',
             'error',
@@ -857,10 +964,11 @@ export default function BookingScreen({
           if (typeof availabilityActions.readBookingByRequestKey === 'function') {
             const recovered = await availabilityActions.readBookingByRequestKey(requestKey);
             if (recovered?.outcome === 'booking_loaded') {
-              setLatestReservation(recovered.reservation);
+              await linkReservationToMatch(recovered.reservation);
             }
           }
-          setSelectedSlot(null);
+          setSelectedRange(null);
+          setIsBookingSheetOpen(false);
           showToast?.(
             'Статус брони не определён. Не повторяйте запрос — обратитесь к администратору клуба.',
             'error',
@@ -875,8 +983,8 @@ export default function BookingScreen({
       }
 
       await onBookSlot?.({
-        court: selectedSlot.court,
-        time: selectedSlot.time,
+        court: selectedOption.court,
+        time: selectedStartTime,
         dateISO: selectedDateISO,
         duration,
         type: 'private',
@@ -894,7 +1002,8 @@ export default function BookingScreen({
 
       const message = 'Бронь создана. Оплата сейчас подтверждается через администратора клуба.';
       setSuccessText(message);
-      setSelectedSlot(null);
+      setSelectedRange(null);
+      setIsBookingSheetOpen(false);
       alignBookingScreenAfterCreate();
     } catch (error) {
       console.error(error);
@@ -1076,7 +1185,7 @@ export default function BookingScreen({
         </div>
         <h1 className="booking-title text-[30px] font-black leading-tight">Бронирование корта</h1>
         <p className="booking-subtitle text-sm leading-relaxed text-warm-white/58">
-          Выберите удобное время, длительность и формат брони.
+          Выберите соседние свободные интервалы от 1 до 2,5 часа.
         </p>
       </header>
 
@@ -1124,7 +1233,9 @@ export default function BookingScreen({
                 disabled={disabled}
                 onClick={() => {
                   setSelectedDateISO(item.dateISO);
-                  setSelectedSlot(null);
+                  setSelectedRange(null);
+                  setSelectionHint('');
+                  setIsBookingSheetOpen(false);
                   setSuccessText('');
                 }}
                 className={[
@@ -1146,43 +1257,6 @@ export default function BookingScreen({
 
       <section className="booking-section booking-control-panel">
         <div className="booking-section-label">
-          Длительность
-        </div>
-        <div className="booking-duration-control grid grid-cols-4">
-          {BOOKING_DURATIONS.map((item) => {
-            const active = duration === item;
-            const disabled = usesBackendAvailability && (
-              servicesState.status !== 'ready' ||
-              !servicesState.groups.some((group) => group.duration === item)
-            );
-            return (
-              <button
-                key={item}
-                type="button"
-                disabled={disabled}
-                onClick={() => {
-                  setDuration(item);
-                  setSelectedSlot(null);
-                  setSuccessText('');
-                }}
-                className={[
-                  'booking-duration-option px-2 text-sm font-extrabold',
-                  active
-                    ? 'is-active text-app-bg'
-                    : disabled
-                      ? 'text-warm-white/22'
-                      : 'text-warm-white/62',
-                ].join(' ')}
-              >
-                {formatDuration(item)}
-              </button>
-            );
-          })}
-        </div>
-      </section>
-
-      <section className="booking-section booking-control-panel">
-        <div className="booking-section-label">
           Корт
         </div>
         <div className="booking-court-strip flex gap-2 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
@@ -1196,7 +1270,9 @@ export default function BookingScreen({
                 disabled={disabled}
                 onClick={() => {
                   setCourtId(court.id);
-                  setSelectedSlot(null);
+                  setSelectedRange(null);
+                  setSelectionHint('');
+                  setIsBookingSheetOpen(false);
                   setSuccessText('');
                 }}
                 className={[
@@ -1215,6 +1291,44 @@ export default function BookingScreen({
         </div>
       </section>
 
+      {selectedRange && (
+        <section
+          data-testid="booking-selection-summary"
+          className="booking-selection-summary mb-5"
+          aria-live="polite"
+        >
+          <div>
+            <div className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-warm-white/42">
+              Выбранный интервал
+            </div>
+            <div className="mt-1 text-lg font-black tabular-nums">
+              {selectedStartTime}–{selectedEndTime}
+            </div>
+            <div className="mt-1 text-xs text-warm-white/58">
+              {formatDuration(duration)} · {selectedOption ? fmtPrice(totalPrice) : 'добавьте соседний слот'}
+            </div>
+          </div>
+          <button
+            type="button"
+            className="booking-selection-continue"
+            disabled={!selectedOption}
+            onClick={() => setIsBookingSheetOpen(true)}
+          >
+            Продолжить
+          </button>
+        </section>
+      )}
+
+      {selectionHint && (
+        <p
+          data-testid="booking-selection-hint"
+          className="mb-5 rounded-xl bg-warm-white/6 px-3 py-3 text-xs leading-relaxed text-warm-white/64"
+          role="status"
+        >
+          {selectionHint}
+        </p>
+      )}
+
       <section className="booking-times">
         {sectionedSlots.map((section) => (
           <div key={section.id} className="booking-time-section">
@@ -1226,11 +1340,15 @@ export default function BookingScreen({
               {section.slots.map(({ time, minute }) => {
                 const { state } = getSlotState(time, minute);
                 const disabled = state !== 'free' && state !== 'selected';
+                const intervalEnd = formatPrivateBookingMinute(
+                  minute + PRIVATE_BOOKING_SLOT_MINUTES,
+                );
                 return (
                   <button
                     key={time}
                     type="button"
                     disabled={disabled}
+                    aria-label={`${time}–${intervalEnd} ${getSlotLabel(state)}`}
                     onClick={() => handleSelectSlot(time, minute)}
                     className={[
                       'booking-time-slot min-h-[70px] px-3 text-left',
@@ -1245,7 +1363,9 @@ export default function BookingScreen({
                       <Clock3 className="booking-slot-icon" size={13} />
                       {time}
                     </div>
-                    <div className="booking-slot-status mt-1 text-[10px] font-semibold">{getSlotLabel(state)}</div>
+                    <div className="booking-slot-status mt-1 text-[10px] font-semibold">
+                      до {intervalEnd} · {getSlotLabel(state)}
+                    </div>
                   </button>
                 );
               })}
@@ -1254,7 +1374,7 @@ export default function BookingScreen({
         ))}
       </section>
 
-      {selectedSlot && createPortal(
+      {selectedOption && isBookingSheetOpen && createPortal(
         <div className="booking-sheet-overlay" role="presentation" onClick={handleCloseConfirm}>
           <div
             className="booking-sheet"
@@ -1274,7 +1394,7 @@ export default function BookingScreen({
                     {selectedDate?.eyebrow}, {selectedDate?.label}
                   </h2>
                   <p className="mt-1 text-sm text-warm-white/60">
-                    {selectedSlot.time} · {formatDuration(duration)} · {selectedCourt?.name}
+                    {selectedStartTime}–{selectedEndTime} · {formatDuration(duration)} · {selectedCourt?.name}
                   </p>
                 </div>
                 <button
@@ -1314,44 +1434,39 @@ export default function BookingScreen({
               </div>
 
               <p className="text-xs leading-relaxed text-warm-white/52">
-                {usesBackendAvailability
-                  ? normalizedBookingClient
-                    ? 'Бронь появится в YCLIENTS без онлайн-оплаты. Оплату подтвердит администратор клуба.'
-                    : 'Для бронирования нужны имя и телефон в профиле, а также email в форме.'
-                  : 'Бронь создаётся без онлайн-оплаты. Администратор клуба подтвердит оплату отдельно.'}
+                {normalizedBookingClient
+                  ? 'Контакты будут взяты из вашего профиля. Онлайн-оплата пока не подключена, поэтому бронь не будет создана на этом шаге.'
+                  : 'Заполните имя, телефон и email в профиле, затем вернитесь к бронированию.'}
               </p>
 
-              {usesBackendAvailability && (
-                <label className="mt-4 block text-xs font-bold text-warm-white/72">
-                  Email для этой брони
-                  <input
-                    data-testid="booking-contact-email"
-                    type="email"
-                    value={bookingEmail}
-                    onChange={(event) => setBookingEmail(event.target.value)}
-                    autoComplete="email"
-                    maxLength={320}
-                    placeholder="name@example.com"
-                    className="mt-2 w-full rounded-xl border border-warm-white/12 bg-app-bg/70 px-3 py-3 text-base text-warm-white outline-none"
-                  />
-                </label>
+              {normalizedBookingClient === null && typeof onOpenProfile === 'function' && (
+                <button
+                  type="button"
+                  className="mt-4 min-h-11 w-full rounded-xl border border-warm-white/12 bg-warm-white/6 px-3 text-sm font-black text-warm-white"
+                  onClick={() => {
+                    setIsBookingSheetOpen(false);
+                    onOpenProfile();
+                  }}
+                >
+                  Перейти в профиль
+                </button>
               )}
             </div>
 
             <div className="booking-sheet-footer">
               <button
                 type="button"
-                disabled={isSaving || (
-                  usesBackendAvailability && normalizedBookingClient === null
-                )}
+                disabled={
+                  isSaving ||
+                  normalizedBookingClient === null ||
+                  !PAYMENT_PROVIDER_READY
+                }
                 onClick={handleConfirm}
                 className="booking-confirm-cta"
               >
                 {isSaving
-                  ? 'Создаём бронь...'
-                  : usesBackendAvailability && normalizedBookingClient === null
-                    ? 'Заполните контакты'
-                    : 'Создать бронь'}
+                  ? 'Переходим к оплате...'
+                  : `Оплатить ${fmtPrice(totalPrice)}`}
               </button>
             </div>
           </div>
@@ -1359,32 +1474,6 @@ export default function BookingScreen({
         document.body,
       )}
 
-      {latestReservation && (
-        <section data-testid="booking-reservation-card" className="booking-success mt-3 p-4 text-sm leading-relaxed">
-          <div className="font-black">Статус: {latestReservation.status}</div>
-          <div className="mt-1 text-warm-white/68">
-            {new Date(latestReservation.startsAt).toLocaleString('ru-RU')} · {latestReservationCourtName}
-          </div>
-          {latestReservation.stale && (
-            <div className="mt-2 text-amber-200">Данные YCLIENTS временно не подтверждены.</div>
-          )}
-          {matchLinkStatus === 'failed' && (
-            <button
-              type="button"
-              data-testid="booking-retry-match-link"
-              className="mt-3 rounded-xl bg-accent-light px-3 py-2 font-black text-app-bg"
-              onClick={() => linkReservationToMatch(latestReservation)}
-            >
-              Связать бронь с матчем
-            </button>
-          )}
-          <div className="mt-3 flex flex-wrap gap-2">
-            <div className="rounded-xl bg-warm-white/10 px-3 py-2 text-sm">
-              Для отмены или переноса свяжитесь с администратором клуба. Прямая ссылка появится после подключения официального контакта клуба.
-            </div>
-          </div>
-        </section>
-      )}
     </div>
     </PullToRefresh>
   );
