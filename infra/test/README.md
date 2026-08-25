@@ -64,36 +64,41 @@ The `VITE_ONBOARDING_*` values are public build-time settings, not secrets.
 The legal gate stays fail-closed unless both
 `VITE_ONBOARDING_LEGAL_PUBLISHED=true` and
 `VITE_ONBOARDING_LEGAL_POLICY_ALIGNED=true`. The second flag may be enabled
-only after the backend policy accepts the exact configured Terms, Privacy and
-Cancellation versions. Each document also requires its own public HTTPS URL
-and version. Missing or invalid values keep consent and completion controls
-unavailable; repository draft files are never used as a fallback.
+only after the backend policy accepts the exact configured Terms, Cancellation
+and personal-data-processing consent versions. Four distinct documents require
+their own immutable version and public HTTPS URL: Terms, Cancellation Policy,
+Privacy Policy and Personal Data Consent. A production URL must contain its
+exact version as one path segment, contain no query string and be unique among
+the four documents. Missing or invalid values keep onboarding fail-closed;
+repository draft files are never used as a fallback.
 
-The temporary Selectel test publication is an explicitly isolated exception:
+The Selectel test candidate uses the four exact `*-2026-08-26-v1` versions and
+versioned `https://test-app.prostopdl.ru/legal/.../` URLs from
+`.env.test.example`. Keep `VITE_ONBOARDING_LEGAL_TEST_ONLY=false`: the frontend
+image deliberately refuses to build when the legacy test-only flag is true.
+The image packages only the four current placeholder-free pages and shared
+assets beneath `/legal/`; source drafts and archived `/legal/test-only/` pages
+are not copied into the runtime image. Replacing content beneath an accepted
+version is forbidden.
 
-- set `VITE_ONBOARDING_LEGAL_TEST_ONLY=true` together with both publication
-  flags;
-- use only the three exact `*-test-2026-08-23-v1` versions and versioned
-  `https://test-app.prostopdl.ru/legal/test-only/.../` URLs from
-  `.env.test.example`;
-- enable `PLAYER_ONBOARDING_LEGAL_POLICY_ENABLED=true` with the same three
-  backend versions in the same separately approved test rollout;
-- never copy these values or the packaged pages to `app.prostopdl.ru` or a
-  production build.
-
-The test frontend image packages the current repository drafts only beneath
-`/legal/test-only/`, adds a prominent non-production warning and serves them
-with `no-store`. The source drafts remain visibly incomplete; the wrapper does
-not claim legal approval or fill missing organisation details. When the ООО
-requisites are added, publish three new immutable version values and obtain new
-acceptances through a separately implemented re-consent lifecycle. Replacing
-content under an accepted version is forbidden.
+The onboarding UI exposes exactly two required checkboxes. The first explicitly
+names and links Terms plus Cancellation Policy and produces the two exact
+`terms` and `cancellation` evidence records. The second links only the separate
+Personal Data Consent and produces `personal_data_processing` evidence. Privacy
+Policy remains an informational public link without a checkbox. Historical
+`privacy` evidence remains readable and is never relabelled. Migration 041 is
+already applied on Selectel test; this candidate adds the runtime append-only
+re-consent path for completed users whose current grouped versions are missing.
 
 The backend policy is runtime configuration and fails closed when disabled or
-incomplete. Changing it requires recreating only `backend`; changing the public
-Vite settings or packaged pages requires rebuilding and recreating only
-`frontend`. Config, rollout and any authenticated consent/completion smoke are
-separate approved gates.
+incomplete. Set `PLAYER_ONBOARDING_LEGAL_POLICY_ENABLED=true` with the same
+Terms, Cancellation, Privacy metadata and Personal Data Consent versions only
+in a separately approved rollout. Changing backend policy or the re-consent API
+requires rebuilding and recreating only `backend`; changing the public Vite
+settings or packaged pages requires rebuilding and recreating only `frontend`.
+No part of this local candidate is deployed by editing environment variables on
+an existing image. Config, rollout and authenticated two-checkbox/re-consent
+smoke remain a separate approved gate.
 
 ## Guard model
 

@@ -7,8 +7,8 @@ DRAFT — НЕ ОПУБЛИКОВАНО — НЕ УТВЕРЖДЕНО ВЛАДЕ
 - Комплект: `D5.3 legal documents v0.2`.
 - D5.3 preparation checkpoint: `done`.
 - Legal candidate: `draft_not_published_not_legally_approved`.
-- D5.3 overall: `not_done`; implementation и publication остаются отдельными
-  будущими gates.
+- D5.3 legal-publication implementation candidate: `local_candidate_in_progress`;
+  commit/integration и Selectel test rollout остаются отдельными gates.
 - Публикация: `not_published`.
 - Финальное утверждение legal documents владельцем: `not_given`.
 - Юридическая проверка: `required`.
@@ -16,7 +16,8 @@ DRAFT — НЕ ОПУБЛИКОВАНО — НЕ УТВЕРЖДЕНО ВЛАДЕ
   цифры ИНН/ОГРН проверены, сверка с электронной выпиской ЕГРЮЛ до публикации
   остаётся `pending`.
 - Язык: `ru-RU`.
-- Runtime/deployment impact: `not_needed` до отдельного code/publication gate.
+- Runtime/deployment impact: `frontend_and_backend`; `deployment_deferred_by_user`
+  до отдельного commit/integration и Selectel test rollout gate.
 - Тексты, ранее выведенные в чат, не являются каноническими. Каноническая рабочая версия находится только в файлах этого каталога.
 
 Незакрытые fact buckets сохранены явно:
@@ -34,10 +35,10 @@ DRAFT — НЕ ОПУБЛИКОВАНО — НЕ УТВЕРЖДЕНО ВЛАДЕ
 
 | Ключ | Документ | Версия | Статус |
 |---|---|---|---|
-| `terms` | [TERMS_DRAFT.md](./TERMS_DRAFT.md) | `{{TERMS_VERSION}}` | draft / owner approval pending |
-| `privacy` | [PRIVACY_POLICY_DRAFT.md](./PRIVACY_POLICY_DRAFT.md) | `{{PRIVACY_VERSION}}` | draft / fact map pending |
-| `cancellation` | [CANCELLATION_POLICY_DRAFT.md](./CANCELLATION_POLICY_DRAFT.md) | `{{CANCELLATION_VERSION}}` | draft / expense method pending |
-| `personal_data_processing` | [PERSONAL_DATA_CONSENT_DRAFT.md](./PERSONAL_DATA_CONSENT_DRAFT.md) | `{{PERSONAL_DATA_CONSENT_VERSION}}` | draft / backend evidence key absent |
+| `terms` | [TERMS_DRAFT.md](./TERMS_DRAFT.md) | `terms-2026-08-26-v1` | draft source + placeholder-free Selectel test page candidate |
+| `privacy` | [PRIVACY_POLICY_DRAFT.md](./PRIVACY_POLICY_DRAFT.md) | `privacy-2026-08-26-v1` | informational document; no checkbox |
+| `cancellation` | [CANCELLATION_POLICY_DRAFT.md](./CANCELLATION_POLICY_DRAFT.md) | `cancellation-2026-08-26-v1` | integral Terms attachment; shared offer checkbox |
+| `personal_data_processing` | [PERSONAL_DATA_CONSENT_DRAFT.md](./PERSONAL_DATA_CONSENT_DRAFT.md) | `personal-data-consent-2026-08-26-v1` | separate mandatory checkbox; migration 041 evidence key ready |
 
 ## Канонические рабочие реестры
 
@@ -51,35 +52,36 @@ DRAFT — НЕ ОПУБЛИКОВАНО — НЕ УТВЕРЖДЕНО ВЛАДЕ
 четырёх drafts; их user-visible versions и effective dates остаются
 плейсхолдерами до отдельного approval gate.
 
-Предлагаемый публичный namespace после отдельного publication gate:
-`{{PUBLIC_LEGAL_BASE_URL}}`, предположительно `https://prostopdl.ru/legal`.
-Каждый current URL должен иметь отдельный неизменяемый versioned URL и архив.
+Selectel test public namespace candidate:
+`https://test-app.prostopdl.ru/legal/`. Четыре immutable versioned URL включены
+в frontend image candidate; до отдельного rollout они локальны и недоступны на
+сервере. Production hostname остаётся отдельным будущим gate.
 
 Все четыре current и versioned HTTPS URL обязаны открываться без Telegram,
-session или иной авторизации и без редиректа в `AuthGate`. Ссылки на них должны
-быть доступны из обоих checkbox в onboarding и из authenticated settings после
-входа. Это проверяется отдельным publication smoke; сейчас публичных legal routes
-нет.
+session или иной авторизации и без редиректа в `AuthGate`. Ссылки из двух
+checkbox и отдельная Privacy-ссылка используют exact versioned URLs. Серверная
+доступность проверяется только в отдельном Selectel test rollout/manual smoke.
 
 ## Контракт двух checkbox
 
-1. Обязательный: `Принимаю Условия использования и Правила отмены, с Политикой конфиденциальности ознакомлен.`
-2. Добровольный: `Даю отдельное согласие на обработку персональных данных для необязательных функций профиля.`
+1. Обязательный: `Принимаю Условия использования и Правила отмены` — две
+   отдельные ссылки, одно действие и два immutable evidence records.
+2. Обязательный: `Даю отдельное согласие на обработку персональных данных` —
+   отдельная ссылка и только evidence key `personal_data_processing`.
+
+Privacy Policy остаётся отдельной видимой информационной ссылкой без checkbox и
+без записи ложного «согласия с политикой».
 
 Отдельный обязательный checkbox «мне исполнилось 18 лет» не добавляется.
 Условия использования содержат действующую owner-модель использования Сервиса
 несовершеннолетними с согласием законного представителя, но ни возраст, ни такое
 согласие не объявляются технически проверенными.
 
-Первое действие должно связать аккаунт с точными версиями `terms`, `privacy` и
-`cancellation`. Отказ от второго checkbox не блокирует базовый аккаунт, приватное
-бронирование или договорно необходимые функции. При выборе второго действия
-требуется самостоятельный evidence key `personal_data_processing`; без него
-отключаются только перечисленные в Согласии необязательные функции. Текущий D5.1
-backend знает только первые три ключа; его `2026-08-01` является test-only policy
-и не является версией этих текстов. До отдельного code/schema approval второй
-checkbox нельзя сохранять под видом `privacy` или делать обязательным этапом
-текущего onboarding.
+Первое действие связывает аккаунт с exact `terms` и `cancellation`; второе — с
+exact `personal_data_processing`. Migration 041 уже добавила новый kind без
+изменения исторического `privacy`. Текущий implementation candidate пишет новый
+набор из трёх evidence records и продолжает читать legacy `privacy` как историю.
+Два действия не считаются согласием на распространение данных профиля.
 
 ## Re-consent contract
 
@@ -90,9 +92,10 @@ checkbox нельзя сохранять под видом `privacy` или де
 | Информационное изменение `privacy` без новой consent-based операции | уведомление и доступ к новой версии | ознакомление и архив сохраняются |
 | Новая цель/категория/получатель на основании согласия | новая версия `personal_data_processing` и новое добровольное согласие | отзыв/исторические evidence сохраняются |
 
-Completed D5.1 onboarding не переоткрывается и не изменяется. Для уже
-завершившего onboarding аккаунта нужен отдельный append-only re-consent lifecycle
-до того, как UI или документы будут обещать работающий повторный запрос.
+Completed D5.1 onboarding не переоткрывается и не изменяется. Candidate добавляет
+отдельный bearer-protected append-only re-consent endpoint: устаревшая offer
+group требует новое принятие exact terms+cancellation, устаревшая PD group —
+новое отдельное согласие; актуальная группа остаётся отмеченной и не переписывается.
 
 ## Подтверждённые решения владельца
 

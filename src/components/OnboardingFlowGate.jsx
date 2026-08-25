@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import OnboardingProfileGate from './OnboardingProfileGate';
 import {
+  currentLegalConsentGroups,
   hasCurrentLegalConsents,
   legalConsentContract,
   readOnboardingLegalConfig,
@@ -50,6 +51,97 @@ function TestOnlyLegalNotice({ legalConfig }) {
   );
 }
 
+function legalDocument(legalConfig, kind) {
+  return legalConfig.documents.find((document) => document.kind === kind);
+}
+
+function LegalConsentControls({
+  accepted,
+  disabled,
+  idPrefix = 'onboarding-consent',
+  legalConfig,
+  locked = {},
+  onChange,
+}) {
+  const consents = legalConsentContract(legalConfig);
+  if (consents === null) return <LegalUnavailableNotice />;
+
+  const terms = legalDocument(legalConfig, 'terms');
+  const cancellation = legalDocument(legalConfig, 'cancellation');
+  const privacy = legalDocument(legalConfig, 'privacy');
+  const personalData = legalDocument(legalConfig, 'personal_data_processing');
+  const rows = [
+    {
+      key: 'offer',
+      label: (
+        <>
+          Принимаю{' '}
+          <a href={terms.url} target="_blank" rel="noopener noreferrer">
+            Условия использования
+          </a>{' '}
+          и{' '}
+          <a href={cancellation.url} target="_blank" rel="noopener noreferrer">
+            Правила отмены
+          </a>
+          <small>
+            Версии {terms.version} и {cancellation.version}
+          </small>
+        </>
+      ),
+      ariaLabel: `Принимаю Условия использования версии ${terms.version} и Правила отмены версии ${cancellation.version}`,
+    },
+    {
+      key: 'personalDataProcessing',
+      label: (
+        <>
+          Даю отдельное{' '}
+          <a href={personalData.url} target="_blank" rel="noopener noreferrer">
+            согласие на обработку персональных данных
+          </a>
+          <small>Версия {personalData.version}</small>
+        </>
+      ),
+      ariaLabel: `Даю отдельное согласие на обработку персональных данных версии ${personalData.version}`,
+    },
+  ];
+
+  return (
+    <>
+      <TestOnlyLegalNotice legalConfig={legalConfig} />
+      <fieldset className="onboarding-consent-list" disabled={disabled}>
+        <legend>Откройте документы и отметьте два обязательных пункта *</legend>
+        {rows.map((row) => {
+          const inputId = `${idPrefix}-${row.key}`;
+          return (
+            <div className="onboarding-consent-row" key={row.key}>
+              <label className="onboarding-consent-toggle" htmlFor={inputId}>
+                <input
+                  id={inputId}
+                  type="checkbox"
+                  required
+                  aria-required="true"
+                  aria-label={row.ariaLabel}
+                  checked={accepted[row.key] === true}
+                  disabled={disabled || locked[row.key] === true}
+                  onChange={(event) => onChange(row.key, event.target.checked)}
+                />
+              </label>
+              <div className="onboarding-consent-copy">{row.label}</div>
+            </div>
+          );
+        })}
+      </fieldset>
+      <p className="onboarding-privacy-note">
+        Информация об обработке данных:{' '}
+        <a href={privacy.url} target="_blank" rel="noopener noreferrer">
+          Политика конфиденциальности
+        </a>{' '}
+        <small>Версия {privacy.version}</small>
+      </p>
+    </>
+  );
+}
+
 function OnboardingIdentityGate({
   onboarding,
   legalConfig,
@@ -64,7 +156,8 @@ function OnboardingIdentityGate({
   );
   const allAccepted =
     consents !== null &&
-    legalConfig.documents.every(({ kind }) => accepted[kind] === true);
+    accepted.offer === true &&
+    accepted.personalDataProcessing === true;
 
   useEffect(() => {
     setAccepted({});
@@ -131,52 +224,21 @@ function OnboardingIdentityGate({
         <LegalUnavailableNotice />
       ) : (
         <>
-          <TestOnlyLegalNotice legalConfig={legalConfig} />
-          <fieldset className="onboarding-consent-list" disabled={submitting}>
-            <legend>Откройте документы и отметьте все три пункта *</legend>
-            {legalConfig.documents.map((document) => {
-              const inputId = `onboarding-consent-${document.kind}`;
-              return (
-                <div className="onboarding-consent-row" key={document.kind}>
-                  <label
-                    className="onboarding-consent-toggle"
-                    htmlFor={inputId}
-                  >
-                    <input
-                      id={inputId}
-                      type="checkbox"
-                      required
-                      aria-required="true"
-                      aria-label={`${document.acceptanceLabel}: ${document.title}, версия ${document.version}`}
-                      checked={accepted[document.kind] === true}
-                      onChange={(event) => {
-                        setAccepted((previous) => ({
-                          ...previous,
-                          [document.kind]: event.target.checked,
-                        }));
-                      }}
-                    />
-                  </label>
-                  <a
-                    className="onboarding-legal-link"
-                    href={document.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    <span>{document.title}</span>
-                    <small>Версия {document.version}</small>
-                  </a>
-                </div>
-              );
-            })}
-          </fieldset>
+          <LegalConsentControls
+            accepted={accepted}
+            disabled={submitting}
+            legalConfig={legalConfig}
+            onChange={(key, checked) => {
+              setAccepted((previous) => ({ ...previous, [key]: checked }));
+            }}
+          />
           <p
             id="onboarding-legal-readiness"
             className="onboarding-consent-hint"
           >
             {allAccepted
-              ? 'Все три согласия отмечены.'
-              : 'Продолжение станет доступно после заполнения профиля и трёх согласий.'}
+              ? 'Оба обязательных пункта отмечены.'
+              : 'Продолжение станет доступно после заполнения профиля и двух подтверждений.'}
           </p>
         </>
       )}
@@ -198,6 +260,90 @@ function OnboardingIdentityGate({
       disableUntilValid
       submitDescriptionId="onboarding-legal-readiness"
     />
+  );
+}
+
+export function LegalReconsentGate({
+  onboarding,
+  legalConfig = readOnboardingLegalConfig(),
+  onAccept,
+  onAccepted,
+}) {
+  const currentGroups = currentLegalConsentGroups(onboarding, legalConfig);
+  const [accepted, setAccepted] = useState(() => ({
+    offer: currentGroups?.offer === true,
+    personalDataProcessing: currentGroups?.personalDataProcessing === true,
+  }));
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+  const consents = legalConsentContract(legalConfig);
+  const allAccepted =
+    consents !== null &&
+    accepted.offer === true &&
+    accepted.personalDataProcessing === true;
+
+  useEffect(() => {
+    setAccepted({
+      offer: currentGroups?.offer === true,
+      personalDataProcessing: currentGroups?.personalDataProcessing === true,
+    });
+    setError('');
+  }, [
+    currentGroups?.offer,
+    currentGroups?.personalDataProcessing,
+    onboarding.revision,
+  ]);
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    if (!allAccepted || consents === null || submitting) return;
+    setSubmitting(true);
+    setError('');
+    try {
+      const result = await onAccept({ consents });
+      if (result.outcome === 'accepted') {
+        onAccepted(result.onboarding);
+        return;
+      }
+      setError('Не удалось сохранить подтверждения. Попробуйте ещё раз.');
+    } catch {
+      setError('Не удалось сохранить подтверждения. Попробуйте ещё раз.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <OnboardingShell
+      testId="onboarding-legal-reconsent-gate"
+      title="Документы обновились"
+      intro="Перед продолжением подтвердите актуальные версии документов. Предыдущие подтверждения сохраняются."
+    >
+      <form onSubmit={handleSubmit}>
+        <LegalConsentControls
+          accepted={accepted}
+          disabled={submitting}
+          idPrefix="onboarding-reconsent"
+          legalConfig={legalConfig}
+          locked={{
+            offer: currentGroups?.offer === true,
+            personalDataProcessing:
+              currentGroups?.personalDataProcessing === true,
+          }}
+          onChange={(key, checked) => {
+            setAccepted((previous) => ({ ...previous, [key]: checked }));
+          }}
+        />
+        {error ? <p role="alert">{error}</p> : null}
+        <button
+          type="submit"
+          className="onboarding-profile-submit"
+          disabled={!allAccepted || submitting}
+        >
+          {submitting ? 'Сохраняем…' : 'Продолжить'}
+        </button>
+      </form>
+    </OnboardingShell>
   );
 }
 
@@ -307,9 +453,7 @@ function OnboardingSurveyGate({
   const handleSubmit = async (event) => {
     event.preventDefault();
     if (submitting) return;
-    if (
-      !currentQuestion.answers.some(({ code }) => code === currentAnswer)
-    ) {
+    if (!currentQuestion.answers.some(({ code }) => code === currentAnswer)) {
       setNotice({
         tone: 'error',
         kind: 'validation',

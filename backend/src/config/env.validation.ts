@@ -35,7 +35,8 @@ const canonicalBase64Secret = Joi.string()
     return valid ? value : helpers.error('string.base64Secret');
   })
   .messages({
-    'string.base64Secret': '{{#label}} must be a canonical base64 secret of at least 32 bytes',
+    'string.base64Secret':
+      '{{#label}} must be a canonical base64 secret of at least 32 bytes',
   });
 
 const canonicalBase64Key32 = Joi.string()
@@ -69,9 +70,7 @@ function requiredWhenTelegramEnabled(schema: Joi.StringSchema) {
   });
 }
 
-function requiredWhenProfilePhotoStorageEnabled(
-  schema: Joi.StringSchema,
-) {
+function requiredWhenProfilePhotoStorageEnabled(schema: Joi.StringSchema) {
   return Joi.when(PLAYER_PROFILE_PHOTO_CONFIG_KEYS.enabled, {
     is: true,
     then: schema.required(),
@@ -79,9 +78,7 @@ function requiredWhenProfilePhotoStorageEnabled(
   });
 }
 
-function requiredWhenPlayerOnboardingPolicyEnabled(
-  schema: Joi.StringSchema,
-) {
+function requiredWhenPlayerOnboardingPolicyEnabled(schema: Joi.StringSchema) {
   return Joi.when(PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.enabled, {
     is: true,
     then: schema.required(),
@@ -212,10 +209,7 @@ export const envValidationSchema = Joi.object({
       }),
     },
   ),
-  DATABASE_ENABLED: Joi.boolean()
-    .truthy('true')
-    .falsy('false')
-    .default(false),
+  DATABASE_ENABLED: Joi.boolean().truthy('true').falsy('false').default(false),
   DATABASE_URL: Joi.when('DATABASE_ENABLED', {
     is: true,
     then: Joi.string()
@@ -249,6 +243,10 @@ export const envValidationSchema = Joi.object({
     requiredWhenPlayerOnboardingPolicyEnabled(
       Joi.string().pattern(PLAYER_ONBOARDING_DOCUMENT_VERSION_PATTERN),
     ),
+  [PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.personalDataProcessingVersion]:
+    requiredWhenPlayerOnboardingPolicyEnabled(
+      Joi.string().pattern(PLAYER_ONBOARDING_DOCUMENT_VERSION_PATTERN),
+    ),
   [PLAYER_PROFILE_PHOTO_CONFIG_KEYS.enabled]: Joi.boolean()
     .truthy('true')
     .falsy('false')
@@ -261,9 +259,7 @@ export const envValidationSchema = Joi.object({
       }),
     }),
   [PLAYER_PROFILE_PHOTO_CONFIG_KEYS.endpoint]:
-    requiredWhenProfilePhotoStorageEnabled(
-      canonicalHttpsBaseUrl,
-    ),
+    requiredWhenProfilePhotoStorageEnabled(canonicalHttpsBaseUrl),
   [PLAYER_PROFILE_PHOTO_CONFIG_KEYS.region]:
     requiredWhenProfilePhotoStorageEnabled(
       Joi.string().pattern(/^[a-z0-9][a-z0-9-]{0,62}$/u),
@@ -273,9 +269,7 @@ export const envValidationSchema = Joi.object({
       Joi.string().pattern(/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/u),
     ),
   [PLAYER_PROFILE_PHOTO_CONFIG_KEYS.publicBaseUrl]:
-    requiredWhenProfilePhotoStorageEnabled(
-      canonicalHttpsBaseUrl,
-    ),
+    requiredWhenProfilePhotoStorageEnabled(canonicalHttpsBaseUrl),
   [PLAYER_PROFILE_PHOTO_CONFIG_KEYS.accessKeyId]:
     requiredWhenProfilePhotoStorageEnabled(Joi.string().min(1).max(512)),
   [PLAYER_PROFILE_PHOTO_CONFIG_KEYS.secretAccessKey]:
@@ -321,12 +315,15 @@ export const envValidationSchema = Joi.object({
     TELEGRAM_NOTIFICATION_CONFIG_KEYS.enabled,
     {
       is: true,
-      then: Joi.string().uri({ scheme: ['https'] }).required(),
+      then: Joi.string()
+        .uri({ scheme: ['https'] })
+        .required(),
       otherwise: Joi.string().allow('').default(''),
     },
   ),
-  [TELEGRAM_LOGIN_CONFIG_KEYS.lookupPepperBase64]:
-    requiredWhenTelegramEnabled(canonicalBase64Secret),
+  [TELEGRAM_LOGIN_CONFIG_KEYS.lookupPepperBase64]: requiredWhenTelegramEnabled(
+    canonicalBase64Secret,
+  ),
   [TELEGRAM_LOGIN_CONFIG_KEYS.workflowHmacSecretBase64]:
     requiredWhenTelegramEnabled(canonicalBase64Secret),
   [TELEGRAM_LOGIN_CONFIG_KEYS.uuidNamespace]: Joi.when(

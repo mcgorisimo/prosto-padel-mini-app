@@ -10,12 +10,12 @@ const EMAIL = 'synthetic@example.invalid';
 const TEST_POLICY_VERSION = 'synthetic-v1';
 const INPUT_CONSENTS = Object.freeze([
   { kind: 'terms', documentVersion: TEST_POLICY_VERSION },
-  { kind: 'privacy', documentVersion: TEST_POLICY_VERSION },
+  { kind: 'personal_data_processing', documentVersion: TEST_POLICY_VERSION },
   { kind: 'cancellation', documentVersion: TEST_POLICY_VERSION },
 ]);
 const CONSENTS = Object.freeze([
   { kind: 'cancellation', documentVersion: TEST_POLICY_VERSION },
-  { kind: 'privacy', documentVersion: TEST_POLICY_VERSION },
+  { kind: 'personal_data_processing', documentVersion: TEST_POLICY_VERSION },
   { kind: 'terms', documentVersion: TEST_POLICY_VERSION },
 ]);
 
@@ -234,7 +234,10 @@ describe('playerOnboardingClient', () => {
       nextStep: 'level_survey',
       consents: [
         { kind: 'cancellation', documentVersion: TEST_POLICY_VERSION },
-        { kind: 'privacy', documentVersion: TEST_POLICY_VERSION },
+        {
+          kind: 'personal_data_processing',
+          documentVersion: TEST_POLICY_VERSION,
+        },
         { kind: 'terms', documentVersion: TEST_POLICY_VERSION },
       ],
     });
@@ -257,6 +260,38 @@ describe('playerOnboardingClient', () => {
       /requestKey|verified|rating/iu,
     );
     expect(surveyState.consents).toHaveLength(4);
+  });
+
+  it('posts exact append-only re-consent evidence and never substitutes privacy', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(response(completedV2State()));
+    const client = createPlayerOnboardingClient({ fetchImpl });
+
+    await expect(
+      client.acceptLegalPolicy(CREDENTIAL, { consents: INPUT_CONSENTS }),
+    ).resolves.toEqual({
+      outcome: 'accepted',
+      onboarding: completedV2State(),
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(fetchImpl.mock.calls[0][0]).toBe(
+      '/api/v1/onboarding/me/legal-acceptances',
+    );
+    expect(JSON.parse(fetchImpl.mock.calls[0][1].body)).toEqual({
+      consents: CONSENTS,
+    });
+
+    await expect(
+      client.acceptLegalPolicy(CREDENTIAL, {
+        consents: [
+          { kind: 'terms', documentVersion: TEST_POLICY_VERSION },
+          { kind: 'privacy', documentVersion: TEST_POLICY_VERSION },
+          { kind: 'cancellation', documentVersion: TEST_POLICY_VERSION },
+        ],
+      }),
+    ).resolves.toEqual({ outcome: 'rejected', reason: 'invalid_request' });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
   it('loads and reloads only the server-computed label for a completed v2 owner', async () => {
@@ -435,7 +470,8 @@ describe('playerOnboardingClient', () => {
     [
       'missing completed v2 label',
       (() => {
-        const { initialLevelLabel: _label, ...state } = completedV2State();
+        const state = completedV2State();
+        delete state.initialLevelLabel;
         return state;
       })(),
     ],

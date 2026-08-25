@@ -4,18 +4,25 @@ import { useState } from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import OnboardingFlowGate from './OnboardingFlowGate';
+import OnboardingFlowGate, { LegalReconsentGate } from './OnboardingFlowGate';
 import { readOnboardingLegalConfig } from '../lib/playerOnboardingUiPolicy';
 
 const LEGAL_CONFIG = readOnboardingLegalConfig({
   VITE_ONBOARDING_LEGAL_PUBLISHED: 'true',
   VITE_ONBOARDING_LEGAL_POLICY_ALIGNED: 'true',
-  VITE_ONBOARDING_TERMS_URL: 'https://legal.example.test/terms',
+  VITE_ONBOARDING_TERMS_URL:
+    'https://legal.example.test/terms/terms-2026-08-26/',
   VITE_ONBOARDING_TERMS_VERSION: 'terms-2026-08-26',
-  VITE_ONBOARDING_PRIVACY_URL: 'https://legal.example.test/privacy',
+  VITE_ONBOARDING_PRIVACY_URL:
+    'https://legal.example.test/privacy/privacy-2026-08-26/',
   VITE_ONBOARDING_PRIVACY_VERSION: 'privacy-2026-08-26',
-  VITE_ONBOARDING_CANCELLATION_URL: 'https://legal.example.test/cancellation',
+  VITE_ONBOARDING_CANCELLATION_URL:
+    'https://legal.example.test/cancellation/cancellation-2026-08-26/',
   VITE_ONBOARDING_CANCELLATION_VERSION: 'cancellation-2026-08-26',
+  VITE_ONBOARDING_PERSONAL_DATA_CONSENT_URL:
+    'https://legal.example.test/personal-data-consent/personal-data-consent-2026-08-26/',
+  VITE_ONBOARDING_PERSONAL_DATA_CONSENT_VERSION:
+    'personal-data-consent-2026-08-26',
 });
 
 const TEST_ONLY_LEGAL_CONFIG = readOnboardingLegalConfig({
@@ -31,15 +38,22 @@ const TEST_ONLY_LEGAL_CONFIG = readOnboardingLegalConfig({
   VITE_ONBOARDING_CANCELLATION_URL:
     'https://test-app.prostopdl.ru/legal/test-only/cancellation-test-2026-08-23-v1/',
   VITE_ONBOARDING_CANCELLATION_VERSION: 'cancellation-test-2026-08-23-v1',
+  VITE_ONBOARDING_PERSONAL_DATA_CONSENT_URL:
+    'https://test-app.prostopdl.ru/legal/test-only/personal-data-consent-test-2026-08-23-v1/',
+  VITE_ONBOARDING_PERSONAL_DATA_CONSENT_VERSION:
+    'personal-data-consent-test-2026-08-23-v1',
 });
 
 const CONSENTS = Object.freeze([
-  Object.freeze({ kind: 'terms', documentVersion: 'terms-2026-08-26' }),
-  Object.freeze({ kind: 'privacy', documentVersion: 'privacy-2026-08-26' }),
   Object.freeze({
     kind: 'cancellation',
     documentVersion: 'cancellation-2026-08-26',
   }),
+  Object.freeze({
+    kind: 'personal_data_processing',
+    documentVersion: 'personal-data-consent-2026-08-26',
+  }),
+  Object.freeze({ kind: 'terms', documentVersion: 'terms-2026-08-26' }),
 ]);
 
 const INITIAL_LEVEL_V2_ANSWERS = Object.freeze({
@@ -91,6 +105,58 @@ afterEach(() => {
 });
 
 describe('OnboardingFlowGate', () => {
+  it('requires only the stale consent group and preserves the current group', async () => {
+    const user = userEvent.setup();
+    const onAccept = vi.fn().mockResolvedValue({
+      outcome: 'accepted',
+      onboarding: inProgressState('completed', 5, {
+        status: 'completed',
+        consents: CONSENTS,
+        surveyAnswers: INITIAL_LEVEL_V2_ANSWERS,
+        initialLevelLabel: 'C',
+      }),
+    });
+    const onAccepted = vi.fn();
+    render(
+      <LegalReconsentGate
+        onboarding={inProgressState('completed', 5, {
+          status: 'completed',
+          consents: [
+            { kind: 'terms', documentVersion: 'terms-old' },
+            { kind: 'cancellation', documentVersion: 'cancellation-old' },
+            {
+              kind: 'personal_data_processing',
+              documentVersion: 'personal-data-consent-2026-08-26',
+            },
+            { kind: 'privacy', documentVersion: 'privacy-old' },
+          ],
+          surveyAnswers: INITIAL_LEVEL_V2_ANSWERS,
+          initialLevelLabel: 'C',
+        })}
+        legalConfig={LEGAL_CONFIG}
+        onAccept={onAccept}
+        onAccepted={onAccepted}
+      />,
+    );
+
+    const checkboxes = screen.getAllByRole('checkbox');
+    expect(checkboxes).toHaveLength(2);
+    expect(checkboxes[0].checked).toBe(false);
+    expect(checkboxes[1].checked).toBe(true);
+    expect(checkboxes[1].disabled).toBe(true);
+    expect(screen.getByRole('button', { name: 'Продолжить' }).disabled).toBe(
+      true,
+    );
+    await user.click(checkboxes[0]);
+    await user.click(screen.getByRole('button', { name: 'Продолжить' }));
+
+    expect(onAccept).toHaveBeenCalledWith({ consents: CONSENTS });
+    expect(onAccepted).toHaveBeenCalledTimes(1);
+    expect(
+      screen.getByRole('link', { name: 'Политика конфиденциальности' }),
+    ).toBeTruthy();
+  });
+
   it('labels the temporary test-only documents before any acceptance control', () => {
     render(
       <OnboardingFlowGate
@@ -110,7 +176,7 @@ describe('OnboardingFlowGate', () => {
     ).toContain('не публикация для production');
     expect(
       screen
-        .getByRole('link', { name: /terms-test-2026-08-23-v1/u })
+        .getByRole('link', { name: 'Условия использования' })
         .getAttribute('href'),
     ).toBe(
       'https://test-app.prostopdl.ru/legal/test-only/terms-test-2026-08-23-v1/',
@@ -230,16 +296,10 @@ describe('OnboardingFlowGate', () => {
       screen.getByLabelText('Стабильно выполняю базовые действия'),
     );
     await user.click(screen.getByRole('button', { name: 'Далее' }));
-    await user.click(
-      screen.getByLabelText('Регулярные любительские матчи'),
-    );
-    await user.click(
-      screen.getByRole('button', { name: 'Узнать уровень' }),
-    );
+    await user.click(screen.getByLabelText('Регулярные любительские матчи'));
+    await user.click(screen.getByRole('button', { name: 'Узнать уровень' }));
 
-    const result = await screen.findByTestId(
-      'onboarding-initial-level-result',
-    );
+    const result = await screen.findByTestId('onboarding-initial-level-result');
     expect(result.textContent).toContain('Ваш начальный уровень: C');
     expect(result.textContent).not.toMatch(/балл|формул|огранич/u);
     expect(completionCalls).toEqual([
@@ -350,7 +410,7 @@ describe('OnboardingFlowGate', () => {
     expect(onComplete).not.toHaveBeenCalled();
   });
 
-  it('keeps continue disabled until profile fields and all three consents are valid', async () => {
+  it('keeps continue disabled until profile fields and both confirmations are valid', async () => {
     const user = userEvent.setup();
     const onSaveProfile = vi.fn();
     const onAdvance = vi.fn();
@@ -418,7 +478,7 @@ describe('OnboardingFlowGate', () => {
         .every((checkbox) => checkbox.matches(':disabled')),
     ).toBe(true);
     expect(continueButton.getAttribute('aria-busy')).toBe('true');
-    expect(screen.getAllByRole('link')).toHaveLength(3);
+    expect(screen.getAllByRole('link')).toHaveLength(4);
 
     resolveSave({ outcome: 'reconciled' });
     await waitFor(() => expect(continueButton.disabled).toBe(false));
@@ -484,16 +544,20 @@ describe('OnboardingFlowGate', () => {
     expect(screen.queryByTestId('onboarding-consents-gate')).toBeNull();
     expect(screen.getByLabelText('Телефон *').value).toBe('+79991234567');
     const checkboxes = screen.getAllByRole('checkbox');
+    expect(checkboxes).toHaveLength(2);
     expect(checkboxes.every((checkbox) => checkbox.required)).toBe(true);
     expect(
       screen.getByRole('checkbox', {
-        name: /Условия использования, версия terms-2026-08-26/u,
+        name: /Условия использования версии terms-2026-08-26 и Правила отмены версии cancellation-2026-08-26/u,
       }),
     ).toBeTruthy();
     expect(
       screen.getByRole('checkbox', {
-        name: /Политика конфиденциальности, версия privacy-2026-08-26/u,
+        name: /согласие на обработку персональных данных версии personal-data-consent-2026-08-26/u,
       }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole('link', { name: 'Политика конфиденциальности' }),
     ).toBeTruthy();
     const continueButton = screen.getByRole('button', { name: 'Продолжить' });
     expect(continueButton.disabled).toBe(true);
@@ -576,12 +640,8 @@ describe('OnboardingFlowGate', () => {
       screen.getByLabelText('Стабильно выполняю базовые действия'),
     );
     await user.click(screen.getByRole('button', { name: 'Далее' }));
-    await user.click(
-      screen.getByLabelText('Регулярные любительские матчи'),
-    );
-    await user.click(
-      screen.getByRole('button', { name: 'Узнать уровень' }),
-    );
+    await user.click(screen.getByLabelText('Регулярные любительские матчи'));
+    await user.click(screen.getByRole('button', { name: 'Узнать уровень' }));
     await waitFor(() => expect(onComplete).toHaveBeenCalledTimes(1));
     expect(onComplete).toHaveBeenCalledWith({
       expectedRevision: 3,
@@ -613,13 +673,19 @@ describe('OnboardingFlowGate', () => {
     const changedLegalConfig = readOnboardingLegalConfig({
       VITE_ONBOARDING_LEGAL_PUBLISHED: 'true',
       VITE_ONBOARDING_LEGAL_POLICY_ALIGNED: 'true',
-      VITE_ONBOARDING_TERMS_URL: 'https://legal.example.test/terms',
+      VITE_ONBOARDING_TERMS_URL:
+        'https://legal.example.test/terms/terms-new/',
       VITE_ONBOARDING_TERMS_VERSION: 'terms-new',
-      VITE_ONBOARDING_PRIVACY_URL: 'https://legal.example.test/privacy',
+      VITE_ONBOARDING_PRIVACY_URL:
+        'https://legal.example.test/privacy/privacy-2026-08-26/',
       VITE_ONBOARDING_PRIVACY_VERSION: 'privacy-2026-08-26',
       VITE_ONBOARDING_CANCELLATION_URL:
-        'https://legal.example.test/cancellation',
+        'https://legal.example.test/cancellation/cancellation-2026-08-26/',
       VITE_ONBOARDING_CANCELLATION_VERSION: 'cancellation-2026-08-26',
+      VITE_ONBOARDING_PERSONAL_DATA_CONSENT_URL:
+        'https://legal.example.test/personal-data-consent/personal-data-consent-2026-08-26/',
+      VITE_ONBOARDING_PERSONAL_DATA_CONSENT_VERSION:
+        'personal-data-consent-2026-08-26',
     });
     rerender(
       <OnboardingFlowGate

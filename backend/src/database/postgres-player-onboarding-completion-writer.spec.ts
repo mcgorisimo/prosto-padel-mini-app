@@ -111,7 +111,7 @@ function consentRows(acceptedAt = '1800000000') {
       accepted_at: acceptedAt,
     },
     {
-      consent_kind: 'privacy',
+      consent_kind: 'personal_data_processing',
       document_version: '2026-08-01',
       flow_version: 'tma_v1',
       accepted_at: acceptedAt,
@@ -134,7 +134,7 @@ function validInput(
     flowVersion: 'tma_v1',
     consents: [
       { kind: 'cancellation', documentVersion: '2026-08-01' },
-      { kind: 'privacy', documentVersion: '2026-08-01' },
+      { kind: 'personal_data_processing', documentVersion: '2026-08-01' },
       { kind: 'terms', documentVersion: '2026-08-01' },
     ],
     surveyVersion: 'initial_level_v2',
@@ -232,7 +232,7 @@ describe('PostgresPlayerOnboardingCompletionWriter', () => {
       ACCOUNT_ID,
       'cancellation',
       '2026-08-01',
-      'privacy',
+      'personal_data_processing',
       '2026-08-01',
       'terms',
       '2026-08-01',
@@ -327,7 +327,9 @@ describe('PostgresPlayerOnboardingCompletionWriter', () => {
   );
 
   it('conflicts when an otherwise matching retry lacks an exact mandatory consent version', async () => {
-    const rows = consentRows().filter((row) => row.consent_kind !== 'privacy');
+    const rows = consentRows().filter(
+      (row) => row.consent_kind !== 'personal_data_processing',
+    );
     const transaction = new FakeTransaction([
       queryResult([profileRow()]),
       queryResult([

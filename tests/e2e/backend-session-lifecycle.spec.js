@@ -54,9 +54,15 @@ async function fulfillCompletedOnboarding(route) {
         assurance: 'declared',
       },
       consents: [
-        { kind: 'terms', documentVersion: 'synthetic-v1' },
-        { kind: 'privacy', documentVersion: 'synthetic-v1' },
-        { kind: 'cancellation', documentVersion: 'synthetic-v1' },
+        { kind: 'terms', documentVersion: 'terms-2026-08-26-v1' },
+        {
+          kind: 'cancellation',
+          documentVersion: 'cancellation-2026-08-26-v1',
+        },
+        {
+          kind: 'personal_data_processing',
+          documentVersion: 'personal-data-consent-2026-08-26-v1',
+        },
       ],
       surveyAnswers: { experience: 'beginner' },
     }),
@@ -2102,9 +2108,15 @@ test.describe('backend session credential lifecycle', () => {
         '/src/hooks/useTelegramBackendLogin.js'
       );
       const consents = Object.freeze([
-        Object.freeze({ kind: 'terms', documentVersion: 'synthetic-v1' }),
-        Object.freeze({ kind: 'privacy', documentVersion: 'synthetic-v1' }),
-        Object.freeze({ kind: 'cancellation', documentVersion: 'synthetic-v1' }),
+        Object.freeze({ kind: 'terms', documentVersion: 'terms-2026-08-26-v1' }),
+        Object.freeze({
+          kind: 'cancellation',
+          documentVersion: 'cancellation-2026-08-26-v1',
+        }),
+        Object.freeze({
+          kind: 'personal_data_processing',
+          documentVersion: 'personal-data-consent-2026-08-26-v1',
+        }),
       ]);
       const onboardingState = (currentStep, revision, acceptedConsents = []) =>
         Object.freeze({

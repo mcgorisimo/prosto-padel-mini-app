@@ -31,13 +31,15 @@ const SAFE_TEST_DATABASE_CONFIG = Object.freeze({
   DATABASE_ENABLED: 'true',
   DATABASE_URL: 'postgresql://test-only.invalid/prosto_padel',
 });
-const SAFE_TEST_BOT_TOKEN =
-  '123456789:AA_TEST_ONLY_FAKE_TELEGRAM_BOT_TOKEN';
+const SAFE_TEST_BOT_TOKEN = '123456789:AA_TEST_ONLY_FAKE_TELEGRAM_BOT_TOKEN';
 const SAFE_TEST_YCLIENTS_CONFIG = Object.freeze({
   [YCLIENTS_API_CONFIG_KEYS.companyId]: '2079564',
   [YCLIENTS_API_CONFIG_KEYS.partnerToken]: 'synthetic-partner-token',
   [YCLIENTS_API_CONFIG_KEYS.userToken]: 'synthetic-user-token',
-  [RESERVATION_SNAPSHOT_CONFIG_KEYS.masterKeyBase64]: Buffer.alloc(32, 0x5a).toString('base64'),
+  [RESERVATION_SNAPSHOT_CONFIG_KEYS.masterKeyBase64]: Buffer.alloc(
+    32,
+    0x5a,
+  ).toString('base64'),
 });
 
 function validate(environment: Record<string, unknown> = {}) {
@@ -57,6 +59,7 @@ describe('envValidationSchema', () => {
       [PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.termsVersion]: '',
       [PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.privacyVersion]: '',
       [PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.cancellationVersion]: '',
+      [PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.personalDataProcessingVersion]: '',
     });
   });
 
@@ -69,6 +72,8 @@ describe('envValidationSchema', () => {
         'privacy-test-2026-08-23-v1',
       [PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.cancellationVersion]:
         'cancellation-test-2026-08-23-v1',
+      [PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.personalDataProcessingVersion]:
+        'personal-data-consent-test-2026-08-23-v1',
     });
     expect(withoutDatabase.error?.message).toContain(
       'requires DATABASE_ENABLED',
@@ -81,18 +86,21 @@ describe('envValidationSchema', () => {
         'terms-test-2026-08-23-v1',
       [PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.privacyVersion]:
         'privacy-test-2026-08-23-v1',
+      [PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.personalDataProcessingVersion]:
+        'personal-data-consent-test-2026-08-23-v1',
     });
     expect(missingVersion.error).toBeDefined();
 
     const invalidVersion = validate({
       ...SAFE_TEST_DATABASE_CONFIG,
       [PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.enabled]: 'true',
-      [PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.termsVersion]:
-        'Terms test version',
+      [PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.termsVersion]: 'Terms test version',
       [PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.privacyVersion]:
         'privacy-test-2026-08-23-v1',
       [PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.cancellationVersion]:
         'cancellation-test-2026-08-23-v1',
+      [PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.personalDataProcessingVersion]:
+        'personal-data-consent-test-2026-08-23-v1',
     });
     expect(invalidVersion.error).toBeDefined();
 
@@ -105,6 +113,8 @@ describe('envValidationSchema', () => {
         'privacy-test-2026-08-23-v1',
       [PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.cancellationVersion]:
         'cancellation-test-2026-08-23-v1',
+      [PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.personalDataProcessingVersion]:
+        'personal-data-consent-test-2026-08-23-v1',
     });
     expect(enabled.error).toBeUndefined();
     expect(enabled.value).toMatchObject({
@@ -115,6 +125,8 @@ describe('envValidationSchema', () => {
         'privacy-test-2026-08-23-v1',
       [PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.cancellationVersion]:
         'cancellation-test-2026-08-23-v1',
+      [PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.personalDataProcessingVersion]:
+        'personal-data-consent-test-2026-08-23-v1',
     });
   });
 
@@ -142,9 +154,9 @@ describe('envValidationSchema', () => {
 
     expect(apiDisabled.error).toBeDefined();
     expect(apiEnabled.error).toBeUndefined();
-    expect(
-      apiEnabled.value[YCLIENTS_API_CONFIG_KEYS.bookingWriteEnabled],
-    ).toBe(true);
+    expect(apiEnabled.value[YCLIENTS_API_CONFIG_KEYS.bookingWriteEnabled]).toBe(
+      true,
+    );
   });
 
   it('requires an exact canonical 32-byte reservation snapshot key for writes', () => {
@@ -154,14 +166,24 @@ describe('envValidationSchema', () => {
       [YCLIENTS_API_CONFIG_KEYS.enabled]: 'true',
       [YCLIENTS_API_CONFIG_KEYS.bookingWriteEnabled]: 'true',
     };
-    expect(validate({
-      ...common,
-      [RESERVATION_SNAPSHOT_CONFIG_KEYS.masterKeyBase64]: Buffer.alloc(31, 1).toString('base64'),
-    }).error).toBeDefined();
-    expect(validate({
-      ...common,
-      [RESERVATION_SNAPSHOT_CONFIG_KEYS.masterKeyBase64]: Buffer.alloc(33, 1).toString('base64'),
-    }).error).toBeDefined();
+    expect(
+      validate({
+        ...common,
+        [RESERVATION_SNAPSHOT_CONFIG_KEYS.masterKeyBase64]: Buffer.alloc(
+          31,
+          1,
+        ).toString('base64'),
+      }).error,
+    ).toBeDefined();
+    expect(
+      validate({
+        ...common,
+        [RESERVATION_SNAPSHOT_CONFIG_KEYS.masterKeyBase64]: Buffer.alloc(
+          33,
+          1,
+        ).toString('base64'),
+      }).error,
+    ).toBeDefined();
   });
 
   it('keeps read/decrypt configured when booking writes are disabled and rejects rotation without a keyring', () => {
@@ -172,14 +194,18 @@ describe('envValidationSchema', () => {
       [YCLIENTS_API_CONFIG_KEYS.bookingWriteEnabled]: 'false',
     };
     expect(validate(enabledRead).error).toBeUndefined();
-    expect(validate({
-      ...enabledRead,
-      [RESERVATION_SNAPSHOT_CONFIG_KEYS.masterKeyBase64]: '',
-    }).error).toBeDefined();
-    expect(validate({
-      ...enabledRead,
-      [RESERVATION_SNAPSHOT_CONFIG_KEYS.keyVersion]: '2',
-    }).error).toBeDefined();
+    expect(
+      validate({
+        ...enabledRead,
+        [RESERVATION_SNAPSHOT_CONFIG_KEYS.masterKeyBase64]: '',
+      }).error,
+    ).toBeDefined();
+    expect(
+      validate({
+        ...enabledRead,
+        [RESERVATION_SNAPSHOT_CONFIG_KEYS.keyVersion]: '2',
+      }).error,
+    ).toBeDefined();
   });
 
   it('requires the database, company and both tokens for the enabled YCLIENTS API', () => {

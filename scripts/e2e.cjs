@@ -6,6 +6,26 @@ const path = require('node:path');
 const host = '127.0.0.1';
 const port = 5173;
 const baseURL = `http://${host}:${port}`;
+const e2eEnvironment = {
+  ...process.env,
+  BROWSER: 'none',
+  VITE_ONBOARDING_LEGAL_PUBLISHED: 'true',
+  VITE_ONBOARDING_LEGAL_POLICY_ALIGNED: 'true',
+  VITE_ONBOARDING_LEGAL_TEST_ONLY: 'false',
+  VITE_ONBOARDING_TERMS_URL:
+    'https://test-app.prostopdl.ru/legal/terms/terms-2026-08-26-v1/',
+  VITE_ONBOARDING_TERMS_VERSION: 'terms-2026-08-26-v1',
+  VITE_ONBOARDING_CANCELLATION_URL:
+    'https://test-app.prostopdl.ru/legal/cancellation/cancellation-2026-08-26-v1/',
+  VITE_ONBOARDING_CANCELLATION_VERSION: 'cancellation-2026-08-26-v1',
+  VITE_ONBOARDING_PRIVACY_URL:
+    'https://test-app.prostopdl.ru/legal/privacy/privacy-2026-08-26-v1/',
+  VITE_ONBOARDING_PRIVACY_VERSION: 'privacy-2026-08-26-v1',
+  VITE_ONBOARDING_PERSONAL_DATA_CONSENT_URL:
+    'https://test-app.prostopdl.ru/legal/personal-data-consent/personal-data-consent-2026-08-26-v1/',
+  VITE_ONBOARDING_PERSONAL_DATA_CONSENT_VERSION:
+    'personal-data-consent-2026-08-26-v1',
+};
 
 function assertPortIsFree() {
   return new Promise((resolve, reject) => {
@@ -92,7 +112,9 @@ function killProcessTree(pid) {
   } catch {
     try {
       process.kill(pid, 'SIGTERM');
-    } catch {}
+    } catch {
+      // The owned process may already have exited between the state check and cleanup.
+    }
   }
 }
 
@@ -134,7 +156,7 @@ async function main() {
       '--strictPort',
     ], {
       cwd: process.cwd(),
-      env: { ...process.env, BROWSER: 'none' },
+      env: e2eEnvironment,
       stdio: ['ignore', 'inherit', 'inherit'],
       detached: process.platform !== 'win32',
     });
@@ -154,6 +176,7 @@ async function main() {
       ...extraArgs,
     ], {
       cwd: process.cwd(),
+      env: e2eEnvironment,
       stdio: 'inherit',
     });
 

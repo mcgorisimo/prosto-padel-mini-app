@@ -19,6 +19,7 @@ import {
 import { SessionLifecyclePublicError } from './session-lifecycle.http';
 import { PlayerOnboardingService } from './player-onboarding.service';
 import {
+  AcceptOwnPlayerOnboardingLegalPolicyResult,
   AdvanceOwnPlayerOnboardingResult,
   CompleteOwnPlayerOnboardingResult,
   OwnPlayerOnboarding,
@@ -26,6 +27,7 @@ import {
   SaveOwnPlayerOnboardingDraftResult,
   isOwnPlayerOnboarding,
   readOwnPlayerOnboardingCompletion,
+  readOwnPlayerOnboardingLegalAcceptances,
   readOwnPlayerOnboardingDraft,
   readOwnPlayerOnboardingProgress,
 } from './player-onboarding.types';
@@ -218,6 +220,47 @@ function completionRejection(
         HttpStatus.UNPROCESSABLE_ENTITY,
         'onboarding_incomplete',
         'Onboarding requirements are incomplete',
+      );
+    case 'temporary_unavailable':
+      return publicError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        'onboarding_service_unavailable',
+        'Onboarding service is unavailable',
+      );
+    case 'internal_failure':
+      return publicError(
+        HttpStatus.INTERNAL_SERVER_ERROR,
+        'onboarding_internal_error',
+        'Onboarding request failed',
+      );
+  }
+}
+
+function legalAcceptanceRejection(
+  reason: Extract<
+    AcceptOwnPlayerOnboardingLegalPolicyResult,
+    { readonly outcome: 'rejected' }
+  >['reason'],
+): HttpException {
+  switch (reason) {
+    case 'invalid_request':
+      return publicError(
+        HttpStatus.BAD_REQUEST,
+        'onboarding_legal_acceptances_invalid_request',
+        'Onboarding legal acceptances request is invalid',
+      );
+    case 'onboarding_not_found':
+      return publicError(
+        HttpStatus.NOT_FOUND,
+        'onboarding_not_found',
+        'Onboarding was not found',
+      );
+    case 'onboarding_incomplete':
+    case 'legal_acceptances_conflict':
+      return publicError(
+        HttpStatus.CONFLICT,
+        'onboarding_legal_acceptances_conflict',
+        'Onboarding legal acceptances conflict with current policy',
       );
     case 'temporary_unavailable':
       return publicError(
@@ -477,6 +520,62 @@ function readCompletionRejectionReason(
     : undefined;
 }
 
+function readLegalAcceptanceResult(value: unknown): OwnPlayerOnboarding {
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    Array.isArray(value) ||
+    Object.getPrototypeOf(value) !== Object.prototype ||
+    Object.keys(value).length !== 2
+  ) {
+    throw legalAcceptanceRejection('internal_failure');
+  }
+  const result = value as Record<string, unknown>;
+  if (
+    result.outcome !== 'accepted' ||
+    !isOwnPlayerOnboarding(result.onboarding) ||
+    result.onboarding.status !== 'completed'
+  ) {
+    throw legalAcceptanceRejection('internal_failure');
+  }
+  return result.onboarding;
+}
+
+function readLegalAcceptanceRejectionReason(
+  value: unknown,
+):
+  | Extract<
+      AcceptOwnPlayerOnboardingLegalPolicyResult,
+      { readonly outcome: 'rejected' }
+    >['reason']
+  | undefined {
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    Array.isArray(value) ||
+    Object.getPrototypeOf(value) !== Object.prototype
+  ) {
+    return undefined;
+  }
+  const result = value as Record<string, unknown>;
+  const reasons = [
+    'invalid_request',
+    'onboarding_not_found',
+    'onboarding_incomplete',
+    'legal_acceptances_conflict',
+    'temporary_unavailable',
+    'internal_failure',
+  ];
+  return result.outcome === 'rejected' &&
+    typeof result.reason === 'string' &&
+    reasons.includes(result.reason)
+    ? (result.reason as Extract<
+        AcceptOwnPlayerOnboardingLegalPolicyResult,
+        { readonly outcome: 'rejected' }
+      >['reason'])
+    : undefined;
+}
+
 @Controller('onboarding')
 export class PlayerOnboardingController {
   constructor(private readonly service: PlayerOnboardingService) {}
@@ -611,5 +710,40 @@ export class PlayerOnboardingController {
       throw completionRejection(rejectionReason);
     }
     return readCompleted(result);
+  }
+
+  @Post('me/legal-acceptances')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(SessionBearerGuard)
+  async acceptLegalPolicy(
+    @Body() body: unknown,
+    @Req() request: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ): Promise<OwnPlayerOnboarding> {
+    disableCaching(reply);
+    const principal = readAuthenticatedSessionPrincipal(request);
+    if (principal === undefined) {
+      throw legalAcceptanceRejection('internal_failure');
+    }
+    const acceptance = readOwnPlayerOnboardingLegalAcceptances(body);
+    if (acceptance === undefined) {
+      throw legalAcceptanceRejection('invalid_request');
+    }
+
+    let result: unknown;
+    try {
+      result = await this.service.acceptOwnLegalPolicy({
+        accountId: principal.accountId,
+        role: principal.role,
+        acceptance,
+      });
+    } catch {
+      throw legalAcceptanceRejection('internal_failure');
+    }
+    const rejectionReason = readLegalAcceptanceRejectionReason(result);
+    if (rejectionReason !== undefined) {
+      throw legalAcceptanceRejection(rejectionReason);
+    }
+    return readLegalAcceptanceResult(result);
   }
 }

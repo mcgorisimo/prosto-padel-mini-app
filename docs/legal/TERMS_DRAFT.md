@@ -3,10 +3,9 @@ DRAFT — НЕ ОПУБЛИКОВАНО — НЕ УТВЕРЖДЕНО ВЛАДЕ
 # Условия использования сервиса и публичная оферта об оказании услуг
 
 - Ключ документа: `terms`
-- Версия: `{{TERMS_VERSION}}`
-- Дата вступления в силу: `{{TERMS_EFFECTIVE_DATE}}`
-- Current URL: `{{PUBLIC_LEGAL_BASE_URL}}/terms`
-- Versioned URL: `{{PUBLIC_LEGAL_BASE_URL}}/terms/{{TERMS_VERSION}}`
+- Версия candidate: `terms-2026-08-26-v1`
+- Дата вступления в силу candidate: `26.08.2026`
+- Selectel test versioned URL candidate: `https://test-app.prostopdl.ru/legal/terms/terms-2026-08-26-v1/`
 - Locale: `ru-RU`
 
 ## 1. Общие положения

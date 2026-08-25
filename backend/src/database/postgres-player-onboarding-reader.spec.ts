@@ -164,9 +164,8 @@ describe('PostgresPlayerOnboardingReader', () => {
     );
     expect(sql).toContain('WHERE details.account_id = $1');
     expect(sql).toContain('state.initial_level_label');
-    expect(sql).toContain(
-      'acceptance.account_id = details.account_id AND acceptance.flow_version = state.flow_version',
-    );
+    expect(sql).toContain('acceptance.account_id = details.account_id');
+    expect(sql).not.toContain('acceptance.flow_version = state.flow_version');
     expect(call.text).not.toContain(ACCOUNT_ID);
     for (const forbidden of [
       'FOR UPDATE',

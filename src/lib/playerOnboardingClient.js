@@ -3,6 +3,7 @@ import { isCanonicalSessionCredential } from './sessionCredential';
 const ONBOARDING_PATH = '/api/v1/onboarding/me';
 const ONBOARDING_PROGRESS_PATH = `${ONBOARDING_PATH}/progress`;
 const ONBOARDING_COMPLETE_PATH = `${ONBOARDING_PATH}/complete`;
+const ONBOARDING_LEGAL_ACCEPTANCES_PATH = `${ONBOARDING_PATH}/legal-acceptances`;
 const REQUEST_TIMEOUT_MS = 8_000;
 const MAX_REQUESTS = 3;
 const BACKOFF_BASE_MS = 250;
@@ -26,7 +27,17 @@ const ONBOARDING_STEPS = Object.freeze([
   'level_survey',
   'completed',
 ]);
-const CONSENT_KINDS = Object.freeze(['terms', 'privacy', 'cancellation']);
+const CONSENT_KINDS = Object.freeze([
+  'terms',
+  'privacy',
+  'cancellation',
+  'personal_data_processing',
+]);
+const CURRENT_CONSENT_KINDS = Object.freeze([
+  'terms',
+  'cancellation',
+  'personal_data_processing',
+]);
 const INITIAL_LEVEL_SURVEY_VERSION = 'initial_level_v2';
 const INITIAL_LEVEL_LABELS = Object.freeze([
   'D',
@@ -129,8 +140,10 @@ function readConsents(value, requireCurrentKinds = false) {
   }
   if (
     requireCurrentKinds &&
-    (consents.length !== CONSENT_KINDS.length ||
-      new Set(consents.map(({ kind }) => kind)).size !== CONSENT_KINDS.length)
+    (consents.length !== CURRENT_CONSENT_KINDS.length ||
+      !CURRENT_CONSENT_KINDS.every((kind) =>
+        consents.some((consent) => consent.kind === kind),
+      ))
   ) {
     return null;
   }
@@ -364,6 +377,12 @@ function readCompletion(value) {
   });
 }
 
+function readLegalAcceptances(value) {
+  if (!hasExactKeys(value, ['consents'])) return null;
+  const consents = readConsents(value.consents, true);
+  return consents ? Object.freeze({ consents }) : null;
+}
+
 function cancelReader(reader) {
   try {
     const cancellation = reader.cancel();
@@ -514,6 +533,8 @@ function classifyFailure(operation, status, body) {
     onboarding_completion_revision_conflict: 'stale_revision',
     onboarding_completion_conflict: 'conflict',
     onboarding_incomplete: 'incomplete',
+    onboarding_legal_acceptances_invalid_request: 'invalid_request',
+    onboarding_legal_acceptances_conflict: 'conflict',
   });
   if (operation === 'read' && code === 'onboarding_not_found') {
     return frozen('rejected', { reason: 'not_found' });
@@ -553,7 +574,9 @@ export function createPlayerOnboardingClient(dependencies = {}) {
         ? ONBOARDING_PROGRESS_PATH
         : operation === 'complete'
           ? ONBOARDING_COMPLETE_PATH
-          : ONBOARDING_PATH;
+          : operation === 'legal_acceptances'
+            ? ONBOARDING_LEGAL_ACCEPTANCES_PATH
+            : ONBOARDING_PATH;
     try {
       const response = await fetchImpl(path, {
         method: isRead ? 'GET' : operation === 'draft' ? 'PATCH' : 'POST',
@@ -580,7 +603,9 @@ export function createPlayerOnboardingClient(dependencies = {}) {
                     ? 'saved'
                     : operation === 'progress'
                       ? 'advanced'
-                      : 'completed',
+                      : operation === 'complete'
+                        ? 'completed'
+                        : 'accepted',
                 { onboarding },
               ),
             })
@@ -622,7 +647,9 @@ export function createPlayerOnboardingClient(dependencies = {}) {
           ? readDraft(payload)
           : operation === 'progress'
             ? readProgress(payload)
-            : readCompletion(payload);
+            : operation === 'complete'
+              ? readCompletion(payload)
+              : readLegalAcceptances(payload);
     if (operation !== 'read' && !normalizedPayload) {
       return frozen('rejected', { reason: 'invalid_request' });
     }
@@ -691,6 +718,8 @@ export function createPlayerOnboardingClient(dependencies = {}) {
       execute('progress', credential, progress, options),
     complete: (credential, completion, options) =>
       execute('complete', credential, completion, options),
+    acceptLegalPolicy: (credential, acceptance, options) =>
+      execute('legal_acceptances', credential, acceptance, options),
   });
 }
 

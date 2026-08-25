@@ -5,6 +5,8 @@ export const PLAYER_ONBOARDING_POLICY_CONFIG_KEYS = Object.freeze({
   termsVersion: 'PLAYER_ONBOARDING_TERMS_VERSION',
   privacyVersion: 'PLAYER_ONBOARDING_PRIVACY_VERSION',
   cancellationVersion: 'PLAYER_ONBOARDING_CANCELLATION_VERSION',
+  personalDataProcessingVersion:
+    'PLAYER_ONBOARDING_PERSONAL_DATA_PROCESSING_VERSION',
 } as const);
 
 export const PLAYER_ONBOARDING_DOCUMENT_VERSION_PATTERN =
@@ -14,6 +16,7 @@ export type PlayerOnboardingDocumentVersions = Readonly<{
   terms: string;
   privacy: string;
   cancellation: string;
+  personalDataProcessing: string;
 }>;
 
 export type PlayerOnboardingPolicyConfiguration =
@@ -64,6 +67,10 @@ export function readPlayerOnboardingPolicyConfiguration(
       cancellation: readDocumentVersion(
         config,
         PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.cancellationVersion,
+      ),
+      personalDataProcessing: readDocumentVersion(
+        config,
+        PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.personalDataProcessingVersion,
       ),
     }),
   });

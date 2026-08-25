@@ -96,8 +96,8 @@ const EMAIL_PATTERN =
   /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9][a-z0-9.-]*\.[a-z]{2,63}$/u;
 const CONSENT_KINDS = Object.freeze([
   'terms',
-  'privacy',
   'cancellation',
+  'personal_data_processing',
 ] as const);
 
 interface ProfileRow extends QueryResultRow {

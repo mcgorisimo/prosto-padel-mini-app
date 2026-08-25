@@ -3,10 +3,9 @@ DRAFT — НЕ ОПУБЛИКОВАНО — НЕ УТВЕРЖДЕНО ВЛАДЕ
 # Правила отмены, переноса и возврата денежных средств
 
 - Ключ документа: `cancellation`
-- Версия: `{{CANCELLATION_VERSION}}`
-- Дата вступления в силу: `{{CANCELLATION_EFFECTIVE_DATE}}`
-- Current URL: `{{PUBLIC_LEGAL_BASE_URL}}/cancellation`
-- Versioned URL: `{{PUBLIC_LEGAL_BASE_URL}}/cancellation/{{CANCELLATION_VERSION}}`
+- Версия candidate: `cancellation-2026-08-26-v1`
+- Дата вступления в силу candidate: `26.08.2026`
+- Selectel test versioned URL candidate: `https://test-app.prostopdl.ru/legal/cancellation/cancellation-2026-08-26-v1/`
 - Locale: `ru-RU`
 
 ## 1. Область применения

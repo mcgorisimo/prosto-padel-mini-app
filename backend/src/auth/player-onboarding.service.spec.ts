@@ -18,6 +18,11 @@ import {
   PlayerOnboardingProgressWriter,
 } from '../database/player-onboarding-progress-writer';
 import {
+  AcceptPlayerOnboardingLegalPolicyInput,
+  AcceptPlayerOnboardingLegalPolicyResult,
+  PlayerOnboardingLegalAcceptanceWriter,
+} from '../database/player-onboarding-legal-acceptance-writer';
+import {
   PlayerOnboardingReadPersistenceError,
   PlayerOnboardingReader,
   ReadPlayerOnboardingInput,
@@ -48,6 +53,7 @@ const TEST_POLICY = createPlayerOnboardingPolicy({
   terms: '2026-08-01',
   privacy: '2026-08-01',
   cancellation: '2026-08-01',
+  personalDataProcessing: '2026-08-01',
 });
 const SURVEY_ANSWERS = Object.freeze({
   match_count: 'thirty_one_to_ninety_nine',
@@ -99,12 +105,21 @@ function createHarness(
       [PostgresTransaction, AdvancePlayerOnboardingInput]
     >()
     .mockResolvedValue({ outcome: 'advanced', revision: 2, replayed: false });
+  const accept = jest
+    .fn<
+      Promise<AcceptPlayerOnboardingLegalPolicyResult>,
+      [PostgresTransaction, AcceptPlayerOnboardingLegalPolicyInput]
+    >()
+    .mockResolvedValue({ outcome: 'accepted' });
   const service = new PlayerOnboardingService({
     transactions: { run } as PlayerOnboardingTransactionExecutor,
     onboarding: { findByAccountId } as PlayerOnboardingReader,
     draftWriter: { saveDraft } as PlayerOnboardingDraftWriter,
     progressWriter: { advance } as PlayerOnboardingProgressWriter,
     completionWriter: { complete } as PlayerOnboardingCompletionWriter,
+    legalAcceptanceWriter: {
+      accept,
+    } as PlayerOnboardingLegalAcceptanceWriter,
     clock: { nowEpochSeconds: () => NOW },
     policy,
   });
@@ -116,6 +131,7 @@ function createHarness(
     saveDraft,
     advance,
     complete,
+    accept,
   };
 }
 
@@ -153,7 +169,7 @@ function draftResult(): ReadPlayerOnboardingResult {
         revision: 4,
       },
       consents: [
-        { kind: 'privacy', documentVersion: '2026-08-01' },
+        { kind: 'personal_data_processing', documentVersion: '2026-08-01' },
         { kind: 'terms', documentVersion: '2026-08-01' },
       ],
     },
@@ -208,7 +224,10 @@ function progressResult(
         currentStep === 'level_survey'
           ? [
               { kind: 'cancellation', documentVersion: '2026-08-01' },
-              { kind: 'privacy', documentVersion: '2026-08-01' },
+              {
+                kind: 'personal_data_processing',
+                documentVersion: '2026-08-01',
+              },
               { kind: 'terms', documentVersion: '2026-08-01' },
             ]
           : [],
@@ -236,7 +255,7 @@ function completedResult(): ReadPlayerOnboardingResult {
       },
       consents: [
         { kind: 'cancellation', documentVersion: '2026-08-01' },
-        { kind: 'privacy', documentVersion: '2026-08-01' },
+        { kind: 'personal_data_processing', documentVersion: '2026-08-01' },
         { kind: 'terms', documentVersion: '2026-08-01' },
       ],
     },
@@ -291,7 +310,7 @@ function completionInput(
       flowVersion: 'tma_v1',
       consents: [
         { kind: 'terms', documentVersion: '2026-08-01' },
-        { kind: 'privacy', documentVersion: '2026-08-01' },
+        { kind: 'personal_data_processing', documentVersion: '2026-08-01' },
         { kind: 'cancellation', documentVersion: '2026-08-01' },
       ],
       survey: {
@@ -374,7 +393,7 @@ describe('PlayerOnboardingService', () => {
           assurance: 'declared',
         },
         consents: [
-          { kind: 'privacy', documentVersion: '2026-08-01' },
+          { kind: 'personal_data_processing', documentVersion: '2026-08-01' },
           { kind: 'terms', documentVersion: '2026-08-01' },
         ],
         surveyAnswers: SURVEY_ANSWERS,
@@ -764,7 +783,7 @@ describe('PlayerOnboardingService', () => {
       nextStep: 'level_survey',
       consents: [
         { kind: 'terms', documentVersion: '2026-08-01' },
-        { kind: 'privacy', documentVersion: '2026-08-01' },
+        { kind: 'personal_data_processing', documentVersion: '2026-08-01' },
         { kind: 'cancellation', documentVersion: '2026-08-01' },
       ],
     };
@@ -783,7 +802,7 @@ describe('PlayerOnboardingService', () => {
       nextStep: 'level_survey',
       consents: [
         { kind: 'cancellation', documentVersion: '2026-08-01' },
-        { kind: 'privacy', documentVersion: '2026-08-01' },
+        { kind: 'personal_data_processing', documentVersion: '2026-08-01' },
         { kind: 'terms', documentVersion: '2026-08-01' },
       ],
       advancedAt: NOW,
@@ -803,7 +822,7 @@ describe('PlayerOnboardingService', () => {
           { kind: 'cancellation', documentVersion: '2026-07-01' },
           { kind: 'cancellation', documentVersion: '2026-08-01' },
           { kind: 'privacy', documentVersion: '2026-07-01' },
-          { kind: 'privacy', documentVersion: '2026-08-01' },
+          { kind: 'personal_data_processing', documentVersion: '2026-08-01' },
           { kind: 'terms', documentVersion: '2026-07-01' },
           { kind: 'terms', documentVersion: '2026-08-01' },
         ],
@@ -823,7 +842,7 @@ describe('PlayerOnboardingService', () => {
           nextStep: 'level_survey',
           consents: [
             { kind: 'terms', documentVersion: '2026-08-01' },
-            { kind: 'privacy', documentVersion: '2026-08-01' },
+            { kind: 'personal_data_processing', documentVersion: '2026-08-01' },
             { kind: 'cancellation', documentVersion: '2026-08-01' },
           ],
         }),
@@ -869,7 +888,10 @@ describe('PlayerOnboardingService', () => {
           nextStep: 'level_survey',
           consents: [
             { kind: 'terms', documentVersion: '2026-08-02' },
-            { kind: 'privacy', documentVersion: '2026-08-02' },
+            {
+              kind: 'personal_data_processing',
+              documentVersion: '2026-08-02',
+            },
             { kind: 'cancellation', documentVersion: '2026-08-02' },
           ],
         }),
@@ -894,8 +916,8 @@ describe('PlayerOnboardingService', () => {
           consents: [
             { kind: 'terms', documentVersion: 'terms-test-2026-08-23-v1' },
             {
-              kind: 'privacy',
-              documentVersion: 'privacy-test-2026-08-23-v1',
+              kind: 'personal_data_processing',
+              documentVersion: 'personal-data-consent-test-2026-08-23-v1',
             },
             {
               kind: 'cancellation',
@@ -967,7 +989,7 @@ describe('PlayerOnboardingService', () => {
         },
         consents: [
           { kind: 'cancellation', documentVersion: '2026-08-01' },
-          { kind: 'privacy', documentVersion: '2026-08-01' },
+          { kind: 'personal_data_processing', documentVersion: '2026-08-01' },
           { kind: 'terms', documentVersion: '2026-08-01' },
         ],
         surveyAnswers: SURVEY_ANSWERS,
@@ -981,7 +1003,7 @@ describe('PlayerOnboardingService', () => {
       flowVersion: 'tma_v1',
       consents: [
         { kind: 'cancellation', documentVersion: '2026-08-01' },
-        { kind: 'privacy', documentVersion: '2026-08-01' },
+        { kind: 'personal_data_processing', documentVersion: '2026-08-01' },
         { kind: 'terms', documentVersion: '2026-08-01' },
       ],
       surveyVersion: 'initial_level_v2',
@@ -1051,7 +1073,10 @@ describe('PlayerOnboardingService', () => {
         ...completionInput().completion,
         consents: [
           { kind: 'terms' as const, documentVersion: '2026-07-01' },
-          { kind: 'privacy' as const, documentVersion: '2026-08-01' },
+          {
+            kind: 'personal_data_processing' as const,
+            documentVersion: '2026-08-01',
+          },
           { kind: 'cancellation' as const, documentVersion: '2026-08-01' },
         ],
       },
@@ -1149,5 +1174,49 @@ describe('PlayerOnboardingService', () => {
     ).resolves.toEqual({ outcome: 'rejected', reason: 'internal_failure' });
     expect(harness.complete).toHaveBeenCalledTimes(1);
     expect(harness.findByAccountId).toHaveBeenCalledTimes(1);
+  });
+
+  it('appends exact current legal evidence for a completed owner without reopening onboarding', async () => {
+    const harness = createHarness(completedResult());
+
+    await expect(
+      harness.service.acceptOwnLegalPolicy({
+        accountId: ACCOUNT_ID,
+        role: 'player',
+        acceptance: { consents: TEST_POLICY.consents },
+      }),
+    ).resolves.toMatchObject({
+      outcome: 'accepted',
+      onboarding: {
+        status: 'completed',
+        currentStep: 'completed',
+        revision: 5,
+      },
+    });
+    expect(harness.accept).toHaveBeenCalledWith(harness.transaction, {
+      accountId: ACCOUNT_ID,
+      consents: TEST_POLICY.consents,
+      flowVersion: 'tma_legal_reconsent_v1',
+      acceptedAt: NOW,
+    });
+  });
+
+  it('does not treat historical privacy evidence as personal data consent', async () => {
+    const harness = createHarness(completedResult());
+
+    await expect(
+      harness.service.acceptOwnLegalPolicy({
+        accountId: ACCOUNT_ID,
+        role: 'player',
+        acceptance: {
+          consents: [
+            { kind: 'cancellation', documentVersion: '2026-08-01' },
+            { kind: 'privacy', documentVersion: '2026-08-01' },
+            { kind: 'terms', documentVersion: '2026-08-01' },
+          ],
+        },
+      }),
+    ).resolves.toEqual({ outcome: 'rejected', reason: 'invalid_request' });
+    expect(harness.accept).not.toHaveBeenCalled();
   });
 });

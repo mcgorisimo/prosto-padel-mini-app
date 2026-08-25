@@ -31,6 +31,7 @@ import { PostgresPlayerProfileDetailsRepository } from '../database/postgres-pla
 import { PostgresPlayerOnboardingDraftWriter } from '../database/postgres-player-onboarding-draft-writer';
 import { PostgresPlayerOnboardingCompletionWriter } from '../database/postgres-player-onboarding-completion-writer';
 import { PostgresPlayerOnboardingProgressWriter } from '../database/postgres-player-onboarding-progress-writer';
+import { PostgresPlayerOnboardingLegalAcceptanceWriter } from '../database/postgres-player-onboarding-legal-acceptance-writer';
 import { PostgresPlayerOnboardingReader } from '../database/postgres-player-onboarding-reader';
 import { PostgresPlayerInitialLevelReassessmentRepository } from '../database/postgres-player-initial-level-reassessment-repository';
 import { PostgresPlayerProfileReader } from '../database/postgres-player-profile-reader';
@@ -107,8 +108,7 @@ class TestConfigModule {}
 const TEST_LOOKUP_PEPPER = Buffer.alloc(32, 0x31).toString('base64');
 const TEST_WORKFLOW_SECRET = Buffer.alloc(32, 0x42).toString('base64');
 const TEST_UUID_NAMESPACE = '12345678-1234-5678-9234-567812345678';
-const TEST_BOT_TOKEN =
-  '123456789:AA_TEST_ONLY_FAKE_TELEGRAM_BOT_TOKEN';
+const TEST_BOT_TOKEN = '123456789:AA_TEST_ONLY_FAKE_TELEGRAM_BOT_TOKEN';
 const NOW = unixEpochSeconds(1_800_000_000);
 const FINGERPRINT = '55'.repeat(32) as AuthenticationProofFingerprint;
 
@@ -134,8 +134,7 @@ function enabledConfiguration(): Record<string, unknown> {
     TELEGRAM_BOT_TOKEN: TEST_BOT_TOKEN,
     TELEGRAM_INIT_DATA_MAX_AGE_SECONDS: 300,
     [TELEGRAM_LOGIN_CONFIG_KEYS.lookupPepperBase64]: TEST_LOOKUP_PEPPER,
-    [TELEGRAM_LOGIN_CONFIG_KEYS.workflowHmacSecretBase64]:
-      TEST_WORKFLOW_SECRET,
+    [TELEGRAM_LOGIN_CONFIG_KEYS.workflowHmacSecretBase64]: TEST_WORKFLOW_SECRET,
     [TELEGRAM_LOGIN_CONFIG_KEYS.uuidNamespace]: TEST_UUID_NAMESPACE,
     [TELEGRAM_LOGIN_CONFIG_KEYS.digestVersion]: 1,
     [TELEGRAM_LOGIN_CONFIG_KEYS.pepperVersion]: 1,
@@ -150,6 +149,8 @@ function enabledConfiguration(): Record<string, unknown> {
       'privacy-test-2026-08-23-v1',
     [PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.cancellationVersion]:
       'cancellation-test-2026-08-23-v1',
+    [PLAYER_ONBOARDING_POLICY_CONFIG_KEYS.personalDataProcessingVersion]:
+      'personal-data-consent-test-2026-08-23-v1',
   };
 }
 
@@ -163,8 +164,7 @@ function verifiedProof(): VerifiedTelegramProof {
       namespace,
       lookup: {
         kind: 'canonical_subject',
-        subject:
-          trustProviderCanonicalizedExternalIdentitySubject('987654321'),
+        subject: trustProviderCanonicalizedExternalIdentitySubject('987654321'),
       },
     },
     authDate: unixEpochSeconds(1_799_999_900),
@@ -412,9 +412,9 @@ describe('AuthModule Telegram login wiring', () => {
     });
 
     expect(getFeature(moduleRef)).toEqual({ enabled: false });
-    expect(
-      getControllerFeature(moduleRef.get(TelegramLoginController)),
-    ).toBe(getFeature(moduleRef));
+    expect(getControllerFeature(moduleRef.get(TelegramLoginController))).toBe(
+      getFeature(moduleRef),
+    );
     expect(moduleRef.get(PostgresService).isEnabled()).toBe(false);
     const sessionLifecycle = moduleRef.get(SessionLifecycleService);
     expect(sessionLifecycle.dependencies.transactions).toBe(
@@ -431,9 +431,7 @@ describe('AuthModule Telegram login wiring', () => {
         moduleRef.get(SessionLifecycleController),
       ),
     ).toBe(sessionLifecycle);
-    const sessionAuthentication = moduleRef.get(
-      SessionAuthenticationService,
-    );
+    const sessionAuthentication = moduleRef.get(SessionAuthenticationService);
     expect(sessionAuthentication.dependencies.transactions).toBe(
       moduleRef.get(PostgresTransactionExecutorAdapter),
     );
@@ -477,9 +475,7 @@ describe('AuthModule Telegram login wiring', () => {
       moduleRef.get(SESSION_AUTHENTICATION_CLOCK),
     );
     expect(
-      getPlayerProfileControllerService(
-        moduleRef.get(PlayerProfileController),
-      ),
+      getPlayerProfileControllerService(moduleRef.get(PlayerProfileController)),
     ).toBe(playerProfile);
     const playerOnboarding = moduleRef.get(PlayerOnboardingService);
     expect(playerOnboarding.dependencies.transactions).toBe(
@@ -496,6 +492,9 @@ describe('AuthModule Telegram login wiring', () => {
     );
     expect(playerOnboarding.dependencies.completionWriter).toBe(
       moduleRef.get(PostgresPlayerOnboardingCompletionWriter),
+    );
+    expect(playerOnboarding.dependencies.legalAcceptanceWriter).toBe(
+      moduleRef.get(PostgresPlayerOnboardingLegalAcceptanceWriter),
     );
     expect(playerOnboarding.dependencies.clock).toBe(
       moduleRef.get(SESSION_AUTHENTICATION_CLOCK),
@@ -521,9 +520,7 @@ describe('AuthModule Telegram login wiring', () => {
         moduleRef.get(PlayerInitialLevelReassessmentController),
       ),
     ).toBe(reassessment);
-    const publicPlayerProfile = moduleRef.get(
-      PublicPlayerProfileService,
-    );
+    const publicPlayerProfile = moduleRef.get(PublicPlayerProfileService);
     expect(publicPlayerProfile.dependencies.transactions).toBe(
       moduleRef.get(PostgresTransactionExecutorAdapter),
     );
@@ -566,9 +563,7 @@ describe('AuthModule Telegram login wiring', () => {
       moduleRef.get(SESSION_AUTHENTICATION_CLOCK),
     );
     expect(
-      getMatchResultControllerService(
-        moduleRef.get(MatchResultController),
-      ),
+      getMatchResultControllerService(moduleRef.get(MatchResultController)),
     ).toBe(matchResult);
     expect(matchLineup.dependencies.transactions).toBe(
       moduleRef.get(PostgresTransactionExecutorAdapter),
@@ -583,9 +578,7 @@ describe('AuthModule Telegram login wiring', () => {
       moduleRef.get(SESSION_AUTHENTICATION_CLOCK),
     );
     expect(
-      getMatchLineupControllerService(
-        moduleRef.get(MatchLineupController),
-      ),
+      getMatchLineupControllerService(moduleRef.get(MatchLineupController)),
     ).toBe(matchLineup);
     expect(matchWaitlist.dependencies.transactions).toBe(
       moduleRef.get(PostgresTransactionExecutorAdapter),
@@ -604,9 +597,7 @@ describe('AuthModule Telegram login wiring', () => {
       moduleRef.get(SESSION_AUTHENTICATION_CLOCK),
     );
     expect(
-      getMatchWaitlistControllerService(
-        moduleRef.get(MatchWaitlistController),
-      ),
+      getMatchWaitlistControllerService(moduleRef.get(MatchWaitlistController)),
     ).toBe(matchWaitlist);
     expect(matchNotifications.dependencies.transactions).toBe(
       moduleRef.get(PostgresTransactionExecutorAdapter),
@@ -625,24 +616,22 @@ describe('AuthModule Telegram login wiring', () => {
     expect(matchApi.dependencies.transactions).toBe(
       moduleRef.get(PostgresTransactionExecutorAdapter),
     );
-      expect(matchApi.dependencies.matches).toBe(matchRepository);
-      expect(matchApi.dependencies.publicProfiles).toBe(
-        moduleRef.get(PostgresPublicPlayerProfileSearchRepository),
-      );
+    expect(matchApi.dependencies.matches).toBe(matchRepository);
+    expect(matchApi.dependencies.publicProfiles).toBe(
+      moduleRef.get(PostgresPublicPlayerProfileSearchRepository),
+    );
     expect(matchApi.dependencies.waitlist).toBe(matchWaitlist);
     expect(matchApi.dependencies.lineups).toBe(matchLineup);
     expect(matchRepository.profiles).toBe(
       moduleRef.get(PostgresPlayerProfileReader),
     );
-    expect(matchRepository.courts).toBe(
-      moduleRef.get(MATCH_COURT_CATALOG),
-    );
+    expect(matchRepository.courts).toBe(moduleRef.get(MATCH_COURT_CATALOG));
     expect(matchApi.dependencies.clock).toBe(
       moduleRef.get(SESSION_AUTHENTICATION_CLOCK),
     );
-    expect(
-      getMatchControllerService(moduleRef.get(MatchController)),
-    ).toBe(matchApi);
+    expect(getMatchControllerService(moduleRef.get(MatchController))).toBe(
+      matchApi,
+    );
     const matchInvitations = moduleRef.get(MatchInvitationService);
     expect(matchInvitations.dependencies.transactions).toBe(
       moduleRef.get(PostgresTransactionExecutorAdapter),
@@ -662,9 +651,9 @@ describe('AuthModule Telegram login wiring', () => {
         moduleRef.get(MatchInvitationController),
       ),
     ).toBe(matchInvitations);
-    expect(
-      moduleRef.get(PostgresMatchInvitationRepository).matches,
-    ).toBe(matchRepository);
+    expect(moduleRef.get(PostgresMatchInvitationRepository).matches).toBe(
+      matchRepository,
+    );
     const matchChat = moduleRef.get(MatchChatService);
     expect(matchChat.dependencies.transactions).toBe(
       moduleRef.get(PostgresTransactionExecutorAdapter),
@@ -707,9 +696,9 @@ describe('AuthModule Telegram login wiring', () => {
     }
 
     expect(feature.service).toBeInstanceOf(TelegramLoginService);
-    expect(
-      getControllerFeature(moduleRef.get(TelegramLoginController)),
-    ).toBe(feature);
+    expect(getControllerFeature(moduleRef.get(TelegramLoginController))).toBe(
+      feature,
+    );
     expectProviderNotRegistered(moduleRef, TelegramLoginService);
     const dependencies = getServiceDependencies(feature.service);
     expect(dependencies.verifier).toBeInstanceOf(TelegramInitDataVerifier);
@@ -759,6 +748,9 @@ describe('AuthModule Telegram login wiring', () => {
       moduleRef.get(PostgresPlayerOnboardingCompletionWriter),
     ).toBeInstanceOf(PostgresPlayerOnboardingCompletionWriter);
     expect(
+      moduleRef.get(PostgresPlayerOnboardingLegalAcceptanceWriter),
+    ).toBeInstanceOf(PostgresPlayerOnboardingLegalAcceptanceWriter);
+    expect(
       moduleRef.get(PlayerOnboardingService).dependencies.policy?.consents,
     ).toEqual([
       {
@@ -766,8 +758,8 @@ describe('AuthModule Telegram login wiring', () => {
         documentVersion: 'cancellation-test-2026-08-23-v1',
       },
       {
-        kind: 'privacy',
-        documentVersion: 'privacy-test-2026-08-23-v1',
+        kind: 'personal_data_processing',
+        documentVersion: 'personal-data-consent-test-2026-08-23-v1',
       },
       { kind: 'terms', documentVersion: 'terms-test-2026-08-23-v1' },
     ]);
@@ -1046,11 +1038,9 @@ describe('AuthModule Telegram login wiring', () => {
 
   it('keeps the public service result unchanged when the workflow Logger throws', async () => {
     const sensitiveMarker = 'SYNTHETIC_WORKFLOW_LOGGER_FAILURE';
-    const warn = jest
-      .spyOn(Logger.prototype, 'warn')
-      .mockImplementation(() => {
-        throw new Error(sensitiveMarker);
-      });
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => {
+      throw new Error(sensitiveMarker);
+    });
     const getPool = jest.spyOn(PostgresService.prototype, 'getPool');
     const moduleRef = await compileAuthModule(enabledConfiguration());
     const feature = getFeature(moduleRef);
@@ -1058,16 +1048,14 @@ describe('AuthModule Telegram login wiring', () => {
       throw new Error('Expected enabled Telegram login feature');
     }
     const dependencies = getServiceDependencies(feature.service);
-    jest
-      .spyOn(dependencies.verifier, 'verifyLoginProof')
-      .mockReturnValue({
-        status: 'verified',
-        proof: verifiedProof(),
-        profile: Object.freeze({ firstName: 'Synthetic' }),
-        notificationPermission: Object.freeze({
-          status: 'not_granted' as const,
-        }),
-      });
+    jest.spyOn(dependencies.verifier, 'verifyLoginProof').mockReturnValue({
+      status: 'verified',
+      proof: verifiedProof(),
+      profile: Object.freeze({ firstName: 'Synthetic' }),
+      notificationPermission: Object.freeze({
+        status: 'not_granted' as const,
+      }),
+    });
     jest
       .spyOn(dependencies.lookupDigests, 'computeCandidates')
       .mockRejectedValue(new Error(sensitiveMarker));
@@ -1095,11 +1083,9 @@ describe('AuthModule Telegram login wiring', () => {
   });
 
   it('keeps verifier outcomes unchanged when the Logger throws', async () => {
-    const warn = jest
-      .spyOn(Logger.prototype, 'warn')
-      .mockImplementation(() => {
-        throw new Error('SYNTHETIC_LOGGER_FAILURE');
-      });
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => {
+      throw new Error('SYNTHETIC_LOGGER_FAILURE');
+    });
     const moduleRef = await compileAuthModule(enabledConfiguration());
     warn.mockClear();
     const feature = getFeature(moduleRef);

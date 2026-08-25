@@ -1,4 +1,5 @@
-import React, {
+/* eslint-disable react-hooks/exhaustive-deps -- the login hook returns an ephemeral frozen facade; dependency lists below track its stable callback members explicitly. */
+import {
   useCallback,
   useEffect,
   useMemo,
@@ -10,8 +11,14 @@ import Toast from './Toast'; // Correct path for Toast
 import { useTelegramBackendLogin } from '../hooks/useTelegramBackendLogin';
 import TelegramBackendLoginStatus from './auth/TelegramBackendLoginStatus';
 import BallLoader from './BallLoader'; // Если мяч лежит в папке components
-import OnboardingFlowGate from './OnboardingFlowGate';
+import OnboardingFlowGate, {
+  LegalReconsentGate,
+} from './OnboardingFlowGate';
 import InitialLevelReassessmentGate from './InitialLevelReassessmentGate';
+import {
+  hasCurrentLegalConsents,
+  readOnboardingLegalConfig,
+} from '../lib/playerOnboardingUiPolicy';
 
 export function resolveOwnProfileGate({
   backendRequired,
@@ -108,6 +115,10 @@ export function createBackendBookingAvailabilityActions(telegramBackendLogin) {
 
 export default function AuthGate() {
   const telegramBackendLogin = useTelegramBackendLogin();
+  const onboardingLegalConfig = useMemo(
+    () => readOnboardingLegalConfig(),
+    [],
+  );
   const {
     completeOwnInitialLevelReassessment,
     loadOwnInitialLevelReassessment,
@@ -121,6 +132,10 @@ export default function AuthGate() {
   const [playerOnboardingStatus, setPlayerOnboardingStatus] =
     useState('inactive');
   const playerOnboardingRequestRef = useRef(0);
+  const completedLegalPolicyCurrent = hasCurrentLegalConsents(
+    playerOnboarding,
+    onboardingLegalConfig,
+  );
   const [initialLevelReassessment, setInitialLevelReassessment] =
     useState(null);
   const [initialLevelReassessmentStatus, setInitialLevelReassessmentStatus] =
@@ -264,7 +279,8 @@ export default function AuthGate() {
     if (
       !telegramBackendLogin.sessionReady ||
       playerOnboardingStatus !== 'ready' ||
-      playerOnboarding?.status !== 'completed'
+      playerOnboarding?.status !== 'completed' ||
+      !completedLegalPolicyCurrent
     ) {
       initialLevelReassessmentRequestRef.current += 1;
       setInitialLevelReassessment(null);
@@ -282,6 +298,8 @@ export default function AuthGate() {
     loadInitialLevelReassessment,
     playerOnboarding,
     playerOnboardingStatus,
+    onboardingLegalConfig,
+    completedLegalPolicyCurrent,
     telegramBackendLogin.sessionReady,
   ]);
 
@@ -402,6 +420,20 @@ export default function AuthGate() {
     loadPlayerOnboarding,
     telegramBackendLogin.completeOwnOnboarding,
   ]);
+
+  const handlePlayerOnboardingLegalAcceptances = useCallback(
+    async (acceptance) => {
+      playerOnboardingRequestRef.current += 1;
+      const result =
+        await telegramBackendLogin.acceptOwnOnboardingLegalPolicy(acceptance);
+      if (result.outcome === 'accepted') {
+        setPlayerOnboarding(result.onboarding);
+        setPlayerOnboardingStatus('ready');
+      }
+      return result;
+    },
+    [telegramBackendLogin.acceptOwnOnboardingLegalPolicy],
+  );
 
   const handlePlayerOnboardingEnterApp = useCallback((completedOnboarding) => {
     if (
@@ -621,11 +653,23 @@ export default function AuthGate() {
     return (
       <OnboardingFlowGate
         onboarding={playerOnboarding}
+        legalConfig={onboardingLegalConfig}
         onReload={loadPlayerOnboarding}
         onSaveProfile={handlePlayerOnboardingSave}
         onAdvance={handlePlayerOnboardingAdvance}
         onComplete={handlePlayerOnboardingComplete}
         onEnterApp={handlePlayerOnboardingEnterApp}
+      />
+    );
+  }
+
+  if (!completedLegalPolicyCurrent) {
+    return (
+      <LegalReconsentGate
+        onboarding={playerOnboarding}
+        legalConfig={onboardingLegalConfig}
+        onAccept={handlePlayerOnboardingLegalAcceptances}
+        onAccepted={setPlayerOnboarding}
       />
     );
   }

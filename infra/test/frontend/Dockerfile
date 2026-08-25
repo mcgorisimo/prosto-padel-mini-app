@@ -14,6 +14,8 @@ ARG VITE_ONBOARDING_PRIVACY_URL=
 ARG VITE_ONBOARDING_PRIVACY_VERSION=
 ARG VITE_ONBOARDING_CANCELLATION_URL=
 ARG VITE_ONBOARDING_CANCELLATION_VERSION=
+ARG VITE_ONBOARDING_PERSONAL_DATA_CONSENT_URL=
+ARG VITE_ONBOARDING_PERSONAL_DATA_CONSENT_VERSION=
 
 RUN if [ "${VITE_TELEGRAM_BACKEND_LOGIN_ENABLED}" != "true" ] && \
        [ "${VITE_TELEGRAM_BACKEND_LOGIN_ENABLED}" != "false" ]; then \
@@ -34,19 +36,20 @@ RUN for value in "${VITE_ONBOARDING_LEGAL_PUBLISHED}" \
       echo "Published legal documents require an aligned backend policy" >&2; \
       exit 1; \
     fi && \
-    if [ "${VITE_ONBOARDING_LEGAL_TEST_ONLY}" = "true" ] && \
-       [ "${VITE_ONBOARDING_LEGAL_PUBLISHED}" != "true" ]; then \
-      echo "Test-only legal documents must be explicitly published and aligned" >&2; \
+    if [ "${VITE_ONBOARDING_LEGAL_PUBLISHED}" = "true" ] && \
+       { [ "${VITE_ONBOARDING_TERMS_URL}" != "https://test-app.prostopdl.ru/legal/terms/terms-2026-08-26-v1/" ] || \
+         [ "${VITE_ONBOARDING_TERMS_VERSION}" != "terms-2026-08-26-v1" ] || \
+         [ "${VITE_ONBOARDING_PRIVACY_URL}" != "https://test-app.prostopdl.ru/legal/privacy/privacy-2026-08-26-v1/" ] || \
+         [ "${VITE_ONBOARDING_PRIVACY_VERSION}" != "privacy-2026-08-26-v1" ] || \
+         [ "${VITE_ONBOARDING_CANCELLATION_URL}" != "https://test-app.prostopdl.ru/legal/cancellation/cancellation-2026-08-26-v1/" ] || \
+         [ "${VITE_ONBOARDING_CANCELLATION_VERSION}" != "cancellation-2026-08-26-v1" ] || \
+         [ "${VITE_ONBOARDING_PERSONAL_DATA_CONSENT_URL}" != "https://test-app.prostopdl.ru/legal/personal-data-consent/personal-data-consent-2026-08-26-v1/" ] || \
+         [ "${VITE_ONBOARDING_PERSONAL_DATA_CONSENT_VERSION}" != "personal-data-consent-2026-08-26-v1" ]; }; then \
+      echo "Published legal build values must match the packaged versioned pages" >&2; \
       exit 1; \
     fi && \
-    if [ "${VITE_ONBOARDING_LEGAL_TEST_ONLY}" = "true" ] && \
-       { [ "${VITE_ONBOARDING_TERMS_URL}" != "https://test-app.prostopdl.ru/legal/test-only/terms-test-2026-08-23-v1/" ] || \
-         [ "${VITE_ONBOARDING_TERMS_VERSION}" != "terms-test-2026-08-23-v1" ] || \
-         [ "${VITE_ONBOARDING_PRIVACY_URL}" != "https://test-app.prostopdl.ru/legal/test-only/privacy-test-2026-08-23-v1/" ] || \
-         [ "${VITE_ONBOARDING_PRIVACY_VERSION}" != "privacy-test-2026-08-23-v1" ] || \
-         [ "${VITE_ONBOARDING_CANCELLATION_URL}" != "https://test-app.prostopdl.ru/legal/test-only/cancellation-test-2026-08-23-v1/" ] || \
-         [ "${VITE_ONBOARDING_CANCELLATION_VERSION}" != "cancellation-test-2026-08-23-v1" ]; }; then \
-      echo "Test-only legal build values must match the packaged versioned pages" >&2; \
+    if [ "${VITE_ONBOARDING_LEGAL_TEST_ONLY}" = "true" ]; then \
+      echo "Legacy test-only legal pages are archived and cannot be used for onboarding" >&2; \
       exit 1; \
     fi
 
@@ -55,15 +58,14 @@ RUN npm ci
 
 COPY index.html vite.config.js postcss.config.js tailwind.config.js ./
 COPY src ./src
-COPY docs/legal/TERMS_DRAFT.md docs/legal/PRIVACY_POLICY_DRAFT.md docs/legal/CANCELLATION_POLICY_DRAFT.md ./legal-source/
 COPY infra/test/legal-pages ./legal-pages
-RUN npm run build && \
-    mkdir -p dist/legal/test-only/source && \
-    cp -R legal-pages/assets dist/legal/test-only/assets && \
-    cp -R legal-pages/terms-test-2026-08-23-v1 dist/legal/test-only/terms-test-2026-08-23-v1 && \
-    cp -R legal-pages/privacy-test-2026-08-23-v1 dist/legal/test-only/privacy-test-2026-08-23-v1 && \
-    cp -R legal-pages/cancellation-test-2026-08-23-v1 dist/legal/test-only/cancellation-test-2026-08-23-v1 && \
-    cp legal-source/TERMS_DRAFT.md legal-source/PRIVACY_POLICY_DRAFT.md legal-source/CANCELLATION_POLICY_DRAFT.md dist/legal/test-only/source/
+RUN npm run build
+RUN mkdir -p dist/legal/assets dist/legal/terms dist/legal/cancellation dist/legal/privacy dist/legal/personal-data-consent && \
+    cp legal-pages/assets/legal.css dist/legal/assets/legal.css && \
+    cp -R legal-pages/terms-2026-08-26-v1 dist/legal/terms/terms-2026-08-26-v1 && \
+    cp -R legal-pages/cancellation-2026-08-26-v1 dist/legal/cancellation/cancellation-2026-08-26-v1 && \
+    cp -R legal-pages/privacy-2026-08-26-v1 dist/legal/privacy/privacy-2026-08-26-v1 && \
+    cp -R legal-pages/personal-data-consent-2026-08-26-v1 dist/legal/personal-data-consent/personal-data-consent-2026-08-26-v1
 
 FROM ${NGINX_IMAGE} AS runtime
 

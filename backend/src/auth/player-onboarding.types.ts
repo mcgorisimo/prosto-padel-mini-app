@@ -66,6 +66,16 @@ export interface CompleteOwnPlayerOnboardingInput {
   readonly completion: OwnPlayerOnboardingCompletion;
 }
 
+export interface OwnPlayerOnboardingLegalAcceptances {
+  readonly consents: readonly OwnPlayerOnboardingConsent[];
+}
+
+export interface AcceptOwnPlayerOnboardingLegalPolicyInput {
+  readonly accountId: AccountId;
+  readonly role: UserRole;
+  readonly acceptance: OwnPlayerOnboardingLegalAcceptances;
+}
+
 export interface OwnPlayerOnboardingConsent {
   readonly kind: PlayerOnboardingConsentKind;
   readonly documentVersion: string;
@@ -157,6 +167,22 @@ export type CompleteOwnPlayerOnboardingResult =
         | 'internal_failure';
     };
 
+export type AcceptOwnPlayerOnboardingLegalPolicyResult =
+  | {
+      readonly outcome: 'accepted';
+      readonly onboarding: OwnPlayerOnboarding;
+    }
+  | {
+      readonly outcome: 'rejected';
+      readonly reason:
+        | 'invalid_request'
+        | 'onboarding_not_found'
+        | 'onboarding_incomplete'
+        | 'legal_acceptances_conflict'
+        | 'temporary_unavailable'
+        | 'internal_failure';
+    };
+
 const FLOW_VERSION_PATTERN = /^[a-z][a-z0-9_.-]{0,63}$/u;
 const DOCUMENT_VERSION_PATTERN = /^[a-z0-9][a-z0-9_.-]{0,63}$/u;
 const ANSWER_CODE_PATTERN = /^[a-z][a-z0-9_]{0,63}$/u;
@@ -174,6 +200,12 @@ const CONSENT_KINDS = Object.freeze([
   'terms',
   'privacy',
   'cancellation',
+  'personal_data_processing',
+] as const);
+const CURRENT_CONSENT_KINDS = Object.freeze([
+  'terms',
+  'cancellation',
+  'personal_data_processing',
 ] as const);
 const INITIAL_LEVEL_LABELS = Object.freeze([
   'D',
@@ -292,6 +324,18 @@ function isConsents(
         ) &&
         typeof consent.documentVersion === 'string' &&
         DOCUMENT_VERSION_PATTERN.test(consent.documentVersion),
+    )
+  );
+}
+
+function isCurrentConsents(
+  value: unknown,
+): value is readonly OwnPlayerOnboardingConsent[] {
+  return (
+    isConsents(value) &&
+    value.length === CURRENT_CONSENT_KINDS.length &&
+    CURRENT_CONSENT_KINDS.every((kind) =>
+      value.some((consent) => consent.kind === kind),
     )
   );
 }
@@ -445,10 +489,7 @@ export function readOwnPlayerOnboardingProgress(
       'nextStep',
       'consents',
     ]) ||
-    !isConsents(value.consents) ||
-    value.consents.length !== CONSENT_KINDS.length ||
-    new Set(value.consents.map((consent) => consent.kind)).size !==
-      CONSENT_KINDS.length
+    !isCurrentConsents(value.consents)
   ) {
     return undefined;
   }
@@ -511,10 +552,7 @@ export function readOwnPlayerOnboardingCompletion(
     value.expectedRevision < 1 ||
     typeof value.flowVersion !== 'string' ||
     !FLOW_VERSION_PATTERN.test(value.flowVersion) ||
-    !isConsents(value.consents) ||
-    value.consents.length !== CONSENT_KINDS.length ||
-    new Set(value.consents.map((consent) => consent.kind)).size !==
-      CONSENT_KINDS.length
+    !isCurrentConsents(value.consents)
   ) {
     return undefined;
   }
@@ -573,5 +611,36 @@ export function isCompleteOwnPlayerOnboardingInput(
     isAccountId(value.accountId) &&
     (value.role === 'player' || value.role === 'club_admin') &&
     readOwnPlayerOnboardingCompletion(value.completion) !== undefined
+  );
+}
+
+export function readOwnPlayerOnboardingLegalAcceptances(
+  value: unknown,
+): OwnPlayerOnboardingLegalAcceptances | undefined {
+  if (
+    !isPlainRecord(value) ||
+    !hasExactlyKeys(value, ['consents']) ||
+    !isCurrentConsents(value.consents)
+  ) {
+    return undefined;
+  }
+  return Object.freeze({
+    consents: Object.freeze(
+      [...value.consents]
+        .sort((left, right) => left.kind.localeCompare(right.kind))
+        .map((consent) => Object.freeze({ ...consent })),
+    ),
+  });
+}
+
+export function isAcceptOwnPlayerOnboardingLegalPolicyInput(
+  value: unknown,
+): value is AcceptOwnPlayerOnboardingLegalPolicyInput {
+  return (
+    isPlainRecord(value) &&
+    hasExactlyKeys(value, ['accountId', 'role', 'acceptance']) &&
+    isAccountId(value.accountId) &&
+    (value.role === 'player' || value.role === 'club_admin') &&
+    readOwnPlayerOnboardingLegalAcceptances(value.acceptance) !== undefined
   );
 }

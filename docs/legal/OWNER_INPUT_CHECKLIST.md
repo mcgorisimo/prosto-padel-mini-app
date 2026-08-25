@@ -44,7 +44,7 @@ DRAFT — НЕ ОПУБЛИКОВАНО — НЕ УТВЕРЖДЕНО ВЛАДЕ
 | `company.kpp` | КПП | `known` | `771601001`; формат PASS, код инспекции `7716` совпадает с ИНН | Реквизиты компании |
 | `company.ogrn` | ОГРН | `known` | `1267700285093`; формат и контрольная цифра PASS | Все документы |
 | `company.legal_address` | Юридический адрес | `known` | 129323, Г.МОСКВА, ВН.ТЕР.Г. МУНИЦИПАЛЬНЫЙ ОКРУГ СВИБЛОВО, УЛ СНЕЖНАЯ, Д. 17, К. 1, ПОМЕЩ. 18П; owner-supplied 2026-08-25 | Оператор, продавец, обращения |
-| `company.postal_address` | Физический почтовый адрес либо отметка «совпадает с юридическим» | `owner_decision` | `{{POSTAL_ADDRESS}}`; не предоставлен: `info@prostopdl.ru` является privacy email, а не почтовым адресом | Претензии и privacy requests |
+| `company.postal_address` | Физический почтовый адрес либо отметка «совпадает с юридическим» | `known` | Совпадает с юридическим: 129323, Г. МОСКВА, ВН.ТЕР.Г. МУНИЦИПАЛЬНЫЙ ОКРУГ СВИБЛОВО, УЛ. СНЕЖНАЯ, Д. 17, К. 1, ПОМЕЩ. 18П | Претензии и privacy requests |
 | `club.official_address` | Полный официальный адрес клуба | `known` | Пятницкое шоссе 1с1, ТП Отрада; owner-supplied 2026-08-25 | Место оказания услуг; финальная адресная полнота проверяется до публикации |
 | `company.public_bank_details` | Публичные банковские реквизиты для Terms, только если владелец утверждает их публикацию: расчётный счёт, банк, БИК, корреспондентский счёт | `owner_decision` | `{{PUBLIC_BANK_DETAILS_OR_NOT_PUBLISHED}}` | Реквизиты Terms; никаких доступов к счёту |
 
@@ -95,8 +95,8 @@ DRAFT — НЕ ОПУБЛИКОВАНО — НЕ УТВЕРЖДЕНО ВЛАДЕ
 | `deletion.model` | Owner-approved deletion/anonymization candidate | `known` | Немедленно скрыть профиль/revoke sessions; live PII без иного основания — удалить/обезличить ≤30 дней; public match/rating оставить только truly anonymized; backups ≤30 дней с deletion replay | Отдельный account-deletion/revoke/processor propagation slice |
 | `cancellation.periods` | Сроки гарантированного полного возврата/переноса | `known` | 24 часа для корта/матча/тренировки; 48 часов для турнира | После срока сохраняется законный отказ с individual actual-expense calculation |
 | `cancellation.expenses` | Утвердить, кто и какими документами считает индивидуальные фактические расходы конкретного заказа; как сообщается расчёт пользователю | `owner_decision` | `{{OWNER_ACTUAL_EXPENSE_METHOD_DECISION}}` | Late cancellation process |
-| `documents.effective_dates` | Назначить версии и даты вступления Terms, Privacy, Cancellation и separate consent | `pending_owner_later` | `{{OWNER_DOCUMENT_VERSIONS_AND_EFFECTIVE_DATES}}` | Consent UI и immutable evidence |
-| `documents.public_urls` | Утвердить stable current/versioned HTTPS URLs на `prostopdl.ru`, доступные без Telegram/auth | `pending_owner_later` | `{{OWNER_PUBLIC_LEGAL_URL_DECISION}}` | D5.1 onboarding, Telegram/store publication |
+| `documents.effective_dates` | Назначить версии и даты вступления Terms, Privacy, Cancellation и separate consent | `known` | Единая дата 26.08.2026; candidate versions: `terms-2026-08-26-v1`, `privacy-2026-08-26-v1`, `cancellation-2026-08-26-v1`, `personal-data-consent-2026-08-26-v1` | Consent UI и immutable evidence |
+| `documents.public_urls` | Утвердить versioned HTTPS URLs, доступные без Telegram/auth | `known` | Selectel test candidate namespace: `https://test-app.prostopdl.ru/legal/`; production hostname остаётся отдельным gate | D5.1 onboarding; test rollout pending |
 
 ## 5.1. Owner-approved retention/deletion policy candidate
 

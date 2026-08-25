@@ -31,6 +31,7 @@ import { PostgresPlayerProfilePhotoRepository } from './postgres-player-profile-
 import { PostgresPlayerOnboardingDraftWriter } from './postgres-player-onboarding-draft-writer';
 import { PostgresPlayerOnboardingCompletionWriter } from './postgres-player-onboarding-completion-writer';
 import { PostgresPlayerOnboardingProgressWriter } from './postgres-player-onboarding-progress-writer';
+import { PostgresPlayerOnboardingLegalAcceptanceWriter } from './postgres-player-onboarding-legal-acceptance-writer';
 import { PostgresPlayerOnboardingReader } from './postgres-player-onboarding-reader';
 import { PostgresPlayerInitialLevelReassessmentRepository } from './postgres-player-initial-level-reassessment-repository';
 import { PostgresPlayerProfileReader } from './postgres-player-profile-reader';
@@ -59,7 +60,10 @@ const DATABASE_WORKFLOW_PROVIDERS: Provider[] = [
       }
       const snapshot = readReservationSnapshotConfiguration(config);
       try {
-        return new ReservationSnapshotCrypto(snapshot.masterKey, snapshot.keyVersion);
+        return new ReservationSnapshotCrypto(
+          snapshot.masterKey,
+          snapshot.keyVersion,
+        );
       } finally {
         snapshot.masterKey.fill(0);
       }
@@ -95,6 +99,7 @@ const DATABASE_WORKFLOW_PROVIDERS: Provider[] = [
   PostgresPlayerOnboardingCompletionWriter,
   PostgresPlayerOnboardingDraftWriter,
   PostgresPlayerOnboardingProgressWriter,
+  PostgresPlayerOnboardingLegalAcceptanceWriter,
   PostgresPlayerOnboardingReader,
   PostgresPlayerInitialLevelReassessmentRepository,
   PostgresPlayerProfileWriter,
@@ -120,8 +125,7 @@ const DATABASE_WORKFLOW_PROVIDERS: Provider[] = [
     inject: [PlayerProfilePhotoUrlResolver],
     useFactory: (
       urls: PlayerProfilePhotoUrlResolver,
-    ): PostgresPlayerProfileReader =>
-      new PostgresPlayerProfileReader(urls),
+    ): PostgresPlayerProfileReader => new PostgresPlayerProfileReader(urls),
   },
   {
     provide: PostgresPublicPlayerProfileSearchRepository,
@@ -142,8 +146,7 @@ const DATABASE_WORKFLOW_PROVIDERS: Provider[] = [
     useFactory: (
       profiles: PostgresPlayerProfileReader,
       courts: MatchCourtCatalog,
-    ): PostgresMatchRepository =>
-      new PostgresMatchRepository(profiles, courts),
+    ): PostgresMatchRepository => new PostgresMatchRepository(profiles, courts),
   },
   {
     provide: PostgresMatchInvitationRepository,
@@ -231,6 +234,7 @@ const DATABASE_WORKFLOW_EXPORTS = [
   PostgresPlayerOnboardingCompletionWriter,
   PostgresPlayerOnboardingDraftWriter,
   PostgresPlayerOnboardingProgressWriter,
+  PostgresPlayerOnboardingLegalAcceptanceWriter,
   PostgresPlayerOnboardingReader,
   PostgresPlayerInitialLevelReassessmentRepository,
   PostgresPlayerProfileReader,

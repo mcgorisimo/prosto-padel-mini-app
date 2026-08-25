@@ -11,12 +11,19 @@ function publishedEnvironment(overrides = {}) {
     VITE_ONBOARDING_LEGAL_PUBLISHED: 'true',
     VITE_ONBOARDING_LEGAL_POLICY_ALIGNED: 'true',
     VITE_ONBOARDING_LEGAL_TEST_ONLY: 'false',
-    VITE_ONBOARDING_TERMS_URL: 'https://legal.example.test/terms',
+    VITE_ONBOARDING_TERMS_URL:
+      'https://legal.example.test/terms/terms-2026-08-26/',
     VITE_ONBOARDING_TERMS_VERSION: 'terms-2026-08-26',
-    VITE_ONBOARDING_PRIVACY_URL: 'https://legal.example.test/privacy',
+    VITE_ONBOARDING_PRIVACY_URL:
+      'https://legal.example.test/privacy/privacy-2026-08-26/',
     VITE_ONBOARDING_PRIVACY_VERSION: 'privacy-2026-08-26',
-    VITE_ONBOARDING_CANCELLATION_URL: 'https://legal.example.test/cancellation',
+    VITE_ONBOARDING_CANCELLATION_URL:
+      'https://legal.example.test/cancellation/cancellation-2026-08-26/',
     VITE_ONBOARDING_CANCELLATION_VERSION: 'cancellation-2026-08-26',
+    VITE_ONBOARDING_PERSONAL_DATA_CONSENT_URL:
+      'https://legal.example.test/personal-data-consent/personal-data-consent-2026-08-26/',
+    VITE_ONBOARDING_PERSONAL_DATA_CONSENT_VERSION:
+      'personal-data-consent-2026-08-26',
     ...overrides,
   };
 }
@@ -32,8 +39,11 @@ function testOnlyEnvironment(overrides = {}) {
     VITE_ONBOARDING_PRIVACY_VERSION: 'privacy-test-2026-08-23-v1',
     VITE_ONBOARDING_CANCELLATION_URL:
       'https://test-app.prostopdl.ru/legal/test-only/cancellation-test-2026-08-23-v1/',
-    VITE_ONBOARDING_CANCELLATION_VERSION:
-      'cancellation-test-2026-08-23-v1',
+    VITE_ONBOARDING_CANCELLATION_VERSION: 'cancellation-test-2026-08-23-v1',
+    VITE_ONBOARDING_PERSONAL_DATA_CONSENT_URL:
+      'https://test-app.prostopdl.ru/legal/test-only/personal-data-consent-test-2026-08-23-v1/',
+    VITE_ONBOARDING_PERSONAL_DATA_CONSENT_VERSION:
+      'personal-data-consent-test-2026-08-23-v1',
     ...overrides,
   });
 }
@@ -88,20 +98,49 @@ describe('player onboarding UI policy', () => {
       reason: 'invalid_configuration',
       documents: [],
     });
+    for (const environment of [
+      publishedEnvironment({
+        VITE_ONBOARDING_TERMS_URL:
+          'https://legal.example.test/terms/current/',
+      }),
+      publishedEnvironment({
+        VITE_ONBOARDING_TERMS_URL:
+          'https://legal.example.test/terms/terms-2026-08-26/?view=latest',
+      }),
+      publishedEnvironment({
+        VITE_ONBOARDING_PRIVACY_URL:
+          'https://legal.example.test/terms/terms-2026-08-26/',
+      }),
+    ]) {
+      expect(readOnboardingLegalConfig(environment)).toEqual({
+        status: 'unavailable',
+        reason: 'invalid_configuration',
+        documents: [],
+      });
+    }
+    expect(
+      hasCurrentLegalConsents(
+        { consents: [] },
+        readOnboardingLegalConfig({}),
+      ),
+    ).toBe(false);
   });
 
-  it('builds the exact three-document consent contract from published config', () => {
+  it('builds three evidence records from four published documents', () => {
     const config = readOnboardingLegalConfig(publishedEnvironment());
 
     expect(config.status).toBe('ready');
     expect(config.scope).toBe('production');
     expect(legalConsentContract(config)).toEqual([
-      { kind: 'terms', documentVersion: 'terms-2026-08-26' },
-      { kind: 'privacy', documentVersion: 'privacy-2026-08-26' },
       {
         kind: 'cancellation',
         documentVersion: 'cancellation-2026-08-26',
       },
+      {
+        kind: 'personal_data_processing',
+        documentVersion: 'personal-data-consent-2026-08-26',
+      },
+      { kind: 'terms', documentVersion: 'terms-2026-08-26' },
     ]);
     expect(
       hasCurrentLegalConsents(
@@ -112,7 +151,10 @@ describe('player onboarding UI policy', () => {
               documentVersion: 'cancellation-2026-08-26',
             },
             { kind: 'terms', documentVersion: 'terms-2026-08-26' },
-            { kind: 'privacy', documentVersion: 'privacy-2026-08-26' },
+            {
+              kind: 'personal_data_processing',
+              documentVersion: 'personal-data-consent-2026-08-26',
+            },
           ],
         },
         config,
@@ -125,6 +167,10 @@ describe('player onboarding UI policy', () => {
             { kind: 'terms', documentVersion: 'historical-v1' },
             { kind: 'terms', documentVersion: 'terms-2026-08-26' },
             { kind: 'privacy', documentVersion: 'privacy-2026-08-26' },
+            {
+              kind: 'personal_data_processing',
+              documentVersion: 'personal-data-consent-2026-08-26',
+            },
             {
               kind: 'cancellation',
               documentVersion: 'cancellation-2026-08-26',
@@ -140,6 +186,10 @@ describe('player onboarding UI policy', () => {
           consents: [
             { kind: 'terms', documentVersion: 'old-version' },
             { kind: 'privacy', documentVersion: 'privacy-2026-08-26' },
+            {
+              kind: 'personal_data_processing',
+              documentVersion: 'personal-data-consent-2026-08-26',
+            },
             {
               kind: 'cancellation',
               documentVersion: 'cancellation-2026-08-26',
@@ -157,12 +207,15 @@ describe('player onboarding UI policy', () => {
     expect(config.status).toBe('ready');
     expect(config.scope).toBe('test_only');
     expect(legalConsentContract(config)).toEqual([
-      { kind: 'terms', documentVersion: 'terms-test-2026-08-23-v1' },
-      { kind: 'privacy', documentVersion: 'privacy-test-2026-08-23-v1' },
       {
         kind: 'cancellation',
         documentVersion: 'cancellation-test-2026-08-23-v1',
       },
+      {
+        kind: 'personal_data_processing',
+        documentVersion: 'personal-data-consent-test-2026-08-23-v1',
+      },
+      { kind: 'terms', documentVersion: 'terms-test-2026-08-23-v1' },
     ]);
 
     for (const environment of [

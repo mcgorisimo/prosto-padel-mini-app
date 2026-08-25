@@ -11,6 +11,8 @@ import {
 } from './player-onboarding-initial-level';
 
 export const PLAYER_ONBOARDING_FLOW_VERSION = 'tma_v1';
+export const PLAYER_ONBOARDING_LEGAL_RECONSENT_FLOW_VERSION =
+  'tma_legal_reconsent_v1';
 export const PLAYER_ONBOARDING_SURVEY_VERSION =
   PLAYER_ONBOARDING_INITIAL_LEVEL_SURVEY_VERSION;
 
@@ -34,8 +36,8 @@ export function createPlayerOnboardingPolicy(
         documentVersion: documentVersions.cancellation,
       }),
       Object.freeze({
-        kind: 'privacy' as const,
-        documentVersion: documentVersions.privacy,
+        kind: 'personal_data_processing' as const,
+        documentVersion: documentVersions.personalDataProcessing,
       }),
       Object.freeze({
         kind: 'terms' as const,

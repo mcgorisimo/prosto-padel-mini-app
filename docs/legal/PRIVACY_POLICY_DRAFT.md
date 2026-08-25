@@ -3,10 +3,9 @@ DRAFT — НЕ ОПУБЛИКОВАНО — НЕ УТВЕРЖДЕНО ВЛАДЕ
 # Политика в отношении обработки персональных данных
 
 - Ключ документа: `privacy`
-- Версия: `{{PRIVACY_VERSION}}`
-- Дата вступления в силу: `{{PRIVACY_EFFECTIVE_DATE}}`
-- Current URL: `{{PUBLIC_LEGAL_BASE_URL}}/privacy`
-- Versioned URL: `{{PUBLIC_LEGAL_BASE_URL}}/privacy/{{PRIVACY_VERSION}}`
+- Версия candidate: `privacy-2026-08-26-v1`
+- Дата вступления в силу candidate: `26.08.2026`
+- Selectel test versioned URL candidate: `https://test-app.prostopdl.ru/legal/privacy/privacy-2026-08-26-v1/`
 - Locale: `ru-RU`
 
 ## 1. Общие положения и оператор
@@ -170,15 +169,18 @@ verification flag. Подробная история матчей в этом en
 
 6.4. Широкая authenticated visibility имеет статус `publication_blocked` до
 финальной юридической классификации круга получателей и правового основания.
-Ознакомление с настоящей Политикой и текущий обязательный privacy acceptance не
-заменяют отдельное согласие. Если применима статья 10.1 Федерального закона
-№ 152-ФЗ, необходим отдельный гранулярный consent/evidence contract:
+Ознакомление с настоящей Политикой и обязательный onboarding checkbox
+`personal_data_processing` не заменяют отдельное решение о такой видимости.
+Если применима статья 10.1 Федерального закона № 152-ФЗ, необходим отдельный
+гранулярный consent/evidence contract:
 [официальный текст закона](https://government.ru/docs/all/98196/).
 
-6.5. Текущий D5.1 backend не поддерживает ключ `personal_data_processing`,
-granular visibility settings или re-consent lifecycle. Необязательная фотография
-и широкая история не должны объявляться разрешёнными текущими двумя checkbox до
-отдельного code/schema/UI gate.
+6.5. Migration 041 поддерживает отдельный immutable key
+`personal_data_processing`, а текущий implementation candidate добавляет
+append-only re-consent для новых версий. Эти evidence относятся к обработке в
+onboarding и не покрывают granular visibility settings, необязательную
+фотографию или широкую историю. Последние не должны объявляться разрешёнными
+двумя onboarding checkbox до отдельного legal/code/UI gate.
 
 ## 7. Локализация и трансграничная передача
 
@@ -248,8 +250,9 @@ gates D5.3.
 блокирования, удаления или уничтожения при наличии основания; отозвать согласие;
 оспорить обработку; обратиться в Роскомнадзор или суд.
 
-9.2. Запрос направляется на `info@prostopdl.ru` или по адресу
-`{{POSTAL_ADDRESS}}`. Компания запрашивает только сведения, необходимые для
+9.2. Запрос направляется на `info@prostopdl.ru` или по адресу 129323,
+Г. МОСКВА, ВН.ТЕР.Г. МУНИЦИПАЛЬНЫЙ ОКРУГ СВИБЛОВО, УЛ. СНЕЖНАЯ, Д. 17,
+К. 1, ПОМЕЩ. 18П. Компания запрашивает только сведения, необходимые для
 подтверждения заявителя и предотвращения доступа к чужим данным.
 
 ## 10. Несовершеннолетние

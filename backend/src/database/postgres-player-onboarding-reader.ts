@@ -45,7 +45,6 @@ const FIND_PLAYER_ONBOARDING_SQL = `
       )
       FROM backend_auth.account_consent_acceptances AS acceptance
       WHERE acceptance.account_id = details.account_id
-        AND acceptance.flow_version = state.flow_version
     ), '[]'::jsonb) AS consents
   FROM backend_auth.player_profile_details AS details
   LEFT JOIN backend_auth.player_onboarding_states AS state
@@ -75,6 +74,7 @@ const CONSENT_KINDS = Object.freeze([
   'terms',
   'privacy',
   'cancellation',
+  'personal_data_processing',
 ] as const);
 const INITIAL_LEVEL_LABELS = Object.freeze([
   'D',

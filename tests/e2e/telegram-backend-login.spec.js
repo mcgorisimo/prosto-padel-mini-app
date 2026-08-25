@@ -10,6 +10,8 @@ const PROFILE_ROUTE = '**/api/v1/profile/me';
 const ONBOARDING_ROUTE = '**/api/v1/onboarding/me';
 const ONBOARDING_PROGRESS_ROUTE = '**/api/v1/onboarding/me/progress';
 const ONBOARDING_COMPLETE_ROUTE = '**/api/v1/onboarding/me/complete';
+const ONBOARDING_LEGAL_ACCEPTANCES_ROUTE =
+  '**/api/v1/onboarding/me/legal-acceptances';
 const REASSESSMENT_ROUTE =
   '**/api/v1/onboarding/me/initial-level-reassessment';
 const TELEGRAM_SDK_ROUTE = 'https://telegram.org/js/telegram-web-app.js';
@@ -48,9 +50,15 @@ function onboardingState(overrides = {}) {
       assurance: 'declared',
     },
     consents: [
-      { kind: 'terms', documentVersion: 'synthetic-v1' },
-      { kind: 'privacy', documentVersion: 'synthetic-v1' },
-      { kind: 'cancellation', documentVersion: 'synthetic-v1' },
+      { kind: 'terms', documentVersion: 'terms-2026-08-26-v1' },
+      {
+        kind: 'cancellation',
+        documentVersion: 'cancellation-2026-08-26-v1',
+      },
+      {
+        kind: 'personal_data_processing',
+        documentVersion: 'personal-data-consent-2026-08-26-v1',
+      },
     ],
     surveyAnswers: { experience: 'beginner' },
     ...overrides,
@@ -494,7 +502,84 @@ test.describe('Telegram backend login feature enabled', () => {
     expect(legacyProviderRequests).toBe(0);
   });
 
-  test('keeps first-run profile and legal readiness on one fail-closed screen without persisting PII', async ({
+  test('requires completed users with stale test evidence to accept both current groups', async ({
+    page,
+  }) => {
+    const completedV2 = {
+      surveyVersion: 'initial_level_v2',
+      surveyAnswers: {
+        match_count: 'one_hundred_plus',
+        rally_stability: 'controls_pace',
+        glass_play: 'uses_tactically',
+        serve_return_net: 'advanced_patterns',
+        match_experience_year: 'tournament',
+      },
+      initialLevelLabel: 'D+',
+    };
+    let acceptanceBody = null;
+    await prepareBrowser(page);
+    await page.unroute(ONBOARDING_ROUTE);
+    await page.route(ONBOARDING_ROUTE, async (route) => {
+      await fulfillOnboardingJson(
+        route,
+        200,
+        onboardingState({
+          ...completedV2,
+          consents: [
+            { kind: 'terms', documentVersion: 'terms-test-2026-08-23-v1' },
+            {
+              kind: 'privacy',
+              documentVersion: 'privacy-test-2026-08-23-v1',
+            },
+            {
+              kind: 'cancellation',
+              documentVersion: 'cancellation-test-2026-08-23-v1',
+            },
+          ],
+        }),
+      );
+    });
+    await page.route(ONBOARDING_LEGAL_ACCEPTANCES_ROUTE, async (route) => {
+      acceptanceBody = route.request().postDataJSON();
+      await fulfillOnboardingJson(
+        route,
+        200,
+        onboardingState(completedV2),
+      );
+    });
+    await page.route(LOGIN_ROUTE, async (route) => {
+      await fulfillJson(route, 200, successBody('existing'));
+    });
+
+    await page.goto('/');
+    await expect(
+      page.getByTestId('onboarding-legal-reconsent-gate'),
+    ).toBeVisible();
+    await expect(page.getByRole('checkbox')).toHaveCount(2);
+    await expect(
+      page.getByRole('link', { name: 'Политика конфиденциальности' }),
+    ).toBeVisible();
+    await page.getByRole('checkbox').nth(0).check();
+    await page.getByRole('checkbox').nth(1).check();
+    await page.getByRole('button', { name: 'Продолжить' }).click();
+
+    await expectBackendApp(page);
+    expect(acceptanceBody).toEqual({
+      consents: [
+        {
+          kind: 'cancellation',
+          documentVersion: 'cancellation-2026-08-26-v1',
+        },
+        {
+          kind: 'personal_data_processing',
+          documentVersion: 'personal-data-consent-2026-08-26-v1',
+        },
+        { kind: 'terms', documentVersion: 'terms-2026-08-26-v1' },
+      ],
+    });
+  });
+
+  test('keeps first-run profile and two legal confirmations on one fail-closed screen without persisting PII', async ({
     page,
   }) => {
     const phone = '+7 (999) 123-45-67';
@@ -595,13 +680,21 @@ test.describe('Telegram backend login feature enabled', () => {
     await page.getByLabel('Фамилия').fill('  Петрова  ');
     await page.getByLabel('Телефон *').fill(phone);
     await page.getByLabel('Email *').fill(email);
+    await expect(page.getByRole('checkbox')).toHaveCount(2);
     await expect(
-      page.getByTestId('onboarding-legal-unavailable-note'),
+      page.getByRole('link', { name: 'Условия использования' }),
     ).toBeVisible();
-    await expect(page.getByText(/Черновики не используются/u)).toBeVisible();
-    await expect(page.getByTestId('onboarding-consents-gate')).toHaveCount(0);
-    await expect(page.getByRole('checkbox')).toHaveCount(0);
-    await expect(page.getByRole('link')).toHaveCount(0);
+    await expect(
+      page.getByRole('link', { name: 'Правила отмены' }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('link', {
+        name: 'согласие на обработку персональных данных',
+      }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('link', { name: 'Политика конфиденциальности' }),
+    ).toBeVisible();
     await expect(page.getByRole('button', { name: 'Продолжить' })).toBeDisabled();
     expect(readCalls).toBe(1);
     expect(patchCalls).toBe(0);
@@ -661,15 +754,13 @@ test.describe('Telegram backend login feature enabled', () => {
     await page.goto('/');
     await expect(page.getByLabel('Имя *')).toHaveValue('Ирина');
     await expect(page.getByLabel('Телефон *')).toHaveValue('+79990001122');
-    await expect(
-      page.getByTestId('onboarding-legal-unavailable-note'),
-    ).toBeVisible();
+    await expect(page.getByRole('checkbox')).toHaveCount(2);
     await expect(page.getByRole('button', { name: 'Продолжить' })).toBeDisabled();
     expect(submittedRevision).toBeNull();
     expect(progressCalls).toBe(0);
   });
 
-  test('does not attempt a stale profile PATCH while legal configuration is unavailable', async ({
+  test('does not attempt a stale profile PATCH before both legal confirmations', async ({
     page,
   }) => {
     let readCalls = 0;
@@ -722,7 +813,7 @@ test.describe('Telegram backend login feature enabled', () => {
     await page.goto('/');
     await expect(page.getByLabel('Имя *')).toHaveValue('Старая');
     await expect(page.getByRole('button', { name: 'Продолжить' })).toBeDisabled();
-    await expect(page.getByTestId('onboarding-legal-unavailable-note')).toBeVisible();
+    await expect(page.getByRole('checkbox')).toHaveCount(2);
     expect({ readCalls, patchCalls }).toEqual({ readCalls: 1, patchCalls: 0 });
   });
 

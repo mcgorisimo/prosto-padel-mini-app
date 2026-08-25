@@ -8369,3 +8369,258 @@
 - This closeout changes only WORKLOG documentation, so tests/build and another
   rollout are `not_run/not_needed`. No server, container, backend/DB/schema,
   provider/payment or production action occurred.
+
+### 2026-08-25 — D5.3 legal publication and two-action consent local candidate
+
+- Started from clean exact `main`
+  `e7a93cbe813ffa7f3941f03ec69837e43697891c`. This is one uncommitted local
+  implementation candidate; no commit, push, merge or external-state action
+  occurred.
+- Added four immutable Selectel-test publication candidates, all effective
+  `26.08.2026`, with registered ООО requisites and no publish-time placeholders
+  or draft banners:
+  - `terms-2026-08-26-v1` at
+    `https://test-app.prostopdl.ru/legal/terms/terms-2026-08-26-v1/`;
+  - `cancellation-2026-08-26-v1` at
+    `https://test-app.prostopdl.ru/legal/cancellation/cancellation-2026-08-26-v1/`;
+  - `privacy-2026-08-26-v1` at
+    `https://test-app.prostopdl.ru/legal/privacy/privacy-2026-08-26-v1/`;
+  - `personal-data-consent-2026-08-26-v1` at
+    `https://test-app.prostopdl.ru/legal/personal-data-consent/personal-data-consent-2026-08-26-v1/`.
+- The frontend container candidate packages only those four current pages and
+  shared legal assets beneath public unauthenticated `/legal/` routes. Nginx
+  gives versioned document pages immutable caching. Source drafts and legacy
+  `/legal/test-only/` pages are excluded from the runtime image, and the legacy
+  test-only build flag now fails closed.
+- Onboarding presents exactly two required checkboxes. The first explicitly
+  names and links Terms plus Cancellation Policy and binds to exact immutable
+  `terms+cancellation` evidence. The second links only the separate PD Consent
+  and binds to `personal_data_processing`. Privacy Policy remains an always
+  visible informational link without a checkbox. Missing, duplicate, queried
+  or non-version-bound production URLs keep the UI fail-closed.
+- Backend policy, config and current completion contract use exact
+  `terms+cancellation+personal_data_processing` evidence while continuing to
+  read historical `privacy` rows without renaming them. The already applied
+  migration 041 supplies the database kind; this candidate adds a bearer-only,
+  no-store append-only re-consent endpoint and repository writer. Completed
+  users missing either current grouped version remain outside the app until
+  they confirm the stale group; prior evidence and onboarding completion are
+  not mutated.
+- Canonical legal drafts and data matrix were synchronized with the two-action
+  contract. The separate future programme-enquiry purpose is limited to name,
+  phone, participant age category, convenient days and time, remains
+  `runtime_not_connected`, and does not inherit TMA onboarding evidence.
+  Broad authenticated profile/match-history visibility remains
+  `publication_blocked`: neither Privacy Policy nor the mandatory onboarding PD
+  checkbox is recorded as permission for that visibility.
+- Focused backend regression run passed `235/235` across `8` suites. Focused
+  frontend regressions passed `35/35` across `4` files, and focused Playwright
+  legal/re-consent smoke passed `3/3`. Full gates passed: frontend unit
+  `115/115` across `18` files, root E2E `107` passed with `1` intentional skip,
+  and root build with `1626` modules plus only the existing large-chunk advisory;
+  backend typecheck, unit `3803/3803` across `163` suites, E2E `4/4` across `2`
+  suites and build all passed. `git diff --check`, public-page
+  banner/placeholder and exact version/URL parity checks are required again
+  after final review corrections.
+- Initial independent exact-diff review returned `P0=0`, `P1=6`; all six
+  findings were corrected locally: fail-closed completed-user gate, strict
+  version-bound unique URLs, canonical-draft consent semantics, explicit
+  profile-visibility exclusion, current four-document test runbook and this
+  factual WORKLOG entry. Final corrected exact-diff re-review returned `P0=0`,
+  `P1=0` and Acceptance PASS.
+- Runtime impact is frontend bundle/image, backend image and nginx/config
+  candidate only. `deployment=deployment_deferred_by_user`: no Selectel test
+  rollout, health/manual TMA smoke or server log check was performed. The
+  existing Selectel checkout, containers, DB/schema (including already applied
+  migration 041), config/env/secrets, provider/API and production were not
+  changed.
+
+### 2026-08-25 — D5.3 legal publication transfer candidate on current main
+
+- A guarded `fetch origin/main` confirmed exact
+  `bb148eda0cf5df9320e1a42374abf89301eb78f5`; local `main` matched. The source
+  checkpoint `9a63b9d03eba3189e242093977de9b656d669f7b` remains preserved on
+  `codex/d5-3-legal-requisites-integration`. A new local branch
+  `codex/d5-3-legal-publication-integration` was created from exact current
+  main without changing the main worktree.
+- The transfer contains the same `56` candidate paths. All `53` non-overlap
+  index blobs match the source checkpoint exactly. Upstream overlaps were
+  limited to `AuthGate.jsx`, `index.css` and this WORKLOG: the first two retain
+  both patches with matching candidate patch IDs; the WORKLOG retains the exact
+  upstream `106`-line D2.1 append followed by the unchanged source `65`-line
+  D5.3 append. There are no other, unstaged or unmerged paths.
+- Focused transfer regressions passed: frontend `35/35` across `4` files and
+  backend `235/235` across `8` suites. Full gates passed: frontend unit
+  `119/119` across `19` files, root E2E `107` passed with `1` intentional skip,
+  and root build with `1627` modules plus only the existing large-chunk
+  advisory; backend typecheck, unit `3803/3803` across `163` suites, E2E `4/4`
+  across `2` suites and build all passed.
+- Final staged/unstaged diff checks, scoped ESLint and public-page blocker
+  checks passed. Independent exact staged-diff review returned `P0=0`, `P1=0`
+  and Acceptance PASS. No transfer commit, push, merge-main,
+  Selectel/DB/schema/runtime/provider/API/environment/secret or production
+  action occurred. Runtime deployment remains
+  `deployment_deferred_by_user` pending separate commit, integration and
+  Selectel-test rollout gates.
+
+### 2026-08-25 — D5.3 legal publication transfer candidate on D2.1 follow-up main
+
+- A guarded `fetch origin/main` confirmed exact
+  `c2a3f3074b142700edad7142993a635b409734d6`. The source checkpoint
+  `d58049dcac28ba2badfaf93f70d3d7b8bb7ab08d` remains preserved on
+  `codex/d5-3-legal-publication-integration`; the new local branch
+  `codex/d5-3-legal-publication-integration-v2` was created from that exact
+  remote-main commit without changing the main worktree.
+- The transfer retains the exact `56` candidate paths. All `54` non-overlap
+  index blobs match the source checkpoint. The two overlaps are intentional:
+  `src/index.css` keeps the upstream booking patch and the exact D5.3
+  onboarding patch (`patch-id`
+  `d1182f8bea6f7dcea916bcbb626369764646f866`), while this WORKLOG keeps the
+  exact upstream `67`-line D2.1 append followed by the exact source `93`-line
+  D5.3 append. No other conflict or path mismatch occurred.
+- Focused transfer regressions passed: frontend `35/35` across `4` files,
+  legal/re-consent Playwright `3/3`, and backend `264/264` across `10` suites.
+  The first frontend focused invocation did not start because sandboxed esbuild
+  could not read the existing shared workspace dependencies; the unchanged
+  command passed with approved dependency access.
+- Full gates passed: frontend unit `119/119` across `19` files, root E2E `108`
+  passed with `1` intentional skip, and root build with `1627` modules plus only
+  the existing large-chunk advisory; backend typecheck, unit `3803/3803` across
+  `163` suites, E2E `4/4` across `2` suites and build all passed. Scoped ESLint
+  for the changed frontend/test files passed.
+- After the successful guard fetch, the shared remote-tracking ref was advanced
+  by separate pushes and was observed at
+  `bc78229491df88b1a43691a2575c587a691873ba` after the gates. This task made no
+  further fetch or any push; the transfer base remains exact `c2a3f307...`, so
+  future integration requires a fresh read-only ancestry/overlap check.
+- Final staged/unstaged diff checks and public-page blocker checks passed.
+  Independent exact staged-diff review returned `P0=0`, `P1=0` and Acceptance
+  PASS. No commit, push, merge-main,
+  Selectel/DB/schema/runtime/provider/API/environment/secret or production
+  action occurred. Runtime deployment remains
+  `deployment_deferred_by_user` pending separate commit, integration and
+  Selectel-test rollout gates.
+
+### 2026-08-25 — D5.3 legal publication transfer candidate on lime-booking main
+
+- A guarded `fetch origin/main` confirmed exact
+  `bc78229491df88b1a43691a2575c587a691873ba`. The source checkpoint
+  `3bcc46046afe6cc6615c4984e9e6d0c048fa8aeb` remains preserved on
+  `codex/d5-3-legal-publication-integration-v2`; the new local branch
+  `codex/d5-3-legal-publication-integration-v3` was created from that exact
+  remote-main commit without changing the main worktree.
+- The transfer retains the exact `56` candidate paths. All `54` non-overlap
+  index blobs match the source checkpoint. The two overlaps are intentional:
+  `src/index.css` keeps the upstream lime-booking patch and the exact D5.3
+  onboarding patch (`patch-id`
+  `d1182f8bea6f7dcea916bcbb626369764646f866`), while this WORKLOG keeps the
+  exact upstream `116`-line D2.1 append followed by the exact source `131`-line
+  D5.3 append. No other conflict or path mismatch occurred.
+- Focused transfer regressions passed: frontend `35/35` across `4` files,
+  legal/re-consent Playwright `3/3`, and backend `264/264` across `10` suites.
+- Full gates passed: frontend unit `119/119` across `19` files, root E2E `108`
+  passed with `1` intentional skip, and root build with `1627` modules plus only
+  the existing large-chunk advisory; backend typecheck, unit `3803/3803` across
+  `163` suites, E2E `4/4` across `2` suites and build all passed. Scoped ESLint
+  for the changed frontend/test files passed.
+- Final staged/unstaged diff checks and public-page blocker checks passed.
+  Independent exact staged-diff review returned `P0=0`, `P1=0` and Acceptance
+  PASS. No commit, push, merge-main,
+  Selectel/DB/schema/runtime/provider/API/environment/secret or production
+  action occurred. Runtime deployment remains
+  `deployment_deferred_by_user` pending separate commit, integration and
+  Selectel-test rollout gates.
+
+### 2026-08-25 — D5.3 legal publication transfer candidate on latest D2.1 main
+
+- A guarded `fetch origin/main` confirmed exact
+  `60578ae0599ed664f8a5ac4c8e7f7b9889079363`. The source checkpoint
+  `194b98df1ef07212f0b768a17378f2fcfd16be68` remains preserved on
+  `codex/d5-3-legal-publication-integration-v3`; the new local branch
+  `codex/d5-3-legal-publication-integration-v4` was created from that exact
+  remote-main commit without changing the main worktree.
+- The transfer retains the exact `56` candidate paths. All `55` non-overlap
+  index blobs match the source checkpoint. The only overlap is this WORKLOG,
+  which keeps the exact upstream `77`-line D2.1 append followed by the exact
+  source `161`-line D5.3 append. No other conflict, unstaged path, unmerged path
+  or path mismatch occurred.
+- Focused transfer regressions passed: frontend `35/35` across `4` files,
+  legal/re-consent Playwright `3/3`, and backend `264/264` across `10` suites.
+  Full frontend unit passed `119/119` across `19` files and build passed with
+  `1627` modules plus only the existing large-chunk advisory. Backend
+  typecheck, unit `3803/3803` across `163` suites, E2E `4/4` across `2` suites
+  and build all passed.
+- The mandatory root E2E gate is not green. Its first full run reported `109`
+  passed, `1` skipped and `2` failed; a focused sequential rerun of both failed
+  cases passed `2/2`. A clean second full run reported `110` passed, `1`
+  skipped and the upstream same-key booking refresh case failed again because
+  it observed `3` times requests instead of exactly `2`. The candidate changes
+  neither the booking runtime paths nor that test, so no cross-scope correction
+  was made in this D5.3 task.
+- Final `git diff --cached --check` passed before review. Independent exact
+  staged-diff P0/P1 review is performed after this factual block. No transfer
+  commit, push, merge-main, Selectel/DB/schema/runtime/provider/API/environment/
+  secret or production action occurred. Runtime deployment remains
+  `deployment_deferred_by_user`; the transfer is not acceptance-ready while the
+  mandatory root E2E gate remains red.
+
+### 2026-08-25 — D5.3 legal publication scope-correction closeout
+
+- The owner explicitly classified the intermittently failing booking same-key
+  refresh E2E as a pre-existing external D2/D3 blocker outside D5.3. This
+  candidate does not change booking runtime or booking tests, and no booking
+  correction is carried into the D5.3 diff.
+- D5.3 acceptance therefore uses the already green focused evidence: frontend
+  `35/35` across `4` files, legal/re-consent Playwright `3/3`, backend `264/264`
+  across `10` suites, frontend unit `119/119`, both builds, backend typecheck,
+  backend unit `3803/3803` and backend E2E `4/4`. The full-suite booking failure
+  remains recorded above as an external blocker rather than being hidden or
+  weakened.
+- The unrelated D2.1 correction task was stopped without a commit, push, merge,
+  deployment or WORKLOG change; none of its experimental changes were copied
+  into this worktree.
+- This branch remains based on
+  `60578ae0599ed664f8a5ac4c8e7f7b9889079363`. The observed `origin/main`
+  `6a59907bb211b4fcec77d280223677cffdcd9793` is one docs-only WORKLOG commit
+  ahead, so any later integration requires a separate guarded exact-transfer
+  gate; it must not be folded silently into this checkpoint.
+- No checkpoint commit, push, merge-main, Selectel/DB/schema/runtime/provider/
+  API/environment/secret or production action occurred. Runtime deployment
+  remains `deployment_deferred_by_user` pending separate commit, integration
+  and Selectel-test rollout gates. The exact staged diff is submitted to the
+  final independent P0/P1 review after this append.
+
+### 2026-08-25 — D5.3 legal publication transfer candidate on owner-smoke main
+
+- A guarded `fetch origin/main` confirmed exact
+  `6a59907bb211b4fcec77d280223677cffdcd9793`. Source checkpoint
+  `1ea0b9b96894c75eccb3f4b1148631b8ad99d54b` remains preserved on
+  `codex/d5-3-legal-publication-integration-v4`; branch
+  `codex/d5-3-legal-publication-integration-v5` was created from the exact
+  remote-main commit without changing the main worktree.
+- The transfer retains the exact `56` candidate paths. All `55` non-WORKLOG
+  index blobs match the source checkpoint. This WORKLOG preserves the exact
+  upstream `16`-line D2.1 owner-smoke append followed by the exact source
+  `220`-line D5.3 append; this section is the only additional factual handoff.
+  No other overlap, conflict, unmerged path, unstaged path or untracked path
+  occurred.
+- Focused D5.3 regressions passed: frontend `35/35` across `4` files, backend
+  `264/264` across `10` suites and legal/re-consent Playwright `3/3`. Initial
+  sandboxed frontend commands could not read the shared installed dependency
+  path; the same commands passed with approved dependency access and did not
+  require a source change.
+- Full frontend unit passed `119/119` across `19` files and build passed with
+  `1627` modules plus only the existing large-chunk advisory. Backend
+  typecheck, unit `3803/3803` across `163` suites, E2E `4/4` across `2` suites
+  and build all passed.
+- The full root E2E result was `110` passed, `1` intentionally skipped and the
+  already isolated booking same-key refresh test failed with `timesCalls=3`
+  instead of `2`. All D5.3 legal/re-consent scenarios passed. By the owner's
+  explicit scope correction this is a recorded external D2/D3 blocker; this
+  candidate changes neither booking runtime nor booking tests, and no booking
+  correction or weakened assertion is included.
+- No transfer commit, push, merge-main, Selectel/DB/schema/runtime/provider/
+  API/environment/secret or production action occurred. Runtime deployment
+  remains `deployment_deferred_by_user` pending separate checkpoint,
+  integration and Selectel-test rollout gates. Final exact diff checks and
+  independent P0/P1 review follow this factual append.

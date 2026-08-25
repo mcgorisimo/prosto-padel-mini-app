@@ -1205,6 +1205,21 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
     );
   }
 
+  function acceptOwnOnboardingLegalPolicy(acceptance) {
+    return runMatchOperation(
+      (credential, signal) =>
+        onboarding.acceptLegalPolicy(credential, acceptance, { signal }),
+      (result) => {
+        const nextState = readPlayerOnboardingState(result?.onboarding);
+        return (
+          result?.outcome === 'accepted' &&
+          nextState?.status === 'completed' &&
+          nextState.currentStep === 'completed'
+        );
+      },
+    );
+  }
+
   function loadOwnInitialLevelReassessment() {
     return runMatchOperation(
       (credential, signal) =>
@@ -1845,6 +1860,7 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
     saveOwnOnboardingDraft,
     advanceOwnOnboarding,
     completeOwnOnboarding,
+    acceptOwnOnboardingLegalPolicy,
     loadOwnInitialLevelReassessment,
     completeOwnInitialLevelReassessment,
     listBookingServices,
@@ -1996,6 +2012,18 @@ export function useTelegramBackendLogin() {
       }));
     }
     return telegramBackendLoginLifecycle.completeOwnOnboarding(completion);
+  }, []);
+
+  const acceptOwnOnboardingLegalPolicy = useCallback((acceptance) => {
+    if (!FEATURE_ENABLED) {
+      return Promise.resolve(Object.freeze({
+        outcome: 'rejected',
+        reason: 'not_authenticated',
+      }));
+    }
+    return telegramBackendLoginLifecycle.acceptOwnOnboardingLegalPolicy(
+      acceptance,
+    );
   }, []);
 
   const loadOwnInitialLevelReassessment = useCallback(() => {
@@ -2491,6 +2519,7 @@ export function useTelegramBackendLogin() {
     saveOwnOnboardingDraft,
     advanceOwnOnboarding,
     completeOwnOnboarding,
+    acceptOwnOnboardingLegalPolicy,
     loadOwnInitialLevelReassessment,
     completeOwnInitialLevelReassessment,
     listBookingServices,

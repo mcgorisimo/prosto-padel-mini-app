@@ -6,24 +6,37 @@ const LEGAL_DOCUMENT_DEFINITIONS = Object.freeze([
   Object.freeze({
     kind: 'terms',
     title: 'Условия использования',
-    acceptanceLabel: 'Принимаю условия этой версии',
+    testOnlyVersionPrefix: 'terms-test-',
     urlKey: 'VITE_ONBOARDING_TERMS_URL',
     versionKey: 'VITE_ONBOARDING_TERMS_VERSION',
   }),
   Object.freeze({
+    kind: 'cancellation',
+    title: 'Правила отмены',
+    testOnlyVersionPrefix: 'cancellation-test-',
+    urlKey: 'VITE_ONBOARDING_CANCELLATION_URL',
+    versionKey: 'VITE_ONBOARDING_CANCELLATION_VERSION',
+  }),
+  Object.freeze({
     kind: 'privacy',
     title: 'Политика конфиденциальности',
-    acceptanceLabel: 'Подтверждаю ознакомление с этой версией',
+    testOnlyVersionPrefix: 'privacy-test-',
     urlKey: 'VITE_ONBOARDING_PRIVACY_URL',
     versionKey: 'VITE_ONBOARDING_PRIVACY_VERSION',
   }),
   Object.freeze({
-    kind: 'cancellation',
-    title: 'Правила отмены',
-    acceptanceLabel: 'Принимаю правила этой версии',
-    urlKey: 'VITE_ONBOARDING_CANCELLATION_URL',
-    versionKey: 'VITE_ONBOARDING_CANCELLATION_VERSION',
+    kind: 'personal_data_processing',
+    title: 'Согласие на обработку персональных данных',
+    testOnlyVersionPrefix: 'personal-data-consent-test-',
+    urlKey: 'VITE_ONBOARDING_PERSONAL_DATA_CONSENT_URL',
+    versionKey: 'VITE_ONBOARDING_PERSONAL_DATA_CONSENT_VERSION',
   }),
+]);
+
+const CONSENT_EVIDENCE_KINDS = Object.freeze([
+  'cancellation',
+  'personal_data_processing',
+  'terms',
 ]);
 
 const INITIAL_LEVEL_SURVEY = Object.freeze({
@@ -203,6 +216,7 @@ export function readOnboardingLegalConfig(environment = import.meta.env) {
   const scope = testOnlyValue === 'true' ? 'test_only' : 'production';
 
   const documents = [];
+  const documentUrls = new Set();
   for (const definition of LEGAL_DOCUMENT_DEFINITIONS) {
     const url = readHttpsUrl(environment?.[definition.urlKey]);
     const version = environment?.[definition.versionKey];
@@ -218,7 +232,12 @@ export function readOnboardingLegalConfig(environment = import.meta.env) {
       });
     }
     const parsedUrl = new URL(url);
-    const isTestOnlyVersion = version.startsWith(`${definition.kind}-test-`);
+    const versionIsPathSegment = parsedUrl.pathname
+      .split('/')
+      .some((segment) => segment === version);
+    const isTestOnlyVersion = version.startsWith(
+      definition.testOnlyVersionPrefix,
+    );
     const isTestOnlyUrl =
       parsedUrl.hostname === TEST_ONLY_LEGAL_HOST &&
       parsedUrl.port === '' &&
@@ -226,7 +245,12 @@ export function readOnboardingLegalConfig(environment = import.meta.env) {
       parsedUrl.pathname === `${TEST_ONLY_LEGAL_PATH_PREFIX}${version}/`;
     if (
       (scope === 'test_only' && (!isTestOnlyVersion || !isTestOnlyUrl)) ||
-      (scope === 'production' && (isTestOnlyVersion || isTestOnlyUrl))
+      (scope === 'production' &&
+        (isTestOnlyVersion ||
+          isTestOnlyUrl ||
+          parsedUrl.search !== '' ||
+          !versionIsPathSegment)) ||
+      documentUrls.has(url)
     ) {
       return frozen({
         status: 'unavailable',
@@ -234,11 +258,11 @@ export function readOnboardingLegalConfig(environment = import.meta.env) {
         documents: frozen([]),
       });
     }
+    documentUrls.add(url);
     documents.push(
       frozen({
         kind: definition.kind,
         title: definition.title,
-        acceptanceLabel: definition.acceptanceLabel,
         url,
         version,
       }),
@@ -256,23 +280,36 @@ export function readOnboardingLegalConfig(environment = import.meta.env) {
 export function legalConsentContract(legalConfig) {
   if (legalConfig?.status !== 'ready') return null;
   return frozen(
-    legalConfig.documents.map(({ kind, version }) =>
-      frozen({ kind, documentVersion: version }),
-    ),
+    CONSENT_EVIDENCE_KINDS.map((kind) => {
+      const document = legalConfig.documents.find(
+        (candidate) => candidate.kind === kind,
+      );
+      return frozen({ kind, documentVersion: document.version });
+    }),
   );
 }
 
-export function hasCurrentLegalConsents(onboarding, legalConfig) {
+export function currentLegalConsentGroups(onboarding, legalConfig) {
   const expected = legalConsentContract(legalConfig);
-  if (expected === null || !Array.isArray(onboarding?.consents)) return false;
+  if (expected === null || !Array.isArray(onboarding?.consents)) return null;
   const actualPairs = new Set(
     onboarding.consents.map(
       ({ kind, documentVersion }) => `${kind}\0${documentVersion}`,
     ),
   );
-  return expected.every(({ kind, documentVersion }) =>
-    actualPairs.has(`${kind}\0${documentVersion}`),
-  );
+  const hasKind = (kind) => {
+    const required = expected.find((consent) => consent.kind === kind);
+    return actualPairs.has(`${required.kind}\0${required.documentVersion}`);
+  };
+  return frozen({
+    offer: hasKind('terms') && hasKind('cancellation'),
+    personalDataProcessing: hasKind('personal_data_processing'),
+  });
+}
+
+export function hasCurrentLegalConsents(onboarding, legalConfig) {
+  const groups = currentLegalConsentGroups(onboarding, legalConfig);
+  return groups?.offer === true && groups.personalDataProcessing === true;
 }
 
 export function readOnboardingSurveyDefinition(version) {

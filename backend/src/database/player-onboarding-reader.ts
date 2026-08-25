@@ -5,7 +5,8 @@ import { PostgresTransaction } from './postgres-transaction';
 export type PlayerOnboardingStep =
   'profile' | 'contacts' | 'consents' | 'level_survey' | 'completed';
 
-export type PlayerOnboardingConsentKind = 'terms' | 'privacy' | 'cancellation';
+export type PlayerOnboardingConsentKind =
+  'terms' | 'privacy' | 'cancellation' | 'personal_data_processing';
 
 export interface PlayerOnboardingStateRecord {
   readonly flowVersion: string;

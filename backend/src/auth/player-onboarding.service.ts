@@ -11,6 +11,10 @@ import {
   SavePlayerOnboardingDraftResult,
 } from '../database/player-onboarding-draft-writer';
 import {
+  PlayerOnboardingLegalAcceptancePersistenceError,
+  PlayerOnboardingLegalAcceptanceWriter,
+} from '../database/player-onboarding-legal-acceptance-writer';
+import {
   AdvancePlayerOnboardingResult,
   PlayerOnboardingProgressPersistenceError,
   PlayerOnboardingProgressWriter,
@@ -22,6 +26,8 @@ import {
 } from '../database/player-onboarding-reader';
 import { PostgresTransaction } from '../database/postgres-transaction';
 import {
+  AcceptOwnPlayerOnboardingLegalPolicyInput,
+  AcceptOwnPlayerOnboardingLegalPolicyResult,
   AdvanceOwnPlayerOnboardingInput,
   AdvanceOwnPlayerOnboardingResult,
   CompleteOwnPlayerOnboardingInput,
@@ -33,6 +39,7 @@ import {
   SaveOwnPlayerOnboardingDraftInput,
   SaveOwnPlayerOnboardingDraftResult,
   isAdvanceOwnPlayerOnboardingInput,
+  isAcceptOwnPlayerOnboardingLegalPolicyInput,
   isOwnPlayerOnboarding,
   isCompleteOwnPlayerOnboardingInput,
   isReadOwnPlayerOnboardingInput,
@@ -40,6 +47,7 @@ import {
 } from './player-onboarding.types';
 import {
   PLAYER_ONBOARDING_FLOW_VERSION,
+  PLAYER_ONBOARDING_LEGAL_RECONSENT_FLOW_VERSION,
   PLAYER_ONBOARDING_SURVEY_VERSION,
   arePlayerOnboardingConsents,
   hasPlayerOnboardingConsents,
@@ -60,6 +68,7 @@ export interface PlayerOnboardingServiceDependencies {
   readonly draftWriter: PlayerOnboardingDraftWriter;
   readonly progressWriter: PlayerOnboardingProgressWriter;
   readonly completionWriter: PlayerOnboardingCompletionWriter;
+  readonly legalAcceptanceWriter: PlayerOnboardingLegalAcceptanceWriter;
   readonly clock: SessionAuthenticationClock;
   readonly policy: PlayerOnboardingPolicy | null;
 }
@@ -68,7 +77,8 @@ type RejectionReason = Extract<
   | ReadOwnPlayerOnboardingResult
   | SaveOwnPlayerOnboardingDraftResult
   | AdvanceOwnPlayerOnboardingResult
-  | CompleteOwnPlayerOnboardingResult,
+  | CompleteOwnPlayerOnboardingResult
+  | AcceptOwnPlayerOnboardingLegalPolicyResult,
   { readonly outcome: 'rejected' }
 >['reason'];
 
@@ -86,6 +96,13 @@ type CompletionTransactionResult =
 type ProgressTransactionResult =
   | Exclude<AdvancePlayerOnboardingResult, { readonly outcome: 'advanced' }>
   | Extract<AdvanceOwnPlayerOnboardingResult, { readonly outcome: 'advanced' }>;
+
+type LegalAcceptanceTransactionResult =
+  | { readonly outcome: 'not_found' | 'incomplete' | 'conflict' }
+  | Extract<
+      AcceptOwnPlayerOnboardingLegalPolicyResult,
+      { readonly outcome: 'accepted' }
+    >;
 
 const EMAIL_PATTERN =
   /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9][a-z0-9.-]*\.[a-z]{2,63}$/u;
@@ -233,7 +250,8 @@ function temporaryStorageFailure(error: unknown): boolean {
     (error instanceof PlayerOnboardingReadPersistenceError ||
       error instanceof PlayerOnboardingDraftWritePersistenceError ||
       error instanceof PlayerOnboardingProgressPersistenceError ||
-      error instanceof PlayerOnboardingCompletionPersistenceError) &&
+      error instanceof PlayerOnboardingCompletionPersistenceError ||
+      error instanceof PlayerOnboardingLegalAcceptancePersistenceError) &&
     (error.reason === 'database_unavailable' ||
       error.reason === 'transaction_conflict')
   );
@@ -535,6 +553,80 @@ export class PlayerOnboardingService {
           return rejected('progress_conflict');
         case 'closed':
           return rejected('onboarding_closed');
+      }
+    } catch (error) {
+      return rejected(
+        temporaryStorageFailure(error)
+          ? 'temporary_unavailable'
+          : 'internal_failure',
+      );
+    }
+  }
+
+  async acceptOwnLegalPolicy(
+    input: AcceptOwnPlayerOnboardingLegalPolicyInput,
+  ): Promise<AcceptOwnPlayerOnboardingLegalPolicyResult> {
+    if (!isAcceptOwnPlayerOnboardingLegalPolicyInput(input)) {
+      return rejected('invalid_request');
+    }
+    if (input.role !== 'player') {
+      return rejected('onboarding_not_found');
+    }
+    const policy = this.dependencies.policy;
+    if (
+      policy === null ||
+      !arePlayerOnboardingConsents(policy, input.acceptance.consents)
+    ) {
+      return rejected('legal_acceptances_conflict');
+    }
+
+    try {
+      const result =
+        await this.dependencies.transactions.run<LegalAcceptanceTransactionResult>(
+          async (transaction) => {
+            const accepted =
+              await this.dependencies.legalAcceptanceWriter.accept(
+                transaction,
+                {
+                  accountId: input.accountId,
+                  consents: policy.consents,
+                  flowVersion: PLAYER_ONBOARDING_LEGAL_RECONSENT_FLOW_VERSION,
+                  acceptedAt: this.dependencies.clock.nowEpochSeconds(),
+                },
+              );
+            if (accepted.outcome !== 'accepted') return accepted;
+
+            const reread = await this.dependencies.onboarding.findByAccountId(
+              transaction,
+              { accountId: input.accountId },
+            );
+            if (reread.outcome !== 'found') {
+              throw storageInvariantFailure();
+            }
+            const onboarding = publicOnboarding(
+              reread.onboarding as PlayerOnboardingRecord,
+              input.accountId,
+            );
+            if (
+              onboarding === undefined ||
+              onboarding.status !== 'completed' ||
+              !hasPlayerOnboardingConsents(policy, onboarding.consents)
+            ) {
+              throw storageInvariantFailure();
+            }
+            return Object.freeze({ outcome: 'accepted', onboarding });
+          },
+        );
+
+      switch (result.outcome) {
+        case 'accepted':
+          return result;
+        case 'not_found':
+          return rejected('onboarding_not_found');
+        case 'incomplete':
+          return rejected('onboarding_incomplete');
+        case 'conflict':
+          return rejected('legal_acceptances_conflict');
       }
     } catch (error) {
       return rejected(

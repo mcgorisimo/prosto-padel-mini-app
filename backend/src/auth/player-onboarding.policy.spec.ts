@@ -10,6 +10,7 @@ const POLICY = createPlayerOnboardingPolicy({
   terms: 'terms-test-2026-08-23-v1',
   privacy: 'privacy-test-2026-08-23-v1',
   cancellation: 'cancellation-test-2026-08-23-v1',
+  personalDataProcessing: 'personal-data-consent-test-2026-08-23-v1',
 });
 
 const CONSENTS = Object.freeze([
@@ -18,8 +19,8 @@ const CONSENTS = Object.freeze([
     documentVersion: 'terms-test-2026-08-23-v1',
   }),
   Object.freeze({
-    kind: 'privacy' as const,
-    documentVersion: 'privacy-test-2026-08-23-v1',
+    kind: 'personal_data_processing' as const,
+    documentVersion: 'personal-data-consent-test-2026-08-23-v1',
   }),
   Object.freeze({
     kind: 'cancellation' as const,
@@ -36,7 +37,7 @@ const SURVEY_ANSWERS = Object.freeze({
 });
 
 describe('player onboarding policy', () => {
-  it('builds an immutable exact three-document policy', () => {
+  it('builds an immutable exact three-evidence policy', () => {
     expect(POLICY).toEqual({
       flowVersion: 'tma_v1',
       consents: [
@@ -45,8 +46,8 @@ describe('player onboarding policy', () => {
           documentVersion: 'cancellation-test-2026-08-23-v1',
         },
         {
-          kind: 'privacy',
-          documentVersion: 'privacy-test-2026-08-23-v1',
+          kind: 'personal_data_processing',
+          documentVersion: 'personal-data-consent-test-2026-08-23-v1',
         },
         {
           kind: 'terms',

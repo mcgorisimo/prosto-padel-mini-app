@@ -35,6 +35,7 @@ import { PostgresPlayerProfilePhotoRepository } from '../database/postgres-playe
 import { PostgresPlayerOnboardingDraftWriter } from '../database/postgres-player-onboarding-draft-writer';
 import { PostgresPlayerOnboardingCompletionWriter } from '../database/postgres-player-onboarding-completion-writer';
 import { PostgresPlayerOnboardingProgressWriter } from '../database/postgres-player-onboarding-progress-writer';
+import { PostgresPlayerOnboardingLegalAcceptanceWriter } from '../database/postgres-player-onboarding-legal-acceptance-writer';
 import { PostgresPlayerOnboardingReader } from '../database/postgres-player-onboarding-reader';
 import { PostgresPlayerInitialLevelReassessmentRepository } from '../database/postgres-player-initial-level-reassessment-repository';
 import { PostgresPlayerProfileReader } from '../database/postgres-player-profile-reader';
@@ -141,9 +142,7 @@ function logTelegramInitDataDiagnostic(
     return;
   }
 
-  logger.warn(
-    `Telegram initData verification rejected reason=${event.reason}`,
-  );
+  logger.warn(`Telegram initData verification rejected reason=${event.reason}`);
 }
 
 function logTelegramLoginDiagnostic(
@@ -173,14 +172,10 @@ function createTelegramLoginFeature(
     return DISABLED_TELEGRAM_LOGIN_FEATURE;
   }
 
-  const telegramInitDataLogger = new Logger(
-    TelegramInitDataVerifier.name,
-  );
+  const telegramInitDataLogger = new Logger(TelegramInitDataVerifier.name);
   const telegramLoginLogger = new Logger(TelegramLoginService.name);
   const pepper = decodeTelegramCryptoSecret(
-    config.getOrThrow<string>(
-      TELEGRAM_LOGIN_CONFIG_KEYS.lookupPepperBase64,
-    ),
+    config.getOrThrow<string>(TELEGRAM_LOGIN_CONFIG_KEYS.lookupPepperBase64),
   );
   try {
     const hmacSecret = decodeTelegramCryptoSecret(
@@ -204,14 +199,10 @@ function createTelegramLoginFeature(
       );
       const lookupDigests = new TelegramLookupDigestCandidatesAdapter({
         digestVersion: externalIdentityLookupDigestVersion(
-          config.getOrThrow<number>(
-            TELEGRAM_LOGIN_CONFIG_KEYS.digestVersion,
-          ),
+          config.getOrThrow<number>(TELEGRAM_LOGIN_CONFIG_KEYS.digestVersion),
         ),
         pepperVersion: externalIdentityLookupDigestPepperVersion(
-          config.getOrThrow<number>(
-            TELEGRAM_LOGIN_CONFIG_KEYS.pepperVersion,
-          ),
+          config.getOrThrow<number>(TELEGRAM_LOGIN_CONFIG_KEYS.pepperVersion),
         ),
         pepper,
       });
@@ -315,16 +306,17 @@ function createPlayerOnboardingService(
   draftWriter: PostgresPlayerOnboardingDraftWriter,
   progressWriter: PostgresPlayerOnboardingProgressWriter,
   completionWriter: PostgresPlayerOnboardingCompletionWriter,
+  legalAcceptanceWriter: PostgresPlayerOnboardingLegalAcceptanceWriter,
   clock: SessionAuthenticationClock,
 ): PlayerOnboardingService {
-  const policyConfiguration =
-    readPlayerOnboardingPolicyConfiguration(config);
+  const policyConfiguration = readPlayerOnboardingPolicyConfiguration(config);
   return new PlayerOnboardingService({
     transactions,
     onboarding,
     draftWriter,
     progressWriter,
     completionWriter,
+    legalAcceptanceWriter,
     clock,
     policy: policyConfiguration.enabled
       ? createPlayerOnboardingPolicy(policyConfiguration.documentVersions)
@@ -485,8 +477,7 @@ function createMatchResultService(
 function createPlayerProfilePhotoObjectStorage(
   config: ConfigService,
 ): PlayerProfilePhotoObjectStorage {
-  const configuration =
-    readPlayerProfilePhotoStorageConfiguration(config);
+  const configuration = readPlayerProfilePhotoStorageConfiguration(config);
   return configuration.enabled
     ? new S3PlayerProfilePhotoObjectStorage(configuration)
     : new DisabledPlayerProfilePhotoObjectStorage();
@@ -674,6 +665,7 @@ function createPlayerProfilePhotoService(
         PostgresPlayerOnboardingDraftWriter,
         PostgresPlayerOnboardingProgressWriter,
         PostgresPlayerOnboardingCompletionWriter,
+        PostgresPlayerOnboardingLegalAcceptanceWriter,
         SESSION_AUTHENTICATION_CLOCK,
       ],
       useFactory: createPlayerOnboardingService,

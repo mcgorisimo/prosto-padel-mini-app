@@ -1673,6 +1673,35 @@ textarea {
   accent-color: var(--accent-light);
 }
 
+.onboarding-consent-copy {
+  min-width: 0;
+  color: #f5f1e8;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.onboarding-consent-copy a,
+.onboarding-privacy-note a {
+  color: var(--accent-light);
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.onboarding-consent-copy small {
+  display: block;
+  margin-top: 2px;
+  color: rgba(245, 241, 232, 0.64);
+  font-size: 11px;
+}
+
+.onboarding-privacy-note {
+  margin: 8px 0 0;
+  color: rgba(245, 241, 232, 0.72);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .onboarding-legal-link {
   display: flex;
   flex-direction: column;

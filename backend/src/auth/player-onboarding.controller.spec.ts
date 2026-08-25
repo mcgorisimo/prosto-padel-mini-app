@@ -9,6 +9,8 @@ import { unixEpochSeconds } from './auth.types';
 import { PlayerOnboardingController } from './player-onboarding.controller';
 import { PlayerOnboardingService } from './player-onboarding.service';
 import {
+  AcceptOwnPlayerOnboardingLegalPolicyInput,
+  AcceptOwnPlayerOnboardingLegalPolicyResult,
   AdvanceOwnPlayerOnboardingInput,
   AdvanceOwnPlayerOnboardingResult,
   CompleteOwnPlayerOnboardingInput,
@@ -65,6 +67,10 @@ interface Harness {
     Promise<CompleteOwnPlayerOnboardingResult>,
     [CompleteOwnPlayerOnboardingInput]
   >;
+  readonly acceptOwnLegalPolicy: jest.Mock<
+    Promise<AcceptOwnPlayerOnboardingLegalPolicyResult>,
+    [AcceptOwnPlayerOnboardingLegalPolicyInput]
+  >;
   readonly logs: readonly unknown[][];
 }
 
@@ -113,7 +119,7 @@ function completedOnboarding(): OwnPlayerOnboarding {
     revision: 5,
     consents: [
       { kind: 'cancellation', documentVersion: '2026-08-01' },
-      { kind: 'privacy', documentVersion: '2026-08-01' },
+      { kind: 'personal_data_processing', documentVersion: '2026-08-01' },
       { kind: 'terms', documentVersion: '2026-08-01' },
     ],
     surveyAnswers: {
@@ -180,6 +186,15 @@ async function createHarness(): Promise<Harness> {
         revision: 3,
       },
     });
+  const acceptOwnLegalPolicy = jest
+    .fn<
+      Promise<AcceptOwnPlayerOnboardingLegalPolicyResult>,
+      [AcceptOwnPlayerOnboardingLegalPolicyInput]
+    >()
+    .mockResolvedValue({
+      outcome: 'accepted',
+      onboarding: completedOnboarding(),
+    });
   const nowEpochSeconds = jest.fn<
     ReturnType<SessionAuthenticationClock['nowEpochSeconds']>,
     []
@@ -199,6 +214,7 @@ async function createHarness(): Promise<Harness> {
           saveOwnOnboardingDraft,
           advanceOwnOnboarding,
           completeOwnOnboarding,
+          acceptOwnLegalPolicy,
         },
       },
       {
@@ -222,6 +238,7 @@ async function createHarness(): Promise<Harness> {
     saveOwnOnboardingDraft,
     advanceOwnOnboarding,
     completeOwnOnboarding,
+    acceptOwnLegalPolicy,
     logs,
   };
 }
@@ -278,7 +295,7 @@ function completionBody(expectedRevision = 4) {
     flowVersion: 'tma_v1',
     consents: [
       { kind: 'terms', documentVersion: '2026-08-01' },
-      { kind: 'privacy', documentVersion: '2026-08-01' },
+      { kind: 'personal_data_processing', documentVersion: '2026-08-01' },
       { kind: 'cancellation', documentVersion: '2026-08-01' },
     ],
     survey: {
@@ -319,7 +336,7 @@ function levelSurveyProgressBody(
     nextStep: 'level_survey',
     consents: [
       { kind: 'terms', documentVersion: '2026-08-01' },
-      { kind: 'privacy', documentVersion: '2026-08-01' },
+      { kind: 'personal_data_processing', documentVersion: '2026-08-01' },
       { kind: 'cancellation', documentVersion: '2026-08-01' },
     ],
   };
@@ -350,6 +367,21 @@ function postCompletion(
   return harness.app.inject({
     method: 'POST',
     url: `${ROUTE}/complete`,
+    headers,
+    payload: body as never,
+  });
+}
+
+function postLegalAcceptances(
+  harness: Harness,
+  body: unknown,
+  authorization?: string,
+) {
+  const headers: Record<string, string> = {};
+  if (authorization !== undefined) headers.authorization = authorization;
+  return harness.app.inject({
+    method: 'POST',
+    url: `${ROUTE}/legal-acceptances`,
     headers,
     payload: body as never,
   });
@@ -419,6 +451,54 @@ describe('PlayerOnboardingController HTTP boundary', () => {
     expect(response.json()).toEqual(completedOnboarding());
     expect(response.json()).toMatchObject({ initialLevelLabel: 'B+' });
     expect(response.body).not.toMatch(/initialLevelScore|isVerified|rating/iu);
+  });
+
+  it('accepts only the bearer owner exact new three-record evidence set', async () => {
+    const body = {
+      consents: [
+        { kind: 'terms', documentVersion: '2026-08-01' },
+        { kind: 'cancellation', documentVersion: '2026-08-01' },
+        { kind: 'personal_data_processing', documentVersion: '2026-08-01' },
+      ],
+    };
+    const response = await postLegalAcceptances(
+      harness,
+      body,
+      `Bearer ${CREDENTIAL}`,
+    );
+
+    expect(response.statusCode).toBe(200);
+    expectNoStore(response);
+    expect(response.json()).toEqual(completedOnboarding());
+    expect(harness.acceptOwnLegalPolicy).toHaveBeenCalledWith({
+      accountId: ACCOUNT_ID,
+      role: 'player',
+      acceptance: {
+        consents: [
+          { kind: 'cancellation', documentVersion: '2026-08-01' },
+          { kind: 'personal_data_processing', documentVersion: '2026-08-01' },
+          { kind: 'terms', documentVersion: '2026-08-01' },
+        ],
+      },
+    });
+  });
+
+  it('rejects legacy privacy in place of separate PD consent', async () => {
+    const response = await postLegalAcceptances(
+      harness,
+      {
+        consents: [
+          { kind: 'terms', documentVersion: '2026-08-01' },
+          { kind: 'cancellation', documentVersion: '2026-08-01' },
+          { kind: 'privacy', documentVersion: '2026-08-01' },
+        ],
+      },
+      `Bearer ${CREDENTIAL}`,
+    );
+
+    expect(response.statusCode).toBe(400);
+    expectNoStore(response);
+    expect(harness.acceptOwnLegalPolicy).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -676,7 +756,10 @@ describe('PlayerOnboardingController HTTP boundary', () => {
                 ...body,
                 consents: [
                   { kind: 'cancellation', documentVersion: '2026-08-01' },
-                  { kind: 'privacy', documentVersion: '2026-08-01' },
+                  {
+                    kind: 'personal_data_processing',
+                    documentVersion: '2026-08-01',
+                  },
                   { kind: 'terms', documentVersion: '2026-08-01' },
                 ],
               }
@@ -721,7 +804,7 @@ describe('PlayerOnboardingController HTTP boundary', () => {
         consents: [
           { kind: 'terms', documentVersion: '2026-08-01' },
           { kind: 'terms', documentVersion: '2026-08-01' },
-          { kind: 'privacy', documentVersion: '2026-08-01' },
+          { kind: 'personal_data_processing', documentVersion: '2026-08-01' },
         ],
       },
     ],
@@ -819,7 +902,7 @@ describe('PlayerOnboardingController HTTP boundary', () => {
         flowVersion: 'tma_v1',
         consents: [
           { kind: 'cancellation', documentVersion: '2026-08-01' },
-          { kind: 'privacy', documentVersion: '2026-08-01' },
+          { kind: 'personal_data_processing', documentVersion: '2026-08-01' },
           { kind: 'terms', documentVersion: '2026-08-01' },
         ],
         survey: {
@@ -869,7 +952,7 @@ describe('PlayerOnboardingController HTTP boundary', () => {
         consents: [
           { kind: 'terms', documentVersion: '2026-08-01' },
           { kind: 'terms', documentVersion: '2026-08-01' },
-          { kind: 'privacy', documentVersion: '2026-08-01' },
+          { kind: 'personal_data_processing', documentVersion: '2026-08-01' },
         ],
       },
     ],

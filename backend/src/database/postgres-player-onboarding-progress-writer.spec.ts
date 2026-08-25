@@ -26,9 +26,7 @@ interface QueryCall {
 }
 
 type QueuedQuery =
-  | QueryResult<QueryResultRow>
-  | Error
-  | Record<string, unknown>;
+  QueryResult<QueryResultRow> | Error | Record<string, unknown>;
 
 class FakeTransaction implements PostgresTransaction {
   readonly calls: QueryCall[] = [];
@@ -103,7 +101,7 @@ function consentRows(version = '2026-08-01') {
       accepted_at: '1800000000',
     },
     {
-      consent_kind: 'privacy',
+      consent_kind: 'personal_data_processing',
       document_version: version,
       flow_version: 'tma_v1',
       accepted_at: '1800000000',
@@ -139,7 +137,7 @@ function levelSurveyInput(
     nextStep: 'level_survey',
     consents: [
       { kind: 'cancellation', documentVersion: '2026-08-01' },
-      { kind: 'privacy', documentVersion: '2026-08-01' },
+      { kind: 'personal_data_processing', documentVersion: '2026-08-01' },
       { kind: 'terms', documentVersion: '2026-08-01' },
     ],
     ...overrides,
@@ -210,7 +208,9 @@ describe('PostgresPlayerOnboardingProgressWriter', () => {
       expect(sql[2]).toContain("current_step = 'consents'");
       expect(sql[2]).toContain("current_step IN ('profile', 'contacts')");
       expect(sql[2]).toContain('revision = revision + 1');
-      expect(sql.join(' ')).not.toContain('INSERT INTO backend_auth.account_consent_acceptances');
+      expect(sql.join(' ')).not.toContain(
+        'INSERT INTO backend_auth.account_consent_acceptances',
+      );
     },
   );
 
@@ -241,7 +241,7 @@ describe('PostgresPlayerOnboardingProgressWriter', () => {
       ACCOUNT_ID,
       'cancellation',
       '2026-08-01',
-      'privacy',
+      'personal_data_processing',
       '2026-08-01',
       'terms',
       '2026-08-01',
@@ -292,7 +292,7 @@ describe('PostgresPlayerOnboardingProgressWriter', () => {
     const different = levelSurveyInput({
       consents: [
         { kind: 'cancellation', documentVersion: '2026-08-02' },
-        { kind: 'privacy', documentVersion: '2026-08-02' },
+        { kind: 'personal_data_processing', documentVersion: '2026-08-02' },
         { kind: 'terms', documentVersion: '2026-08-02' },
       ],
     });
@@ -307,7 +307,13 @@ describe('PostgresPlayerOnboardingProgressWriter', () => {
   });
 
   it.each([
-    ['stale revision', profileRow(), stateRow({ revision: '4' }), input(), 'stale_revision'],
+    [
+      'stale revision',
+      profileRow(),
+      stateRow({ revision: '4' }),
+      input(),
+      'stale_revision',
+    ],
     [
       'silent skip',
       profileRow(),
