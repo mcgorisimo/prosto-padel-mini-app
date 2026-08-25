@@ -311,6 +311,7 @@ services:
       GF_PLUGINS_PREINSTALL_DISABLED: "true"
       GF_PLUGINS_PREINSTALL_AUTO_UPDATE: "false"
       GF_PLUGINS_PLUGIN_ADMIN_ENABLED: "false"
+      GF_LOG_FILTERS: "plugin.angulardetectorsprovider.dynamic:critical"
     ports:
       - "127.0.0.1:3001:3000"
     volumes:
