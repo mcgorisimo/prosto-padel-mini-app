@@ -9073,3 +9073,33 @@
   docs-only with `deployment=not_needed`. Off-host Selectel Logs durability and
   external alert notification delivery remain the next credential-dependent
   operations steps.
+### 2026-08-25 — D5 contact-verification local contract slice
+
+- Owner confirmed D5.1 complete and authorized only the local non-destructive
+  slice. Added provider-neutral phone SMS OTP and email code/link contracts,
+  separate backend-owned challenge/proof states, bounded expiry/attempt/resend
+  policy, PII-safe audit projection, checkout eligibility for current contact
+  versions, threat model and a Selectel PostgreSQL persistence proposal without
+  SQL or runtime wiring.
+- Focused regressions PASS `46/46`: strict field/method and method-policy
+  binding, attempt exhaustion, expiry, monotonic trusted command time,
+  command/resend idempotency, cooldown, history/proof integrity, contact-version
+  checkout gating and PII/provider rejection. Full backend gates PASS:
+  typecheck, unit `140 suites / 3412 tests`, E2E `2 suites / 4 tests`, build.
+- Required root gates PASS: E2E inventory `95` and official E2E
+  `94 passed / 1 skipped` in `1.1m`; build `1619` modules; lint `100` files with
+  `104` unchanged legacy findings; format `493` files with `389` unchanged
+  legacy files; Knip digest unchanged with seven legacy Supabase imports.
+- Independent exact-diff review first found three P1 in hydrated policy/history
+  and resend idempotency; correction review found one P1 in monotonic command
+  time. All were corrected and the final exact five-file read-only review is
+  `PASS`, `P0=0`, `P1=0`; PII/privacy/provider boundary has no P0/P1.
+- Local candidate remains uncommitted on detached base
+  `173c0a64f21fcad0cb5ab46f6be678f48964aaef`. No commit, push, integration,
+  Selectel/server action, DB/schema write, provider/API call, secrets/env change
+  or production action was performed. Payment and rating state remain
+  untouched.
+- Deployment: `not_needed`. The TypeScript contracts/state machine are not
+  imported by a module/controller/bootstrap and therefore do not change the
+  runtime or container image; tests and proposal are local-only. Next gate, if
+  authorized separately, is one local commit of this six-file candidate only.
