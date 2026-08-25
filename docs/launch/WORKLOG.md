@@ -8984,3 +8984,10 @@
   Compose/config validation on Selectel test, pinned image validation, rollout,
   health/business/log/metrics/dashboard/alert verification and exact commit
   confirmation. Production is not authorized.
+- Selectel preflight then validated all six pinned image tags and native config
+  parsers: Loki config, Vector VRL/topology, Prometheus config plus all `8`
+  rules, and Alertmanager config passed. The first Loki container stayed
+  running with restart count `0`, but its Docker health command failed because
+  the pinned distroless image has no `/bin/sh`; the container logs showed Loki
+  ready. The candidate healthcheck was corrected to the image-native Loki
+  config verifier before any application container was recreated.
