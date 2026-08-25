@@ -559,6 +559,19 @@ test.describe('Telegram backend login feature enabled', () => {
     await expect(
       page.getByRole('link', { name: 'Политика конфиденциальности' }),
     ).toBeVisible();
+    await expect(
+      page.getByText('Редакция от 26.08.2026', { exact: true }),
+    ).toHaveCount(3);
+    await expect(page.locator('body')).not.toContainText('terms-2026-08-26-v1');
+    await expect(page.locator('body')).not.toContainText(
+      'cancellation-2026-08-26-v1',
+    );
+    await expect(page.locator('body')).not.toContainText(
+      'personal-data-consent-2026-08-26-v1',
+    );
+    await expect(page.locator('body')).not.toContainText(
+      'privacy-2026-08-26-v1',
+    );
     await page.getByRole('checkbox').nth(0).check();
     await page.getByRole('checkbox').nth(1).check();
     await page.getByRole('button', { name: 'Продолжить' }).click();

@@ -55,6 +55,30 @@ function legalDocument(legalConfig, kind) {
   return legalConfig.documents.find((document) => document.kind === kind);
 }
 
+function legalRevisionDate(version) {
+  const match = /(?:^|-)(\d{4})-(\d{2})-(\d{2})(?:-|$)/u.exec(version);
+  if (match === null) return null;
+  const [, year, month, day] = match;
+  const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+  if (
+    date.getUTCFullYear() !== Number(year) ||
+    date.getUTCMonth() + 1 !== Number(month) ||
+    date.getUTCDate() !== Number(day)
+  ) {
+    return null;
+  }
+  return `${day}.${month}.${year}`;
+}
+
+function legalRevisionLabel(...documents) {
+  const dates = documents.map((document) =>
+    legalRevisionDate(document.version),
+  );
+  return dates.every((date) => date !== null && date === dates[0])
+    ? `Редакция от ${dates[0]}`
+    : 'Актуальные редакции';
+}
+
 function LegalConsentControls({
   accepted,
   disabled,
@@ -83,12 +107,10 @@ function LegalConsentControls({
           <a href={cancellation.url} target="_blank" rel="noopener noreferrer">
             Правила отмены
           </a>
-          <small>
-            Версии {terms.version} и {cancellation.version}
-          </small>
+          <small>{legalRevisionLabel(terms, cancellation)}</small>
         </>
       ),
-      ariaLabel: `Принимаю Условия использования версии ${terms.version} и Правила отмены версии ${cancellation.version}`,
+      ariaLabel: `Принимаю Условия использования и Правила отмены, ${legalRevisionLabel(terms, cancellation).toLocaleLowerCase('ru-RU')}`,
     },
     {
       key: 'personalDataProcessing',
@@ -98,10 +120,10 @@ function LegalConsentControls({
           <a href={personalData.url} target="_blank" rel="noopener noreferrer">
             согласие на обработку персональных данных
           </a>
-          <small>Версия {personalData.version}</small>
+          <small>{legalRevisionLabel(personalData)}</small>
         </>
       ),
-      ariaLabel: `Даю отдельное согласие на обработку персональных данных версии ${personalData.version}`,
+      ariaLabel: `Даю отдельное согласие на обработку персональных данных, ${legalRevisionLabel(personalData).toLocaleLowerCase('ru-RU')}`,
     },
   ];
 
@@ -136,7 +158,7 @@ function LegalConsentControls({
         <a href={privacy.url} target="_blank" rel="noopener noreferrer">
           Политика конфиденциальности
         </a>{' '}
-        <small>Версия {privacy.version}</small>
+        <small>{legalRevisionLabel(privacy)}</small>
       </p>
     </>
   );

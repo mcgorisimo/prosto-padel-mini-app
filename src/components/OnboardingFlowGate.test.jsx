@@ -155,6 +155,13 @@ describe('OnboardingFlowGate', () => {
     expect(
       screen.getByRole('link', { name: 'Политика конфиденциальности' }),
     ).toBeTruthy();
+    expect(screen.getAllByText('Редакция от 26.08.2026')).toHaveLength(3);
+    expect(document.body.textContent).not.toContain('terms-2026-08-26');
+    expect(document.body.textContent).not.toContain('cancellation-2026-08-26');
+    expect(document.body.textContent).not.toContain(
+      'personal-data-consent-2026-08-26',
+    );
+    expect(document.body.textContent).not.toContain('privacy-2026-08-26');
   });
 
   it('labels the temporary test-only documents before any acceptance control', () => {
@@ -548,12 +555,12 @@ describe('OnboardingFlowGate', () => {
     expect(checkboxes.every((checkbox) => checkbox.required)).toBe(true);
     expect(
       screen.getByRole('checkbox', {
-        name: /Условия использования версии terms-2026-08-26 и Правила отмены версии cancellation-2026-08-26/u,
+        name: /Условия использования и Правила отмены, редакция от 26\.08\.2026/u,
       }),
     ).toBeTruthy();
     expect(
       screen.getByRole('checkbox', {
-        name: /согласие на обработку персональных данных версии personal-data-consent-2026-08-26/u,
+        name: /согласие на обработку персональных данных, редакция от 26\.08\.2026/u,
       }),
     ).toBeTruthy();
     expect(

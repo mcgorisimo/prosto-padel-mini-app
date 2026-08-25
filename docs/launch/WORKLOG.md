@@ -8624,3 +8624,88 @@
   remains `deployment_deferred_by_user` pending separate checkpoint,
   integration and Selectel-test rollout gates. Final exact diff checks and
   independent P0/P1 review follow this factual append.
+
+### 2026-08-25 — D5.3 legal publication Selectel-test rollout
+
+- The rollout used the exact clean server checkout
+  `85e8768f1cef9290a82e1aa4760e7d6fc874dcf7` with tree
+  `b1898bf76c4927478e69753a88069c804fd050c8`. Migration 041 was verified
+  read-only with the canonical POSTCHECK: the transaction ended in `ROLLBACK`,
+  historical evidence and its digest were unchanged, and no migration or
+  schema write was performed.
+- Only the `16` exact non-secret legal publication variables were atomically
+  aligned: `13` existing values were replaced and `3` missing values were
+  added. All other env lines, secrets, config, provider settings and
+  production remained unchanged. Compose validation passed before the
+  container update.
+- Only backend and frontend images were built and their containers recreated.
+  Backend is healthy at image
+  `sha256:d4767c8054a91588b4e368478a2080cb106e10f78602dda4cee641da152c6230`;
+  frontend is healthy at image
+  `sha256:ac57a632b1221a42fc9a9425c66ff2f5118fe6f040239453d7877e5d36e5b9ee`.
+  Both have restart count `0`. Nginx and PostgreSQL retained their exact
+  pre-rollout container/image identities, stayed healthy and have restart
+  count `0`.
+- Internal and external health returned HTTP `200`. The public unauthenticated
+  versioned Terms, Cancellation Policy, Privacy Policy and standalone PD
+  Consent URLs each returned HTTPS `200`, contained the exact configured
+  version, and contained no draft/placeholder banner. The former test-only
+  Terms URL returned `404`. Frontend URL/version values and backend immutable
+  policy versions matched exactly.
+- A deployed-frontend headless TMA contract smoke with mocked auth/API state
+  confirmed the completed-user stale-version gate, exactly `2` required
+  checkboxes, a disabled Continue action until both are checked, all four
+  exact public links, and the exact re-consent payload for `terms`,
+  `cancellation` and `personal_data_processing`. The mock intercepted the API
+  request and made no database write.
+- A live bearer re-consent write was intentionally not made to an unidentified
+  account. Read-only classification found stale fixtures, but none was both
+  provably synthetic and re-authenticatable without a retained credential or
+  recoverable Telegram subject. Final count-only verification therefore
+  remained `personal_data_processing=0` and published-version evidence rows
+  `0`; no real user was mutated. One owner-operated stale test-account TMA
+  smoke remains required and may append only the expected three immutable
+  consent rows through the normal API.
+- The final stable log window reported backend critical/HTTP 5xx `0/0`,
+  frontend critical `0`, nginx critical/HTTP 5xx `0/0` and PostgreSQL critical
+  `0`. Checkout remained exact and clean. No PostgreSQL/schema/migration,
+  nginx/TLS, other env/secret, provider or production change occurred.
+  Deployment status is
+  `deployment=applied_verified_except_owner_bearer_reconsent_tma_smoke_pending`.
+
+### 2026-08-25 — D5.3 legal version-label UI polish candidate
+
+- On exact local base `85e8768f1cef9290a82e1aa4760e7d6fc874dcf7`, the
+  onboarding and completed-user re-consent screens now display
+  `Редакция от 26.08.2026` instead of raw legal version identifiers. The date
+  is parsed and calendar-validated from the immutable version; a non-date or
+  inconsistent group falls back to `Актуальные редакции` without exposing a
+  technical identifier.
+- URLs, configured document versions, the three-item immutable consent
+  evidence payload, stale-version comparison and exactly two required
+  checkboxes are unchanged. Accessibility labels use the same readable
+  revision wording.
+- Focused component tests passed `10/10`; focused stale re-consent Playwright
+  passed `1/1`; full frontend unit passed `119/119` across `19` files; frontend
+  build passed with `1627` modules and only the existing large-chunk advisory.
+- Full root E2E reported `109` passed, `1` intentional skip and two unrelated
+  booking failures: the already recorded same-key refresh observed three
+  times calls instead of two, and a second booking contact case timed out
+  under the parallel run. Their focused sequential rerun passed `2/2`; no
+  booking runtime or test was changed.
+- Scoped ESLint for the three changed runtime/test files passed and
+  `git diff --check` passed. Repository-wide format and lint ratchets remain
+  red on the existing broader baseline; HEAD versions of all three touched
+  files were already Prettier-different, and this slice formatted only its new
+  lines rather than rewriting unrelated files.
+- Owner clarification: the current Selectel host is the primary project/server
+  and must not be presented to users as a test-named server. This local slice
+  did not rename the host, compose project, environment, DNS/TLS or URLs; that
+  requires a separate exact inventory and infrastructure gate. The naming
+  decision alone does not authorize production classification or bypass the
+  production approval gate.
+- No commit, push, merge, Selectel/server, DNS/TLS, DB/schema/migration,
+  runtime, env/secret, provider or production action occurred. Because this
+  changes the frontend bundle, deployment is
+  `deployment_deferred_by_user` pending separate checkpoint, integration and
+  rollout gates.
