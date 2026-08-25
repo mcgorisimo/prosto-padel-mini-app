@@ -8234,3 +8234,45 @@
   `c2a3f307...`; `deployment=pending_separate_owner_authorization` for commit,
   push and a frontend-only test rollout followed by health, authenticated TMA
   booking smoke and bounded logs.
+
+### 2026-08-25 — D2.1 canonical lime Selectel test rollout closeout
+
+- The owner authorized commit, push and Selectel test rollout. The clean
+  reviewed frontend checkpoint was committed and fast-forward pushed to
+  `main` as exact `239d4ef314915c7689d4d199285746958e29294d`.
+- Read-only preflight on `prosto-padel-test-01`, Compose project
+  `prosto-padel-test`, found the checkout clean at `c2a3f307...`, exact remote
+  target `239d4ef...`, valid `config --quiet` and all four containers healthy
+  with restart count `0`. The clean detached checkout advanced to exact
+  `239d4ef...` after fast-forward ancestry verification.
+- Frontend-only build ran from `2026-08-25T15:24:54Z`; it transformed `1627`
+  modules with only the existing large-chunk advisory and produced
+  `index-D_9k6MU3.js` plus `index-5eTQqx71.css`. Frontend container
+  `52356f04334c2b47db0f7d6153e68f9652a330849d258dc4926a912b536df882`
+  / image `sha256:2e35f61aa10205aa1e206dfd26c6d8eab5351eccf72c1b91e52abe2d3b2c6968`
+  was replaced by
+  `9b456b32f042f7b632873a8641e9662a1523ae45ba6593812463b167cc5ce013`
+  / image `sha256:c6d7455617728146d1a17c75b6cc192efcc931eefde54333e4b207eeace1bf14`.
+  The new frontend is healthy with restart count `0`.
+- Backend `ab732d5d43294409c620abd4abcf14eb660f970074b3b72ab9b8afae3ef80fae`,
+  nginx `e5b98b53a385aef67465e097753fb54b060596d3c620af3cfb484a175d624be7`
+  and PostgreSQL
+  `5e36d4dc1a5c3e2fa658382cfc4a8dff7fe3ea2ba1a9834bb89cc83df743f7be`
+  remained unchanged, healthy and at restart count `0`. No backend/DB/schema,
+  environment/secret, YCLIENTS/provider or production action occurred.
+- Frontend internal `/healthz`, internal nginx root, internal backend
+  `/api/v1/health`, public HTTPS frontend, public HTTPS backend health and both
+  exact JS/CSS assets returned `200`; public TLS verification was `0` at
+  `135.106.155.112`. Bounded rollout logs contained frontend `200 x4`, nginx
+  `200 x43` and critical/panic/fatal/unhandled `0` across frontend, nginx and
+  backend.
+- The already-open Telegram WebView still held stale pre-rollout UI state, so
+  it was not accepted as a smoke result. Computer Use stopped when the owner
+  pressed Escape before a fresh Mini App could be opened; no slot continuation,
+  Continue/payment, booking creation, message or API/provider write occurred.
+  The owner subsequently chose to perform the authenticated TMA smoke manually.
+  Deployment is
+  `applied_with_manual_owner_tma_smoke_pending`; the remaining owner checks are
+  canonical lime, `Не добавить` explanation, valid end-at-`00:00` ranges,
+  availability loading and unchanged Home bookings. This append-only closeout
+  is docs-only and requires no additional rollout.
