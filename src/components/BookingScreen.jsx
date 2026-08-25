@@ -547,6 +547,15 @@ export default function BookingScreen({
       : []
   ), [datesQueryKey, datesState.dates, datesState.queryKey]);
   const backendDateSet = useMemo(() => new Set(backendDates), [backendDates]);
+  const backendDateBlocksTimes = usesBackendAvailability &&
+    datesState.queryKey === datesQueryKey &&
+    (
+      datesState.status === 'error' ||
+      (
+        datesState.status === 'ready' &&
+        !backendDateSet.has(selectedDateISO)
+      )
+    );
 
   useEffect(() => {
     if (
@@ -579,26 +588,9 @@ export default function BookingScreen({
     if (
       !usesBackendAvailability ||
       isReservationDetailsMode ||
-      datesState.status !== 'ready' ||
-      datesState.queryKey !== datesQueryKey ||
       queryServiceCourtPairs.length === 0 ||
       queryCourtIds.length === 0
     ) {
-      return undefined;
-    }
-    if (!backendDateSet.has(selectedDateISO)) {
-      setTimesState((current) => (
-        current.status === 'ready' &&
-        current.queryKey === timesQueryKey &&
-        current.slots.length === 0
-          ? current
-          : {
-              status: 'ready',
-              queryKey: timesQueryKey,
-              slots: [],
-              partial: false,
-            }
-      ));
       return undefined;
     }
     let active = true;
@@ -678,10 +670,6 @@ export default function BookingScreen({
   }, [
     availabilityActions,
     backendCourts,
-    backendDateSet,
-    datesQueryKey,
-    datesState.queryKey,
-    datesState.status,
     isReservationDetailsMode,
     queryCourtIds,
     queryServiceCourtPairs,
@@ -691,10 +679,15 @@ export default function BookingScreen({
   ]);
 
   const backendTimeSlots = useMemo(() => (
-    timesState.queryKey === timesQueryKey
+    !backendDateBlocksTimes && timesState.queryKey === timesQueryKey
       ? timesState.slots
       : []
-  ), [timesQueryKey, timesState.queryKey, timesState.slots]);
+  ), [
+    backendDateBlocksTimes,
+    timesQueryKey,
+    timesState.queryKey,
+    timesState.slots,
+  ]);
 
   const selectedDate = dates.find((item) => item.dateISO === selectedDateISO) ?? dates[0];
   const displayedCourts = usesBackendAvailability ? backendCourts : COURTS;
@@ -749,6 +742,12 @@ export default function BookingScreen({
 
     if (isPastSlot(selectedDateISO, time)) {
       return { state: 'past' };
+    }
+
+    if (backendDateBlocksTimes) {
+      return {
+        state: datesState.status === 'error' ? 'unknown' : 'unavailable',
+      };
     }
 
     if (usesBackendAvailability && timesState.queryKey !== timesQueryKey) {
@@ -1291,34 +1290,6 @@ export default function BookingScreen({
         </div>
       </section>
 
-      {selectedRange && (
-        <section
-          data-testid="booking-selection-summary"
-          className="booking-selection-summary mb-5"
-          aria-live="polite"
-        >
-          <div>
-            <div className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-warm-white/42">
-              Выбранный интервал
-            </div>
-            <div className="mt-1 text-lg font-black tabular-nums">
-              {selectedStartTime}–{selectedEndTime}
-            </div>
-            <div className="mt-1 text-xs text-warm-white/58">
-              {formatDuration(duration)} · {selectedOption ? fmtPrice(totalPrice) : 'добавьте соседний слот'}
-            </div>
-          </div>
-          <button
-            type="button"
-            className="booking-selection-continue"
-            disabled={!selectedOption}
-            onClick={() => setIsBookingSheetOpen(true)}
-          >
-            Продолжить
-          </button>
-        </section>
-      )}
-
       {selectionHint && (
         <p
           data-testid="booking-selection-hint"
@@ -1373,6 +1344,34 @@ export default function BookingScreen({
           </div>
         ))}
       </section>
+
+      {selectedRange && (
+        <section
+          data-testid="booking-selection-summary"
+          className="booking-selection-summary mb-5"
+          aria-live="polite"
+        >
+          <div>
+            <div className="booking-selection-label text-[10px] font-extrabold uppercase tracking-[0.16em]">
+              Выбранный интервал
+            </div>
+            <div className="mt-1 text-lg font-black tabular-nums">
+              {selectedStartTime}–{selectedEndTime}
+            </div>
+            <div className="booking-selection-meta mt-1 text-xs">
+              {formatDuration(duration)} · {selectedOption ? fmtPrice(totalPrice) : 'добавьте соседний слот'}
+            </div>
+          </div>
+          <button
+            type="button"
+            className="booking-selection-continue"
+            disabled={!selectedOption}
+            onClick={() => setIsBookingSheetOpen(true)}
+          >
+            Продолжить
+          </button>
+        </section>
+      )}
 
       {selectedOption && isBookingSheetOpen && createPortal(
         <div className="booking-sheet-overlay" role="presentation" onClick={handleCloseConfirm}>

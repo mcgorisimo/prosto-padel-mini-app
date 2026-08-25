@@ -8093,3 +8093,53 @@
   the previous reservation card and unchanged Home bookings remains pending;
   `deployment=applied_with_manual_tma_d21_smoke_pending`. This closeout is
   docs-only and requires no additional rollout.
+
+### 2026-08-25 — D2.1 slot presentation and loading follow-up (local)
+
+- Started from clean detached exact `main=origin/main`
+  `bb148eda0cf5df9320e1a42374abf89301eb78f5`; the currently verified Selectel
+  test frontend remains the earlier D2.1 runtime commit
+  `2cf2cae0f836a425ba70e06658b7548fa89edd1f`.
+- The selected-range summary now follows the complete slot grid. Selected
+  30-minute tiles use a bright-green, dark-text state while retaining the
+  explicit `Выбрано` label; the summary and its continue action use layered
+  highlights, edges and inset/drop shadows for a compact raised treatment.
+  The confirmation sheet and the rest of the booking screen were unchanged.
+- Root cause of the slower perceived availability load: the duration-free
+  range selector correctly loads all four provider duration services, but its
+  time requests were also gated behind completion of every service/court date
+  request. This serialized `services -> courts -> dates -> times`. Dates and
+  times now start together once the same bounded service/court pairs are
+  ready, giving `services -> courts -> (dates || times)` on the initially
+  selected date without changing the exact-pair or per-batch request bounds.
+  If the resolved catalog advances the selection to a later date, one second
+  bounded time batch is required for that new date. A regression holds all
+  five date reads unresolved and proves all five initial time reads and a
+  selectable slot are already available; another proves that a late empty
+  catalog suppresses those early slots and clears the range, while a shifted
+  catalog produces exactly the initial and replacement single-pair batches.
+- Focused booking regressions passed `2/2`; root unit tests passed `116/116`
+  across `19` files; production build passed with `1627` transformed modules
+  and only the existing large-chunk advisory; `git diff --check` passed. The
+  first full E2E run had one overloaded parallel-WebKit click timeout after
+  `105` passes and `1` intentional skip; that exact test then passed focused
+  in `2.9s`, and a clean full repeat passed `106` with `1` intentional skip.
+  After the date-catalog fail-closed regression was added, the final full gate
+  passed `107` with `1` intentional skip.
+  The repository lint gate still reports its existing baseline of `31` errors
+  across previously changed files, including the pre-existing unused default
+  `React` import in `BookingScreen.jsx`; this slice did not add a lint finding.
+  The format ratchet likewise reports the existing edited legacy-file
+  baseline and was not addressed with an out-of-scope bulk reformat.
+- The independent reviewer found `P0=0`, `P1=2` in the first diff: early time
+  results were not suppressed after a late empty/error date catalog, and the
+  read-count claim omitted the replacement batch after a date shift. Both
+  were corrected with matching regressions and truthful bounded-batch
+  documentation. Final exact-diff review is clean with `P0=0`, `P1=0`; the
+  reviewer changed no file or external state.
+- This candidate changes the frontend bundle. No commit, push, merge, Selectel
+  action, backend/DB/schema mutation, YCLIENTS/provider write or production
+  action was performed. Health/HTTP, authenticated TMA smoke and bounded logs
+  therefore remain unchanged from the prior rollout;
+  `deployment=deployment_deferred_by_user` pending a separate clean-review,
+  commit/integration and Selectel test rollout authorization.
