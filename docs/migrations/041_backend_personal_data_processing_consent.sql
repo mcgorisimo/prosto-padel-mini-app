@@ -135,14 +135,11 @@ begin
          and not trigger_row.tgisinternal
          and trigger_row.tgname =
            'account_consent_acceptances_immutable_guard'
-         and pg_catalog.strpos(
-           pg_catalog.pg_get_triggerdef(trigger_row.oid, false),
-           'BEFORE UPDATE OR DELETE'
-         ) > 0
-         and pg_catalog.strpos(
-           pg_catalog.pg_get_triggerdef(trigger_row.oid, false),
-           'reject_immutable_mutation()'
-         ) > 0
+         -- pg_trigger.tgtype = ROW (1) | BEFORE (2) | DELETE (8) | UPDATE (16).
+         and trigger_row.tgtype = 27
+         and trigger_row.tgfoid = v_immutable_oid
+         and trigger_row.tgenabled = 'O'
+         and trigger_row.tgconstraint = 0
      ) <> 1 then
     raise exception 'MIGRATION_PRECONDITION_FAILED: consent immutability trigger differs';
   end if;
@@ -465,6 +462,8 @@ declare
     'backend_auth.player_initial_level_reassessments'::pg_catalog.regclass::oid;
   v_guard_oid oid :=
     'backend_auth.guard_player_onboarding_state_transition()'::pg_catalog.regprocedure::oid;
+  v_immutable_oid oid :=
+    'backend_auth.reject_immutable_mutation()'::pg_catalog.regprocedure::oid;
   v_guard_definition text;
   v_column text;
   v_execute_acl_count bigint;
@@ -533,14 +532,11 @@ begin
          and not trigger_row.tgisinternal
          and trigger_row.tgname =
            'account_consent_acceptances_immutable_guard'
-         and pg_catalog.strpos(
-           pg_catalog.pg_get_triggerdef(trigger_row.oid, false),
-           'BEFORE UPDATE OR DELETE'
-         ) > 0
-         and pg_catalog.strpos(
-           pg_catalog.pg_get_triggerdef(trigger_row.oid, false),
-           'reject_immutable_mutation()'
-         ) > 0
+         -- pg_trigger.tgtype = ROW (1) | BEFORE (2) | DELETE (8) | UPDATE (16).
+         and trigger_row.tgtype = 27
+         and trigger_row.tgfoid = v_immutable_oid
+         and trigger_row.tgenabled = 'O'
+         and trigger_row.tgconstraint = 0
      ) <> 1 then
     raise exception 'MIGRATION_ASSERTION_FAILED: consent immutability trigger differs';
   end if;

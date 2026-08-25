@@ -26,6 +26,10 @@ const MIGRATION_037 = readFileSync(
   'utf8',
 );
 const SQL_ARTIFACTS = [MIGRATION, PRECHECK, POSTCHECK, ROLLBACK];
+const POSTGRESQL_14_IMMUTABLE_TRIGGER_DEFINITION =
+  'CREATE TRIGGER account_consent_acceptances_immutable_guard ' +
+  'BEFORE DELETE OR UPDATE ON backend_auth.account_consent_acceptances ' +
+  'FOR EACH ROW EXECUTE FUNCTION backend_auth.reject_immutable_mutation()';
 
 function compact(value: string): string {
   return value.replace(/\s+/gu, ' ').trim().toLowerCase();
@@ -220,6 +224,37 @@ describe('migration 041 personal data processing consent contract', () => {
     expect(rollback).toContain(
       "'037_backend_player_onboarding_progress_transition:' || pg_catalog.md5",
     );
+  });
+
+  it('validates the immutable trigger structurally for PostgreSQL canonical event order', () => {
+    expect(POSTGRESQL_14_IMMUTABLE_TRIGGER_DEFINITION).toContain(
+      'BEFORE DELETE OR UPDATE',
+    );
+
+    const structurallyCheckedArtifacts = [MIGRATION, PRECHECK, POSTCHECK].map(
+      compact,
+    );
+    for (const artifact of structurallyCheckedArtifacts) {
+      expect(artifact).toContain('trigger_row.tgtype = 27');
+      expect(artifact).toContain('trigger_row.tgfoid = v_immutable_oid');
+      expect(artifact).toContain("trigger_row.tgenabled = 'o'");
+      expect(artifact).toContain('trigger_row.tgconstraint = 0');
+      expect(artifact).not.toContain('before update or delete');
+      expect(artifact).not.toContain('before delete or update');
+      expect(artifact).not.toContain(
+        'pg_catalog.pg_get_triggerdef(trigger_row.oid',
+      );
+    }
+    expect(compact(MIGRATION).split('trigger_row.tgtype = 27')).toHaveLength(3);
+
+    for (const applyBlock of [
+      between(MIGRATION, 'do $preconditions$', '$preconditions$;'),
+      between(MIGRATION, 'do $assertions$', '$assertions$;'),
+    ].map(compact)) {
+      expect(applyBlock).toContain('v_immutable_oid oid :=');
+      expect(applyBlock).toContain('backend_auth.reject_immutable_mutation()');
+      expect(applyBlock).toContain('trigger_row.tgfoid = v_immutable_oid');
+    }
   });
 
   it('provides read-only evidence gates with deterministic comparison data', () => {

@@ -145,6 +145,22 @@ begin
     raise exception 'POSTCHECK_FAILED: consent immutability trigger set differs';
   end if;
 
+  if (
+       select pg_catalog.count(*)
+       from pg_catalog.pg_trigger trigger_row
+       where trigger_row.tgrelid = v_acceptance_oid
+         and not trigger_row.tgisinternal
+         and trigger_row.tgname =
+           'account_consent_acceptances_immutable_guard'
+         -- pg_trigger.tgtype = ROW (1) | BEFORE (2) | DELETE (8) | UPDATE (16).
+         and trigger_row.tgtype = 27
+         and trigger_row.tgfoid = v_immutable_oid
+         and trigger_row.tgenabled = 'O'
+         and trigger_row.tgconstraint = 0
+     ) <> 1 then
+    raise exception 'POSTCHECK_FAILED: consent immutability trigger differs';
+  end if;
+
   if not pg_catalog.has_table_privilege(
        'backend_auth_app',
        v_acceptance_oid,

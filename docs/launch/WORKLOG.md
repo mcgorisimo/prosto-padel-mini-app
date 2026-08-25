@@ -7879,3 +7879,60 @@
   performed. This runtime-disconnected candidate has
   `deployment=not_applied_not_needed_for_candidate`; DB/schema apply is a
   separate future gate.
+
+### 2026-08-25 — D5.3 migration 041 failed apply recovery and local correction
+
+- The separately approved Selectel test apply used exact integrated commit
+  `b81000c2366dbc6bfe8c4850d9f70820e947ce88`. Exact artifacts matched their
+  canonical Git blobs; the server checkout was clean at
+  `f456965877fe6f617c5e50552d1bd9e70a6cf4e0`, and remote `main` was exact
+  `b81000c2366dbc6bfe8c4850d9f70820e947ce88`.
+- Only the existing backend was stopped. A verified custom-format backup was
+  retained in root-only directory
+  `/root/prosto-padel-db-backups/migration041_20260825T111500Z_b81000c`:
+  `557100` bytes, mode `0600`, SHA-256
+  `1fdb36487c96e26e508118d8ded147794840913513129ffac68b20ba723d5844`;
+  `pg_restore --list` passed without restoring data.
+- Exact read-only PRECHECK passed with `ready=true`, `21` immutable consent
+  rows, by-kind counts `terms=7`, `privacy=7`, `cancellation=7`, evidence
+  digest `104ef7a592b832b97cd3d04f78cd1c01` and zero
+  `personal_data_processing` rows. The migration then failed closed inside its
+  initial precondition block with `MIGRATION_PRECONDITION_FAILED: consent
+  immutability trigger differs`; no DDL preceded that block and no `COMMIT`
+  occurred, so session termination rolled back the open transaction. POSTCHECK
+  and the separate ROLLBACK artifact were not run.
+- The separately approved read-only recovery repeated PRECHECK with the exact
+  same row count, by-kind counts and digest. PostgreSQL 14.23 reported the
+  existing immutable trigger canonically as `BEFORE DELETE OR UPDATE`; the
+  candidate had incorrectly searched text output for `BEFORE UPDATE OR
+  DELETE`. This was an artifact validation defect, not schema or evidence
+  drift.
+- The same backend container
+  `ab732d5d43294409c620abd4abcf14eb660f970074b3b72ab9b8afae3ef80fae`
+  and image
+  `sha256:e807806a6768cbb76aab96a0409079ed07f3243e42b2e2ed02c1c61927a6da35`
+  restarted without recreate/build at restart count `0` and became healthy.
+  Internal and public HTTPS health returned `200`, TLS verification returned
+  `0`, and the stable post-healthy logs were clean; one expected nginx `502`
+  occurred only during backend startup before health became green.
+- The local correction started from clean exact
+  `b81000c2366dbc6bfe8c4850d9f70820e947ce88`. PRECHECK, apply precondition,
+  apply assertion and POSTCHECK now validate the trigger through structured
+  `pg_trigger` fields (`tgtype`, `tgfoid`, `tgenabled`, `tgconstraint`) instead
+  of `pg_get_triggerdef` event text. A focused regression pins PostgreSQL's
+  observed `BEFORE DELETE OR UPDATE` representation and rejects either textual
+  ordering dependency.
+- Focused migration-contract tests passed `10/10`. Mandatory backend gates
+  passed: typecheck, unit `3795/3795` across `162` suites, E2E `4/4` across `2`
+  suites, and build. The first root E2E gate had two unrelated UI
+  timeout/state failures (`104` passed, `1` skipped); their isolated low-load
+  rerun passed `2/2`, and the full four-worker rerun passed `106` with `1`
+  intentional skip. Root production build passed with `1626` modules and only
+  the existing large-chunk advisory.
+- Independent read-only review of the exact correction diff completed with
+  `P0=0`, `P1=0` and acceptance PASS after its one finding, an undeclared
+  assertion-block `v_immutable_oid`, was corrected and regression-tested. The
+  correction itself has not been applied to any database. No commit, push,
+  merge, new Selectel/DB command, runtime/container action, provider/API write,
+  environment/secret change or production action occurred during this local
+  correction; `deployment=not_applied_not_needed_for_local_candidate`.
