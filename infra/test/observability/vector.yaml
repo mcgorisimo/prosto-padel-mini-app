@@ -22,7 +22,15 @@ transforms:
       - docker_gelf
     source: |
       .environment = "test"
-      .service = to_string(.tag) ?? to_string(.container_name) ?? "unknown"
+      container_tag = to_string(._tag) ?? ""
+      container_name = to_string(._container_name) ?? ""
+      if container_tag != "" {
+        .service = container_tag
+      } else if container_name != "" {
+        .service = container_name
+      } else {
+        .service = "unknown"
+      }
       .event = "unclassified"
       .domain = "none"
       .level = to_string(.level) ?? "unknown"

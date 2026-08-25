@@ -56,6 +56,8 @@ Assert-Contains $nginx 'location = /api/v1/metrics\s*\{\s*access_log off;\s*retu
 Assert-Contains $nginx 'location = /api/v1/metrics/\s*\{\s*access_log off;\s*return 404;' 'OBSERVABILITY_PUBLIC_METRICS_TRAILING_SLASH_NOT_BLOCKED'
 
 Assert-Contains $vector 'type:\s+socket' 'OBSERVABILITY_VECTOR_GELF_SOURCE_MISSING'
+Assert-Contains $vector 'container_tag = to_string\(\._tag\) \?\? ""' 'OBSERVABILITY_VECTOR_DOCKER_TAG_NORMALIZATION_MISSING'
+Assert-Contains $vector 'container_name = to_string\(\._container_name\) \?\? ""' 'OBSERVABILITY_VECTOR_CONTAINER_NAME_NORMALIZATION_MISSING'
 Assert-Contains $vector 'type:\s+loki' 'OBSERVABILITY_VECTOR_LOKI_SINK_MISSING'
 Assert-Contains $vector 'type:\s+prometheus_exporter' 'OBSERVABILITY_VECTOR_METRICS_MISSING'
 Assert-Contains $loki 'retention_period:\s+336h' 'OBSERVABILITY_LOKI_RETENTION_INVALID'

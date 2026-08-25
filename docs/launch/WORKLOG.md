@@ -8999,3 +8999,10 @@
   bridge with IP masquerading disabled: it permits host-loopback delivery from
   the Docker daemon without attaching application/data services or granting
   ordinary internet NAT. Application containers still have not been recreated.
+- Recreating only Vector with that bridge produced the expected loopback UDP
+  NAT binding. Raw and real Docker GELF probes reached the collector; Vector
+  received/transformed/sent the events to Loki with an empty disk queue, and
+  the exact synthetic marker was found by a Loki content query. Runtime
+  inspection also showed Docker GELF metadata uses `_tag`/`_container_name`,
+  so the bounded service-label normalizer was corrected from the absent
+  non-underscore fields before application container rollout.
