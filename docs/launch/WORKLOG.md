@@ -9006,3 +9006,11 @@
   inspection also showed Docker GELF metadata uses `_tag`/`_container_name`,
   so the bounded service-label normalizer was corrected from the absent
   non-underscore fields before application container rollout.
+- At exact `5e95728`, service-label lookup passed, the four application
+  containers were recreated with GELF and became healthy with restart count
+  `0`; public health was `200`, both public metrics path forms were `404`, and
+  the internal metric release plus backend Loki label were exact. The remaining
+  observability services also became healthy/running with restart count `0`.
+  Grafana's configured loopback port then showed the same Docker internal-only
+  NAT limitation, so a separate Grafana-only access bridge with masquerading
+  disabled was added before operator/dashboard verification.
