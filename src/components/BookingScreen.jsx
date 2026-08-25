@@ -7,6 +7,7 @@ import { getBackendBookingStatusPresentation } from '../lib/backendBookingHomeAd
 import { getMoscowDateRange, hasMoscowSlotStarted } from '../lib/moscowDateTime';
 import {
   MIN_PRIVATE_BOOKING_SLOTS,
+  MAX_PRIVATE_BOOKING_SLOTS,
   PRIVATE_BOOKING_SLOT_MINUTES,
   findPrivateBookingRangeOption,
   formatPrivateBookingMinute,
@@ -22,6 +23,11 @@ const PAYMENT_PROVIDER_READY = false;
 const MAX_BOOKING_SERVICE_VARIANTS = 16;
 const MAX_BOOKING_QUERY_COURTS = 8;
 const MAX_BOOKING_AVAILABILITY_REQUESTS = 64;
+const PRIVATE_BOOKING_DURATIONS = BOOKING_DURATIONS.filter(
+  (duration) =>
+    duration * 60 <=
+    MAX_PRIVATE_BOOKING_SLOTS * PRIVATE_BOOKING_SLOT_MINUTES,
+);
 
 const TIME_SECTIONS = [
   { id: 'morning', title: 'Утро', from: 7 * 60, to: 12 * 60 },
@@ -105,7 +111,7 @@ function getSlotLabel(state) {
 }
 
 function getSelectionHint(reason, targetMinute, range = null) {
-  if (reason === 'maximum') return 'Можно выбрать не больше 2,5 часа.';
+  if (reason === 'maximum') return 'Можно выбрать не больше 2 часов.';
   if (reason === 'gap') return 'Выбирайте только соседние слоты без разрывов.';
   if (reason === 'minimum' && targetMinute === 23 * 60 + 30) {
     return 'Начните не позднее 23:00: минимум бронирования — 1 час.';
@@ -137,7 +143,7 @@ function readRentalServiceDuration(title) {
   const match = /^Аренда корта\s+(\d+(?:[.,]\d+)?)\s*ч\./iu.exec(title);
   if (!match) return null;
   const duration = Number(match[1].replace(',', '.'));
-  return BOOKING_DURATIONS.includes(duration) ? duration : null;
+  return PRIVATE_BOOKING_DURATIONS.includes(duration) ? duration : null;
 }
 
 function groupRentalServices(services) {
@@ -149,7 +155,7 @@ function groupRentalServices(services) {
     current.push(service);
     groups.set(duration, current);
   }
-  return BOOKING_DURATIONS.flatMap((duration) => {
+  return PRIVATE_BOOKING_DURATIONS.flatMap((duration) => {
     const matchingServices = groups.get(duration);
     return matchingServices
       ? [{ duration, services: matchingServices }]
@@ -278,6 +284,7 @@ export default function BookingScreen({
     queryKey: '',
     dates: [],
   });
+  const datesRequestKeyRef = useRef('');
   const [timesState, setTimesState] = useState({
     status: 'idle',
     queryKey: '',
@@ -361,6 +368,9 @@ export default function BookingScreen({
     if (!usesBackendAvailability || isReservationDetailsMode) return;
     const requestId = servicesRequestRef.current + 1;
     servicesRequestRef.current = requestId;
+    datesRequestKeyRef.current = '';
+    setDatesState({ status: 'idle', queryKey: '', dates: [] });
+    setTimesState({ status: 'idle', queryKey: '', slots: [], partial: false });
     setServicesState({ status: 'loading', groups: [] });
 
     try {
@@ -444,11 +454,12 @@ export default function BookingScreen({
         courts,
         pairs,
       });
-      setCourtId((current) => (
-        current === ANY_COURT || courts.some((court) => court.id === current)
+      setCourtId((current) => {
+        const fallbackCourtId = courts[0]?.id ?? ANY_COURT;
+        return current !== ANY_COURT && courts.some((court) => court.id === current)
           ? current
-          : ANY_COURT
-      ));
+          : fallbackCourtId;
+      });
     }).catch(() => {
       if (active) {
         setCourtsState({ status: 'error', serviceKey, courts: [], pairs: [] });
@@ -503,6 +514,7 @@ export default function BookingScreen({
     serviceDurationById,
   ]);
   const datesQueryKey = `${selectedServiceKey}|${queryCourtKey}`;
+  const initialTimesQueryKey = `${datesQueryKey}|${selectedDateISO}`;
 
   useEffect(() => {
     if (
@@ -511,12 +523,19 @@ export default function BookingScreen({
       courtsState.status !== 'ready' ||
       queryServiceCourtPairs.length === 0 ||
       queryCourtIds.length === 0 ||
-      dates.length === 0
+      dates.length === 0 ||
+      timesState.status !== 'ready' ||
+      timesState.queryKey !== initialTimesQueryKey
     ) {
       return undefined;
     }
+    if (datesRequestKeyRef.current === datesQueryKey) {
+      return undefined;
+    }
     let active = true;
+    let settled = false;
     const queryKey = datesQueryKey;
+    datesRequestKeyRef.current = queryKey;
     if (
       queryCourtIds.length > MAX_BOOKING_QUERY_COURTS ||
       queryServiceCourtPairs.length > MAX_BOOKING_AVAILABILITY_REQUESTS
@@ -535,26 +554,36 @@ export default function BookingScreen({
 
     void Promise.all(requests).then((results) => {
       if (!active) return;
+      settled = true;
       if (results.some((result) => result?.outcome !== 'dates_loaded')) {
         setDatesState({ status: 'error', queryKey, dates: [] });
         return;
       }
       setDatesState({ status: 'ready', queryKey, dates: mergeDates(results) });
     }).catch(() => {
-      if (active) setDatesState({ status: 'error', queryKey, dates: [] });
+      if (active) {
+        settled = true;
+        setDatesState({ status: 'error', queryKey, dates: [] });
+      }
     });
 
     return () => {
       active = false;
+      if (!settled && datesRequestKeyRef.current === queryKey) {
+        datesRequestKeyRef.current = '';
+      }
     };
   }, [
     availabilityActions,
     courtsState.status,
     dates,
     datesQueryKey,
+    initialTimesQueryKey,
     isReservationDetailsMode,
     queryCourtIds,
     queryServiceCourtPairs,
+    timesState.queryKey,
+    timesState.status,
     usesBackendAvailability,
   ]);
 
@@ -634,7 +663,7 @@ export default function BookingScreen({
           ? [{ request: requests[index], result }]
           : []
       ));
-      if (loadedResults.length === 0) {
+      if (loadedResults.length !== results.length) {
         setTimesState({ status: 'error', queryKey, slots: [], partial: false });
         return;
       }
@@ -673,7 +702,7 @@ export default function BookingScreen({
         status: 'ready',
         queryKey,
         slots: validSlots,
-        partial: loadedResults.length < results.length,
+        partial: false,
       });
     }).catch(() => {
       if (active) {
@@ -713,7 +742,7 @@ export default function BookingScreen({
     const candidates = courtId === ANY_COURT
       ? COURTS
       : COURTS.filter((court) => court.id === courtId);
-    return BOOKING_DURATIONS.flatMap((optionDuration) =>
+    return PRIVATE_BOOKING_DURATIONS.flatMap((optionDuration) =>
       times.flatMap(({ time, minute }) =>
         candidates.flatMap((court) => (
           checkAvailability(
@@ -812,9 +841,7 @@ export default function BookingScreen({
         backendDates.length === 0
       ? 'Для выбранного корта нет доступных дат.'
     : timesState.status === 'ready' && timesState.queryKey === timesQueryKey
-      ? timesState.partial
-        ? 'Показаны доступные слоты. Часть вариантов услуги временно недоступна.'
-        : 'Показаны актуальные свободные слоты клуба.'
+      ? 'Показаны актуальные свободные слоты клуба.'
       : 'Загружаем актуальные свободные слоты…';
 
   useEffect(() => {
@@ -1219,7 +1246,7 @@ export default function BookingScreen({
         </div>
         <h1 className="booking-title text-[30px] font-black leading-tight">Бронирование корта</h1>
         <p className="booking-subtitle text-sm leading-relaxed text-warm-white/58">
-          Выберите соседние свободные интервалы от 1 до 2,5 часа.
+          Выберите соседние свободные интервалы от 1 до 2 часов.
         </p>
       </header>
 

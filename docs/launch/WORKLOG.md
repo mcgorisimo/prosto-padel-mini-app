@@ -8276,3 +8276,41 @@
   canonical lime, `Не добавить` explanation, valid end-at-`00:00` ranges,
   availability loading and unchanged Home bookings. This append-only closeout
   is docs-only and requires no additional rollout.
+
+### 2026-08-25 — D2.1 maximum two-hour range and complete availability checkpoint
+
+- Started locally from clean detached exact `HEAD=origin/main`
+  `bc78229491df88b1a43691a2575c587a691873ba`; Selectel test remains on
+  frontend exact `239d4ef314915c7689d4d199285746958e29294d`. A bounded read-only
+  provider preflight found only the six active rental variants for `1`, `1.5`
+  and `2` hours (standard/prime), with no active `2.5`-hour rental service.
+  It also proved exact prime service `30539748` on court `5730531` at `19:00`
+  returns `seance_length=5400`, so `19:00–20:30` is provider-bookable.
+- Private booking now permits two through four adjacent 30-minute tiles: one
+  hour minimum and two hours maximum. The frontend catalog and fallback
+  availability mapping ignore unsupported `2.5`-hour variants, the fifth tile
+  is rejected with the truthful two-hour hint, and valid ranges ending exactly
+  at `00:00` remain supported.
+- Root cause of the false `Не добавить` for a valid 1.5-hour range was an
+  incomplete duration batch: the client could time out while backend provider
+  reads were queued, but the screen treated the remaining successful duration
+  results as a complete availability answer. The screen now starts with one
+  concrete court, loads exact times before the wider date catalog, and fails
+  closed on any incomplete duration batch instead of inventing occupancy.
+  Refresh invalidates old date/time readiness, so same-key refreshes cannot
+  start date reads from stale times. Regressions cover incomplete batches,
+  A→B→A court switching and same-key pull refresh.
+- Focused booking E2E passed `16/16`; root unit tests passed `116/116` across
+  `19` files; production build passed with `1627` modules and only the existing
+  large-chunk advisory; stable full E2E passed `110` with `1` intentional skip
+  using `6` workers. `git diff --check` passed. Backend files were not changed,
+  so backend gates were not applicable.
+- Independent review first found `P0=0`, `P1=1` for A→B→A date-request dedupe;
+  after its fix it found another `P1` for stale same-key refresh readiness.
+  Both have focused regressions. Final exact-diff review is clean with `P0=0`,
+  `P1=0`; the reviewer changed no file or external state.
+- This checkpoint changes the frontend bundle only. No commit, push, merge,
+  Selectel rollout, backend/DB/schema, YCLIENTS/provider write, payment runtime
+  or production action was performed. `deployment=pending_separate_owner_authorization`:
+  the next gate is commit/integration and a frontend-only Selectel test rollout,
+  followed by health/HTTP, owner-run authenticated TMA smoke and bounded logs.

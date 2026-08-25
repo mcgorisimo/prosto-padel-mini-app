@@ -15,8 +15,8 @@ function option(startMinute, durationSlots) {
 }
 
 describe('private booking 30-minute range selection', () => {
-  it('keeps one slot incomplete and accepts exact continuous ranges from 1 to 2.5 hours', () => {
-    const options = [2, 3, 4, 5].map((durationSlots) =>
+  it('keeps one slot incomplete and accepts exact continuous ranges from 1 to 2 hours', () => {
+    const options = [2, 3, 4].map((durationSlots) =>
       option(22 * 60, durationSlots),
     );
     let result = updatePrivateBookingRange({
@@ -75,7 +75,7 @@ describe('private booking 30-minute range selection', () => {
     }
   });
 
-  it('rejects 23:30 as a start, gaps, occupied continuations and a sixth slot', () => {
+  it('rejects 23:30 as a start, gaps, occupied continuations and a fifth slot', () => {
     const longOption = option(21 * 60, MAX_PRIVATE_BOOKING_SLOTS);
     expect(
       updatePrivateBookingRange({
@@ -114,13 +114,17 @@ describe('private booking 30-minute range selection', () => {
 
     result = {
       outcome: 'selected',
-      range: { startMinute: 21 * 60, slotCount: 5, courtId: court.id },
+      range: {
+        startMinute: 21 * 60,
+        slotCount: MAX_PRIVATE_BOOKING_SLOTS,
+        courtId: court.id,
+      },
     };
     expect(
       updatePrivateBookingRange({
         range: result.range,
-        targetMinute: 23 * 60 + 30,
-        options: [option(21 * 60, 6)],
+        targetMinute: 23 * 60,
+        options: [option(21 * 60, MAX_PRIVATE_BOOKING_SLOTS + 1)],
       }),
     ).toMatchObject({ outcome: 'rejected', reason: 'maximum' });
   });

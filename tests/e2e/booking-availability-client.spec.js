@@ -847,7 +847,7 @@ test('builds one bounded private range and keeps payment honest', async ({ page 
       (call) => call.operation === 'times',
     ).length,
     settledDateRequests: window.__bookingReadOnlySummary.settledDateRequests,
-  }))).toEqual({ dates: 5, times: 5, settledDateRequests: 0 });
+  }))).toEqual({ dates: 3, times: 3, settledDateRequests: 0 });
   await expect(root.getByRole('button', { name: '17:00–17:30 Свободно' })).toBeEnabled();
   await page.evaluate(() => window.__bookingReadOnlySummary.releaseDates());
   await expect(root.getByTestId('booking-availability-status')).toHaveText(
@@ -940,14 +940,13 @@ test('builds one bounded private range and keeps payment honest', async ({ page 
 
   await slot('18:00').click();
   await slot('18:30').click();
+  await expect(selection).toContainText('17:00–19:00');
+  await expect(selection).toContainText('2 ч · 8 800 ₽');
   await slot('19:00').click();
-  await expect(selection).toContainText('17:00–19:30');
-  await expect(selection).toContainText('2,5 ч · 11 000 ₽');
-  await slot('19:30').click();
   await expect(root.getByTestId('booking-selection-hint')).toContainText(
-    'не больше 2,5 часа',
+    'не больше 2 часов',
   );
-  await expect(selection).toContainText('17:00–19:30');
+  await expect(selection).toContainText('17:00–19:00');
   await expect(slot('20:30', 'Недоступно')).toBeDisabled();
 
   await anyCourt.click();
@@ -1041,16 +1040,79 @@ test('builds one bounded private range and keeps payment honest', async ({ page 
   expect(summary.writes).toBe(0);
   expect(summary.lists).toBe(0);
   expect(summary.calls.filter((call) => ['create', 'read', 'link'].includes(call.operation))).toEqual([]);
-  expect(summary.calls.filter((call) => call.operation === 'courts')).toHaveLength(4);
-  expect(summary.calls.filter((call) => call.operation === 'dates')).toHaveLength(5);
-  expect(summary.calls.filter((call) => call.operation === 'times')).toHaveLength(5);
+  expect(summary.calls.filter((call) => call.operation === 'courts')).toHaveLength(3);
+  expect(summary.calls.filter((call) => call.operation === 'dates')).toHaveLength(7);
+  expect(summary.calls.filter((call) => call.operation === 'times')).toHaveLength(7);
+  expect(summary.calls.some((call) => call.serviceId === 30539801)).toBe(false);
   expect(summary.calls.filter((call) =>
     ['dates', 'times'].includes(call.operation) && call.courtId === 5762241,
   )).toEqual([
-    expect.objectContaining({ operation: 'dates', serviceId: 30539679 }),
     expect.objectContaining({ operation: 'times', serviceId: 30539679 }),
+    expect.objectContaining({ operation: 'dates', serviceId: 30539679 }),
   ]);
   await expect(root.getByTestId('booking-reservation-card')).toHaveCount(0);
+});
+
+test('fails closed instead of treating an incomplete duration batch as occupied', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-08-05T06:00:00.000Z') });
+  await isolateComponentHarness(page);
+
+  await page.evaluate(async () => {
+    const reactModule = await import('/@id/react');
+    const React = reactModule.default ?? reactModule;
+    const reactDomClientModule = await import('/@id/react-dom/client');
+    const { createRoot } = reactDomClientModule.default ?? reactDomClientModule;
+    const { default: BookingScreen } = await import('/src/components/BookingScreen.jsx');
+    const availabilityActions = Object.freeze({
+      async listServices() {
+        return {
+          outcome: 'services_loaded',
+          services: [
+            { id: 101, title: 'Аренда корта 1ч.', categoryId: 1 },
+            { id: 102, title: 'Аренда корта 1.5ч.', categoryId: 1 },
+          ],
+        };
+      },
+      async listCourts() {
+        return {
+          outcome: 'courts_loaded',
+          courts: [{ id: 201, name: 'Корт №1' }],
+        };
+      },
+      async listDates(query) {
+        return { outcome: 'dates_loaded', dates: [query.dateFrom] };
+      },
+      async listTimes(query) {
+        if (query.serviceId === 102) {
+          return { outcome: 'rejected', reason: 'request_timeout' };
+        }
+        return {
+          outcome: 'times_loaded',
+          times: ['19:00', '19:30', '20:00'].map((time) => ({
+            time,
+            durationSeconds: 3_600,
+            datetime: `${query.date}T${time}:00+03:00`,
+          })),
+        };
+      },
+    });
+    const container = document.createElement('div');
+    container.dataset.testid = 'partial-duration-root';
+    document.body.append(container);
+    createRoot(container).render(React.createElement(BookingScreen, {
+      availabilityActions,
+    }));
+  });
+
+  const root = page.getByTestId('partial-duration-root');
+  await expect(root.getByTestId('booking-availability-status')).toHaveText(
+    'Не удалось загрузить доступность. Попробуйте открыть экран ещё раз.',
+  );
+  await expect(root.getByRole('button', {
+    name: '19:00–19:30 Нет данных',
+  })).toBeDisabled();
+  await expect(root.getByRole('button', { name: /Не добавить/u })).toHaveCount(0);
+  await expect(root.getByTestId('booking-selection-summary')).toHaveCount(0);
 });
 
 test('keeps early times fast but obeys the resolved date catalog', async ({ page }) => {
@@ -1161,6 +1223,194 @@ test('keeps early times fast but obeys the resolved date catalog', async ({ page
     empty: ['2026-08-05'],
     shifted: ['2026-08-05', '2026-08-06'],
   });
+});
+
+test('restarts a cancelled date catalog after a fast court A to B to A switch', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-08-05T06:00:00.000Z') });
+  await isolateComponentHarness(page);
+
+  await page.evaluate(async () => {
+    const reactModule = await import('/@id/react');
+    const React = reactModule.default ?? reactModule;
+    const reactDomClientModule = await import('/@id/react-dom/client');
+    const { createRoot } = reactDomClientModule.default ?? reactDomClientModule;
+    const { default: BookingScreen } = await import('/src/components/BookingScreen.jsx');
+    const firstCourtDateReleases = [];
+    let releaseSecondCourtTimes;
+    const secondCourtTimesGate = new Promise((resolve) => {
+      releaseSecondCourtTimes = resolve;
+    });
+    const calls = [];
+    const availabilityActions = Object.freeze({
+      async listServices() {
+        return {
+          outcome: 'services_loaded',
+          services: [{ id: 101, title: 'Аренда корта 1ч.', categoryId: 1 }],
+        };
+      },
+      async listCourts() {
+        return {
+          outcome: 'courts_loaded',
+          courts: [
+            { id: 201, name: 'Корт №1' },
+            { id: 202, name: 'Корт №2' },
+          ],
+        };
+      },
+      async listDates(query) {
+        calls.push({ operation: 'dates', courtId: query.courtId });
+        if (query.courtId !== 201) {
+          return { outcome: 'dates_loaded', dates: [query.dateFrom] };
+        }
+        await new Promise((resolve) => firstCourtDateReleases.push(resolve));
+        return { outcome: 'dates_loaded', dates: [query.dateFrom] };
+      },
+      async listTimes(query) {
+        calls.push({ operation: 'times', courtId: query.courtId });
+        if (query.courtId === 202) await secondCourtTimesGate;
+        return {
+          outcome: 'times_loaded',
+          times: [{
+            time: '19:00',
+            durationSeconds: 3_600,
+            datetime: `${query.date}T19:00:00+03:00`,
+          }],
+        };
+      },
+    });
+    const container = document.createElement('div');
+    container.dataset.testid = 'court-switch-date-root';
+    document.body.append(container);
+    createRoot(container).render(React.createElement(BookingScreen, {
+      availabilityActions,
+    }));
+    window.__courtSwitchDateScenario = {
+      calls,
+      firstCourtDateReleases,
+      releaseSecondCourtTimes,
+    };
+  });
+
+  const root = page.getByTestId('court-switch-date-root');
+  await expect.poll(() => page.evaluate(() => (
+    window.__courtSwitchDateScenario.firstCourtDateReleases.length
+  ))).toBe(1);
+  await root.getByRole('button', { name: 'Корт №2' }).click();
+  await expect.poll(() => page.evaluate(() => (
+    window.__courtSwitchDateScenario.calls.filter(
+      (call) => call.operation === 'times' && call.courtId === 202,
+    ).length
+  ))).toBe(1);
+  await root.getByRole('button', { name: 'Корт №1' }).click();
+
+  await expect.poll(() => page.evaluate(() => (
+    window.__courtSwitchDateScenario.firstCourtDateReleases.length
+  ))).toBe(2);
+  await page.evaluate(() => window.__courtSwitchDateScenario.firstCourtDateReleases[1]());
+  await expect(root.getByTestId('booking-availability-status')).toHaveText(
+    'Показаны актуальные свободные слоты клуба.',
+  );
+  await expect(root.locator('.booking-date-card.is-active')).toBeEnabled();
+
+  await page.evaluate(() => {
+    window.__courtSwitchDateScenario.firstCourtDateReleases[0]();
+    window.__courtSwitchDateScenario.releaseSecondCourtTimes();
+  });
+  await expect(root.getByTestId('booking-availability-status')).toHaveText(
+    'Показаны актуальные свободные слоты клуба.',
+  );
+});
+
+test('does not reuse stale times to start dates during a same-key refresh', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-08-05T06:00:00.000Z') });
+  await isolateComponentHarness(page);
+
+  await page.evaluate(async () => {
+    const reactModule = await import('/@id/react');
+    const React = reactModule.default ?? reactModule;
+    const reactDomClientModule = await import('/@id/react-dom/client');
+    const { createRoot } = reactDomClientModule.default ?? reactDomClientModule;
+    const { default: BookingScreen } = await import('/src/components/BookingScreen.jsx');
+    let timesCalls = 0;
+    let datesCalls = 0;
+    let releaseRefreshedTimes;
+    const refreshedTimesGate = new Promise((resolve) => {
+      releaseRefreshedTimes = resolve;
+    });
+    const availabilityActions = Object.freeze({
+      async listServices() {
+        return {
+          outcome: 'services_loaded',
+          services: [{ id: 101, title: 'Аренда корта 1ч.', categoryId: 1 }],
+        };
+      },
+      async listCourts() {
+        return {
+          outcome: 'courts_loaded',
+          courts: [{ id: 201, name: 'Корт №1' }],
+        };
+      },
+      async listDates(query) {
+        datesCalls += 1;
+        return { outcome: 'dates_loaded', dates: [query.dateFrom] };
+      },
+      async listTimes(query) {
+        timesCalls += 1;
+        if (timesCalls > 1) {
+          await refreshedTimesGate;
+          return { outcome: 'rejected', reason: 'request_timeout' };
+        }
+        return {
+          outcome: 'times_loaded',
+          times: [{
+            time: '19:00',
+            durationSeconds: 3_600,
+            datetime: `${query.date}T19:00:00+03:00`,
+          }],
+        };
+      },
+    });
+    const container = document.createElement('div');
+    container.dataset.testid = 'same-key-refresh-root';
+    document.body.append(container);
+    createRoot(container).render(React.createElement(BookingScreen, {
+      availabilityActions,
+    }));
+    window.__sameKeyRefreshScenario = {
+      get datesCalls() { return datesCalls; },
+      get timesCalls() { return timesCalls; },
+      releaseRefreshedTimes,
+    };
+  });
+
+  const root = page.getByTestId('same-key-refresh-root');
+  await expect(root.getByTestId('booking-availability-status')).toHaveText(
+    'Показаны актуальные свободные слоты клуба.',
+  );
+  expect(await page.evaluate(() => window.__sameKeyRefreshScenario.datesCalls)).toBe(1);
+
+  await page.evaluate(() => {
+    window.scrollTo(0, 0);
+    const target = document.querySelector('[data-testid="pull-to-refresh-booking"]');
+    const dispatch = (type, touches) => {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.defineProperty(event, 'touches', { value: touches });
+      target.dispatchEvent(event);
+    };
+    dispatch('touchstart', [{ clientX: 120, clientY: 12 }]);
+    dispatch('touchmove', [{ clientX: 120, clientY: 152 }]);
+    dispatch('touchend', []);
+  });
+
+  await expect.poll(() => page.evaluate(
+    () => window.__sameKeyRefreshScenario.timesCalls,
+  )).toBe(2);
+  expect(await page.evaluate(() => window.__sameKeyRefreshScenario.datesCalls)).toBe(1);
+  await page.evaluate(() => window.__sameKeyRefreshScenario.releaseRefreshedTimes());
+  await expect(root.getByTestId('booking-availability-status')).toHaveText(
+    'Не удалось загрузить доступность. Попробуйте открыть экран ещё раз.',
+  );
+  expect(await page.evaluate(() => window.__sameKeyRefreshScenario.datesCalls)).toBe(1);
 });
 
 test('uses only backend profile contacts and routes an incomplete profile out of the sheet', async ({ page }) => {
