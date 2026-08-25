@@ -8353,3 +8353,19 @@
   `1`, `1.5` and `2` hours, ending at `00:00` and pull-refresh availability.
   Deployment is `applied_with_manual_owner_tma_smoke_pending`. This append-only
   closeout changes documentation only and has deployment `not_needed`.
+
+### 2026-08-25 — D2.1 owner TMA smoke closeout
+
+- The owner confirmed the deployed private-booking flow works in Telegram Mini
+  App after the frontend-only rollout of exact runtime
+  `b0dff18fb323a62d05dfdff1a2ce1d9509833ac0`. This accepts the remaining
+  manual smoke gate for the reported 1.5-hour selection defect and the agreed
+  one-to-two-hour private-booking range.
+- Automated rollout evidence remains unchanged: frontend container
+  `2e17e46a5aae4f8061d188192354def1f1707013b1e08b16acabebcd964488dd`
+  is healthy with restart count `0`; internal/public health and exact assets
+  returned `200`, TLS verification was `0`, and bounded critical/5xx counts
+  were zero. Deployment is `test_deployed` with owner TMA smoke passed.
+- This closeout changes only WORKLOG documentation, so tests/build and another
+  rollout are `not_run/not_needed`. No server, container, backend/DB/schema,
+  provider/payment or production action occurred.
