@@ -9103,3 +9103,31 @@
   imported by a module/controller/bootstrap and therefore do not change the
   runtime or container image; tests and proposal are local-only. Next gate, if
   authorized separately, is one local commit of this six-file candidate only.
+
+### 2026-08-25 — Booking same-key refresh regression local correction
+
+- On exact detached base `203f5eee34ef0369f4be7c8b9354ae202a9099f3`,
+  stress reproduction of the focused regression failed `7/20` with the exact
+  `timesCalls` mismatch (`expected 2`, `received 3`). A same-key services
+  refresh cleared dates/times but left the prior court pairs eligible, so one
+  times read started against stale courts before refreshed courts arrived and
+  restarted it.
+- The minimal runtime correction clears the court snapshot together with its
+  downstream availability state. The focused regression now gates the second
+  court response and proves there is no extra times read before that response.
+  No backend, contact-verification, payment or provider boundary changed.
+- Focused regression PASS `1/1`; post-fix stress PASS `20/20`. The first full
+  root E2E run had one parallel timeout in an unchanged booking range test and
+  five secondary server-connection failures; that primary test then passed
+  focused `1/1`, and the unchanged full rerun passed `111` with `1` intentional
+  skip. Root build PASS with `1627` modules; `git diff --check` PASS. Backend
+  gates are not applicable because no backend file changed.
+- Independent exact booking-diff review: `PASS`, `P0=0`, `P1=0`. Candidate
+  remains uncommitted; no commit, push, integration, Selectel/SSH action,
+  database/schema/migration write, provider/API call, secret/env change or
+  production action occurred.
+- Deployment status: `deployment_deferred_by_user`. The frontend runtime bundle
+  changes, but deployment was explicitly outside this local slice. Deployed
+  environment and commit: none for this candidate; changed containers: none;
+  remote health, business smoke and log checks: not run. Next gate is an
+  owner-controlled local commit/integration of this exact three-file candidate.

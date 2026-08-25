@@ -369,6 +369,7 @@ export default function BookingScreen({
     const requestId = servicesRequestRef.current + 1;
     servicesRequestRef.current = requestId;
     datesRequestKeyRef.current = '';
+    setCourtsState({ status: 'idle', serviceKey: '', courts: [], pairs: [] });
     setDatesState({ status: 'idle', queryKey: '', dates: [] });
     setTimesState({ status: 'idle', queryKey: '', slots: [], partial: false });
     setServicesState({ status: 'loading', groups: [] });

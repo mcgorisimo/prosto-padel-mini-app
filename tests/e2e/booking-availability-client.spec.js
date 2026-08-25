@@ -1333,7 +1333,12 @@ test('does not reuse stale times to start dates during a same-key refresh', asyn
     const { default: BookingScreen } = await import('/src/components/BookingScreen.jsx');
     let timesCalls = 0;
     let datesCalls = 0;
+    let courtsCalls = 0;
+    let releaseRefreshedCourts;
     let releaseRefreshedTimes;
+    const refreshedCourtsGate = new Promise((resolve) => {
+      releaseRefreshedCourts = resolve;
+    });
     const refreshedTimesGate = new Promise((resolve) => {
       releaseRefreshedTimes = resolve;
     });
@@ -1345,6 +1350,8 @@ test('does not reuse stale times to start dates during a same-key refresh', asyn
         };
       },
       async listCourts() {
+        courtsCalls += 1;
+        if (courtsCalls > 1) await refreshedCourtsGate;
         return {
           outcome: 'courts_loaded',
           courts: [{ id: 201, name: 'Корт №1' }],
@@ -1377,8 +1384,10 @@ test('does not reuse stale times to start dates during a same-key refresh', asyn
       availabilityActions,
     }));
     window.__sameKeyRefreshScenario = {
+      get courtsCalls() { return courtsCalls; },
       get datesCalls() { return datesCalls; },
       get timesCalls() { return timesCalls; },
+      releaseRefreshedCourts,
       releaseRefreshedTimes,
     };
   });
@@ -1402,6 +1411,12 @@ test('does not reuse stale times to start dates during a same-key refresh', asyn
     dispatch('touchend', []);
   });
 
+  await expect.poll(() => page.evaluate(
+    () => window.__sameKeyRefreshScenario.courtsCalls,
+  )).toBe(2);
+  expect(await page.evaluate(() => window.__sameKeyRefreshScenario.timesCalls)).toBe(1);
+  expect(await page.evaluate(() => window.__sameKeyRefreshScenario.datesCalls)).toBe(1);
+  await page.evaluate(() => window.__sameKeyRefreshScenario.releaseRefreshedCourts());
   await expect.poll(() => page.evaluate(
     () => window.__sameKeyRefreshScenario.timesCalls,
   )).toBe(2);
