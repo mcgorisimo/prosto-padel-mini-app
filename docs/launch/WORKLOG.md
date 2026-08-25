@@ -7936,3 +7936,54 @@
   merge, new Selectel/DB command, runtime/container action, provider/API write,
   environment/secret change or production action occurred during this local
   correction; `deployment=not_applied_not_needed_for_local_candidate`.
+
+### 2026-08-25 — D5.3 corrected migration 041 applied on Selectel test
+
+- Exact corrected commit
+  `c143416b505b3fd1a6af757bfb1b8213f4829b71` (tree
+  `ef4e2d88e46eb16ff923d0cdac98afdceadaa2c7`) was already integrated in local
+  and remote `main`. Root-only server artifacts matched local SHA-256 values:
+  migration `3278e7c09c0a9bdb124e7b53d644640c9bd0778f9022f3b8f710962b4b4d9835`,
+  PRECHECK `30e4610847f75854b8d8546af02d2ce48a4ae2b89e25a72f0a5a9cdba9eeee06`,
+  POSTCHECK `c5049c210ff5e263e0149442e73da03f34c005654a35b847a2fc8457f20fd27f`
+  and unused ROLLBACK
+  `6759cba11c5bc1d7dfe194b9fc480b2d02fe8fdfa910583a5f22687b307d6c04`.
+- The confirmed target was Selectel test host `prosto-padel-test-01`, Compose
+  project `prosto-padel-test`, PostgreSQL `14.23`, database
+  `prosto_padel_test_migration_cycle`. The clean detached server checkout
+  remained unchanged at `f456965877fe6f617c5e50552d1bd9e70a6cf4e0`; remote
+  `main` was exact `c143416b505b3fd1a6af757bfb1b8213f4829b71`.
+- Only the existing backend container was stopped for the lock window. A new
+  verified custom-format backup was created in root-only directory
+  `/root/prosto-padel-db-backups/migration041_retry_20260825T114900Z_c143416`:
+  `557100` bytes, owner `root:root`, mode `0600`, SHA-256
+  `eaf3f368b54b03b976426cd13bc8acfd1799f231049ca71c7713ca3691eb0337`;
+  `pg_restore --list` passed without restoring data.
+- Corrected read-only PRECHECK exited `0` with `ready=true`, `21` immutable
+  consent rows, by-kind counts `terms=7`, `privacy=7`, `cancellation=7`, digest
+  `104ef7a592b832b97cd3d04f78cd1c01` and zero
+  `personal_data_processing` rows. PRECHECK evidence-output SHA-256 is
+  `b56bf6ca209c42d918352c2ddbe1f5f27ba181de53c5e82e9bf4153eed349e47`.
+- Exact corrected migration 041 exited `0`, reached `COMMIT` and returned its
+  runtime-disconnected success marker. Apply-output SHA-256 is
+  `20badf403c7ffb2b7e35a14a0b26a6a2a4b16a1e294c62a674c3984f2ea989a2`;
+  the separate ROLLBACK artifact was not run.
+- Exact read-only POSTCHECK exited `0` with `verified=true`, the same `21`
+  rows, the same `7/7/7` by-kind counts and the same evidence digest, with zero
+  `personal_data_processing` rows. A local JSON comparison passed after the
+  host-only comparison stopped read-only because `jq` was not installed;
+  POSTCHECK-output SHA-256 is
+  `7d36ac930a00ba97aecd68d23154248f7c260666521e4a3c1f9736aba21a32af`.
+- The same backend container
+  `ab732d5d43294409c620abd4abcf14eb660f970074b3b72ab9b8afae3ef80fae`
+  and image
+  `sha256:e807806a6768cbb76aab96a0409079ed07f3243e42b2e2ed02c1c61927a6da35`
+  restarted without build/recreate at restart count `0` and became healthy.
+  Internal and public HTTPS health returned `200`, TLS verification returned
+  `0` from `135.106.155.112`; stable logs reported backend critical `0`, nginx
+  `5xx=0` and nginx critical `0`.
+- Migration status is `applied_verified_runtime_disconnected`. Frontend,
+  image, config/env/secrets, nginx/TLS, checkout, provider/API and production
+  were unchanged. This append-only closeout is Markdown-only; automated tests
+  are `not_run/not_needed`, deployment is `not_needed`, and a local docs-only
+  checkpoint commit remains a separate gate.
