@@ -7987,6 +7987,7 @@
   were unchanged. This append-only closeout is Markdown-only; automated tests
   are `not_run/not_needed`, deployment is `not_needed`, and a local docs-only
   checkpoint commit remains a separate gate.
+
 ### 2026-08-25 — D2.1 private-booking slot selection local checkpoint
 
 - Continued code-only from detached base
@@ -8038,3 +8039,57 @@
   Selectel test frontend, then verify health/HTTP, authenticated TMA slot and
   Home-booking smoke, and bounded frontend/nginx/backend logs. Production
   remains a separate direct authorization.
+
+### 2026-08-25 — D2.1 private-booking Selectel test rollout
+
+- The owner authorized integration and Selectel test rollout. Local checkpoint
+  `14318145269aebfc7dafc1e8b20fbbc0d7911504` was rebased onto clean exact
+  `main=e7a93cbe813ffa7f3941f03ec69837e43697891c`. The only conflict was the
+  append-only WORKLOG tail; all migration-041 records from `main` and the exact
+  D2.1 record were retained. Integrated commit
+  `2cf2cae0f836a425ba70e06658b7548fa89edd1f` became local and remote `main`.
+- Repeat integration gates passed: root unit `116/116` across `19` files, root
+  E2E `106` with `1` intentional skip, production build with `1627` modules
+  and only the existing large-chunk advisory, and `git diff --check`.
+  Independent exact integrated-diff review found `P0=0`, `P1=0` and proved
+  runtime/test blobs identical to the reviewed local checkpoint.
+- Read-only preflight passed on `prosto-padel-test-01`, Compose project
+  `prosto-padel-test`: server checkout was clean exact
+  `f456965877fe6f617c5e50552d1bd9e70a6cf4e0`, remote `main` was exact target,
+  Compose `config --quiet` passed and all four containers were healthy with
+  restart count `0`. The first rollout command stopped before fetch or any
+  mutation because of local shell quoting; its corrected fail-closed form
+  advanced the clean detached checkout to exact `2cf2cae0f836a425ba70e06658b7548fa89edd1f`.
+- Frontend-only build ran from `2026-08-25T13:41:09Z` through recreate completion
+  at `13:41:18Z`, transformed `1627` modules and completed with only the
+  existing large-chunk advisory. Frontend container
+  `e33ab30823fe1138d756c21c6a3b31fa97874d6c410834fdff53be9b50a1e05d`
+  using image
+  `sha256:8cd894ea2f250de13ca23eec0e581fa0c6f5b622125321d423fccc0aea121e5a`
+  was replaced by
+  `edefcdde3f98f86b00a9a5529c81f9a058419fbaba014da2eb9d320fea3f8411`
+  using image
+  `sha256:923a0c6a2a2f93137439e04dbdb27f0bfc163ce60db01e542723972c85231b24`.
+  The new frontend is healthy at restart count `0`.
+- Backend `ab732d5d43294409c620abd4abcf14eb660f970074b3b72ab9b8afae3ef80fae`,
+  nginx `e5b98b53a385aef67465e097753fb54b060596d3c620af3cfb484a175d624be7`
+  and PostgreSQL
+  `5e36d4dc1a5c3e2fa658382cfc4a8dff7fe3ea2ba1a9834bb89cc83df743f7be`
+  remained unchanged, healthy and at restart count `0`. No backend/DB/schema,
+  environment/secret, YCLIENTS/provider or production action occurred.
+- Frontend internal `/healthz`, nginx internal `/healthz`, backend internal
+  `/api/v1/health`, public HTTPS frontend and public HTTPS backend health all
+  passed (`200`, TLS verification `0`). The public HTML references the deployed
+  `index-C1QVZLSg.js` bundle. Bounded rollout and stable-window frontend,
+  nginx and backend logs reported critical `0` and `5xx=0`. One combined
+  read-only postcheck command stopped on local shell composition and was
+  replaced by smaller successful read-only checks; it changed no state.
+- An ordinary browser correctly stopped at the Telegram-only login boundary.
+  An authenticated Telegram Desktop window was available, but user input was
+  detected during navigation and the window was then minimized; automation
+  stopped without opening the Mini App, sending a message, creating a booking,
+  selecting payment or making an API/provider write. Owner-run authenticated
+  TMA verification of slot boundaries, prices, incomplete profile, absence of
+  the previous reservation card and unchanged Home bookings remains pending;
+  `deployment=applied_with_manual_tma_d21_smoke_pending`. This closeout is
+  docs-only and requires no additional rollout.
