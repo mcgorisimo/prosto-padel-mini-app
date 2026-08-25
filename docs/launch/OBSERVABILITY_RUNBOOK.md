@@ -67,6 +67,13 @@ provider payloads must never be metric labels. If a forbidden value is found,
 stop exporting the affected stream, preserve only the minimum incident
 evidence, rotate any exposed credential and fix the allowlist before restart.
 
+In the pinned no-egress Grafana image, one startup record from the exact logger
+`plugin.angulardetectorsprovider.dynamic` may report a failed request to the
+exact public path `https://grafana.com/api/plugins/angular_patterns`. Grafana's
+plugin and analytics update settings must still be verified as disabled. This
+known upstream air-gap record alone is not an operational failure; do not mute
+the logger, and treat every other `error` or `fatal` record normally.
+
 ## Alert rules
 
 - `ProstoPadelBackendDown`: backend scrape absent for 2 minutes.

@@ -9026,6 +9026,7 @@
   update checks are all `false`/disabled. The remaining startup errors were two
   absent optional provisioning directories plus Grafana's dynamic Angular
   detector still attempting the network despite that effective setting. The
-  optional directories are now present, and the irrelevant removed-Angular
-  provider alone is filtered below `critical`; application, datasource,
-  dashboard and all other error logs remain visible.
+  optional directories are now present. The known upstream Angular-detector
+  air-gap record is documented as one exact startup exception rather than
+  hidden by a broad logger filter; application, datasource, dashboard and all
+  other error logs remain visible.

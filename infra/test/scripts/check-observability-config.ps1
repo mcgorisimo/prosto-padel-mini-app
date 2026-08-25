@@ -26,6 +26,18 @@ function Assert-Contains {
     }
 }
 
+function Assert-NotContains {
+    param(
+        [Parameter(Mandatory = $true)][string]$Text,
+        [Parameter(Mandatory = $true)][string]$Pattern,
+        [Parameter(Mandatory = $true)][string]$Code
+    )
+
+    if ($Text -match $Pattern) {
+        throw $Code
+    }
+}
+
 $compose = Read-RequiredFile 'infra/test/compose.yaml'
 $runtime = Read-RequiredFile 'infra/test/compose.runtime-backend.yaml'
 $nginx = Read-RequiredFile 'infra/test/nginx/nginx.conf'
@@ -45,7 +57,7 @@ Assert-Contains $compose 'gelf-address:\s+"udp://127\.0\.0\.1:12201"' 'OBSERVABI
 Assert-Contains $compose 'mode:\s+"non-blocking"' 'OBSERVABILITY_GELF_NOT_NON_BLOCKING'
 Assert-Contains $compose '127\.0\.0\.1:3001:3000' 'OBSERVABILITY_GRAFANA_NOT_LOOPBACK'
 Assert-Contains $compose 'GF_PLUGINS_PREINSTALL_DISABLED:\s+"true"' 'OBSERVABILITY_GRAFANA_PLUGIN_PREINSTALL_NOT_DISABLED'
-Assert-Contains $compose 'GF_LOG_FILTERS:\s+"plugin\.angulardetectorsprovider\.dynamic:critical"' 'OBSERVABILITY_GRAFANA_AIRGAP_FILTER_MISSING'
+Assert-NotContains $compose 'GF_LOG_FILTERS:' 'OBSERVABILITY_GRAFANA_ERRORS_MUST_NOT_BE_HIDDEN'
 Assert-Contains $compose 'observability_internal:\s*\r?\n\s+internal:\s+true' 'OBSERVABILITY_NETWORK_NOT_INTERNAL'
 Assert-Contains $compose 'observability_ingest:\s*\r?\n\s+driver:\s+bridge\s*\r?\n\s+driver_opts:\s*\r?\n\s+com\.docker\.network\.bridge\.enable_ip_masquerade:\s+"false"' 'OBSERVABILITY_INGEST_NETWORK_EGRESS_INVALID'
 Assert-Contains $compose 'observability_access:\s*\r?\n\s+driver:\s+bridge\s*\r?\n\s+driver_opts:\s*\r?\n\s+com\.docker\.network\.bridge\.enable_ip_masquerade:\s+"false"' 'OBSERVABILITY_ACCESS_NETWORK_EGRESS_INVALID'
