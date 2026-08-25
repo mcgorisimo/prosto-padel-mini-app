@@ -42,6 +42,7 @@ Assert-Contains $compose 'driver:\s+gelf' 'OBSERVABILITY_GELF_DRIVER_MISSING'
 Assert-Contains $compose 'gelf-address:\s+"udp://127\.0\.0\.1:12201"' 'OBSERVABILITY_GELF_NOT_LOOPBACK'
 Assert-Contains $compose 'mode:\s+"non-blocking"' 'OBSERVABILITY_GELF_NOT_NON_BLOCKING'
 Assert-Contains $compose '127\.0\.0\.1:3001:3000' 'OBSERVABILITY_GRAFANA_NOT_LOOPBACK'
+Assert-Contains $compose 'GF_PLUGINS_PREINSTALL_DISABLED:\s+"true"' 'OBSERVABILITY_GRAFANA_PLUGIN_PREINSTALL_NOT_DISABLED'
 Assert-Contains $compose 'observability_internal:\s*\r?\n\s+internal:\s+true' 'OBSERVABILITY_NETWORK_NOT_INTERNAL'
 Assert-Contains $compose 'observability_ingest:\s*\r?\n\s+driver:\s+bridge\s*\r?\n\s+driver_opts:\s*\r?\n\s+com\.docker\.network\.bridge\.enable_ip_masquerade:\s+"false"' 'OBSERVABILITY_INGEST_NETWORK_EGRESS_INVALID'
 Assert-Contains $compose 'observability_access:\s*\r?\n\s+driver:\s+bridge\s*\r?\n\s+driver_opts:\s*\r?\n\s+com\.docker\.network\.bridge\.enable_ip_masquerade:\s+"false"' 'OBSERVABILITY_ACCESS_NETWORK_EGRESS_INVALID'
@@ -80,6 +81,9 @@ foreach ($alertName in @(
 Assert-Contains $alertmanager 'receiver:\s+local-observability-ui' 'OBSERVABILITY_LOCAL_ALERT_RECEIVER_MISSING'
 Assert-Contains $datasources 'uid:\s+prosto-padel-prometheus' 'OBSERVABILITY_PROMETHEUS_DATASOURCE_MISSING'
 Assert-Contains $datasources 'uid:\s+prosto-padel-loki' 'OBSERVABILITY_LOKI_DATASOURCE_MISSING'
+if ($datasources -match '(?ms)^datasources:.*?type:\s+alertmanager') {
+    throw 'OBSERVABILITY_UNAVAILABLE_ALERTMANAGER_PLUGIN_CONFIGURED'
+}
 Assert-Contains $dashboardProvider 'path:\s+/var/lib/grafana/dashboards' 'OBSERVABILITY_DASHBOARD_PROVIDER_MISSING'
 
 try {

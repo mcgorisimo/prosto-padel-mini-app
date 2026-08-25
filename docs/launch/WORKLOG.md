@@ -9014,3 +9014,11 @@
   Grafana's configured loopback port then showed the same Docker internal-only
   NAT limitation, so a separate Grafana-only access bridge with masquerading
   disabled was added before operator/dashboard verification.
+- Grafana loopback health and the provisioned `8`-panel dashboard passed;
+  Prometheus and Loki datasource health both returned `OK`. The additionally
+  provisioned Alertmanager datasource returned `plugin.unavailable` because it
+  is not a core datasource in the pinned OSS image. It was removed as
+  unnecessary: Grafana's firing-alert panel reads Prometheus `ALERTS`, while
+  Prometheus continues delivering alert state to Alertmanager. Grafana's
+  default suggested-plugin preinstall/update path was also disabled to prevent
+  expected no-egress download attempts from producing false error logs.

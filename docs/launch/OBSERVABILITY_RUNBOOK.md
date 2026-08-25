@@ -8,7 +8,7 @@ The test contour implements one operational chain:
 containers --GELF/UDP--> Vector --> Loki --> Grafana
 backend /metrics ---------> Prometheus --> Grafana
 host/node-exporter --------^       |
-                                    +--> Alertmanager --> Grafana alert list
+                                    +--> Alertmanager
 ```
 
 - Vector is the only centralized log collector. Its API and Prometheus
@@ -16,8 +16,9 @@ host/node-exporter --------^       |
 - Loki keeps container logs for 14 days on a named volume.
 - Prometheus keeps metrics for 15 days with a 2 GB size cap.
 - Grafana is the only operator UI. It binds to server loopback on port `3001`.
-- Alertmanager groups and stores alert state. External delivery is deliberately
-  disabled until an owner-approved recipient and transport secret exist.
+- Alertmanager groups and stores alert state. Grafana reads firing-rule state
+  from Prometheus. External delivery is deliberately disabled until an
+  owner-approved recipient and transport secret exist.
 - The backend metrics route is reachable only from the internal observability
   network. Nginx returns `404` for public `/api/v1/metrics`.
 
@@ -100,7 +101,7 @@ explicit incomplete delivery gate, not a silent success.
 8. Start node-exporter, Alertmanager, Prometheus and Grafana.
 9. Require all containers healthy/running with restart count `0`, then verify:
    backend internal/public health `200`; public metrics `404`; Prometheus
-   targets up; dashboard datasource health; log arrival from all application
+   targets up; Prometheus/Loki datasource health; log arrival from all application
    services; one safe alert-rule evaluation; and the existing no-write business
    smoke.
 
