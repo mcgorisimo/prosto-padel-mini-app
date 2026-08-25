@@ -378,6 +378,7 @@ describe('MatchApiService', () => {
 
     expect(result).toMatchObject({
       outcome: 'created',
+      persistence: 'applied',
       match: {
         courtName: 'Корт не выбран',
         courtType: 'unassigned',
@@ -407,7 +408,10 @@ describe('MatchApiService', () => {
         role: 'player',
         request: request(),
       }),
-    ).resolves.toMatchObject({ outcome: 'created' });
+    ).resolves.toMatchObject({
+      outcome: 'created',
+      persistence: 'idempotent_retry',
+    });
     expect(harness.create).toHaveBeenCalledTimes(1);
     expect(harness.create.mock.calls[0][1].now).toBe(NOW + 7_200);
   });
@@ -878,6 +882,7 @@ describe('MatchApiService', () => {
 
     expect(joined).toEqual({
       outcome: 'updated',
+      persistence: 'applied',
       participant: {
         matchId: MATCH_ID,
         playerId: ACCOUNT_ID,
@@ -888,6 +893,7 @@ describe('MatchApiService', () => {
     });
     expect(left).toEqual({
       outcome: 'updated',
+      persistence: 'applied',
       participant: {
         matchId: MATCH_ID,
         playerId: ACCOUNT_ID,
@@ -901,7 +907,7 @@ describe('MatchApiService', () => {
       leaveCommand.requestDigest,
     );
     expect(joined).not.toHaveProperty('participant.participantId');
-    expect(joined).not.toHaveProperty('persistence');
+    expect(joined).toHaveProperty('persistence', 'applied');
     expect(harness.closeForParticipant).toHaveBeenCalledWith(
       TRANSACTION,
       MATCH_ID,
@@ -939,12 +945,13 @@ describe('MatchApiService', () => {
       },
       matchVersion: 3,
     });
-    await harness.service.leave({
+    const result = await harness.service.leave({
       accountId: ACCOUNT_ID,
       role: 'player',
       matchId: MATCH_ID,
       request: { requestKey: REQUEST_KEY },
     });
+    expect(result).toHaveProperty('persistence', 'idempotent_retry');
     expect(harness.promoteAvailable).not.toHaveBeenCalled();
     expect(harness.closeForParticipant).not.toHaveBeenCalled();
     expect(harness.releaseLineupForParticipant).not.toHaveBeenCalled();
@@ -976,6 +983,7 @@ describe('MatchApiService', () => {
       }),
     ).resolves.toEqual({
       outcome: 'updated',
+      persistence: 'idempotent_retry',
       participant: {
         matchId: MATCH_ID,
         playerId: ACCOUNT_ID,

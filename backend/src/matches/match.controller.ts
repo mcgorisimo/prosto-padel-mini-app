@@ -19,6 +19,7 @@ import {
   readAuthenticatedSessionPrincipal,
 } from '../auth/session-authentication.guard';
 import { SessionLifecyclePublicError } from '../auth/session-lifecycle.http';
+import { BackendDomainEventLogger } from '../common/logging/backend-domain-event.logger';
 import {
   readCreateMatchRequest,
   readMatchActionRequest,
@@ -174,7 +175,10 @@ function serviceFailure(): never {
 
 @Controller('matches')
 export class MatchController {
-  constructor(private readonly service: MatchApiService) {}
+  constructor(
+    private readonly service: MatchApiService,
+    private readonly domainEvents: BackendDomainEventLogger,
+  ) {}
 
   @Post()
   @UseGuards(SessionBearerGuard)
@@ -200,8 +204,21 @@ export class MatchController {
       return serviceFailure();
     }
     if (result.outcome === 'rejected') {
+      this.domainEvents.record({
+        domain: 'match',
+        action: 'create',
+        outcome: 'rejected',
+        reason: result.reason,
+      });
       throw rejection(result.reason);
     }
+    this.domainEvents.record({
+      domain: 'match',
+      action: 'create',
+      outcome:
+        result.persistence === 'applied' ? 'created' : 'idempotent_retry',
+      matchId: result.match.matchId,
+    });
     return Object.freeze({ match: result.match });
   }
 
@@ -391,8 +408,27 @@ export class MatchController {
       return serviceFailure();
     }
     if (result.outcome === 'rejected') {
+      this.domainEvents.record({
+        domain: 'match_slot',
+        action: operation,
+        outcome: 'rejected',
+        matchId,
+        reason: result.reason,
+      });
       throw rejection(result.reason);
     }
+    this.domainEvents.record({
+      domain: 'match_slot',
+      action: operation,
+      outcome:
+        result.persistence === 'idempotent_retry'
+          ? 'idempotent_retry'
+          : operation === 'join'
+            ? 'occupied'
+            : 'released',
+      matchId,
+      slotNumber: result.participant.slotNumber,
+    });
     return Object.freeze({ participant: result.participant });
   }
 }

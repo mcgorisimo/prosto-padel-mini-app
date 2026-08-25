@@ -129,6 +129,7 @@ export type MatchApiRejection =
 export type CreateMatchApiResult =
   | {
       readonly outcome: 'created';
+      readonly persistence: 'applied' | 'idempotent_retry';
       readonly match: MatchDetailResponse;
     }
   | {
@@ -159,6 +160,7 @@ export type ReadMatchDetailApiResult =
 export type MutateMatchParticipationApiResult =
   | {
       readonly outcome: 'updated';
+      readonly persistence: 'applied' | 'idempotent_retry';
       readonly participant: MatchParticipationResponse;
     }
   | {

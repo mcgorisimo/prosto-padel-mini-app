@@ -17,6 +17,7 @@ import {
   readAuthenticatedSessionPrincipal,
 } from '../auth/session-authentication.guard';
 import { SessionLifecyclePublicError } from '../auth/session-lifecycle.http';
+import { BackendDomainEventLogger } from '../common/logging/backend-domain-event.logger';
 import { MatchChatApiRejection } from './match-chat-api.types';
 import {
   readChatMatchId,
@@ -96,7 +97,10 @@ function disableCaching(reply: FastifyReply): void {
 
 @Controller('matches/:matchId/messages')
 export class MatchChatController {
-  constructor(private readonly service: MatchChatService) {}
+  constructor(
+    private readonly service: MatchChatService,
+    private readonly domainEvents: BackendDomainEventLogger,
+  ) {}
 
   @Get()
   @UseGuards(SessionBearerGuard)
@@ -149,7 +153,24 @@ export class MatchChatController {
       matchId,
       request: parsed,
     });
-    if (result.outcome === 'rejected') throw rejection(result.reason);
+    if (result.outcome === 'rejected') {
+      this.domainEvents.record({
+        domain: 'match_chat',
+        action: 'send_message',
+        outcome: 'rejected',
+        matchId,
+        reason: result.reason,
+      });
+      throw rejection(result.reason);
+    }
+    this.domainEvents.record({
+      domain: 'match_chat',
+      action: 'send_message',
+      outcome:
+        result.persistence === 'applied' ? 'sent' : 'idempotent_retry',
+      matchId,
+      messageId: result.message.messageId,
+    });
     return Object.freeze({ message: result.message });
   }
 }

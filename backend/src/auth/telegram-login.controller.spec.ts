@@ -3,6 +3,7 @@ import {
   FastifyAdapter,
   NestFastifyApplication,
 } from '@nestjs/platform-fastify';
+import { BackendDomainEventLogger } from '../common/logging/backend-domain-event.logger';
 import { unixEpochSeconds } from './auth.types';
 import { TelegramLoginController } from './telegram-login.controller';
 import {
@@ -40,6 +41,7 @@ interface HttpHarness {
     ReturnType<TelegramLoginHttpClock['nowEpochSeconds']>,
     []
   >;
+  readonly domainEvents: jest.Mock;
   readonly logEntries: LogEntry[];
 }
 
@@ -90,6 +92,7 @@ async function createHarness(
         } as unknown as TelegramLoginService,
       }
     : { enabled: false };
+  const domainEvents = jest.fn();
 
   const moduleRef = await Test.createTestingModule({
     controllers: [TelegramLoginController],
@@ -98,6 +101,10 @@ async function createHarness(
       {
         provide: TELEGRAM_LOGIN_HTTP_CLOCK,
         useValue: { nowEpochSeconds },
+      },
+      {
+        provide: BackendDomainEventLogger,
+        useValue: { record: domainEvents },
       },
     ],
   }).compile();
@@ -114,6 +121,7 @@ async function createHarness(
     app,
     authenticateWithTelegram,
     nowEpochSeconds,
+    domainEvents,
     logEntries,
   };
 }
@@ -199,6 +207,12 @@ describe('TelegramLoginController HTTP boundary', () => {
       expect(response.headers.pragma).toBe('no-cache');
       expect(subject.authenticateWithTelegram).toHaveBeenCalledTimes(1);
       expect(subject.nowEpochSeconds).toHaveBeenCalledTimes(1);
+      expect(subject.domainEvents).toHaveBeenCalledWith({
+        domain: 'auth',
+        action: 'telegram_login',
+        outcome: 'authenticated',
+        accountKind,
+      });
     },
   );
 

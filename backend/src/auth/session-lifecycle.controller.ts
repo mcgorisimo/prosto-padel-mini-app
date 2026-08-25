@@ -10,6 +10,7 @@ import {
   Res,
 } from '@nestjs/common';
 import { FastifyReply } from 'fastify';
+import { BackendDomainEventLogger } from '../common/logging/backend-domain-event.logger';
 import { isUnixEpochSeconds } from './auth.types';
 import {
   SESSION_LIFECYCLE_HTTP_CLOCK,
@@ -133,6 +134,7 @@ export class SessionLifecycleController {
     private readonly service: SessionLifecycleService,
     @Inject(SESSION_LIFECYCLE_HTTP_CLOCK)
     private readonly clock: SessionLifecycleHttpClock,
+    private readonly domainEvents: BackendDomainEventLogger,
   ) {}
 
   @Post('refresh')
@@ -173,6 +175,12 @@ export class SessionLifecycleController {
       throw internalFailure();
     }
     if (result.outcome === 'rejected') {
+      this.domainEvents.record({
+        domain: 'auth',
+        action: 'session_refresh',
+        outcome: 'rejected',
+        reason: result.reason,
+      });
       throw refreshRejection(result.reason);
     }
     const response = createSessionRefreshHttpSuccessResponse(
@@ -183,6 +191,11 @@ export class SessionLifecycleController {
     if (response === undefined) {
       throw internalFailure();
     }
+    this.domainEvents.record({
+      domain: 'auth',
+      action: 'session_refresh',
+      outcome: 'refreshed',
+    });
     return response;
   }
 
@@ -224,8 +237,19 @@ export class SessionLifecycleController {
       throw internalFailure();
     }
     if (result.outcome === 'rejected') {
+      this.domainEvents.record({
+        domain: 'auth',
+        action: 'session_logout',
+        outcome: 'rejected',
+        reason: result.reason,
+      });
       throw logoutRejection(result.reason);
     }
+    this.domainEvents.record({
+      domain: 'auth',
+      action: 'session_logout',
+      outcome: 'logged_out',
+    });
   }
 }
 

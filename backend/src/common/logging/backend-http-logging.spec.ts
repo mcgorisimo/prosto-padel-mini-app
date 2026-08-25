@@ -7,6 +7,7 @@ import {
 import { Test } from '@nestjs/testing';
 import { setImmediate } from 'node:timers/promises';
 import { isInternalUuid } from '../internal-uuid';
+import { BackendDomainEventLogger } from './backend-domain-event.logger';
 import { registerBackendHttpLogging } from './backend-http-logging';
 import { LoggingModule } from './logging.module';
 import { RequestContextStore } from './request-context.store';
@@ -127,7 +128,10 @@ describe('backend HTTP logging', () => {
           },
         },
       ],
-    }).compile();
+    })
+      .overrideProvider(BackendDomainEventLogger)
+      .useValue({ record: jest.fn() })
+      .compile();
 
     application = moduleRef.createNestApplication<NestFastifyApplication>(
       new FastifyAdapter(),

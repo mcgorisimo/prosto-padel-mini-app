@@ -165,6 +165,7 @@ describe('MatchChatService', () => {
 
     await expect(test.service.send(input)).resolves.toMatchObject({
       outcome: 'message_sent',
+      persistence: 'applied',
       message: {
         messageId: MESSAGE_ID,
         sender: { playerId: ACTOR_ID, firstName: 'Alice' },
@@ -185,6 +186,25 @@ describe('MatchChatService', () => {
     expect(first.messageId).toMatch(/^[0-9a-f-]{36}$/u);
     expect(first.commandId).not.toBe(first.messageId);
     expect(first.requestDigest).toMatch(/^[0-9a-f]{64}$/u);
+  });
+
+  it('preserves an idempotent repository result for operational logging', async () => {
+    const test = harness();
+    test.chat.send.mockResolvedValue({
+      outcome: 'message_sent',
+      persistence: 'idempotent_retry',
+      message: message(),
+    });
+
+    await expect(
+      test.service.send({
+        ...actorInput(),
+        request: { requestKey: REQUEST_KEY, body: BODY },
+      }),
+    ).resolves.toMatchObject({
+      outcome: 'message_sent',
+      persistence: 'idempotent_retry',
+    });
   });
 
   it('keeps command identity but changes the digest when the body changes', async () => {

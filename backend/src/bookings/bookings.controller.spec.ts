@@ -12,6 +12,7 @@ import {
 } from '../auth/session-authentication.guard';
 import { SessionAuthenticationService } from '../auth/session-authentication.service';
 import { SessionAuthenticationResult } from '../auth/session-authentication.types';
+import { BackendDomainEventLogger } from '../common/logging/backend-domain-event.logger';
 import { YclientsAvailabilityService } from '../integrations/yclients/yclients-availability.service';
 import { BookingReservationService } from './booking-reservation.service';
 import { BookingsController } from './bookings.controller';
@@ -35,6 +36,7 @@ interface Harness {
     Promise<SessionAuthenticationResult>,
     [unknown]
   >;
+  readonly domainEvents: jest.Mock;
   readonly logs: readonly unknown[][];
 }
 
@@ -83,6 +85,7 @@ async function createHarness(): Promise<Harness> {
         expiresAt: unixEpochSeconds(Number(NOW) + 3_600),
       },
     });
+  const domainEvents = jest.fn();
   const moduleRef = await Test.createTestingModule({
     controllers: [BookingsController],
     providers: [
@@ -107,6 +110,10 @@ async function createHarness(): Promise<Harness> {
       {
         provide: SESSION_AUTHENTICATION_CLOCK,
         useValue: { nowEpochSeconds: () => NOW },
+      },
+      {
+        provide: BackendDomainEventLogger,
+        useValue: { record: domainEvents },
       },
     ],
   }).compile();
@@ -136,6 +143,7 @@ async function createHarness(): Promise<Harness> {
     readBooking,
     readBookingByRequestKey,
     authenticate,
+    domainEvents,
     logs,
   };
 }
@@ -258,6 +266,13 @@ describe('BookingsController', () => {
       email: 'test@example.test',
     });
     expect(JSON.stringify(response.json())).not.toContain('record-hash');
+    expect(harness.domainEvents).toHaveBeenCalledWith({
+      domain: 'private_booking',
+      action: 'create',
+      outcome: 'created',
+      reservationId: expect.any(String),
+      reservationStatus: 'confirmed',
+    });
   });
 
   it('rejects malformed booking creation before the write service', async () => {
@@ -328,6 +343,13 @@ describe('BookingsController', () => {
     });
     expect(response.statusCode).toBe(202);
     expect(response.json()).toMatchObject({ reservationId, status: 'unknown', stale: true });
+    expect(harness.domainEvents).toHaveBeenCalledWith({
+      domain: 'private_booking',
+      action: 'create',
+      outcome: 'unknown',
+      reservationId,
+      reservationStatus: 'unknown',
+    });
   });
 
   it('lists owner reservations and resolves an uncertain request key without a write route', async () => {

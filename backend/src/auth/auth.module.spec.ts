@@ -79,6 +79,7 @@ import { PlayerOnboardingService } from './player-onboarding.service';
 import { PlayerInitialLevelReassessmentController } from './player-initial-level-reassessment.controller';
 import { PlayerInitialLevelReassessmentService } from './player-initial-level-reassessment.service';
 import { PublicPlayerProfileController } from './public-player-profile.controller';
+import { LoggingModule } from '../common/logging/logging.module';
 import { PublicPlayerProfileService } from './public-player-profile.service';
 import { SessionAuthenticationController } from './session-authentication.controller';
 import {
@@ -200,7 +201,7 @@ async function compileAuthModule(
   values: Record<string, unknown>,
 ): Promise<TestingModule> {
   return Test.createTestingModule({
-    imports: [configModule(values), AuthModule],
+    imports: [configModule(values), LoggingModule, AuthModule],
   }).compile();
 }
 

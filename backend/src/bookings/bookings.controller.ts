@@ -17,6 +17,7 @@ import {
   readAuthenticatedSessionPrincipal,
 } from '../auth/session-authentication.guard';
 import { SessionLifecyclePublicError } from '../auth/session-lifecycle.http';
+import { BackendDomainEventLogger } from '../common/logging/backend-domain-event.logger';
 import {
   YclientsAvailabilityService,
   YclientsAvailableDatesResult,
@@ -263,6 +264,7 @@ export class BookingsController {
   constructor(
     private readonly availability: YclientsAvailabilityService,
     private readonly reservations: BookingReservationService,
+    private readonly domainEvents: BackendDomainEventLogger,
   ) {}
 
   @Post()
@@ -280,12 +282,32 @@ export class BookingsController {
     }
     const result = await this.reservations.create(principal.accountId, body);
     if (result.outcome === 'unknown') {
+      this.domainEvents.record({
+        domain: 'private_booking',
+        action: 'create',
+        outcome: 'unknown',
+        reservationId: result.reservation.reservationId,
+        reservationStatus: result.reservation.status,
+      });
       reply.status(HttpStatus.ACCEPTED);
       return result.reservation;
     }
     if (result.outcome !== 'created' && result.outcome !== 'idempotent_retry') {
+      this.domainEvents.record({
+        domain: 'private_booking',
+        action: 'create',
+        outcome: 'rejected',
+        reason: result.outcome,
+      });
       throw creationRejection(result.outcome);
     }
+    this.domainEvents.record({
+      domain: 'private_booking',
+      action: 'create',
+      outcome: result.outcome,
+      reservationId: result.reservation.reservationId,
+      reservationStatus: result.reservation.status,
+    });
     return result.reservation;
   }
 

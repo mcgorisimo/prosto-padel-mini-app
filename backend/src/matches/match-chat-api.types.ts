@@ -71,6 +71,7 @@ export type ListMatchMessagesApiResult =
 export type SendMatchMessageApiResult =
   | {
       readonly outcome: 'message_sent';
+      readonly persistence: 'applied' | 'idempotent_retry';
       readonly message: MatchMessageResponse;
     }
   | {

@@ -3,6 +3,7 @@ import {
   FastifyAdapter,
   NestFastifyApplication,
 } from '@nestjs/platform-fastify';
+import { BackendDomainEventLogger } from '../common/logging/backend-domain-event.logger';
 import { unixEpochSeconds } from './auth.types';
 import {
   SESSION_LIFECYCLE_HTTP_CLOCK,
@@ -41,6 +42,7 @@ interface HttpHarness {
     ReturnType<SessionLifecycleHttpClock['nowEpochSeconds']>,
     []
   >;
+  readonly domainEvents: jest.Mock;
   readonly logEntries: LogEntry[];
 }
 
@@ -77,6 +79,7 @@ async function createHarness(): Promise<HttpHarness> {
     ReturnType<SessionLifecycleHttpClock['nowEpochSeconds']>,
     []
   >(() => NOW);
+  const domainEvents = jest.fn();
 
   const moduleRef = await Test.createTestingModule({
     controllers: [SessionLifecycleController],
@@ -88,6 +91,10 @@ async function createHarness(): Promise<HttpHarness> {
       {
         provide: SESSION_LIFECYCLE_HTTP_CLOCK,
         useValue: { nowEpochSeconds },
+      },
+      {
+        provide: BackendDomainEventLogger,
+        useValue: { record: domainEvents },
       },
     ],
   }).compile();
@@ -105,6 +112,7 @@ async function createHarness(): Promise<HttpHarness> {
     refresh,
     logout,
     nowEpochSeconds,
+    domainEvents,
     logEntries,
   };
 }
@@ -179,6 +187,11 @@ describe('SessionLifecycleController HTTP boundary', () => {
       now: NOW,
     });
     expect(subject.logout).not.toHaveBeenCalled();
+    expect(subject.domainEvents).toHaveBeenCalledWith({
+      domain: 'auth',
+      action: 'session_refresh',
+      outcome: 'refreshed',
+    });
   });
 
   it.each(['applied', 'idempotent_retry'] as const)(
@@ -199,6 +212,11 @@ describe('SessionLifecycleController HTTP boundary', () => {
         now: NOW,
       });
       expect(subject.refresh).not.toHaveBeenCalled();
+      expect(subject.domainEvents).toHaveBeenCalledWith({
+        domain: 'auth',
+        action: 'session_logout',
+        outcome: 'logged_out',
+      });
     },
   );
 

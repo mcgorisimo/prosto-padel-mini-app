@@ -829,6 +829,7 @@ export class MatchApiService {
       }
       return Object.freeze({
         outcome: 'created',
+        persistence: completed.result.persistence,
         match: completed.match,
       });
     } catch (error) {
@@ -1267,6 +1268,7 @@ export class MatchApiService {
       }
       return Object.freeze({
         outcome: 'updated',
+        persistence: result.persistence,
         participant: safeParticipant,
       });
     } catch (error) {

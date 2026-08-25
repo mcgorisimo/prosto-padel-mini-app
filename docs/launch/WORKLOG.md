@@ -8889,3 +8889,30 @@
   Production, database/schema, secret and provider state were not changed.
   This closeout entry is docs-only, so its later documentation commit has
   `deployment=not_needed`; the deployed runtime commit remains `b457c2f`.
+
+### 2026-08-25 — Observability domain events candidate
+
+- Added a fail-closed domain-event contract for auth login/session lifecycle,
+  match creation, slot join/leave, match chat sends and private booking
+  creation. Events use bounded actions/outcomes/reasons plus internal resource
+  IDs where needed; request body, chat text, Telegram proof, bearer,
+  request-key, email, phone and provider payloads are never copied to logs.
+- Persistence results now remain available inside the match and chat service
+  boundary so repeated request keys are logged as `idempotent_retry`, not as
+  new matches, occupied/released slots or sent messages. Public HTTP response
+  shapes are unchanged.
+- Focused logging/controller/service tests passed `183/183`; backend typecheck,
+  backend E2E `4/4`, backend build and root build passed. Full backend unit
+  reported `3823/3824` with only the already classified unchanged migration
+  038 notification-outbox contract failure.
+- Full root E2E reported `110` passed, `1` intentional skip and the unchanged
+  parallel same-key booking refresh failure (`3` calls instead of `2`). The
+  exact case passed `1/1` with one worker; no frontend or booking-client file
+  changed in this slice.
+- Runtime and security reviews were repeated after the idempotency correction;
+  both returned `P0=0`, `P1=0`, Acceptance PASS. `App.jsx`, payment fields,
+  Supabase, metrics and alerts were not changed.
+- Deployment status is `not_deployed_pending_commit`. The candidate still
+  requires guarded fast-forward integration and a backend-only Selectel test
+  rollout of the exact runtime commit, followed by health, authenticated
+  business smoke and strict JSON/domain-event log verification.

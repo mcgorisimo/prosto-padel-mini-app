@@ -12,6 +12,7 @@ import {
 } from '../auth/session-authentication.guard';
 import { SessionAuthenticationService } from '../auth/session-authentication.service';
 import { SessionAuthenticationResult } from '../auth/session-authentication.types';
+import { BackendDomainEventLogger } from '../common/logging/backend-domain-event.logger';
 import {
   ListMatchMessagesApiResult,
   SendMatchMessageApiResult,
@@ -65,6 +66,7 @@ interface Harness {
     Promise<SessionAuthenticationResult>,
     [unknown]
   >;
+  readonly domainEvents: jest.Mock;
   readonly logs: readonly unknown[][];
 }
 
@@ -81,6 +83,7 @@ async function createHarness(): Promise<Harness> {
     .mockResolvedValue({
       outcome: 'message_sent',
       message: responseMessage(),
+      persistence: 'applied',
     });
   const authenticate = jest
     .fn<Promise<SessionAuthenticationResult>, [unknown]>()
@@ -92,6 +95,7 @@ async function createHarness(): Promise<Harness> {
         expiresAt: unixEpochSeconds(Number(NOW) + 3_600),
       },
     });
+  const domainEvents = jest.fn();
   const moduleRef = await Test.createTestingModule({
     controllers: [MatchChatController],
     providers: [
@@ -104,6 +108,10 @@ async function createHarness(): Promise<Harness> {
       {
         provide: SESSION_AUTHENTICATION_CLOCK,
         useValue: { nowEpochSeconds: () => NOW },
+      },
+      {
+        provide: BackendDomainEventLogger,
+        useValue: { record: domainEvents },
       },
     ],
   }).compile();
@@ -122,7 +130,7 @@ async function createHarness(): Promise<Harness> {
   });
   await app.init();
   await app.getHttpAdapter().getInstance().ready();
-  return { app, list, send, authenticate, logs };
+  return { app, list, send, authenticate, domainEvents, logs };
 }
 
 function headers() {
@@ -177,6 +185,37 @@ describe('MatchChatController', () => {
       request: { requestKey: REQUEST_KEY, body: BODY },
     });
     expect(harness.authenticate).toHaveBeenCalledTimes(2);
+    expect(harness.domainEvents).toHaveBeenCalledWith({
+      domain: 'match_chat',
+      action: 'send_message',
+      outcome: 'sent',
+      matchId: MATCH_ID,
+      messageId: MESSAGE_ID,
+    });
+  });
+
+  it('logs an idempotent send retry without reporting a new message', async () => {
+    harness.send.mockResolvedValueOnce({
+      outcome: 'message_sent',
+      message: responseMessage(),
+      persistence: 'idempotent_retry',
+    });
+
+    const response = await harness.app.inject({
+      method: 'POST',
+      url: `/matches/${MATCH_ID}/messages`,
+      headers: headers(),
+      payload: { requestKey: REQUEST_KEY, body: BODY },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(harness.domainEvents).toHaveBeenCalledWith({
+      domain: 'match_chat',
+      action: 'send_message',
+      outcome: 'idempotent_retry',
+      matchId: MATCH_ID,
+      messageId: MESSAGE_ID,
+    });
   });
 
   it('rejects missing bearer and malformed body/cursor before the service', async () => {

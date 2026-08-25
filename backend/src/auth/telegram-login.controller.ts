@@ -9,6 +9,7 @@ import {
   Res,
 } from '@nestjs/common';
 import { FastifyReply } from 'fastify';
+import { BackendDomainEventLogger } from '../common/logging/backend-domain-event.logger';
 import {
   TELEGRAM_LOGIN_FEATURE,
   TelegramLoginFeature,
@@ -110,6 +111,7 @@ export class TelegramLoginController {
     private readonly feature: TelegramLoginFeature,
     @Inject(TELEGRAM_LOGIN_HTTP_CLOCK)
     private readonly clock: TelegramLoginHttpClock,
+    private readonly domainEvents: BackendDomainEventLogger,
   ) {}
 
   @Post('login')
@@ -151,6 +153,12 @@ export class TelegramLoginController {
     }
 
     if (result.outcome === 'rejected') {
+      this.domainEvents.record({
+        domain: 'auth',
+        action: 'telegram_login',
+        outcome: 'rejected',
+        reason: result.reason,
+      });
       throw rejectionError(result.reason);
     }
 
@@ -163,6 +171,13 @@ export class TelegramLoginController {
     if (response === undefined) {
       throw internalFailure();
     }
+
+    this.domainEvents.record({
+      domain: 'auth',
+      action: 'telegram_login',
+      outcome: 'authenticated',
+      accountKind: result.accountKind,
+    });
 
     return response;
   }

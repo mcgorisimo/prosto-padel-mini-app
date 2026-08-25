@@ -335,6 +335,7 @@ export class MatchChatService {
           }
           return Object.freeze({
             outcome: 'message_sent' as const,
+            persistence: result.persistence,
             message,
           });
         },

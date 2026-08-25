@@ -11,6 +11,7 @@ import {
 } from '../auth/session-authentication.guard';
 import { SessionAuthenticationService } from '../auth/session-authentication.service';
 import { SessionAuthenticationResult } from '../auth/session-authentication.types';
+import { BackendDomainEventLogger } from '../common/logging/backend-domain-event.logger';
 import { deterministicUuid } from '../../test/deterministic-uuid';
 import { MatchApiService } from './match-api.service';
 import {
@@ -91,6 +92,7 @@ interface Harness {
     Promise<SessionAuthenticationResult>,
     [unknown]
   >;
+  readonly domainEvents: jest.Mock;
   readonly logs: readonly unknown[][];
 }
 
@@ -114,6 +116,7 @@ async function createHarness(): Promise<Harness> {
     [unknown]
   >().mockResolvedValue({
     outcome: 'created',
+    persistence: 'applied',
     match: match(),
   });
   const list = jest.fn<
@@ -142,6 +145,7 @@ async function createHarness(): Promise<Harness> {
     [unknown]
   >().mockResolvedValue({
     outcome: 'updated',
+    persistence: 'applied',
     participant: {
       matchId: MATCH_ID,
       playerId: ACCOUNT_ID,
@@ -155,6 +159,7 @@ async function createHarness(): Promise<Harness> {
     [unknown]
   >().mockResolvedValue({
     outcome: 'updated',
+    persistence: 'applied',
     participant: {
       matchId: MATCH_ID,
       playerId: ACCOUNT_ID,
@@ -184,6 +189,7 @@ async function createHarness(): Promise<Harness> {
         expiresAt: unixEpochSeconds(NOW + 3_600),
       },
     });
+  const domainEvents = jest.fn();
   const moduleRef = await Test.createTestingModule({
     controllers: [MatchController],
     providers: [
@@ -208,6 +214,10 @@ async function createHarness(): Promise<Harness> {
         provide: SESSION_AUTHENTICATION_CLOCK,
         useValue: { nowEpochSeconds: () => NOW },
       },
+      {
+        provide: BackendDomainEventLogger,
+        useValue: { record: domainEvents },
+      },
     ],
   }).compile();
   const app = moduleRef.createNestApplication<NestFastifyApplication>(
@@ -228,6 +238,7 @@ async function createHarness(): Promise<Harness> {
     leave,
     updateDescription,
     authenticate,
+    domainEvents,
     logs,
   };
 }
@@ -377,6 +388,110 @@ describe('MatchController HTTP boundary', () => {
     expect(harness.join).toHaveBeenCalledTimes(1);
     expect(harness.leave).toHaveBeenCalledTimes(1);
     expect(harness.authenticate).toHaveBeenCalledTimes(7);
+    expect(harness.domainEvents.mock.calls.map(([event]) => event)).toEqual([
+      {
+        domain: 'match',
+        action: 'create',
+        outcome: 'created',
+        matchId: MATCH_ID,
+      },
+      {
+        domain: 'match_slot',
+        action: 'join',
+        outcome: 'occupied',
+        matchId: MATCH_ID,
+        slotNumber: 2,
+      },
+      {
+        domain: 'match_slot',
+        action: 'leave',
+        outcome: 'released',
+        matchId: MATCH_ID,
+        slotNumber: 2,
+      },
+    ]);
+  });
+
+  it('logs durable create, join and leave retries without new transitions', async () => {
+    harness.create.mockResolvedValueOnce({
+      outcome: 'created',
+      persistence: 'idempotent_retry',
+      match: match(),
+    });
+    harness.join.mockResolvedValueOnce({
+      outcome: 'updated',
+      persistence: 'idempotent_retry',
+      participant: {
+        matchId: MATCH_ID,
+        playerId: ACCOUNT_ID,
+        slotNumber: 2,
+        status: 'active',
+        matchVersion: 2,
+      },
+    });
+    harness.leave.mockResolvedValueOnce({
+      outcome: 'updated',
+      persistence: 'idempotent_retry',
+      participant: {
+        matchId: MATCH_ID,
+        playerId: ACCOUNT_ID,
+        slotNumber: 2,
+        status: 'left',
+        matchVersion: 3,
+      },
+    });
+
+    const createResponse = await harness.app.inject({
+      method: 'POST',
+      url: '/api/v1/matches',
+      headers: headers(),
+      payload: {
+        requestKey: REQUEST_KEY,
+        startsAt: NOW + 3_600,
+        durationMinutes: 90,
+        courtId: 'p1',
+        scenario: 'social',
+        description: '',
+        ratingMin: 2,
+        ratingMax: 4,
+        isRatingMatch: true,
+      },
+    });
+    const joinResponse = await harness.app.inject({
+      method: 'POST',
+      url: `/api/v1/matches/${MATCH_ID}/join`,
+      headers: headers(),
+      payload: { requestKey: REQUEST_KEY },
+    });
+    const leaveResponse = await harness.app.inject({
+      method: 'POST',
+      url: `/api/v1/matches/${MATCH_ID}/leave`,
+      headers: headers(),
+      payload: { requestKey: REQUEST_KEY },
+    });
+
+    expect([
+      createResponse.statusCode,
+      joinResponse.statusCode,
+      leaveResponse.statusCode,
+    ]).toEqual([201, 200, 200]);
+    expect(harness.domainEvents.mock.calls.map(([event]) => event)).toEqual([
+      expect.objectContaining({
+        domain: 'match',
+        action: 'create',
+        outcome: 'idempotent_retry',
+      }),
+      expect.objectContaining({
+        domain: 'match_slot',
+        action: 'join',
+        outcome: 'idempotent_retry',
+      }),
+      expect.objectContaining({
+        domain: 'match_slot',
+        action: 'leave',
+        outcome: 'idempotent_retry',
+      }),
+    ]);
   });
 
   it.each([
