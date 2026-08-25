@@ -8709,3 +8709,49 @@
   changes the frontend bundle, deployment is
   `deployment_deferred_by_user` pending separate checkpoint, integration and
   rollout gates.
+
+### 2026-08-25 — D5.3 legal version-label UI polish Selectel rollout
+
+- The owner-authorized frontend-only rollout used the clean detached checkout
+  at exact integrated commit
+  `9ae39adb85b51f47c85ad0a157214788fbafcd25` with tree
+  `75adacd6ce7a56486b77f98c803d797a7c6c40c8`. The primary Selectel project
+  host retained its existing technical hostname, Compose project, DNS/TLS and
+  public URLs; renaming those legacy technical identifiers remains a separate
+  infrastructure gate.
+- Only the frontend image was rebuilt and only the frontend container was
+  recreated. Frontend container
+  `88bc0c50abcba49e46a2e2bdfb142a96852907945f990153b1587bcb4902208b` /
+  image `sha256:ac57a632b1221a42fc9a9425c66ff2f5118fe6f040239453d7877e5d36e5b9ee`
+  was replaced by container
+  `f4602f0bb97f17b9acaab71636031debd46ce0cc0c9948ebcb2c1d817561d083` /
+  image `sha256:5ca3aabff684ec8857fc17ffaeae40369d0b7577963a740b543dd85accf76ec8`.
+  The new frontend is healthy with restart count `0`.
+- Backend container/image
+  `bc3a9c71209919918316fc932e56491ce36611cfeb082e09c204be8f9c42f39d` /
+  `sha256:d4767c8054a91588b4e368478a2080cb106e10f78602dda4cee641da152c6230`,
+  nginx
+  `e5b98b53a385aef67465e097753fb54b060596d3c620af3cfb484a175d624be7` /
+  `sha256:4ff102c5d78d254a6f0da062b3cf39eaf07f01eec0927fd21e219d0af8bc0591`
+  and PostgreSQL
+  `5e36d4dc1a5c3e2fa658382cfc4a8dff7fe3ea2ba1a9834bb89cc83df743f7be` /
+  `sha256:9062043625415b4628f0ca44c2c65de93778afb7b1db33aff67877cace3b966f`
+  retained their exact identities, stayed healthy and have restart count `0`.
+- Public frontend health, backend health and all four immutable versioned legal
+  URLs returned HTTPS `200` with TLS verification result `0`. A deployed
+  headless TMA smoke with fully intercepted synthetic auth/API state confirmed
+  exactly `2` required checkboxes, a disabled Continue action until both were
+  selected, three visible `Редакция от 26.08.2026` labels, no visible technical
+  version IDs, all four exact legal links and the unchanged three-item consent
+  payload for `cancellation`, `personal_data_processing` and `terms`. The
+  acceptance request never reached backend or PostgreSQL.
+- The first local smoke invocation stopped before navigation because of shell
+  quoting. A later over-broad synthetic post-acceptance navigation assertion
+  timed out after the exact consent payload had already been intercepted; the
+  bounded acceptance-only rerun passed. Neither diagnostic made a server/API/
+  DB write.
+- Stable-window frontend, nginx, backend and PostgreSQL logs reported critical
+  `0` and HTTP 5xx `0`; the server checkout remained exact and clean. No
+  backend, DB/schema/migration, nginx/DNS/TLS, env/secret, provider or
+  production change occurred. Deployment status is
+  `deployment=applied_verified` for this UI-polish slice.
