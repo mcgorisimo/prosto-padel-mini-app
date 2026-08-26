@@ -9360,8 +9360,9 @@
   writes `0`.
 - No compose/env/secret, database/schema/migration, provider/API, payment,
   production or Supabase action occurred. This WORKLOG closeout is docs-only
-  with `deployment=not_needed`. Runtime status is
-  `applied_verified_pending_owner_manual_tma_smoke`; D5.S remains open until
-  the owner confirms one existing completed user can enter the Telegram Mini
-  App, use it and is not shown the questionnaire again, without creating a
-  booking.
+  with `deployment=not_needed`.
+- Owner manual Telegram Mini App acceptance passed on 2026-08-26. The first
+  entry showed only the expected current-document re-consent screen, not the
+  onboarding questionnaire; the next entry opened the application normally
+  and the questionnaire did not reappear. No booking was created. Runtime
+  status is `applied_verified`; D5.S first PII containment slice is `done`.
