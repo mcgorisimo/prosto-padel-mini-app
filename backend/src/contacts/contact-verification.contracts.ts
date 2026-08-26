@@ -240,14 +240,74 @@ export type ContactVerificationDeliveryOutcome =
   | Readonly<{ outcome: 'rate_limited'; retryAt: UnixEpochSeconds }>
   | Readonly<{ outcome: 'unknown' }>;
 
+export type ContactVerificationDeliveryReconciliationOutcome =
+  | ContactVerificationDeliveryOutcome
+  | Readonly<{ outcome: 'pending' }>
+  | Readonly<{ outcome: 'not_found' }>;
+
+export type ContactVerificationDeliveryRecoveryAction =
+  | 'record_outcome'
+  | 'reconcile_again'
+  | 'redeliver_same_dispatch'
+  | 'invalidate_and_erase';
+
+export interface ContactVerificationDeliveryRecoverySnapshot {
+  readonly challengeStatus:
+    'pending' | 'verified' | 'expired' | 'attempts_exhausted' | 'cancelled';
+  readonly contactVersionMatches: boolean;
+  readonly checkedAt: UnixEpochSeconds;
+  readonly challengeExpiresAt: UnixEpochSeconds;
+}
+
+export interface ContactVerificationDeliveryReconciliationRequest {
+  readonly challengeId: ContactVerificationChallengeId;
+  readonly dispatchId: InternalUuid;
+  readonly method: ContactVerificationMethod;
+  readonly expiresAt: UnixEpochSeconds;
+}
+
+export function decideContactVerificationDeliveryRecovery(
+  result: ContactVerificationDeliveryReconciliationOutcome,
+  snapshot: ContactVerificationDeliveryRecoverySnapshot,
+): ContactVerificationDeliveryRecoveryAction {
+  switch (result.outcome) {
+    case 'accepted':
+    case 'unavailable':
+    case 'rate_limited':
+      return 'record_outcome';
+  }
+  if (
+    snapshot.challengeStatus !== 'pending' ||
+    !snapshot.contactVersionMatches ||
+    snapshot.checkedAt >= snapshot.challengeExpiresAt
+  ) {
+    return 'invalidate_and_erase';
+  }
+  return result.outcome === 'not_found'
+    ? 'redeliver_same_dispatch'
+    : 'reconcile_again';
+}
+
 export interface ContactVerificationDeliveryPort {
   /**
-   * Destination and plaintext proof are transient. The caller must never put
-   * them in challenge state, audit events, ordinary logs or typed errors.
+   * The caller must durably reserve the dispatch and its TTL-limited encrypted
+   * envelope before delivery. Destination and plaintext proof are transient
+   * after decryption and must never enter state, audit, logs or typed errors.
+   * Exact redelivery is allowed only after reconcile returns `not_found` and
+   * must reuse the same dispatch ID and byte-equivalent decrypted payload.
    */
   deliver(
     request: ContactVerificationDeliveryRequest,
   ): Promise<ContactVerificationDeliveryOutcome>;
+
+  /**
+   * PII-free lookup used after a crash or an `unknown` delivery outcome.
+   * Its result cannot authorize redelivery without a fresh atomic recovery
+   * snapshot proving the challenge pending, current-contact and unexpired.
+   */
+  reconcile(
+    request: ContactVerificationDeliveryReconciliationRequest,
+  ): Promise<ContactVerificationDeliveryReconciliationOutcome>;
 }
 
 export type ContactVerificationRateLimitOperation =

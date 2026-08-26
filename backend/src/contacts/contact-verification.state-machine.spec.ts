@@ -372,6 +372,7 @@ describe('contact verification attempts, expiry and idempotency', () => {
       transition: 'resend_reserved',
       state: {
         status: 'pending',
+        verifierDigest: VERIFIER_DIGEST,
         attemptsRemaining: 2,
         lastDispatchAt: CREATED_AT + 60,
         resendCount: 1,
@@ -382,6 +383,20 @@ describe('contact verification attempts, expiry and idempotency', () => {
         rateLimitDecisionId: deterministicUuid('resend-rate-decision'),
         reservedAt: CREATED_AT + 60,
       },
+    });
+  });
+
+  it('rejects resend-side verifier rotation', () => {
+    const state = pending();
+    expect(
+      transitionContactVerificationChallenge(state, {
+        ...reserveResend(state),
+        verifierDigest: OTHER_DIGEST,
+      }),
+    ).toMatchObject({
+      outcome: 'rejected',
+      reason: 'invalid_command',
+      state: { verifierDigest: VERIFIER_DIGEST, resendCount: 0 },
     });
   });
 

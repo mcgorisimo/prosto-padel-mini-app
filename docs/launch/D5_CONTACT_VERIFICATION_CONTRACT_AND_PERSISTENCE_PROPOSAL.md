@@ -84,6 +84,17 @@ the same key with a different digest fails closed. A new reservation is allowed
 only while pending and unexpired, after cooldown and abuse checks, and never
 resets the submit-attempt budget.
 
+The reservation transaction also writes a TTL-limited AEAD-encrypted delivery
+envelope before any provider call. A worker recovering `reserved` or `unknown`
+must reconcile the same dispatch ID first. Only an authoritative `not_found`
+may redeliver the byte-equivalent decrypted envelope under that same dispatch
+ID, and `not_found` alone is insufficient: immediately before delivery the
+backend atomically rechecks that the challenge is pending, the bound contact
+version is current and database time is before expiry. A failed check
+invalidates the dispatch and erases its envelope. `pending` and `unknown` remain
+reconciliation-only states. Resend reserves a new dispatch for the current
+challenge proof and does not rotate its verifier.
+
 ## Initial abuse and expiry policy
 
 These are product safety defaults, independent of an SMS/email provider:
@@ -109,21 +120,22 @@ provider's own rate limits may be stricter but cannot weaken these limits.
 
 ## Threat model and required controls
 
-| Threat                                  | Required control / regression                                                                                |
-| --------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| Brute-force code guessing               | atomic five-attempt budget; exact retry spends zero extra attempts; final failure is terminal                |
-| Resend amplification and provider cost  | persistent cooldown plus short/daily account, contact and network buckets before one idempotent dispatch     |
-| Account/contact enumeration             | uniform public response and coarse error/timing; no contact echo or scope detail                             |
-| Contact-swap race                       | verification commit atomically compares current account, field, version and subject digest                   |
-| Cross-channel proof confusion           | closed phone/SMS and email/code-or-link discriminated states                                                 |
-| Token replay                            | terminal one-time command; exact retry returns the original result only                                      |
-| Email scanner/prefetch                  | GET is read-only; only a deliberate POST consumes the link token                                             |
-| Concurrent idempotency race             | start/command/resend DB uniqueness and aggregate row lock; same key/different digest fails closed            |
-| Clock rollback or untrusted timestamp   | backend transaction-time clock only; reject new commands older than challenge/history                        |
-| Unknown delivery result                 | persist `unknown`; never treat it as delivered and never blind-resend under a new operation                  |
-| Logging/provider leakage                | allowlisted audit projection; discard raw provider responses/errors and transient destination/proof material |
-| Old proof after contact edit            | monotonic contact version; checkout requires `verifiedVersion == contactVersion`                             |
-| Auth/rating/payment privilege confusion | separate module/types/tables; no auth proof, rating flag or payment field in contact inputs                  |
+| Threat                                  | Required control / regression                                                                                   |
+| --------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| Brute-force code guessing               | atomic five-attempt budget; exact retry spends zero extra attempts; final failure is terminal                   |
+| Resend amplification and provider cost  | persistent cooldown plus short/daily account, contact and network buckets before one idempotent dispatch        |
+| Account/contact enumeration             | uniform public response and coarse error/timing; no contact echo or scope detail                                |
+| Contact-swap race                       | verification commit atomically compares current account, field, version and subject digest                      |
+| Cross-channel proof confusion           | closed phone/SMS and email/code-or-link discriminated states                                                    |
+| Token replay                            | terminal one-time command; exact retry returns the original result only                                         |
+| Email scanner/prefetch                  | GET is read-only; only a deliberate POST consumes the link token                                                |
+| Concurrent idempotency race             | start/command/resend DB uniqueness and aggregate row lock; same key/different digest fails closed               |
+| Clock rollback or untrusted timestamp   | backend transaction-time clock only; reject new commands older than challenge/history                           |
+| Crash after reservation                 | persist the encrypted envelope; reconcile, then atomically recheck pending/current-contact/unexpired            |
+| Unknown delivery result                 | retain the envelope; `pending/unknown` reconcile again, only authoritative `not_found` permits exact redelivery |
+| Logging/provider leakage                | allowlisted audit projection; ciphertext is least-privilege and plaintext/provider details stay transient       |
+| Old proof after contact edit            | monotonic contact version; checkout requires `verifiedVersion == contactVersion`                                |
+| Auth/rating/payment privilege confusion | separate module/types/tables; no auth proof, rating flag or payment field in contact inputs                     |
 
 ## PII-safe audit contract
 
@@ -156,6 +168,8 @@ backend schema. Proposed logical tables:
 2. `contact_verification_challenges`
    - challenge/account/field/method/contact-version binding;
    - protected subject/verifier digests with key versions;
+   - AEAD-encrypted active proof with key version/nonce/tag and an expiry no
+     later than the challenge expiry; erase it on every terminal transition;
    - create idempotency key and request digest;
    - policy snapshot, attempts remaining, state and terminal metadata;
    - at most one active challenge per account and field under a transactional
@@ -168,11 +182,21 @@ backend schema. Proposed logical tables:
    - immutable result needed for exact retries; no destination or plaintext.
 4. `contact_verification_dispatches`
    - stable internal dispatch ID, challenge ID, method, status
-     `reserved/accepted/unavailable/rate_limited/unknown` and timestamps;
+     `reserved/pending/accepted/unavailable/rate_limited/unknown` and
+     timestamps;
    - unique link to the start or resend command that reserved it, so an exact
      retry observes the original dispatch and outcome instead of dispatching;
-   - destination and plaintext proof remain transient and are not stored here;
-   - unknown is reconciled under the same dispatch ID, never blind-retried.
+   - TTL-limited AEAD-encrypted delivery envelope containing only the exact
+     destination/proof payload needed by the adapter, with key version, nonce,
+     tag and `payload_expires_at`; plaintext remains transient after decryption;
+   - optional encrypted adapter reconciliation reference, never audit/log data;
+   - erase the envelope after a durable non-recoverable delivery outcome or at
+     challenge expiry; retain it while status is `reserved/pending/unknown`;
+   - `pending/unknown` reconcile under the same dispatch ID. Only `not_found`
+     may redeliver the same envelope and dispatch ID; `not_found` is a recovery
+     result, not a terminal stored status, and never creates a blind retry;
+   - every terminal challenge transition and contact-version change atomically
+     invalidates related dispatches and erases all retained envelopes.
 5. `contact_verification_rate_buckets`
    - keyed account/contact/network subjects, window start, count and cooldown;
    - atomic multi-scope consume; values are not copied to audit.
@@ -188,6 +212,17 @@ idempotency_key)` and binds the immutable request digest;
   aggregate lock; exact digest match returns the stored dispatch/outcome,
   mismatch conflicts, and only a missing key may consume buckets and reserve a
   new dispatch in the same transaction;
+- start/resend commits the challenge or command, dispatch row and encrypted
+  envelope atomically before delivery. Resend uses the current verifier digest
+  and encrypted proof; it neither resets attempts/expiry nor rotates the proof;
+- a recovered worker calls the PII-free reconciliation port before delivery.
+  `pending/unknown` wait, `accepted/unavailable/rate_limited` record the outcome,
+  and `not_found` may proceed only after a fresh aggregate/contact lock proves
+  `pending`, the current contact version and database time before expiry;
+- that guard and the dispatch claim are one transaction immediately before
+  provider delivery. Failure invalidates the dispatch and erases its envelope;
+  expiry, verification, cancellation, exhaustion, supersession and contact
+  update invalidate/erase every related recoverable dispatch in their own lock;
 - submit locks the challenge and durable abuse budget before comparing the
   protected proof;
 - verified transition succeeds only when the current contact row still has
@@ -204,7 +239,8 @@ idempotency_key)` and binds the immutable request digest;
 
 1. Review and approve exact SQL, PRECHECK/POSTCHECK and rollback boundary.
 2. Select SMS and email providers; review only their official documentation,
-   delivery/idempotency/unknown-outcome contracts and data-processing terms.
+   strong dispatch-ID idempotency or authoritative reconciliation semantics,
+   unknown-outcome contracts and data-processing terms.
 3. Provision secrets outside Git/image/frontend and implement adapters.
 4. Wire repositories/controllers/runtime and checkout eligibility.
 5. Commit, integrate/push and perform an exact-SHA Selectel test rollout with

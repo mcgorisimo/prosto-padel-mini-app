@@ -163,6 +163,7 @@ export interface ExpireContactVerificationChallengeCommand extends CommandBase {
 
 export interface ReserveContactVerificationResendCommand extends CommandBase {
   readonly type: 'reserve_resend';
+  /** Resend re-delivers the current proof and never rotates verifierDigest. */
   readonly idempotencyKey: ContactVerificationIdempotencyKey;
   readonly dispatchId: InternalUuid;
   readonly rateLimitDecisionId: InternalUuid;

@@ -12,6 +12,9 @@ import {
   ContactVerificationAuditEvent,
   ContactVerificationChallengeId,
   ContactVerificationDeliveryPort,
+  ContactVerificationDeliveryReconciliationOutcome,
+  ContactVerificationDeliveryReconciliationRequest,
+  ContactVerificationDeliveryRecoverySnapshot,
   ContactVerificationDeliveryRequest,
   ContactVerificationRateLimitPort,
   ContactVerificationRateLimitRequest,
@@ -23,6 +26,7 @@ import {
   contactVerificationSourceDigest,
   contactVerificationSubjectDigest,
   createContactVerificationAuditEvent,
+  decideContactVerificationDeliveryRecovery,
   evaluateContactCheckoutEligibility,
   isContactVerificationSourceDigest,
   newContactVerificationChallengeId,
@@ -35,6 +39,12 @@ const CHALLENGE_ID = deterministicUuid(
 ) as ContactVerificationChallengeId;
 const NOW = unixEpochSeconds(1_787_500_000);
 const EXPIRES_AT = unixEpochSeconds(1_787_500_300);
+const ELIGIBLE_RECOVERY: ContactVerificationDeliveryRecoverySnapshot = {
+  challengeStatus: 'pending',
+  contactVersionMatches: true,
+  checkedAt: NOW,
+  challengeExpiresAt: EXPIRES_AT,
+};
 
 describe('contact verification provider-neutral contracts', () => {
   it('keeps phone and email fields separate from their allowed methods', () => {
@@ -113,6 +123,7 @@ describe('contact verification provider-neutral contracts', () => {
         received.push({ ...request });
         return { outcome: 'accepted' };
       },
+      reconcile: async () => ({ outcome: 'not_found' }),
     };
     const requests: readonly ContactVerificationDeliveryRequest[] = [
       {
@@ -152,6 +163,111 @@ describe('contact verification provider-neutral contracts', () => {
       'email_link',
     ]);
   });
+
+  it('reconciles a durable dispatch before exact crash recovery', async () => {
+    const dispatchId = deterministicUuid('crash-recovery-dispatch');
+    const reconciliationRequest: ContactVerificationDeliveryReconciliationRequest =
+      {
+        challengeId: CHALLENGE_ID,
+        dispatchId,
+        method: 'phone_sms_otp',
+        expiresAt: EXPIRES_AT,
+      };
+    const deliveryRequest: ContactVerificationDeliveryRequest = {
+      method: 'phone_sms_otp',
+      challengeId: CHALLENGE_ID,
+      dispatchId,
+      expiresAt: EXPIRES_AT,
+      destination: '+79990000000',
+      plaintextCode: '123456',
+    };
+    let reconciliationOutcome: ContactVerificationDeliveryReconciliationOutcome =
+      { outcome: 'unknown' };
+    const delivered: ContactVerificationDeliveryRequest[] = [];
+    const port: ContactVerificationDeliveryPort = {
+      deliver: async (request) => {
+        delivered.push({ ...request });
+        return { outcome: 'accepted' };
+      },
+      reconcile: async (request) => {
+        expect(request).toEqual(reconciliationRequest);
+        return reconciliationOutcome;
+      },
+    };
+
+    const unknown = await port.reconcile(reconciliationRequest);
+    expect(
+      decideContactVerificationDeliveryRecovery(unknown, ELIGIBLE_RECOVERY),
+    ).toBe('reconcile_again');
+    expect(delivered).toHaveLength(0);
+
+    reconciliationOutcome = { outcome: 'not_found' };
+    const notFound = await port.reconcile(reconciliationRequest);
+    expect(
+      decideContactVerificationDeliveryRecovery(notFound, ELIGIBLE_RECOVERY),
+    ).toBe('redeliver_same_dispatch');
+    await expect(port.deliver(deliveryRequest)).resolves.toEqual({
+      outcome: 'accepted',
+    });
+    expect(delivered).toEqual([deliveryRequest]);
+    expect(JSON.stringify(reconciliationRequest)).not.toContain(
+      deliveryRequest.destination,
+    );
+    expect(JSON.stringify(reconciliationRequest)).not.toContain(
+      deliveryRequest.plaintextCode,
+    );
+  });
+
+  it.each([
+    ['accepted', 'record_outcome'],
+    ['unavailable', 'record_outcome'],
+    ['rate_limited', 'record_outcome'],
+    ['pending', 'reconcile_again'],
+    ['unknown', 'reconcile_again'],
+    ['not_found', 'redeliver_same_dispatch'],
+  ] as const)('maps recovery outcome %s to %s', (outcome, expected) => {
+    const result: ContactVerificationDeliveryReconciliationOutcome =
+      outcome === 'rate_limited'
+        ? { outcome, retryAt: EXPIRES_AT }
+        : { outcome };
+    expect(
+      decideContactVerificationDeliveryRecovery(result, ELIGIBLE_RECOVERY),
+    ).toBe(expected);
+  });
+
+  it.each([
+    [
+      'expiry',
+      {
+        ...ELIGIBLE_RECOVERY,
+        checkedAt: EXPIRES_AT,
+      },
+    ],
+    [
+      'cancellation',
+      {
+        ...ELIGIBLE_RECOVERY,
+        challengeStatus: 'cancelled' as const,
+      },
+    ],
+    [
+      'contact change',
+      {
+        ...ELIGIBLE_RECOVERY,
+        contactVersionMatches: false,
+      },
+    ],
+  ] as const)(
+    'invalidates a not-found dispatch after %s',
+    (_label, snapshot) => {
+      expect(
+        decideContactVerificationDeliveryRecovery(
+          { outcome: 'not_found' },
+          snapshot,
+        ),
+      ).toBe('invalidate_and_erase');
+    },
+  );
 
   it('requires one atomic scoped abuse decision for start and resend', async () => {
     const sourceDigest: ContactVerificationSourceDigest =

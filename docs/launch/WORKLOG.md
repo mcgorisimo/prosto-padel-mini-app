@@ -9131,3 +9131,30 @@
   environment and commit: none for this candidate; changed containers: none;
   remote health, business smoke and log checks: not run. Next gate is an
   owner-controlled local commit/integration of this exact three-file candidate.
+
+### 2026-08-26 — D5 contact delivery crash-recovery correction
+
+- On clean local `main` `e24f1b2707d333e867ec9ca9519081c99dd69be2`,
+  the exact integration review found one P1: a crash after durable dispatch
+  reservation could lose transient proof material, leaving `unknown` without a
+  safe recovery path. No booking file changed in this correction.
+- Added provider-neutral, PII-free reconciliation outcomes and a fail-closed
+  recovery decision. `pending/unknown` reconcile again; `not_found` permits an
+  exact same-dispatch redelivery only after a fresh atomic snapshot proves the
+  challenge pending, the bound contact version current and database time before
+  expiry. Expiry, cancellation and contact change invalidate and erase instead.
+- The persistence proposal now requires an atomically reserved TTL-limited
+  AEAD-encrypted proof/delivery envelope, erasure on terminal/contact-invalidating
+  transitions and non-rotating verifier semantics for resend. No SQL, provider
+  choice/call, secret, repository/controller or runtime wiring was added.
+- Focused contact regressions PASS `57/57`. Final backend gates PASS: typecheck,
+  unit `170 suites / 3881 tests`, E2E `2 suites / 4 tests`, build. Final root E2E
+  PASS `111 passed / 1 skipped` with one worker; root build PASS `1627` modules.
+- Independent recovery review first found the crash-recovery P1, then one P1 for
+  redelivery after expiry/cancellation/contact change. Both were corrected; the
+  final five-file code/test/proposal review is `PASS`, `P0=0`, `P1=0`.
+- Candidate remains uncommitted. No rebase/integration, push, Selectel/SSH,
+  DB/schema/migration, provider/API, secrets/env or production action occurred.
+  This runtime-disabled contracts/tests/docs correction has
+  `deployment=not_needed`; the pre-existing booking frontend rollout remains
+  `deployment_deferred_by_user`.
