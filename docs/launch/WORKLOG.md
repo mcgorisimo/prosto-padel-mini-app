@@ -9366,3 +9366,47 @@
   onboarding questionnaire; the next entry opened the application normally
   and the questionnaire did not reappear. No booking was created. Runtime
   status is `applied_verified`; D5.S first PII containment slice is `done`.
+
+### 2026-08-26 — D5.2 contact-verification persistence review candidate
+
+- D5.2 remains `in_progress` on clean branch
+  `codex/d5-2-contact-verification-persistence` from exact parent
+  `0fe9cfde914703cb7c61fe8589f98f0bbdcde60c`. The integrated provider-neutral
+  contact contracts/state machine and D5.S containment are base-owned and were
+  not changed.
+- Prepared migration `042_backend_contact_verification_persistence` with
+  read-only PRECHECK/POSTCHECK, a non-destructive fail-closed rollback boundary
+  and review notes. The expand-only SQL adds only six `backend_auth` relations:
+  current encrypted contacts, challenges, append-only commands, durable
+  dispatch reservations, durable abuse buckets and PII-safe append-only audit.
+- Phone/SMS and email/code-or-link remain discriminated states under the single
+  `contact_ownership` purpose. The schema pins owner/contact-version bindings,
+  exact TTL/attempt/start/cooldown policy, start/command/resend idempotency,
+  aggregate lock versions, one pending challenge per account/field and guarded
+  terminal/contact-change/dispatch recovery boundaries.
+- Contact values, active proofs, dispatch payloads and optional reconciliation
+  references have only bounded AEAD envelope metadata plus keyed digests/key
+  versions; raw contacts, OTP/token, adapter bodies and key material are absent.
+  Audit has only allowlisted internal identifiers/outcomes and no free-form
+  payload. No retention duration or provider-specific semantic was invented.
+- Focused migration contract tests passed `13/13`; backend typecheck, backend
+  E2E `4/4`, backend build, root build (`1627` modules) and `git diff --check`
+  passed. Full backend unit passed `3910/3911`; its only failure is the unchanged
+  pre-existing migration 038 contract baseline outside this D5.2 diff. The
+  mandatory default nine-worker root E2E run reported `106 passed / 1 skipped /
+  5 failed` on timeouts or unresolved async UI state in untouched booking and
+  profile-photo scenarios; the complete diagnostic rerun with one worker passed
+  `111/111` with `1` intentional skip, including all five prior failures. No
+  D5.2 runtime/frontend source was changed.
+- Three independent exact-diff security/concurrency/privacy passes found eight P1
+  findings in the candidate: current-contact binding, command/aggregate binding,
+  global contact/network bucket scope, guard-function attestation, exact column
+  allowlists, exclusive expiry, stale gate counts and owner-only ACL enforcement.
+  All eight were corrected; the final corrected-diff re-review passed with
+  `P0=0`, `P1=0` and acceptance `PASS`. This entry is prepared for the
+  authorized local checkpoint commit. Migration status is `prepared_for_review`,
+  `not_applied`; no SQL/PRECHECK/POSTCHECK/rollback file was executed.
+  Runtime/endpoints/controllers/UI, DB/schema, Selectel, providers/APIs,
+  secrets/env, YCLIENTS, payment fields and production were not changed.
+  Deployment is `deployment=not_needed` because this candidate is unapplied SQL,
+  a static backend contract test and documentation only.
