@@ -70,6 +70,90 @@ if ($compose -match 'docker\.sock') {
 
 Assert-Contains $runtime 'GF_SECURITY_ADMIN_PASSWORD:\s+!reset null' 'OBSERVABILITY_GRAFANA_INLINE_PASSWORD_NOT_RESET'
 Assert-Contains $runtime 'GF_SECURITY_ADMIN_PASSWORD__FILE:\s+/run/secrets/grafana-admin-password' 'OBSERVABILITY_GRAFANA_PASSWORD_FILE_MISSING'
+$safeAccessLogMatch = [regex]::Match(
+    $nginx,
+    '(?ms)^log_format\s+pii_safe\s+escape=json\s+(?<format>.*?);'
+)
+if (-not $safeAccessLogMatch.Success) {
+    throw 'OBSERVABILITY_NGINX_PII_SAFE_LOG_FORMAT_MISSING'
+}
+$safeAccessLogFormat = $safeAccessLogMatch.Groups['format'].Value
+$safeAccessLogVariables = @(
+    [regex]::Matches($safeAccessLogFormat, '\$[A-Za-z0-9_]+') |
+        ForEach-Object { $_.Value } |
+        Sort-Object -Unique
+)
+$expectedSafeAccessLogVariables = @(
+    '$body_bytes_sent',
+    '$request_method',
+    '$request_time',
+    '$status'
+)
+if (
+    $safeAccessLogVariables.Count -ne $expectedSafeAccessLogVariables.Count -or
+    @(Compare-Object $safeAccessLogVariables $expectedSafeAccessLogVariables).Count -ne 0
+) {
+    throw 'OBSERVABILITY_NGINX_ACCESS_LOG_VARIABLE_ALLOWLIST_INVALID'
+}
+Assert-Contains $nginx '(?ms)^server\s*\{.*?^\s+access_log\s+/var/log/nginx/access\.log\s+pii_safe;' 'OBSERVABILITY_NGINX_PII_SAFE_ACCESS_LOG_NOT_ENABLED'
+$serverAccessLogDirectives = @(
+    [regex]::Matches($nginx, '(?m)^\s+access_log\s+(?<value>[^;]+);') |
+        ForEach-Object { $_.Groups['value'].Value }
+)
+if (
+    $serverAccessLogDirectives.Count -ne 3 -or
+    @($serverAccessLogDirectives | Where-Object {
+        $_ -ne '/var/log/nginx/access.log pii_safe' -and $_ -ne 'off'
+    }).Count -ne 0
+) {
+    throw 'OBSERVABILITY_NGINX_ACCESS_LOG_OVERRIDE_INVALID'
+}
+$syntheticQueryCanary = 'D5S_SYNTHETIC_QUERY_CANARY'
+$syntheticCursorCanary = 'D5S_SYNTHETIC_CURSOR_CANARY'
+$syntheticBodyCanary = 'D5S_SYNTHETIC_BODY_CANARY'
+$syntheticAuthorizationCanary = 'D5S_SYNTHETIC_AUTHORIZATION_CANARY'
+$syntheticAccessLogLine = (
+    $safeAccessLogFormat -replace "'\s*\r?\n\s*'", ''
+).Trim().Trim("'")
+$syntheticUnsafeValues = [ordered]@{
+    '$http_authorization' = "Bearer $syntheticAuthorizationCanary"
+    '$query_string' = "search=$syntheticQueryCanary&cursor=$syntheticCursorCanary"
+    '$request_body' = $syntheticBodyCanary
+    '$request_uri' = "/api/v1/admin/players?search=$syntheticQueryCanary&cursor=$syntheticCursorCanary"
+    '$request' = "GET /api/v1/admin/players?search=$syntheticQueryCanary&cursor=$syntheticCursorCanary HTTP/1.1"
+    '$args' = "search=$syntheticQueryCanary&cursor=$syntheticCursorCanary"
+    '$request_method' = 'GET'
+    '$body_bytes_sent' = '0'
+    '$request_time' = '0.001'
+    '$status' = '401'
+}
+foreach ($entry in @(
+    $syntheticUnsafeValues.GetEnumerator() |
+        Sort-Object { $_.Key.Length } -Descending
+)) {
+    $syntheticAccessLogLine = $syntheticAccessLogLine.Replace($entry.Key, $entry.Value)
+}
+if (
+    $syntheticAccessLogLine.Contains($syntheticQueryCanary) -or
+    $syntheticAccessLogLine.Contains($syntheticCursorCanary) -or
+    $syntheticAccessLogLine.Contains($syntheticBodyCanary) -or
+    $syntheticAccessLogLine.Contains($syntheticAuthorizationCanary)
+) {
+    throw 'OBSERVABILITY_NGINX_ACCESS_LOG_CANARY_LEAK'
+}
+try {
+    $syntheticAccessLog = $syntheticAccessLogLine | ConvertFrom-Json
+} catch {
+    throw 'OBSERVABILITY_NGINX_ACCESS_LOG_JSON_INVALID'
+}
+if (
+    $syntheticAccessLog.level -ne 'info' -or
+    $syntheticAccessLog.message.event -ne 'nginx_access' -or
+    $syntheticAccessLog.message.method -ne 'GET' -or
+    $syntheticAccessLog.message.statusCode -ne 401
+) {
+    throw 'OBSERVABILITY_NGINX_ACCESS_LOG_CONTRACT_INVALID'
+}
 Assert-Contains $nginx 'location = /api/v1/metrics\s*\{\s*access_log off;\s*return 404;' 'OBSERVABILITY_PUBLIC_METRICS_NOT_BLOCKED'
 Assert-Contains $nginx 'location = /api/v1/metrics/\s*\{\s*access_log off;\s*return 404;' 'OBSERVABILITY_PUBLIC_METRICS_TRAILING_SLASH_NOT_BLOCKED'
 
