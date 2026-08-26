@@ -667,16 +667,26 @@ describe('MatchApiService', () => {
     expect(JSON.stringify({ feed, mine, found })).not.toContain('title');
   });
 
-  it('fails closed when a participant public profile is missing', async () => {
+  it('keeps match aggregates available when a participant public profile is hidden', async () => {
     const harness = createHarness();
+    const participants = [
+      {
+        playerId: OTHER_ACCOUNT_ID,
+        slotNumber: 2 as const,
+      },
+    ];
+    const feedRecord = {
+      ...detail(),
+      scenario: 'social' as const,
+      ratingMin: 2,
+      ratingMax: 4,
+      occupiedSlots: 2,
+      participants,
+    };
+    harness.listPublicFeed.mockResolvedValue([feedRecord]);
     harness.findVisibleById.mockResolvedValue({
       ...detail(),
-      participants: [
-        {
-          playerId: OTHER_ACCOUNT_ID,
-          slotNumber: 2,
-        },
-      ],
+      participants,
     });
     harness.findByPlayerIds.mockResolvedValue({
       outcome: 'found',
@@ -690,16 +700,37 @@ describe('MatchApiService', () => {
       ],
     });
 
-    await expect(
-      harness.service.detail({
-        accountId: ACCOUNT_ID,
-        role: 'player',
-        matchId: MATCH_ID,
-      }),
-    ).resolves.toEqual({
-      outcome: 'rejected',
-      reason: 'internal_failure',
+    const feed = await harness.service.list({
+      accountId: ACCOUNT_ID,
+      role: 'player',
+      request: { limit: 20 },
     });
+    const found = await harness.service.detail({
+      accountId: ACCOUNT_ID,
+      role: 'player',
+      matchId: MATCH_ID,
+    });
+
+    expect(feed).toMatchObject({
+      outcome: 'found',
+      matches: [{
+        owner: { playerId: ACCOUNT_ID, firstName: 'Synthetic' },
+        participants: [{ unavailable: true, slotNumber: 2 }],
+      }],
+    });
+    expect(found).toMatchObject({
+      outcome: 'found',
+      match: {
+        owner: { playerId: ACCOUNT_ID, firstName: 'Synthetic' },
+        participants: [{ unavailable: true, slotNumber: 2 }],
+      },
+    });
+    expect(JSON.stringify({ feed, found })).not.toContain(
+      OTHER_ACCOUNT_ID,
+    );
+    expect(JSON.stringify({ feed, found })).not.toMatch(
+      /Other|phone|email/iu,
+    );
   });
 
   it('redacts legacy invalid comments without rejecting read flows', async () => {

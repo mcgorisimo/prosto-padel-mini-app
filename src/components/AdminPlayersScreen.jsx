@@ -156,8 +156,11 @@ export default function AdminPlayersScreen({ user, adminActions, onBack }) {
       let data = [];
       let loadError = null;
       try {
+        const normalizedSearch = query.trim().normalize('NFKC');
         const result = await adminActions?.listAdminPlayers?.({
-          ...(query.trim() ? { search: query.trim().normalize('NFKC') } : {}),
+          ...([...normalizedSearch].length >= 2
+            ? { search: normalizedSearch }
+            : {}),
           verification: filter,
           limit: 50,
         });

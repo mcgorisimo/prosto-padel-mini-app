@@ -87,22 +87,33 @@ export interface MatchPublicPlayerResponse {
   readonly isVerified: boolean;
 }
 
-export interface MatchPublicParticipantResponse
-  extends MatchPublicPlayerResponse {
-  readonly slotNumber: MatchSlotNumber;
+export interface MatchUnavailablePlayerResponse {
+  readonly unavailable: true;
 }
+
+export type MatchPlayerProjectionResponse =
+  | MatchPublicPlayerResponse
+  | MatchUnavailablePlayerResponse;
+
+export type MatchPublicParticipantResponse =
+  | (MatchPublicPlayerResponse & Readonly<{
+      readonly slotNumber: MatchSlotNumber;
+    }>)
+  | (MatchUnavailablePlayerResponse & Readonly<{
+      readonly slotNumber: MatchSlotNumber;
+    }>);
 
 export type MatchFeedResponse =
   Omit<MatchFeedRecord, 'participants' | 'title'> &
   MatchCourtBookingResponse & Readonly<{
-  readonly owner: MatchPublicPlayerResponse;
+  readonly owner: MatchPlayerProjectionResponse;
   readonly participants: readonly MatchPublicParticipantResponse[];
 }>;
 
 export type MatchDetailResponse =
   Omit<MatchDetailRecord, 'participants' | 'title'> &
   MatchCourtBookingResponse & Readonly<{
-  readonly owner: MatchPublicPlayerResponse;
+  readonly owner: MatchPlayerProjectionResponse;
   readonly participants: readonly MatchPublicParticipantResponse[];
 }>;
 

@@ -2,13 +2,17 @@ import { deterministicUuid } from '../../test/deterministic-uuid';
 import {
   readAdminPlayerId,
   readAdminPlayerListRequest,
+  readAdminPlayerSearchRequest,
   readSetAdminPlayerRatingStateRequest,
 } from './admin-player-rating.http';
 
 describe('admin player rating HTTP readers', () => {
   it('applies bounded list defaults and accepts canonical filters', () => {
     expect(readAdminPlayerListRequest({})).toEqual({ verification: 'all', limit: 20 });
-    expect(readAdminPlayerListRequest({ search: 'Иван', verification: 'unverified', limit: '50' })).toEqual({
+    expect(readAdminPlayerListRequest({ verification: 'unverified', limit: '50' })).toEqual({
+      verification: 'unverified', limit: 50,
+    });
+    expect(readAdminPlayerSearchRequest({ search: 'Иван', verification: 'unverified', limit: 50 })).toEqual({
       search: 'Иван', verification: 'unverified', limit: 50,
     });
   });
@@ -18,10 +22,20 @@ describe('admin player rating HTTP readers', () => {
     { limit: '0' },
     { limit: '51' },
     { verification: 'unknown' },
-    { search: ' Иван' },
+    { search: 'Иван' },
     { cursor: 'not+a+cursor' },
   ])('rejects malformed list query %#', (query) => {
     expect(readAdminPlayerListRequest(query)).toBeUndefined();
+  });
+
+  it.each([
+    {},
+    { search: 'И' },
+    { search: ' Иван' },
+    { search: 'Иван', limit: '20' },
+    { search: 'Иван', extra: true },
+  ])('rejects malformed POST search body %#', (body) => {
+    expect(readAdminPlayerSearchRequest(body)).toBeUndefined();
   });
 
   it('accepts an exact canonical rating command', () => {

@@ -14,6 +14,7 @@ export interface PlayerProfileRecord {
   readonly fullPhotoUrl?: string;
   readonly languageCode?: string;
   readonly phone?: string;
+  readonly normalizedEmail?: string;
   readonly sidePreference?: 'Left' | 'Both' | 'Right';
   readonly rating: number;
   readonly isVerified: boolean;

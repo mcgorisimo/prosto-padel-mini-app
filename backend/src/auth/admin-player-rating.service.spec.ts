@@ -70,6 +70,9 @@ describe('AdminPlayerRatingService', () => {
     expect(first.outcome).toBe('listed');
     if (first.outcome !== 'listed') throw new Error('expected list');
     expect(first.response.nextCursor).not.toBeNull();
+    expect(
+      Buffer.from(first.response.nextCursor!, 'base64url').toString('utf8'),
+    ).not.toContain('Player');
     await subject.service.list({
       accountId: ADMIN_ID,
       role: 'club_admin',

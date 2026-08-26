@@ -16,6 +16,7 @@ import {
   CompleteOwnPlayerOnboardingInput,
   CompleteOwnPlayerOnboardingResult,
   OwnPlayerOnboarding,
+  OwnPlayerOnboardingResponse,
   ReadOwnPlayerOnboardingResult,
   SaveOwnPlayerOnboardingDraftInput,
   SaveOwnPlayerOnboardingDraftResult,
@@ -88,7 +89,7 @@ function captureLogger(logs: unknown[][]) {
   };
 }
 
-function foundOnboarding(): OwnPlayerOnboarding {
+function foundOnboarding(): OwnPlayerOnboarding & { readonly status: 'in_progress' } {
   return {
     status: 'in_progress',
     flowVersion: 'tma_v1',
@@ -110,26 +111,15 @@ function foundResult(): ReadOwnPlayerOnboardingResult {
   return { outcome: 'found', onboarding: foundOnboarding() };
 }
 
-function completedOnboarding(): OwnPlayerOnboarding {
+function completedOnboarding(): Extract<
+  OwnPlayerOnboardingResponse,
+  { readonly status: 'completed' }
+> {
   return {
-    ...foundOnboarding(),
     status: 'completed',
-    currentStep: 'completed',
-    surveyVersion: 'initial_level_v2',
-    revision: 5,
-    consents: [
-      { kind: 'cancellation', documentVersion: '2026-08-01' },
-      { kind: 'personal_data_processing', documentVersion: '2026-08-01' },
-      { kind: 'terms', documentVersion: '2026-08-01' },
-    ],
-    surveyAnswers: {
-      match_count: 'thirty_one_to_ninety_nine',
-      rally_stability: 'steady_under_pressure',
-      glass_play: 'confident_returns',
-      serve_return_net: 'confident_patterns',
-      match_experience_year: 'league_or_club',
-    },
+    legalPolicyCurrent: true,
     initialLevelLabel: 'B+',
+    initialLevelAlgorithmVersion: 'initial_level_v2',
   };
 }
 
@@ -450,7 +440,9 @@ describe('PlayerOnboardingController HTTP boundary', () => {
     expectNoStore(response);
     expect(response.json()).toEqual(completedOnboarding());
     expect(response.json()).toMatchObject({ initialLevelLabel: 'B+' });
-    expect(response.body).not.toMatch(/initialLevelScore|isVerified|rating/iu);
+    expect(response.body).not.toMatch(
+      /surveyAnswers|profile|contacts|consents|initialLevelScore|isVerified|rating/iu,
+    );
   });
 
   it('accepts only the bearer owner exact new three-record evidence set', async () => {
@@ -886,7 +878,7 @@ describe('PlayerOnboardingController HTTP boundary', () => {
     }
   });
 
-  it('completes only the bearer owner and returns a no-store declared-contact response', async () => {
+  it('completes only the bearer owner and returns a no-store one-time survey projection', async () => {
     const response = await postCompletion(
       harness,
       completionBody(),
@@ -919,12 +911,12 @@ describe('PlayerOnboardingController HTTP boundary', () => {
     });
     expect(response.json()).toMatchObject({
       status: 'completed',
-      revision: 5,
-      contacts: { assurance: 'declared' },
+      legalPolicyCurrent: true,
       initialLevelLabel: 'B+',
+      initialLevelAlgorithmVersion: 'initial_level_v2',
     });
     expect(response.body).not.toMatch(
-      /initialLevelScore|isVerified|verified|rating/iu,
+      /surveyAnswers|profile|contacts|consents|revision|initialLevelScore|isVerified|verified|rating/iu,
     );
   });
 

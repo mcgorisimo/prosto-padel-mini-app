@@ -29,6 +29,10 @@ import {
 } from './match-chat.repository';
 import { classifyPostgresError } from './postgres-error-classifier';
 import { PostgresTransaction } from './postgres-transaction';
+import {
+  PublicPlayerVisibilityPolicy,
+  publicPlayerVisibilityParameters,
+} from './public-player-profile-search.repository';
 
 const MAX_LIST_LIMIT = 50;
 const MAX_NAME_CODE_POINTS = 256;
@@ -97,6 +101,7 @@ const SELECT_CHAT_SENDERS_SQL = `
     accounts.id AS sender_account_id,
     accounts.role,
     accounts.status,
+    details.account_id AS visible_profile_account_id,
     details.first_name,
     details.last_name,
     details.username,
@@ -108,9 +113,29 @@ const SELECT_CHAT_SENDERS_SQL = `
   LEFT JOIN backend_auth.player_profile_details AS details
     ON details.account_id = profiles.account_id
     AND accounts.status = 'active'
+    AND $2::boolean
+    AND EXISTS (
+      SELECT 1
+      FROM backend_auth.player_onboarding_states AS onboarding
+      WHERE onboarding.account_id = accounts.id
+        AND onboarding.status = 'completed'
+        AND onboarding.current_step = 'completed'
+    )
+    AND NOT EXISTS (
+      SELECT 1
+      FROM unnest($3::text[], $4::text[])
+        AS required_consents(consent_kind, document_version)
+      WHERE NOT EXISTS (
+        SELECT 1
+        FROM backend_auth.account_consent_acceptances AS acceptances
+        WHERE acceptances.account_id = accounts.id
+          AND acceptances.consent_kind = required_consents.consent_kind
+          AND acceptances.document_version = required_consents.document_version
+      )
+    )
   LEFT JOIN backend_auth.player_rating_states AS rating_states
     ON rating_states.account_id = profiles.account_id
-    AND accounts.status = 'active'
+    AND details.account_id = profiles.account_id
   WHERE accounts.id = ANY ($1::uuid[])
   ORDER BY accounts.id
 `;
@@ -216,6 +241,7 @@ interface ChatSenderRow extends QueryResultRow {
   readonly sender_account_id: unknown;
   readonly role: unknown;
   readonly status: unknown;
+  readonly visible_profile_account_id: unknown;
   readonly first_name: unknown;
   readonly last_name: unknown;
   readonly username: unknown;
@@ -317,8 +343,12 @@ function hydrateSender(row: ChatSenderRow): MatchChatSenderRecord {
   ) {
     throw invalidState();
   }
-  if (row.status !== 'active') {
+  if (
+    row.status !== 'active' ||
+    row.visible_profile_account_id !== row.sender_account_id
+  ) {
     if (
+      row.visible_profile_account_id !== null ||
       row.first_name !== null ||
       row.last_name !== null ||
       row.username !== null ||
@@ -474,6 +504,13 @@ function mapPersistenceError(
 }
 
 export class PostgresMatchChatRepository implements MatchChatRepository {
+  constructor(
+    private readonly visibility: PublicPlayerVisibilityPolicy = Object.freeze({
+      enabled: false,
+      requiredConsents: Object.freeze([]),
+    }),
+  ) {}
+
   async list(
     transaction: PostgresTransaction,
     input: ListMatchMessagesInput,
@@ -571,9 +608,12 @@ export class PostgresMatchChatRepository implements MatchChatRepository {
   ): Promise<ReadMatchChatSendersResult> {
     try {
       const validated = validateReadSendersInput(input);
+      const visibility = publicPlayerVisibilityParameters(
+        this.visibility,
+      );
       const selected = await transaction.query<ChatSenderRow>(
         SELECT_CHAT_SENDERS_SQL,
-        [validated.senderAccountIds],
+        [validated.senderAccountIds, ...visibility],
       );
       if (
         selected.rowCount !== selected.rows.length ||

@@ -98,6 +98,63 @@ describe('MatchLineupService', () => {
     ]);
   });
 
+  it('keeps lineup aggregates available when an assigned public profile is hidden', async () => {
+    const subject = harness();
+    subject.read.mockResolvedValue({
+      outcome: 'found',
+      lineup: {
+        matchId: MATCH_ID,
+        status: 'draft',
+        createdAt: NOW,
+        updatedAt: NOW,
+        version: 2,
+        eligibleAccountIds: [ACTOR_ID, OTHER_ID],
+        assignments: [{
+          assignmentId: ASSIGNMENT_ID,
+          matchId: MATCH_ID,
+          accountId: OTHER_ID,
+          teamNumber: 1,
+          courtSide: 'left',
+          assignedAt: NOW,
+          updatedAt: NOW,
+          version: 1,
+        }],
+      },
+    });
+    subject.findByPlayerIds.mockResolvedValue({
+      outcome: 'found',
+      players: [{
+        playerId: ACTOR_ID,
+        firstName: 'Actor',
+        rating: 3,
+        isVerified: true,
+      }],
+    });
+
+    const response = await subject.service.read({
+      accountId: ACTOR_ID,
+      role: 'player',
+      matchId: MATCH_ID,
+    });
+
+    expect(response.outcome).toBe('found');
+    if (response.outcome !== 'found') throw new Error('Expected lineup');
+    expect(response.lineup.slots[0].assignment).toMatchObject({
+      assignmentId: ASSIGNMENT_ID,
+      isCurrentPlayer: false,
+      player: { unavailable: true },
+    });
+    expect(response.lineup.slots[0].assignment?.player).toEqual({
+      unavailable: true,
+    });
+    expect(response.lineup.unassignedPlayers).toEqual([
+      expect.objectContaining({ playerId: ACTOR_ID, firstName: 'Actor' }),
+    ]);
+    expect(JSON.stringify(response.lineup.slots[0].assignment?.player)).not.toMatch(
+      /playerId|firstName|phone|email/iu,
+    );
+  });
+
   it('derives stable command and assignment bindings and never accepts client account ids', async () => {
     const subject = harness();
     subject.assign.mockImplementation(async (_transaction, input) => ({

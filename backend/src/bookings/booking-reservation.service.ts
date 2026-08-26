@@ -63,7 +63,8 @@ export type ListBookingReservationsResult =
   | Readonly<{ outcome: 'loaded'; reservations: ReadonlyArray<BookingReservationView> }>
   | Readonly<{ outcome: 'unavailable' }>;
 
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
+const EMAIL_PATTERN =
+  /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9][a-z0-9.-]*\.[a-z]{2,63}$/u;
 const MAX_SIGNED_INTEGER = 2_147_483_647;
 const STALE_PROVIDER_ATTEMPT_SECONDS = 120;
 
@@ -73,12 +74,34 @@ function now(clock: BookingReservationClock) {
   return unixEpochSeconds(value);
 }
 
-function normalizeEmail(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined;
-  const normalized = value.trim().toLowerCase();
-  return normalized.length > 0 && normalized.length <= 320 && EMAIL_PATTERN.test(normalized)
-    ? normalized
+function readCanonicalEmail(value: unknown): string | undefined {
+  return typeof value === 'string' &&
+    value.length <= 320 &&
+    value.trim() === value &&
+    value.toLowerCase() === value &&
+    EMAIL_PATTERN.test(value)
+    ? value
     : undefined;
+}
+
+function isCreateInput(
+  value: unknown,
+): value is Readonly<{
+  requestKey: string;
+  serviceId: number;
+  courtId: number;
+  datetime: string;
+}> {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Object.getPrototypeOf(value) === Object.prototype &&
+    Object.keys(value).length === 4 &&
+    ['requestKey', 'serviceId', 'courtId', 'datetime'].every((key) =>
+      Object.prototype.hasOwnProperty.call(value, key),
+    )
+  );
 }
 
 function fullName(firstName: string, lastName?: string): string | undefined {
@@ -224,12 +247,14 @@ export class BookingReservationService {
     return reservation;
   }
 
-  async create(ownerAccountId: AccountId, input: Readonly<{requestKey: string;serviceId:number;courtId:number;datetime:string;email:string}>): Promise<CreateBookingReservationResult> {
+  async create(ownerAccountId: AccountId, input: Readonly<{requestKey: string;serviceId:number;courtId:number;datetime:string}>): Promise<CreateBookingReservationResult> {
     let requestKey: ReservationIdempotencyKey;
-    const email = normalizeEmail(input?.email);
+    if (!isCreateInput(input)) {
+      return Object.freeze({ outcome: 'invalid_request' });
+    }
     try { requestKey = reservationIdempotencyKey(input?.requestKey); }
     catch { return Object.freeze({ outcome: 'invalid_request' }); }
-    if (!Number.isSafeInteger(input?.serviceId) || input.serviceId < 1 || !Number.isSafeInteger(input?.courtId) || input.courtId < 1 || typeof input?.datetime !== 'string' || !Number.isFinite(Date.parse(input.datetime)) || email === undefined) {
+    if (!Number.isSafeInteger(input.serviceId) || input.serviceId < 1 || !Number.isSafeInteger(input.courtId) || input.courtId < 1 || typeof input.datetime !== 'string' || !Number.isFinite(Date.parse(input.datetime))) {
       return Object.freeze({ outcome: 'invalid_request' });
     }
 
@@ -238,7 +263,10 @@ export class BookingReservationService {
       const profileResult = await this.transactions.runInTransaction((tx) => this.profiles.findByAccountId(tx, { accountId: ownerAccountId }));
       const name = profileResult.outcome === 'found' ? fullName(profileResult.profile.firstName, profileResult.profile.lastName) : undefined;
       const phone = profileResult.outcome === 'found' ? profileResult.profile.phone : undefined;
-      if (name === undefined || phone === undefined || !/^\+[1-9]\d{6,14}$/u.test(phone)) return Object.freeze({ outcome: 'contact_incomplete' });
+      const email = profileResult.outcome === 'found'
+        ? readCanonicalEmail(profileResult.profile.normalizedEmail)
+        : undefined;
+      if (name === undefined || phone === undefined || !/^\+[1-9]\d{6,14}$/u.test(phone) || email === undefined) return Object.freeze({ outcome: 'contact_incomplete' });
       const snapshot = Object.freeze({ phone, fullName: name, email });
       if (!isReservationClientSnapshot(snapshot)) {
         return Object.freeze({ outcome: 'contact_incomplete' });

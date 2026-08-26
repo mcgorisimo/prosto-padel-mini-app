@@ -37,11 +37,22 @@ function successBody(accountKind = 'new') {
 }
 
 function onboardingState(overrides = {}) {
+  if ((overrides.status ?? 'completed') === 'completed') {
+    return {
+      status: 'completed',
+      legalPolicyCurrent: overrides.legalPolicyCurrent ?? true,
+      initialLevelLabel: overrides.initialLevelLabel ?? null,
+      initialLevelAlgorithmVersion:
+        overrides.initialLevelAlgorithmVersion ??
+        overrides.surveyVersion ??
+        'initial_level_v1',
+    };
+  }
   return {
-    status: 'completed',
+    status: 'in_progress',
     flowVersion: 'tma_v1',
-    currentStep: 'completed',
-    surveyVersion: 'initial_level_v1',
+    currentStep: 'profile',
+    surveyVersion: 'initial_level_v2',
     revision: 4,
     profile: { firstName: 'Synthetic', lastName: 'Player' },
     contacts: {
@@ -60,7 +71,7 @@ function onboardingState(overrides = {}) {
         documentVersion: 'personal-data-consent-2026-08-26-v1',
       },
     ],
-    surveyAnswers: { experience: 'beginner' },
+    surveyAnswers: {},
     ...overrides,
   };
 }
@@ -525,17 +536,7 @@ test.describe('Telegram backend login feature enabled', () => {
         200,
         onboardingState({
           ...completedV2,
-          consents: [
-            { kind: 'terms', documentVersion: 'terms-test-2026-08-23-v1' },
-            {
-              kind: 'privacy',
-              documentVersion: 'privacy-test-2026-08-23-v1',
-            },
-            {
-              kind: 'cancellation',
-              documentVersion: 'cancellation-test-2026-08-23-v1',
-            },
-          ],
+          legalPolicyCurrent: false,
         }),
       );
     });

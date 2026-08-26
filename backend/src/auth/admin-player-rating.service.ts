@@ -30,9 +30,10 @@ export interface AdminPlayerRatingServiceDependencies {
 }
 
 interface CursorPayload {
-  readonly version: 1;
-  readonly search: string | null;
+  readonly version: 2;
+  readonly mode: 'list' | 'search';
   readonly verification: 'all' | 'verified' | 'unverified';
+  readonly contextDigest: string | null;
   readonly afterAccountId: string;
 }
 
@@ -52,18 +53,33 @@ function validRating(value: unknown): value is number {
 }
 
 function encodeCursor(input: Omit<CursorPayload, 'version'>): string {
-  return Buffer.from(JSON.stringify({ version: 1, ...input }), 'utf8').toString('base64url');
+  return Buffer.from(JSON.stringify({ version: 2, ...input }), 'utf8').toString('base64url');
 }
 
-function decodeCursor(value: string, search: string | undefined, verification: CursorPayload['verification']) {
+function cursorContextDigest(search: string | undefined): string | null {
+  return search === undefined
+    ? null
+    : createHash('sha256')
+        .update('backend-admin-player-search:v1\0', 'utf8')
+        .update(search, 'utf8')
+        .digest('hex');
+}
+
+function decodeCursor(
+  value: string,
+  mode: CursorPayload['mode'],
+  verification: CursorPayload['verification'],
+  contextDigest: CursorPayload['contextDigest'],
+) {
   try {
     const decoded = Buffer.from(value, 'base64url').toString('utf8');
     if (Buffer.from(decoded, 'utf8').toString('base64url') !== value) return undefined;
     const parsed: unknown = JSON.parse(decoded);
     if (
-      !isRecord(parsed) || Object.keys(parsed).length !== 4 ||
-      parsed.version !== 1 || parsed.search !== (search ?? null) ||
+      !isRecord(parsed) || Object.keys(parsed).length !== 5 ||
+      parsed.version !== 2 || parsed.mode !== mode ||
       parsed.verification !== verification || !isAccountId(parsed.afterAccountId)
+      || parsed.contextDigest !== contextDigest
     ) {
       return undefined;
     }
@@ -79,7 +95,7 @@ function validListInput(value: unknown): value is ListAdminPlayersApiInput {
       !isRecord(value.request)) return false;
   const request = value.request;
   return Object.keys(request).every((key) => ['search', 'verification', 'cursor', 'limit'].includes(key)) &&
-    (request.search === undefined || (typeof request.search === 'string' && request.search.length > 0 &&
+    (request.search === undefined || (typeof request.search === 'string' && [...request.search].length >= 2 &&
       request.search.trim() === request.search && request.search.normalize('NFKC') === request.search &&
       [...request.search].length <= 64 && !/[\u0000-\u001f\u007f-\u009f]/u.test(request.search))) &&
     ['all', 'verified', 'unverified'].includes(String(request.verification)) &&
@@ -173,9 +189,16 @@ export class AdminPlayerRatingService {
 
   async list(input: ListAdminPlayersApiInput): Promise<ListAdminPlayersApiResult> {
     if (!validListInput(input)) return rejected('invalid_request');
+    const mode: CursorPayload['mode'] = input.request.search === undefined ? 'list' : 'search';
+    const contextDigest = cursorContextDigest(input.request.search);
     const afterAccountId = input.request.cursor === undefined
       ? undefined
-      : decodeCursor(input.request.cursor, input.request.search, input.request.verification);
+      : decodeCursor(
+          input.request.cursor,
+          mode,
+          input.request.verification,
+          contextDigest,
+        );
     if (input.request.cursor !== undefined && afterAccountId === undefined) return rejected('invalid_request');
     try {
       const result = await this.dependencies.transactions.run((transaction) =>
@@ -196,8 +219,9 @@ export class AdminPlayerRatingService {
       const response: AdminPlayerListResponse = Object.freeze({
         players: Object.freeze(result.players.map(responsePlayer)),
         nextCursor: result.nextAfterAccountId === undefined ? null : encodeCursor({
-          search: input.request.search ?? null,
+          mode,
           verification: input.request.verification,
+          contextDigest,
           afterAccountId: result.nextAfterAccountId,
         }),
       });

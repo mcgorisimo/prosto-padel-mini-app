@@ -290,6 +290,15 @@ export function legalConsentContract(legalConfig) {
 }
 
 export function currentLegalConsentGroups(onboarding, legalConfig) {
+  if (
+    onboarding?.status === 'completed' &&
+    typeof onboarding.legalPolicyCurrent === 'boolean'
+  ) {
+    return frozen({
+      offer: onboarding.legalPolicyCurrent,
+      personalDataProcessing: onboarding.legalPolicyCurrent,
+    });
+  }
   const expected = legalConsentContract(legalConfig);
   if (expected === null || !Array.isArray(onboarding?.consents)) return null;
   const actualPairs = new Set(

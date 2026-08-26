@@ -67,25 +67,19 @@ function progressState(currentStep, revision, consents = []) {
 
 function completedState() {
   return {
-    ...progressState('completed', 4, CONSENTS),
     status: 'completed',
-    surveyAnswers: { experience: 'beginner' },
+    legalPolicyCurrent: true,
+    initialLevelLabel: null,
+    initialLevelAlgorithmVersion: 'initial_level_v1',
   };
 }
 
 function completedV2State(initialLevelLabel = 'B+') {
   return {
-    ...progressState('completed', 4, CONSENTS),
     status: 'completed',
-    surveyVersion: 'initial_level_v2',
-    surveyAnswers: {
-      match_count: 'thirty_one_to_ninety_nine',
-      rally_stability: 'steady_under_pressure',
-      glass_play: 'confident_returns',
-      serve_return_net: 'confident_patterns',
-      match_experience_year: 'league_or_club',
-    },
+    legalPolicyCurrent: true,
     initialLevelLabel,
+    initialLevelAlgorithmVersion: 'initial_level_v2',
   };
 }
 
@@ -311,7 +305,7 @@ describe('playerOnboardingClient', () => {
       onboarding: completed,
     });
     expect(JSON.stringify(completed)).not.toMatch(
-      /initialLevelScore|isVerified|verified|rating/iu,
+      /surveyAnswers|profile|contacts|consents|revision|initialLevelScore|isVerified|verified|rating/iu,
     );
   });
 
@@ -484,6 +478,10 @@ describe('playerOnboardingClient', () => {
     [
       'label on legacy completion',
       { ...completedState(), initialLevelLabel: 'C' },
+    ],
+    [
+      'survey answers on completed response',
+      { ...completedV2State(), surveyAnswers: { experience: 'beginner' } },
     ],
   ])(
     'rejects a malformed or expanded response with %s',

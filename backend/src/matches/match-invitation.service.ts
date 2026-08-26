@@ -277,7 +277,7 @@ async function enrich(
   });
   if (
     result.outcome !== 'found' ||
-    result.players.length !== ids.length
+    result.players.length > ids.length
   ) {
     throw new MatchInvitationPersistenceError(
       'invalid_persisted_state',
@@ -295,7 +295,11 @@ async function enrich(
       player,
     ]),
   );
-  if (byId.size !== ids.length) {
+  const requestedIds = new Set(ids);
+  if (
+    byId.size !== result.players.length ||
+    [...byId.keys()].some((playerId) => !requestedIds.has(playerId))
+  ) {
     throw new MatchInvitationPersistenceError(
       'invalid_persisted_state',
     );
@@ -304,15 +308,14 @@ async function enrich(
     invitations.map((invitation) => {
       const owner = byId.get(invitation.match.ownerAccountId);
       const invitedPlayer = byId.get(invitation.invitedAccountId);
-      if (owner === undefined || invitedPlayer === undefined) {
-        throw new MatchInvitationPersistenceError(
-          'invalid_persisted_state',
-        );
-      }
       return Object.freeze({
         ...invitation,
-        match: Object.freeze({ ...invitation.match, owner }),
-        invitedPlayer,
+        match: Object.freeze({
+          ...invitation.match,
+          owner: owner ?? Object.freeze({ unavailable: true as const }),
+        }),
+        invitedPlayer: invitedPlayer ??
+          Object.freeze({ unavailable: true as const }),
       });
     }),
   );

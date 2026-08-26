@@ -217,7 +217,7 @@ function validateListInput(value: unknown): ListAdminPlayersInput {
     (value.afterAccountId !== undefined && !isAccountId(value.afterAccountId)) ||
     (value.search !== undefined && (
       typeof value.search !== 'string' || value.search.trim() !== value.search ||
-      value.search.normalize('NFKC') !== value.search || value.search.length === 0 ||
+      value.search.normalize('NFKC') !== value.search || [...value.search].length < 2 ||
       [...value.search].length > 64 || /[\u0000-\u001f\u007f-\u009f]/u.test(value.search)
     )) ||
     !['all', 'verified', 'unverified'].includes(String(value.verification)) ||
@@ -353,8 +353,7 @@ async function activeAdmin(
   if (rows.length !== 1 || rows[0].id !== actorAccountId || rows[0].status !== 'active') {
     return false;
   }
-  if (rows[0].role === 'club_admin') return true;
-  if (rows[0].role !== 'player') return false;
+  if (rows[0].role !== 'player' && rows[0].role !== 'club_admin') return false;
 
   const capability = await transaction.query<AdminCapabilityRow>(
     SELECT_LATEST_ADMIN_CAPABILITY_SQL,

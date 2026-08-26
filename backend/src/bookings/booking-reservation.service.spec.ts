@@ -130,7 +130,7 @@ function harness() {
     noteReconciliationAttempt: jest.fn(),
     applyExactRefresh: jest.fn(),
   };
-  const profiles = { findByAccountId: jest.fn(async () => ({ outcome: 'found', profile: { accountId: OWNER, firstName: 'Andrey', lastName: 'Player', phone: '+79804440505', rating: 3, isVerified: false, capabilities: [] } })) };
+  const profiles = { findByAccountId: jest.fn(async () => ({ outcome: 'found', profile: { accountId: OWNER, firstName: 'Andrey', lastName: 'Player', phone: '+79804440505', normalizedEmail: PRIVATE_EMAIL, rating: 3, isVerified: false, capabilities: [] } })) };
   const availability = { listAvailableTimes: jest.fn(async () => ({ outcome: 'loaded', times: [{ datetime: '2027-01-15T10:00:00+03:00', time: '10:00', durationSeconds: 3600 }] })) };
   const booking = { createBooking: jest.fn(async (_command: unknown, guard?: () => Promise<boolean>) => {
     if (guard !== undefined && !(await guard())) return { outcome: 'not_dispatched' as const };
@@ -164,7 +164,6 @@ describe('BookingReservationService', () => {
       serviceId: 11,
       courtId: 22,
       datetime: '2027-01-15T10:00:00+03:00',
-      email: PRIVATE_EMAIL,
     })).resolves.toMatchObject({
       outcome: 'created',
       reservation: { status: 'confirmed', stale: false },
@@ -189,9 +188,9 @@ describe('BookingReservationService', () => {
     );
   });
 
-  it('sources name and phone from the backend profile and accepts only normalized booking email', async () => {
+  it('sources name, phone, and normalized email only from the backend profile', async () => {
     const h = harness();
-    const result = await h.service.create(OWNER, { requestKey: REQUEST_KEY, serviceId: 11, courtId: 22, datetime: '2027-01-15T10:00:00+03:00', email: '  PRIVATE.Owner@Example.Test  ' });
+    const result = await h.service.create(OWNER, { requestKey: REQUEST_KEY, serviceId: 11, courtId: 22, datetime: '2027-01-15T10:00:00+03:00' });
     expect(result.outcome).toBe('created');
     expect(h.booking.createBooking).toHaveBeenCalledWith(expect.objectContaining({
       client: { phone: '79804440505', fullName: 'Andrey Player', email: PRIVATE_EMAIL },
@@ -200,13 +199,27 @@ describe('BookingReservationService', () => {
     expect(JSON.stringify(result)).not.toContain('79804440505');
   });
 
-  it('fails before persistence/provider when profile contact or booking email is missing', async () => {
+  it('fails before availability, persistence, and provider when backend profile contact is missing', async () => {
     const h = harness();
     h.profiles.findByAccountId.mockResolvedValueOnce({ outcome: 'found', profile: { accountId: OWNER, firstName: 'Andrey', rating: 3, isVerified: true, capabilities: [] } } as never);
-    expect((await h.service.create(OWNER, { requestKey: REQUEST_KEY, serviceId: 11, courtId: 22, datetime: '2027-01-15T10:00:00+03:00', email: PRIVATE_EMAIL })).outcome).toBe('contact_incomplete');
-    expect((await h.service.create(OWNER, { requestKey: REQUEST_KEY, serviceId: 11, courtId: 22, datetime: '2027-01-15T10:00:00+03:00', email: 'invalid' })).outcome).toBe('invalid_request');
+    expect((await h.service.create(OWNER, { requestKey: REQUEST_KEY, serviceId: 11, courtId: 22, datetime: '2027-01-15T10:00:00+03:00' })).outcome).toBe('contact_incomplete');
     expect(h.booking.createBooking).not.toHaveBeenCalled();
+    expect(h.availability.listAvailableTimes).not.toHaveBeenCalled();
     expect(h.reservations.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects a client-supplied email before profile or provider access', async () => {
+    const h = harness();
+    const result = await h.service.create(OWNER, {
+      requestKey: REQUEST_KEY,
+      serviceId: 11,
+      courtId: 22,
+      datetime: '2027-01-15T10:00:00+03:00',
+      email: 'attacker@example.test',
+    } as never);
+    expect(result).toEqual({ outcome: 'invalid_request' });
+    expect(h.profiles.findByAccountId).not.toHaveBeenCalled();
+    expect(h.booking.createBooking).not.toHaveBeenCalled();
   });
 
   it('rejects a profile contact that cannot be rehydrated as the strict encrypted snapshot', async () => {
@@ -217,6 +230,7 @@ describe('BookingReservationService', () => {
         accountId: OWNER,
         firstName: 'Andrey',
         phone: '+79804440505\n',
+        normalizedEmail: PRIVATE_EMAIL,
         rating: 3,
         isVerified: false,
         capabilities: [],
@@ -228,7 +242,6 @@ describe('BookingReservationService', () => {
       serviceId: 11,
       courtId: 22,
       datetime: '2027-01-15T10:00:00+03:00',
-      email: PRIVATE_EMAIL,
     })).resolves.toEqual({ outcome: 'contact_incomplete' });
     expect(h.reservations.create).not.toHaveBeenCalled();
     expect(h.booking.createBooking).not.toHaveBeenCalled();
@@ -236,8 +249,8 @@ describe('BookingReservationService', () => {
 
   it('returns a terminal same-key retry without a second provider create', async () => {
     const h = harness();
-    const first = await h.service.create(OWNER, { requestKey: REQUEST_KEY, serviceId: 11, courtId: 22, datetime: '2027-01-15T10:00:00+03:00', email: PRIVATE_EMAIL });
-    const second = await h.service.create(OWNER, { requestKey: REQUEST_KEY, serviceId: 11, courtId: 22, datetime: '2027-01-15T10:00:00+03:00', email: PRIVATE_EMAIL });
+    const first = await h.service.create(OWNER, { requestKey: REQUEST_KEY, serviceId: 11, courtId: 22, datetime: '2027-01-15T10:00:00+03:00' });
+    const second = await h.service.create(OWNER, { requestKey: REQUEST_KEY, serviceId: 11, courtId: 22, datetime: '2027-01-15T10:00:00+03:00' });
     expect(first.outcome).toBe('created');
     expect(second.outcome).toBe('idempotent_retry');
     expect(h.booking.createBooking).toHaveBeenCalledTimes(1);
@@ -245,11 +258,24 @@ describe('BookingReservationService', () => {
     expect(h.availability.listAvailableTimes).toHaveBeenCalledTimes(1);
   });
 
-  it('rejects same-key different email before availability or provider access', async () => {
+  it('binds the idempotency contact snapshot to the backend-owned email', async () => {
     const h = harness();
-    const command = { requestKey: REQUEST_KEY, serviceId: 11, courtId: 22, datetime: '2027-01-15T10:00:00+03:00', email: PRIVATE_EMAIL };
+    const command = { requestKey: REQUEST_KEY, serviceId: 11, courtId: 22, datetime: '2027-01-15T10:00:00+03:00' };
     expect((await h.service.create(OWNER, command)).outcome).toBe('created');
-    expect((await h.service.create(OWNER, { ...command, email: 'other@example.test' })).outcome).toBe('conflict');
+    h.profiles.findByAccountId.mockResolvedValueOnce({
+      outcome: 'found',
+      profile: {
+        accountId: OWNER,
+        firstName: 'Andrey',
+        lastName: 'Player',
+        phone: '+79804440505',
+        normalizedEmail: 'other@example.test',
+        rating: 3,
+        isVerified: false,
+        capabilities: [],
+      },
+    } as never);
+    expect((await h.service.create(OWNER, command)).outcome).toBe('conflict');
     expect(h.booking.createBooking).toHaveBeenCalledTimes(1);
     expect(h.availability.listAvailableTimes).toHaveBeenCalledTimes(1);
   });
@@ -264,7 +290,7 @@ describe('BookingReservationService', () => {
       if (guard !== undefined && !(await guard())) return { outcome: 'not_dispatched' as const };
       return provider;
     });
-    const command = { requestKey: REQUEST_KEY, serviceId: 11, courtId: 22, datetime: '2027-01-15T10:00:00+03:00', email: PRIVATE_EMAIL };
+    const command = { requestKey: REQUEST_KEY, serviceId: 11, courtId: 22, datetime: '2027-01-15T10:00:00+03:00' };
     const first = h.service.create(OWNER, command);
     await new Promise((resolve) => setImmediate(resolve));
     const second = await h.service.create(OWNER, command);
@@ -280,7 +306,7 @@ describe('BookingReservationService', () => {
     h.reservations.claimProviderAttempt.mockResolvedValueOnce('already_started' as never);
     h.setAttemptStartedAt(NOW);
     h.setNow(NOW + 121);
-    const result = await h.service.create(OWNER, { requestKey: REQUEST_KEY, serviceId: 11, courtId: 22, datetime: '2027-01-15T10:00:00+03:00', email: PRIVATE_EMAIL });
+    const result = await h.service.create(OWNER, { requestKey: REQUEST_KEY, serviceId: 11, courtId: 22, datetime: '2027-01-15T10:00:00+03:00' });
     expect(result.outcome).toBe('unknown');
     expect(h.booking.createBooking).toHaveBeenCalledTimes(1);
     expect(h.providerDispatchCount()).toBe(0);
@@ -290,7 +316,7 @@ describe('BookingReservationService', () => {
   it('allows a safe retry when the first attempt stopped before dispatch claim', async () => {
     const h = harness();
     h.reservations.claimProviderAttempt.mockRejectedValueOnce(new Error('database unavailable'));
-    const command = { requestKey: REQUEST_KEY, serviceId: 11, courtId: 22, datetime: '2027-01-15T10:00:00+03:00', email: PRIVATE_EMAIL };
+    const command = { requestKey: REQUEST_KEY, serviceId: 11, courtId: 22, datetime: '2027-01-15T10:00:00+03:00' };
     await expect(h.service.create(OWNER, command)).resolves.toMatchObject({ outcome: 'unavailable' });
     await expect(h.service.create(OWNER, command)).resolves.toMatchObject({ outcome: 'created' });
     expect(h.booking.createBooking).toHaveBeenCalledTimes(2);
@@ -303,7 +329,7 @@ describe('BookingReservationService', () => {
       if (guard !== undefined && !(await guard())) return { outcome: 'not_dispatched' as const };
       return { outcome: 'unknown_outcome' as const };
     }) as never);
-    const result = await h.service.create(OWNER, { requestKey: REQUEST_KEY, serviceId: 11, courtId: 22, datetime: '2027-01-15T10:00:00+03:00', email: PRIVATE_EMAIL });
+    const result = await h.service.create(OWNER, { requestKey: REQUEST_KEY, serviceId: 11, courtId: 22, datetime: '2027-01-15T10:00:00+03:00' });
     expect(result.outcome).toBe('unknown');
     expect(h.booking.createBooking).toHaveBeenCalledTimes(1);
     expect(h.reservations.finalizeStartedCreateOperation).toHaveBeenLastCalledWith(expect.anything(), OWNER, expect.any(String), expect.objectContaining({ status: 'pending' }), expect.objectContaining({ type: 'mark_unknown' }));
@@ -323,7 +349,6 @@ describe('BookingReservationService', () => {
       serviceId: 11,
       courtId: 22,
       datetime: '2027-01-15T10:00:00+03:00',
-      email: PRIVATE_EMAIL,
     });
 
     expect(result).toMatchObject({
@@ -369,7 +394,6 @@ describe('BookingReservationService', () => {
       serviceId: 11,
       courtId: 22,
       datetime: '2027-01-15T10:00:00+03:00',
-      email: PRIVATE_EMAIL,
     });
 
     expect(result).toMatchObject({
@@ -391,7 +415,7 @@ describe('BookingReservationService', () => {
   it('releases a pre-dispatch preflight failure without claiming provider effect', async () => {
     const h = harness();
     h.booking.createBooking.mockResolvedValueOnce({ outcome: 'unavailable' } as never);
-    const result = await h.service.create(OWNER, { requestKey: REQUEST_KEY, serviceId: 11, courtId: 22, datetime: '2027-01-15T10:00:00+03:00', email: PRIVATE_EMAIL });
+    const result = await h.service.create(OWNER, { requestKey: REQUEST_KEY, serviceId: 11, courtId: 22, datetime: '2027-01-15T10:00:00+03:00' });
     expect(result.outcome).toBe('unavailable');
     expect(h.providerDispatchCount()).toBe(0);
     expect(h.reservations.claimProviderAttempt).not.toHaveBeenCalled();
@@ -404,7 +428,7 @@ describe('BookingReservationService', () => {
       if (guard !== undefined && !(await guard())) return { outcome: 'not_dispatched' as const };
       return { outcome: 'rejected' as const };
     }) as never);
-    const result = await h.service.create(OWNER, { requestKey: REQUEST_KEY, serviceId: 11, courtId: 22, datetime: '2027-01-15T10:00:00+03:00', email: PRIVATE_EMAIL });
+    const result = await h.service.create(OWNER, { requestKey: REQUEST_KEY, serviceId: 11, courtId: 22, datetime: '2027-01-15T10:00:00+03:00' });
     expect(result.outcome).toBe('unknown');
     expect(h.reservations.finalizeStartedCreateOperation).toHaveBeenLastCalledWith(expect.anything(), OWNER, expect.any(String), expect.objectContaining({ status: 'pending' }), expect.objectContaining({ type: 'mark_unknown' }));
   });
@@ -777,7 +801,7 @@ describe('BookingReservationService', () => {
 
   it('restores an owner-scoped reservation list and request-key recovery handle', async () => {
     const h = harness();
-    await h.service.create(OWNER, { requestKey: REQUEST_KEY, serviceId: 11, courtId: 22, datetime: '2027-01-15T10:00:00+03:00', email: PRIVATE_EMAIL });
+    await h.service.create(OWNER, { requestKey: REQUEST_KEY, serviceId: 11, courtId: 22, datetime: '2027-01-15T10:00:00+03:00' });
     h.adminRead.getRecord.mockResolvedValue({ outcome: 'unavailable' });
     await expect(h.service.list(OWNER)).resolves.toMatchObject({ outcome:'loaded', reservations:[{status:'confirmed'}] });
     await expect(h.service.readByRequestKey(OWNER,REQUEST_KEY)).resolves.toMatchObject({outcome:'found',reservation:{reservationId:expect.any(String)}});

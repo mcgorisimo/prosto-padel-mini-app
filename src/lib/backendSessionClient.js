@@ -11,6 +11,7 @@ const MATCH_INVITATIONS_PATH = '/api/v1/match-invitations';
 const MATCH_NOTIFICATIONS_PATH = '/api/v1/match-notifications';
 const CONTENT_MODERATION_PATH = '/api/v1/content/moderation';
 const ADMIN_PLAYERS_PATH = '/api/v1/admin/players';
+const ADMIN_PLAYER_SEARCH_PATH = `${ADMIN_PLAYERS_PATH}/search`;
 const REQUEST_TIMEOUT_MS = 8_000;
 const MAX_REQUESTS = 3;
 const BACKOFF_BASE_MS = 250;
@@ -295,15 +296,38 @@ function isBackendMatchPublicPlayer(value, slotRequired = false) {
   return !slotRequired || [2, 3, 4].includes(value.slotNumber);
 }
 
-function isBackendMatchMessageSender(value) {
+function isBackendUnavailablePlayer(value) {
+  return (
+    isPlainObject(value) &&
+    hasExactKeys(Object.keys(value).sort(), ['unavailable']) &&
+    value.unavailable === true
+  );
+}
+
+function isBackendMatchPlayerProjection(value) {
   return (
     isBackendMatchPublicPlayer(value) ||
+    isBackendUnavailablePlayer(value)
+  );
+}
+
+function isBackendMatchParticipantProjection(value) {
+  return (
+    isBackendMatchPublicPlayer(value, true) ||
     (
       isPlainObject(value) &&
-      hasExactKeys(Object.keys(value).sort(), ['unavailable']) &&
+      hasExactKeys(
+        Object.keys(value).sort(),
+        ['slotNumber', 'unavailable'],
+      ) &&
+      [2, 3, 4].includes(value.slotNumber) &&
       value.unavailable === true
     )
   );
+}
+
+function isBackendMatchMessageSender(value) {
+  return isBackendMatchPlayerProjection(value);
 }
 
 function isCanonicalMatchMessageBody(value) {
@@ -406,8 +430,11 @@ function isBackendMatchInvitationMatch(value) {
     !isOptionalMatchTitle(value.title) ||
     typeof value.isRatingMatch !== 'boolean' ||
     !isOptionalSafePrice(value.pricePerPersonSnapshot) ||
-    !isBackendMatchPublicPlayer(value.owner) ||
-    value.owner.playerId !== value.ownerAccountId
+    !isBackendMatchPlayerProjection(value.owner) ||
+    (
+      !isBackendUnavailablePlayer(value.owner) &&
+      value.owner.playerId !== value.ownerAccountId
+    )
   ) {
     return false;
   }
@@ -461,8 +488,11 @@ export function isBackendMatchInvitation(value) {
     isBackendMatchInvitationMatch(value.match) &&
     value.match.matchId === value.matchId &&
     value.match.ownerAccountId === value.invitedByAccountId &&
-    isBackendMatchPublicPlayer(value.invitedPlayer) &&
-    value.invitedPlayer.playerId === value.invitedAccountId
+    isBackendMatchPlayerProjection(value.invitedPlayer) &&
+    (
+      isBackendUnavailablePlayer(value.invitedPlayer) ||
+      value.invitedPlayer.playerId === value.invitedAccountId
+    )
   );
 }
 
@@ -584,16 +614,21 @@ export function isBackendMatchFeedRecord(value) {
     return false;
   }
   if (
-    !isBackendMatchPublicPlayer(value.owner) ||
-    value.owner.playerId !== value.ownerAccountId ||
+    !isBackendMatchPlayerProjection(value.owner) ||
+    (
+      !isBackendUnavailablePlayer(value.owner) &&
+      value.owner.playerId !== value.ownerAccountId
+    ) ||
     !Array.isArray(value.participants) ||
     value.participants.length > 3 ||
     !value.participants.every((participant) =>
-      isBackendMatchPublicPlayer(participant, true))
+      isBackendMatchParticipantProjection(participant))
   ) {
     return false;
   }
-  const playerIds = value.participants.map(({ playerId }) => playerId);
+  const playerIds = value.participants
+    .filter((participant) => participant.unavailable !== true)
+    .map(({ playerId }) => playerId);
   const slotNumbers = value.participants.map(
     ({ slotNumber }) => slotNumber,
   );
@@ -672,17 +707,22 @@ export function isBackendMatchDetailRecord(value) {
   const hasPublicProjection = value.owner !== undefined;
   const participantsValid = value.participants.every((participant) =>
     hasPublicProjection
-      ? isBackendMatchPublicPlayer(participant, true)
+      ? isBackendMatchParticipantProjection(participant)
       : isBackendMatchParticipantIdentity(participant));
   if (!participantsValid) return false;
 
-  const playerIds = value.participants.map(({ playerId }) => playerId);
+  const playerIds = value.participants
+    .filter((participant) => participant.playerId !== undefined)
+    .map(({ playerId }) => playerId);
   const slotNumbers = value.participants.map(({ slotNumber }) => slotNumber);
   if (
     (hasPublicProjection &&
       (
-        !isBackendMatchPublicPlayer(value.owner) ||
-        value.owner.playerId !== value.ownerAccountId
+        !isBackendMatchPlayerProjection(value.owner) ||
+        (
+          !isBackendUnavailablePlayer(value.owner) &&
+          value.owner.playerId !== value.ownerAccountId
+        )
       )) ||
     playerIds.includes(value.ownerAccountId) ||
     new Set(playerIds).size !== playerIds.length ||
@@ -1436,14 +1476,7 @@ function matchMessageSendSuccess(body, expectedMatchId) {
 }
 
 function isBackendMatchWaitlistPlayer(value) {
-  return (
-    isBackendMatchPublicPlayer(value) ||
-    (
-      isPlainObject(value) &&
-      hasExactKeys(Object.keys(value).sort(), ['unavailable']) &&
-      value.unavailable === true
-    )
-  );
+  return isBackendMatchPlayerProjection(value);
 }
 
 function isBackendMatchWaitlistEntry(value) {
@@ -1685,14 +1718,7 @@ function matchNotificationReadSuccess(body, expectedNotificationId) {
 }
 
 function isBackendMatchLineupPlayer(value) {
-  return (
-    isBackendMatchPublicPlayer(value) ||
-    (
-      isPlainObject(value) &&
-      hasExactKeys(Object.keys(value).sort(), ['unavailable']) &&
-      value.unavailable === true
-    )
-  );
+  return isBackendMatchPlayerProjection(value);
 }
 
 function freezeBackendMatchLineupPlayer(player) {
@@ -2418,6 +2444,8 @@ export function createBackendSessionClient(dependencies = {}) {
       const isMatchResultOperation =
         operation.startsWith('match_result_');
       const isAdminOperation = operation.startsWith('admin_');
+      const isAdminPlayerSearchOperation =
+        operation === 'admin_players_search';
       const isMatchListOperation =
         operation === 'match_list' || operation === 'match_list_mine';
       const isPlayerSearchOperation = operation === 'player_search';
@@ -2456,14 +2484,12 @@ export function createBackendSessionClient(dependencies = {}) {
               ? PROFILE_PATH
               : operation === 'admin_players_list'
                 ? `${ADMIN_PLAYERS_PATH}?verification=${operationPayload.verification}&limit=${operationPayload.limit}${
-                    operationPayload.search === undefined
-                      ? ''
-                      : `&search=${encodeURIComponent(operationPayload.search)}`
-                  }${
                     operationPayload.cursor === undefined
                       ? ''
                       : `&cursor=${encodeURIComponent(operationPayload.cursor)}`
                   }`
+              : isAdminPlayerSearchOperation
+                ? ADMIN_PLAYER_SEARCH_PATH
               : operation === 'admin_player_rating_set'
                 ? `${ADMIN_PLAYERS_PATH}/${encodeURIComponent(adminPlayerId)}/rating-state`
               : operation === 'content_moderation'
@@ -2598,6 +2624,8 @@ export function createBackendSessionClient(dependencies = {}) {
                               requestKey,
                               sets: operationPayload.sets,
                             }
+                    : isAdminPlayerSearchOperation
+                      ? operationPayload
                     : operation === 'admin_player_rating_set'
                           ? {
                               requestKey,
@@ -2664,7 +2692,11 @@ export function createBackendSessionClient(dependencies = {}) {
           ? frozen('success', { result })
           : frozen('malformed_response');
       }
-      if (operation === 'admin_players_list' && response.status === 200) {
+      if (
+        (operation === 'admin_players_list' ||
+          isAdminPlayerSearchOperation) &&
+        response.status === 200
+      ) {
         const result = adminPlayerListSuccess(
           body,
           operationPayload.limit,
@@ -3155,7 +3187,8 @@ export function createBackendSessionClient(dependencies = {}) {
       ((operation === 'match_result_confirm' ||
         operation === 'match_result_dispute') &&
         !isMatchId(operationPayload?.matchId)) ||
-      (operation === 'admin_players_list' &&
+      ((operation === 'admin_players_list' ||
+        operation === 'admin_players_search') &&
         (
           !ADMIN_VERIFICATION_FILTERS.includes(
             operationPayload?.verification,
@@ -3163,8 +3196,11 @@ export function createBackendSessionClient(dependencies = {}) {
           !Number.isInteger(operationPayload?.limit) ||
           operationPayload.limit < 1 ||
           operationPayload.limit > 50 ||
-          (operationPayload.search !== undefined &&
+          (operation === 'admin_players_list' &&
+            operationPayload.search !== undefined) ||
+          (operation === 'admin_players_search' &&
             (!isBoundedString(operationPayload.search, 64) ||
+              [...operationPayload.search].length < 2 ||
               operationPayload.search.trim() !== operationPayload.search ||
               operationPayload.search.normalize('NFKC') !==
                 operationPayload.search ||
@@ -3266,7 +3302,13 @@ export function createBackendSessionClient(dependencies = {}) {
     deleteOwnProfilePhoto: (credential, options) =>
       mutateOwnProfilePhoto(credential, 'DELETE', undefined, options),
     listAdminPlayers: (credential, request = {}, options) =>
-      execute('admin_players_list', credential, options, {
+      execute(
+        request.search === undefined
+          ? 'admin_players_list'
+          : 'admin_players_search',
+        credential,
+        options,
+        {
         verification: request.verification ?? 'all',
         limit: request.limit ?? 20,
         ...(request.search === undefined
@@ -3275,7 +3317,8 @@ export function createBackendSessionClient(dependencies = {}) {
         ...(request.cursor === undefined
           ? {}
           : { cursor: request.cursor }),
-      }),
+        },
+      ),
     setAdminPlayerRatingState: (
       credential,
       playerId,

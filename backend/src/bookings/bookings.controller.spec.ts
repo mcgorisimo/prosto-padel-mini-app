@@ -249,7 +249,6 @@ describe('BookingsController', () => {
         serviceId: 30_539_679,
         courtId: 5_730_531,
         datetime: '2026-08-06T07:00:00+03:00',
-        email: 'test@example.test',
       },
     });
 
@@ -263,7 +262,6 @@ describe('BookingsController', () => {
       serviceId: 30_539_679,
       courtId: 5_730_531,
       datetime: '2026-08-06T07:00:00+03:00',
-      email: 'test@example.test',
     });
     expect(JSON.stringify(response.json())).not.toContain('record-hash');
     expect(harness.domainEvents).toHaveBeenCalledWith({
@@ -281,7 +279,7 @@ describe('BookingsController', () => {
       url: '/bookings',
       headers: headers(),
       payload: {
-        requestKey: 'not-a-uuid',
+        requestKey: deterministicUuid('booking-controller-client-email'),
         serviceId: 30_539_679,
         courtId: 5_730_531,
         datetime: '2026-08-06T07:00:00+03:00',
@@ -317,7 +315,6 @@ describe('BookingsController', () => {
           serviceId: 30_539_679,
           courtId: 5_730_531,
           datetime: '2026-08-06T07:00:00+03:00',
-          email: 'test@example.test',
         },
       });
 
@@ -339,7 +336,7 @@ describe('BookingsController', () => {
     });
     const response = await harness.app.inject({
       method: 'POST', url: '/bookings', headers: headers(),
-      payload: { requestKey: deterministicUuid('booking-controller-unknown'), serviceId: 30_539_679, courtId: 5_730_531, datetime: '2026-08-06T07:00:00+03:00', email: 'test@example.test' },
+      payload: { requestKey: deterministicUuid('booking-controller-unknown'), serviceId: 30_539_679, courtId: 5_730_531, datetime: '2026-08-06T07:00:00+03:00' },
     });
     expect(response.statusCode).toBe(202);
     expect(response.json()).toMatchObject({ reservationId, status: 'unknown', stale: true });

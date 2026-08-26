@@ -287,7 +287,9 @@ export default function AuthGate() {
       setInitialLevelReassessmentStatus('inactive');
       return;
     }
-    if (playerOnboarding.surveyVersion !== 'initial_level_v1') {
+    if (
+      playerOnboarding.initialLevelAlgorithmVersion !== 'initial_level_v1'
+    ) {
       initialLevelReassessmentRequestRef.current += 1;
       setInitialLevelReassessment(Object.freeze({ status: 'not_eligible' }));
       setInitialLevelReassessmentStatus('ready');
@@ -437,8 +439,7 @@ export default function AuthGate() {
 
   const handlePlayerOnboardingEnterApp = useCallback((completedOnboarding) => {
     if (
-      completedOnboarding?.status !== 'completed' ||
-      completedOnboarding.currentStep !== 'completed'
+      completedOnboarding?.status !== 'completed'
     ) {
       return;
     }
@@ -743,15 +744,14 @@ export default function AuthGate() {
         backendProfile={backendProfile}
         privateBookingClient={{
           fullName: [
-            playerOnboarding.profile.firstName,
-            playerOnboarding.profile.lastName,
+            backendProfile.firstName,
+            backendProfile.lastName,
           ].filter(Boolean).join(' '),
-          phone: playerOnboarding.contacts.phone ?? '',
-          email: playerOnboarding.contacts.normalizedEmail ?? '',
+          phone: backendProfile.phone ?? '',
         }}
         playerOnboardingInitialLevelLabel={
           reassessedInitialLevelLabel ??
-          (playerOnboarding.surveyVersion === 'initial_level_v2'
+          (playerOnboarding.initialLevelAlgorithmVersion === 'initial_level_v2'
             ? playerOnboarding.initialLevelLabel
             : null)
         }

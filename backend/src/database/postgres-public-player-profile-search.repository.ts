@@ -9,6 +9,8 @@ import {
   PublicPlayerProfileSearchPersistenceError,
   PublicPlayerProfileSearchPersistenceFailure,
   PublicPlayerProfileSearchRepository,
+  PublicPlayerVisibilityPolicy,
+  publicPlayerVisibilityParameters,
   ReadPublicPlayerProfilesInput,
   ReadPublicPlayerProfilesResult,
   SearchPublicPlayerProfilesInput,
@@ -55,6 +57,26 @@ const SEARCH_PUBLIC_PLAYER_PROFILES_SQL = `
    AND photo_assets.asset_id = photo_states.active_asset_id
   WHERE accounts.role = 'player'
     AND accounts.status = 'active'
+    AND $3::boolean
+    AND EXISTS (
+      SELECT 1
+      FROM backend_auth.player_onboarding_states AS onboarding
+      WHERE onboarding.account_id = accounts.id
+        AND onboarding.status = 'completed'
+        AND onboarding.current_step = 'completed'
+    )
+    AND NOT EXISTS (
+      SELECT 1
+      FROM unnest($4::text[], $5::text[])
+        AS required_consents(consent_kind, document_version)
+      WHERE NOT EXISTS (
+        SELECT 1
+        FROM backend_auth.account_consent_acceptances AS acceptances
+        WHERE acceptances.account_id = accounts.id
+          AND acceptances.consent_kind = required_consents.consent_kind
+          AND acceptances.document_version = required_consents.document_version
+      )
+    )
     AND (
       details.first_name ILIKE $1 ESCAPE E'\\\\'
       OR details.last_name ILIKE $1 ESCAPE E'\\\\'
@@ -103,6 +125,26 @@ const READ_PUBLIC_PLAYER_PROFILES_SQL = `
   WHERE accounts.role = 'player'
     AND accounts.status = 'active'
     AND accounts.id = ANY ($1::uuid[])
+    AND $2::boolean
+    AND EXISTS (
+      SELECT 1
+      FROM backend_auth.player_onboarding_states AS onboarding
+      WHERE onboarding.account_id = accounts.id
+        AND onboarding.status = 'completed'
+        AND onboarding.current_step = 'completed'
+    )
+    AND NOT EXISTS (
+      SELECT 1
+      FROM unnest($3::text[], $4::text[])
+        AS required_consents(consent_kind, document_version)
+      WHERE NOT EXISTS (
+        SELECT 1
+        FROM backend_auth.account_consent_acceptances AS acceptances
+        WHERE acceptances.account_id = accounts.id
+          AND acceptances.consent_kind = required_consents.consent_kind
+          AND acceptances.document_version = required_consents.document_version
+      )
+    )
   ORDER BY details.account_id
 `;
 
@@ -371,6 +413,10 @@ export class PostgresPublicPlayerProfileSearchRepository
 {
   constructor(
     private readonly photoUrls = new PlayerProfilePhotoUrlResolver(''),
+    private readonly visibility: PublicPlayerVisibilityPolicy = Object.freeze({
+      enabled: false,
+      requiredConsents: Object.freeze([]),
+    }),
   ) {}
 
   async search(
@@ -379,9 +425,16 @@ export class PostgresPublicPlayerProfileSearchRepository
   ): Promise<SearchPublicPlayerProfilesResult> {
     try {
       const validated = validateInput(input);
+      const visibility = publicPlayerVisibilityParameters(
+        this.visibility,
+      );
       const selected = await transaction.query<PublicPlayerProfileRow>(
         SEARCH_PUBLIC_PLAYER_PROFILES_SQL,
-        [escapeLikePattern(validated.query), validated.limit],
+        [
+          escapeLikePattern(validated.query),
+          validated.limit,
+          ...visibility,
+        ],
       );
 
       if (
@@ -416,9 +469,12 @@ export class PostgresPublicPlayerProfileSearchRepository
   ): Promise<ReadPublicPlayerProfilesResult> {
     try {
       const validated = validateBatchInput(input);
+      const visibility = publicPlayerVisibilityParameters(
+        this.visibility,
+      );
       const selected = await transaction.query<PublicPlayerProfileRow>(
         READ_PUBLIC_PLAYER_PROFILES_SQL,
-        [validated.playerIds],
+        [validated.playerIds, ...visibility],
       );
 
       if (

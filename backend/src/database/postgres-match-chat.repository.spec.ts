@@ -28,6 +28,23 @@ const COMMAND_ID = deterministicUuid(
 const DIGEST = 'a'.repeat(64) as MatchMessageRequestDigest;
 const NOW = unixEpochSeconds(1_800_000_000);
 const BODY = 'Hello from the backend chat';
+const CURRENT_VISIBILITY_POLICY = Object.freeze({
+  enabled: true,
+  requiredConsents: Object.freeze([
+    Object.freeze({
+      kind: 'cancellation' as const,
+      documentVersion: 'cancellation-2026-08-26-v1',
+    }),
+    Object.freeze({
+      kind: 'personal_data_processing' as const,
+      documentVersion: 'personal-data-consent-2026-08-26-v1',
+    }),
+    Object.freeze({
+      kind: 'terms' as const,
+      documentVersion: 'terms-2026-08-26-v1',
+    }),
+  ]),
+});
 
 interface QueryCall {
   readonly text: string;
@@ -146,6 +163,7 @@ function senderRow(
     sender_account_id: ACTOR_ID,
     role: 'player',
     status: 'active',
+    visible_profile_account_id: ACTOR_ID,
     first_name: 'Alice',
     last_name: 'Player',
     username: 'alice',
@@ -273,13 +291,14 @@ describe('PostgresMatchChatRepository', () => {
     });
   });
 
-  it('reads active and privacy-safe unavailable sender projections in one batch', async () => {
+  it('reads current and policy-hidden sender projections in one batch', async () => {
     const transaction = new FakeTransaction([
       result([
         senderRow(),
         senderRow({
           sender_account_id: OWNER_ID,
-          status: 'anonymized',
+          status: 'active',
+          visible_profile_account_id: null,
           first_name: null,
           last_name: null,
           username: null,
@@ -290,7 +309,9 @@ describe('PostgresMatchChatRepository', () => {
     ]);
 
     await expect(
-      new PostgresMatchChatRepository().readSenders(transaction, {
+      new PostgresMatchChatRepository(
+        CURRENT_VISIBILITY_POLICY,
+      ).readSenders(transaction, {
         senderAccountIds: [ACTOR_ID, OWNER_ID],
       }),
     ).resolves.toEqual({
@@ -314,17 +335,73 @@ describe('PostgresMatchChatRepository', () => {
     expect(transaction.calls).toHaveLength(1);
     expect(transaction.calls[0].values).toEqual([
       [ACTOR_ID, OWNER_ID],
+      true,
+      [
+        'cancellation',
+        'personal_data_processing',
+        'terms',
+      ],
+      [
+        'cancellation-2026-08-26-v1',
+        'personal-data-consent-2026-08-26-v1',
+        'terms-2026-08-26-v1',
+      ],
     ]);
     expect(transaction.calls[0].text).toContain(
       "AND accounts.status = 'active'",
+    );
+    expect(transaction.calls[0].text).toContain(
+      "onboarding.status = 'completed'",
+    );
+    expect(transaction.calls[0].text).toContain(
+      "onboarding.current_step = 'completed'",
+    );
+    expect(transaction.calls[0].text).toContain(
+      'FROM backend_auth.account_consent_acceptances AS acceptances',
+    );
+    expect(transaction.calls[0].text).toContain(
+      'acceptances.document_version = required_consents.document_version',
     );
     expect(transaction.calls[0].text).toContain(
       'accounts.id = ANY ($1::uuid[])',
     );
   });
 
+  it('fails closed to an unavailable sender when visibility policy is disabled', async () => {
+    const transaction = new FakeTransaction([
+      result([senderRow({
+        visible_profile_account_id: null,
+        first_name: null,
+        last_name: null,
+        username: null,
+        rating: null,
+        is_verified: null,
+      })]),
+    ]);
+
+    await expect(
+      new PostgresMatchChatRepository().readSenders(transaction, {
+        senderAccountIds: [ACTOR_ID],
+      }),
+    ).resolves.toEqual({
+      outcome: 'found',
+      senders: [{
+        senderAccountId: ACTOR_ID,
+        availability: 'unavailable',
+      }],
+    });
+    expect(transaction.calls[0].values).toEqual([
+      [ACTOR_ID],
+      false,
+      [],
+      [],
+    ]);
+  });
+
   it('rejects missing or privacy-leaking sender projections', async () => {
-    const repository = new PostgresMatchChatRepository();
+    const repository = new PostgresMatchChatRepository(
+      CURRENT_VISIBILITY_POLICY,
+    );
     await expect(
       repository.readSenders(
         new FakeTransaction([result([])]),
@@ -338,7 +415,7 @@ describe('PostgresMatchChatRepository', () => {
         new FakeTransaction([
           result([
             senderRow({
-              status: 'blocked',
+              visible_profile_account_id: null,
               rating: null,
               is_verified: null,
             }),

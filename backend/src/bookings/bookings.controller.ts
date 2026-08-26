@@ -129,7 +129,6 @@ function readBookingCreationRequest(value: unknown):
       serviceId: number;
       courtId: number;
       datetime: string;
-      email: string;
     }>
   | undefined {
   if (
@@ -139,7 +138,6 @@ function readBookingCreationRequest(value: unknown):
       'serviceId',
       'courtId',
       'datetime',
-      'email',
     ]) ||
     typeof value.requestKey !== 'string' ||
     !UUID_PATTERN.test(value.requestKey) ||
@@ -147,8 +145,7 @@ function readBookingCreationRequest(value: unknown):
     Number(value.serviceId) <= 0 ||
     !Number.isSafeInteger(value.courtId) ||
     Number(value.courtId) <= 0 ||
-    typeof value.datetime !== 'string' ||
-    typeof value.email !== 'string'
+    typeof value.datetime !== 'string'
   ) {
     return undefined;
   }
@@ -157,7 +154,6 @@ function readBookingCreationRequest(value: unknown):
     serviceId: Number(value.serviceId),
     courtId: Number(value.courtId),
     datetime: value.datetime,
-    email: value.email,
   });
 }
 

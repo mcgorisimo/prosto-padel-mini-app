@@ -218,19 +218,14 @@ function normalizeBookingClient(value) {
   const phone = typeof value?.phone === 'string'
     ? value.phone.replace(/\D/gu, '')
     : '';
-  const email = typeof value?.email === 'string'
-    ? value.email.trim().toLowerCase()
-    : '';
   if (
     fullName.length === 0 ||
     fullName.length > 256 ||
-    !/^\d{10,15}$/u.test(phone) ||
-    email.length > 320 ||
-    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(email)
+    !/^\d{10,15}$/u.test(phone)
   ) {
     return null;
   }
-  return Object.freeze({ phone, fullName, email });
+  return Object.freeze({ phone, fullName });
 }
 
 export default function BookingScreen({
@@ -974,7 +969,7 @@ export default function BookingScreen({
           typeof availabilityActions.createBooking !== 'function'
         ) {
           showToast?.(
-            'Заполните имя, телефон и email в профиле перед бронированием.',
+            'Заполните имя и телефон в профиле перед бронированием.',
             'error',
           );
           return;
@@ -984,7 +979,6 @@ export default function BookingScreen({
           serviceId: selectedOption.serviceId,
           courtId: selectedOption.court.id,
           datetime: selectedOption.datetime,
-          email: normalizedBookingClient.email,
         });
         if (result?.outcome === 'booking_created') {
           const message =
@@ -1504,7 +1498,7 @@ export default function BookingScreen({
               <p className="text-xs leading-relaxed text-warm-white/52">
                 {normalizedBookingClient
                   ? 'Контакты будут взяты из вашего профиля. Онлайн-оплата пока не подключена, поэтому бронь не будет создана на этом шаге.'
-                  : 'Заполните имя, телефон и email в профиле, затем вернитесь к бронированию.'}
+                  : 'Заполните имя и телефон в профиле, затем вернитесь к бронированию.'}
               </p>
 
               {normalizedBookingClient === null && typeof onOpenProfile === 'function' && (

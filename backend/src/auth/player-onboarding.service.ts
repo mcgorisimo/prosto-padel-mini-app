@@ -33,6 +33,7 @@ import {
   CompleteOwnPlayerOnboardingInput,
   CompleteOwnPlayerOnboardingResult,
   OwnPlayerOnboarding,
+  OwnPlayerOnboardingResponse,
   OwnPlayerOnboardingConsent,
   ReadOwnPlayerOnboardingInput,
   ReadOwnPlayerOnboardingResult,
@@ -245,6 +246,23 @@ function publicOnboarding(
   });
 }
 
+function responseOnboarding(
+  onboarding: OwnPlayerOnboarding,
+  policy: PlayerOnboardingPolicy | null,
+): OwnPlayerOnboardingResponse {
+  if (onboarding.status !== 'completed') {
+    return onboarding as OwnPlayerOnboardingResponse;
+  }
+  return Object.freeze({
+    status: 'completed',
+    legalPolicyCurrent:
+      policy !== null &&
+      hasPlayerOnboardingConsents(policy, onboarding.consents),
+    initialLevelLabel: onboarding.initialLevelLabel ?? null,
+    initialLevelAlgorithmVersion: onboarding.surveyVersion as string,
+  });
+}
+
 function temporaryStorageFailure(error: unknown): boolean {
   return (
     (error instanceof PlayerOnboardingReadPersistenceError ||
@@ -386,7 +404,10 @@ export class PlayerOnboardingService {
       if (onboarding === undefined) {
         return rejected('internal_failure');
       }
-      return Object.freeze({ outcome: 'found', onboarding });
+      return Object.freeze({
+        outcome: 'found',
+        onboarding: responseOnboarding(onboarding, this.dependencies.policy),
+      });
     } catch (error) {
       return rejected(
         temporaryStorageFailure(error)
@@ -453,7 +474,10 @@ export class PlayerOnboardingService {
             ) {
               throw storageInvariantFailure();
             }
-            return Object.freeze({ outcome: 'saved', onboarding });
+            return Object.freeze({
+              outcome: 'saved',
+              onboarding: responseOnboarding(onboarding, this.dependencies.policy),
+            });
           },
         );
 
@@ -536,7 +560,10 @@ export class PlayerOnboardingService {
             ) {
               throw storageInvariantFailure();
             }
-            return Object.freeze({ outcome: 'advanced', onboarding });
+            return Object.freeze({
+              outcome: 'advanced',
+              onboarding: responseOnboarding(onboarding, policy),
+            });
           },
         );
 
@@ -614,7 +641,10 @@ export class PlayerOnboardingService {
             ) {
               throw storageInvariantFailure();
             }
-            return Object.freeze({ outcome: 'accepted', onboarding });
+            return Object.freeze({
+              outcome: 'accepted',
+              onboarding: responseOnboarding(onboarding, policy),
+            });
           },
         );
 
@@ -699,7 +729,10 @@ export class PlayerOnboardingService {
             ) {
               throw storageInvariantFailure();
             }
-            return Object.freeze({ outcome: 'completed', onboarding });
+            return Object.freeze({
+              outcome: 'completed',
+              onboarding: responseOnboarding(onboarding, policy),
+            });
           },
         );
 

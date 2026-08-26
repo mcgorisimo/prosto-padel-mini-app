@@ -13,6 +13,7 @@ const PLAYER_ID = deterministicUuid('admin-rating-controller-player') as Account
 const REQUEST_KEY = deterministicUuid('admin-rating-controller-command');
 const NOW = unixEpochSeconds(1_800_000_000);
 const CREDENTIAL = Buffer.alloc(32, 0x61).toString('base64url');
+const SEARCH_MARKER = 'SYNTHETIC_ADMIN_PLAYER_SEARCH';
 
 async function createHarness(role: 'player' | 'club_admin' = 'club_admin') {
   const authenticate = jest.fn().mockResolvedValue({
@@ -46,10 +47,20 @@ async function createHarness(role: 'player' | 'club_admin' = 'club_admin') {
     ],
   }).compile();
   const app = moduleRef.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
+  const logs: unknown[][] = [];
+  const capture = (...values: unknown[]) => logs.push(values);
+  app.useLogger({
+    log: capture,
+    error: capture,
+    warn: capture,
+    debug: capture,
+    verbose: capture,
+    fatal: capture,
+  });
   app.setGlobalPrefix('api/v1');
   await app.init();
   await app.getHttpAdapter().getInstance().ready();
-  return { app, authenticate, list, setRatingState };
+  return { app, authenticate, list, setRatingState, logs };
 }
 
 describe('AdminPlayerRatingController HTTP boundary', () => {
@@ -84,6 +95,48 @@ describe('AdminPlayerRatingController HTTP boundary', () => {
         role: 'club_admin',
         request: { verification: 'unverified', limit: 20 },
       });
+    } finally {
+      await subject.app.close();
+    }
+  });
+
+  it('accepts PII search only in an exact POST body and rejects the legacy GET query', async () => {
+    const subject = await createHarness();
+    try {
+      const searched = await subject.app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/players/search',
+        headers: {
+          authorization: `Bearer ${CREDENTIAL}`,
+          'content-type': 'application/json',
+        },
+        payload: {
+          search: SEARCH_MARKER,
+          verification: 'all',
+          limit: 20,
+        },
+      });
+      expect(searched.statusCode).toBe(200);
+      expect(subject.list).toHaveBeenLastCalledWith({
+        accountId: ADMIN_ID,
+        role: 'club_admin',
+        request: {
+          search: SEARCH_MARKER,
+          verification: 'all',
+          limit: 20,
+        },
+      });
+
+      subject.list.mockClear();
+      const legacy = await subject.app.inject({
+        method: 'GET',
+        url: `/api/v1/admin/players?search=${encodeURIComponent(SEARCH_MARKER)}`,
+        headers: { authorization: `Bearer ${CREDENTIAL}` },
+      });
+      expect(legacy.statusCode).toBe(400);
+      expect(subject.list).not.toHaveBeenCalled();
+      expect(JSON.stringify(legacy.json())).not.toContain(SEARCH_MARKER);
+      expect(JSON.stringify(subject.logs)).not.toContain(SEARCH_MARKER);
     } finally {
       await subject.app.close();
     }

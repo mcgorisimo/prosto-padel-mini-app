@@ -70,6 +70,7 @@ function createHarness(): Harness {
       photoUrl: 'https://example.test/avatar.svg',
       languageCode: 'ru',
       phone: '+79990000000',
+      normalizedEmail: 'private.owner@example.test',
       sidePreference: 'Right',
       rating: 3,
       isVerified: false,
@@ -132,6 +133,7 @@ describe('PlayerProfileService', () => {
     expect(harness.findByAccountId).toHaveBeenCalledWith(TRANSACTION, {
       accountId: ACCOUNT_ID,
     });
+    expect(JSON.stringify(result)).not.toContain('private.owner@example.test');
     expect(Object.isFrozen(result)).toBe(true);
     if (result.outcome === 'found') {
       expect(Object.isFrozen(result.profile)).toBe(true);

@@ -398,7 +398,7 @@ async function readPublicPlayers(
     !isRecord(result) ||
     result.outcome !== 'found' ||
     !Array.isArray(result.players) ||
-    result.players.length !== playerIds.length
+    result.players.length > playerIds.length
   ) {
     throw invalidReadModel();
   }
@@ -414,9 +414,10 @@ async function readPublicPlayers(
       player,
     ]),
   );
+  const requestedIds = new Set(playerIds);
   if (
-    byId.size !== playerIds.length ||
-    playerIds.some((playerId) => !byId.has(playerId))
+    byId.size !== result.players.length ||
+    [...byId.keys()].some((playerId) => !requestedIds.has(playerId))
   ) {
     throw invalidReadModel();
   }
@@ -429,20 +430,21 @@ function enrichDetail(
   courtBooking: MatchCourtBookingProjection,
 ): MatchDetailResponse {
   const { title: _retiredTitle, ...publicRecord } = record;
-  const owner = players.get(record.ownerAccountId);
+  const owner = players.get(record.ownerAccountId) ??
+    Object.freeze({ unavailable: true as const });
   const participants = record.participants.map((participant) => {
     const player = players.get(participant.playerId);
     if (player === undefined) {
-      throw invalidReadModel();
+      return Object.freeze({
+        unavailable: true as const,
+        slotNumber: participant.slotNumber,
+      });
     }
     return Object.freeze({
       ...player,
       slotNumber: participant.slotNumber,
     });
   });
-  if (owner === undefined) {
-    throw invalidReadModel();
-  }
   return Object.freeze({
     ...publicRecord,
     ...courtBookingResponse(courtBooking),
@@ -457,20 +459,21 @@ function enrichFeed(
   courtBooking: MatchCourtBookingProjection,
 ): MatchFeedResponse {
   const { title: _retiredTitle, ...publicRecord } = record;
-  const owner = players.get(record.ownerAccountId);
+  const owner = players.get(record.ownerAccountId) ??
+    Object.freeze({ unavailable: true as const });
   const participants = record.participants.map((participant) => {
     const player = players.get(participant.playerId);
     if (player === undefined) {
-      throw invalidReadModel();
+      return Object.freeze({
+        unavailable: true as const,
+        slotNumber: participant.slotNumber,
+      });
     }
     return Object.freeze({
       ...player,
       slotNumber: participant.slotNumber,
     });
   });
-  if (owner === undefined) {
-    throw invalidReadModel();
-  }
   return Object.freeze({
     ...publicRecord,
     ...courtBookingResponse(courtBooking),

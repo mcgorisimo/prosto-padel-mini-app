@@ -23,28 +23,9 @@ test.use({
 function legacyCompletedOnboarding() {
   return {
     status: 'completed',
-    flowVersion: 'tma_v1',
-    currentStep: 'completed',
-    surveyVersion: 'initial_level_v1',
-    revision: 4,
-    profile: { firstName: 'Synthetic', lastName: 'Player' },
-    contacts: {
-      phone: '+79991234567',
-      normalizedEmail: 'synthetic@example.com',
-      assurance: 'declared',
-    },
-    consents: [
-      { kind: 'terms', documentVersion: 'terms-2026-08-26-v1' },
-      {
-        kind: 'cancellation',
-        documentVersion: 'cancellation-2026-08-26-v1',
-      },
-      {
-        kind: 'personal_data_processing',
-        documentVersion: 'personal-data-consent-2026-08-26-v1',
-      },
-    ],
-    surveyAnswers: { experience: 'beginner' },
+    legalPolicyCurrent: true,
+    initialLevelLabel: null,
+    initialLevelAlgorithmVersion: 'initial_level_v1',
   };
 }
 

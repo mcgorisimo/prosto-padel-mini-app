@@ -6,7 +6,13 @@ import {
 } from './admin-player-rating-api.types';
 
 const FILTERS = Object.freeze(['all', 'verified', 'unverified'] as const);
-const QUERY_KEYS = Object.freeze(['search', 'verification', 'cursor', 'limit']);
+const QUERY_KEYS = Object.freeze(['verification', 'cursor', 'limit']);
+const SEARCH_REQUEST_KEYS = Object.freeze([
+  'search',
+  'verification',
+  'cursor',
+  'limit',
+]);
 const REQUEST_KEYS = Object.freeze(['requestKey', 'rating', 'isVerified']);
 const CURSOR_PATTERN = /^[A-Za-z0-9_-]{1,1024}$/u;
 
@@ -29,7 +35,7 @@ function readSearch(value: unknown): string | undefined {
     typeof value !== 'string' ||
     value.trim() !== value ||
     value.normalize('NFKC') !== value ||
-    value.length === 0 ||
+    [...value].length < 2 ||
     [...value].length > 64 ||
     /[\u0000-\u001f\u007f-\u009f]/u.test(value)
   ) {
@@ -51,8 +57,6 @@ export function readAdminPlayerListRequest(
   ) {
     return undefined;
   }
-  const search = readSearch(value.search);
-  if (value.search !== undefined && search === undefined) return undefined;
   const verification = value.verification === undefined ? 'all' : value.verification;
   if (
     typeof verification !== 'string' ||
@@ -71,10 +75,46 @@ export function readAdminPlayerListRequest(
     return undefined;
   }
   return Object.freeze({
-    ...(search === undefined ? {} : { search }),
     verification: verification as (typeof FILTERS)[number],
     ...(value.cursor === undefined ? {} : { cursor: value.cursor }),
     limit: Number(limitText),
+  });
+}
+
+export function readAdminPlayerSearchRequest(
+  value: unknown,
+): AdminPlayerListRequest | undefined {
+  if (
+    !isRecord(value) ||
+    !Object.prototype.hasOwnProperty.call(value, 'search') ||
+    Object.keys(value).some((key) => !SEARCH_REQUEST_KEYS.includes(key))
+  ) {
+    return undefined;
+  }
+  const search = readSearch(value.search);
+  if (search === undefined) return undefined;
+  const verification = value.verification === undefined ? 'all' : value.verification;
+  if (
+    typeof verification !== 'string' ||
+    !FILTERS.includes(verification as (typeof FILTERS)[number])
+  ) {
+    return undefined;
+  }
+  const limit = value.limit === undefined ? 20 : value.limit;
+  if (!Number.isInteger(limit) || Number(limit) < 1 || Number(limit) > 50) {
+    return undefined;
+  }
+  if (
+    value.cursor !== undefined &&
+    (typeof value.cursor !== 'string' || !CURSOR_PATTERN.test(value.cursor))
+  ) {
+    return undefined;
+  }
+  return Object.freeze({
+    search,
+    verification: verification as (typeof FILTERS)[number],
+    ...(value.cursor === undefined ? {} : { cursor: value.cursor }),
+    limit: Number(limit),
   });
 }
 

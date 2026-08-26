@@ -16,7 +16,6 @@ const ISO_DATETIME_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/u;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
 
 class InvalidResponseBodyError extends Error {}
 
@@ -198,7 +197,6 @@ function readCreateBookingCommand(value) {
       'serviceId',
       'courtId',
       'datetime',
-      'email',
     ]) ||
     typeof value.requestKey !== 'string' ||
     !UUID_PATTERN.test(value.requestKey) ||
@@ -206,12 +204,7 @@ function readCreateBookingCommand(value) {
     !isPositiveSafeInteger(value.courtId) ||
     typeof value.datetime !== 'string' ||
     !ISO_DATETIME_PATTERN.test(value.datetime) ||
-    !Number.isFinite(Date.parse(value.datetime)) ||
-    typeof value.email !== 'string' ||
-    value.email.length > 320 ||
-    value.email.trim() !== value.email ||
-    value.email !== value.email.toLowerCase() ||
-    !EMAIL_PATTERN.test(value.email)
+    !Number.isFinite(Date.parse(value.datetime))
   ) {
     return undefined;
   }
@@ -220,7 +213,6 @@ function readCreateBookingCommand(value) {
     serviceId: value.serviceId,
     courtId: value.courtId,
     datetime: value.datetime,
-    email: value.email,
   });
 }
 

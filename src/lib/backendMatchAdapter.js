@@ -187,7 +187,11 @@ export function mergeAccountUpcomingMatches(
 }
 
 export function mapBackendPublicPlayerToApp(player) {
-  if (!player || typeof player !== 'object') return null;
+  if (
+    !player ||
+    typeof player !== 'object' ||
+    player.unavailable === true
+  ) return null;
   return Object.freeze({
     id: player.playerId,
     first_name: player.firstName,
@@ -307,10 +311,22 @@ export function mapBackendMatchNotificationToApp(notification) {
 export function mapBackendInvitationToApp(invitation) {
   if (!invitation || typeof invitation !== 'object') return null;
   const dateTime = moscowDateTime(invitation.match?.startsAt);
-  const invitedPlayer = mapBackendPublicPlayerToApp(
-    invitation.invitedPlayer,
-  );
+  const invitedPlayerUnavailable =
+    invitation.invitedPlayer?.unavailable === true;
+  const invitedPlayer = invitedPlayerUnavailable
+    ? Object.freeze({
+        id: invitation.invitedAccountId,
+        first_name: 'Игрок недоступен',
+        last_name: '',
+        username: '',
+        photo_url: '',
+        rating: null,
+        is_verified: false,
+        backendOwned: true,
+      })
+    : mapBackendPublicPlayerToApp(invitation.invitedPlayer);
   if (!dateTime || !invitedPlayer) return null;
+  const ownerUnavailable = invitation.match.owner?.unavailable === true;
 
   return Object.freeze({
     id: invitation.invitationId,
@@ -324,8 +340,12 @@ export function mapBackendInvitationToApp(invitation) {
     updated_at: invitation.updatedAt,
     responded_at: invitation.respondedAt ?? null,
     version: invitation.version,
-    organizer_first_name: invitation.match.owner.firstName,
-    organizer_last_name: invitation.match.owner.lastName ?? '',
+    organizer_first_name: ownerUnavailable
+      ? 'Организатор'
+      : invitation.match.owner.firstName,
+    organizer_last_name: ownerUnavailable
+      ? ''
+      : invitation.match.owner.lastName ?? '',
     date_iso: dateTime.dateISO,
     start_time: dateTime.time,
     court_name: invitation.match.courtName,
@@ -562,22 +582,31 @@ export function mapBackendMatchToApp(
     ? null
     : courtNamesById?.[confirmedTarget.courtId];
 
-  const owner = profilePlayer(
-    profile,
-    record.owner ?? record.ownerAccountId,
-    true,
-    0,
-  );
+  const owner = record.owner?.unavailable === true
+    ? profilePlayer(
+        null,
+        `occupied:${record.matchId}:1`,
+        true,
+        0,
+      )
+    : profilePlayer(
+        profile,
+        record.owner ?? record.ownerAccountId,
+        true,
+        0,
+      );
   let filledSlots;
   if (Array.isArray(record.participants)) {
     filledSlots = Array(4).fill(null);
     filledSlots[0] = owner;
     for (const participant of record.participants) {
       filledSlots[participant.slotNumber - 1] = profilePlayer(
-        profile,
-        participant.firstName === undefined
-          ? participant.playerId
-          : participant,
+        participant.unavailable === true ? null : profile,
+        participant.unavailable === true
+          ? `occupied:${record.matchId}:${participant.slotNumber}`
+          : participant.firstName === undefined
+            ? participant.playerId
+            : participant,
         false,
         participant.slotNumber - 1,
       );

@@ -43,28 +43,9 @@ async function fulfillCompletedOnboarding(route) {
     headers: { 'Cache-Control': 'no-store' },
     body: JSON.stringify({
       status: 'completed',
-      flowVersion: 'tma_v1',
-      currentStep: 'completed',
-      surveyVersion: 'initial_level_v1',
-      revision: 4,
-      profile: { firstName: 'Synthetic', lastName: 'Player' },
-      contacts: {
-        phone: '+79991234567',
-        normalizedEmail: 'synthetic@example.com',
-        assurance: 'declared',
-      },
-      consents: [
-        { kind: 'terms', documentVersion: 'terms-2026-08-26-v1' },
-        {
-          kind: 'cancellation',
-          documentVersion: 'cancellation-2026-08-26-v1',
-        },
-        {
-          kind: 'personal_data_processing',
-          documentVersion: 'personal-data-consent-2026-08-26-v1',
-        },
-      ],
-      surveyAnswers: { experience: 'beginner' },
+      legalPolicyCurrent: true,
+      initialLevelLabel: null,
+      initialLevelAlgorithmVersion: 'initial_level_v1',
     }),
   });
 }
@@ -1479,7 +1460,7 @@ test.describe('backend session credential lifecycle', () => {
               ? null
               : JSON.parse(options.body),
           });
-          if (options.method === 'GET') {
+          if (url === '/api/v1/admin/players/search') {
             return new Response(JSON.stringify({
               players: [{
                 accountId: parameters.playerId,
@@ -1536,6 +1517,7 @@ test.describe('backend session credential lifecycle', () => {
         callsBeforeInvalid,
         listedOutcome: listed.outcome,
         listedPlayerId: listed.players?.[0]?.accountId,
+        listedPhone: listed.players?.[0]?.phone,
         listedFrozen:
           Object.isFrozen(listed) &&
           Object.isFrozen(listed.players) &&
@@ -1554,13 +1536,17 @@ test.describe('backend session credential lifecycle', () => {
     expect(summary).toEqual({
       contracts: [
         {
-          url: '/api/v1/admin/players?verification=unverified&limit=2&search=Synthetic',
-          method: 'GET',
+          url: '/api/v1/admin/players/search',
+          method: 'POST',
           bearerMatches: true,
           cache: 'no-store',
           credentials: 'omit',
           redirect: 'error',
-          body: null,
+          body: {
+            search: 'Synthetic',
+            verification: 'unverified',
+            limit: 2,
+          },
         },
         {
           url: '/api/v1/admin/players/22222222-2222-4222-8222-222222222222/rating-state',
@@ -1579,6 +1565,7 @@ test.describe('backend session credential lifecycle', () => {
       callsBeforeInvalid: 2,
       listedOutcome: 'admin_players_loaded',
       listedPlayerId: '22222222-2222-4222-8222-222222222222',
+      listedPhone: '+79991112233',
       listedFrozen: true,
       updatedOutcome: 'admin_rating_state_updated',
       updatedState: {
@@ -1616,7 +1603,7 @@ test.describe('backend session credential lifecycle', () => {
       const { default: AdminPlayersScreen } = await import(
         '/src/components/AdminPlayersScreen.jsx'
       );
-      const calls = { list: 0, set: 0, setInput: null };
+      const calls = { list: 0, listRequests: [], set: 0, setInput: null };
       window.__adminPlayerUiCalls = calls;
       document.body.innerHTML = '<div id="admin-root"></div>';
       createRoot(document.getElementById('admin-root')).render(
@@ -1626,6 +1613,7 @@ test.describe('backend session credential lifecycle', () => {
             async listAdminPlayers(request) {
               calls.list += 1;
               calls.listRequest = request;
+              calls.listRequests.push(request);
               return {
                 outcome: 'admin_players_loaded',
                 players: [{
@@ -1663,6 +1651,15 @@ test.describe('backend session credential lifecycle', () => {
     });
 
     await expect(page.getByText('Synthetic Player')).toBeVisible();
+    const search = page.getByPlaceholder('Имя, фамилия или телефон');
+    await search.fill('S');
+    await expect.poll(
+      () => page.evaluate(() => window.__adminPlayerUiCalls.list),
+    ).toBe(2);
+    await search.fill('Sy');
+    await expect.poll(
+      () => page.evaluate(() => window.__adminPlayerUiCalls.list),
+    ).toBe(3);
     await page.locator('#admin-root button').last().click();
     await page.locator('#admin-root input[type="number"]').fill('4.25');
     await page.locator('#admin-root input[type="checkbox"]').check();
@@ -1672,8 +1669,13 @@ test.describe('backend session credential lifecycle', () => {
 
     const calls = await page.evaluate(() => window.__adminPlayerUiCalls);
     expect(calls).toEqual({
-      list: 1,
-      listRequest: { verification: 'all', limit: 50 },
+      list: 3,
+      listRequest: { search: 'Sy', verification: 'all', limit: 50 },
+      listRequests: [
+        { verification: 'all', limit: 50 },
+        { verification: 'all', limit: 50 },
+        { search: 'Sy', verification: 'all', limit: 50 },
+      ],
       set: 1,
       setInput: {
         playerId: '22222222-2222-4222-8222-222222222222',
@@ -2140,18 +2142,10 @@ test.describe('backend session credential lifecycle', () => {
       const consentsState = onboardingState('consents', 2);
       const surveyState = onboardingState('level_survey', 3, consents);
       const completedState = Object.freeze({
-        ...surveyState,
         status: 'completed',
-        currentStep: 'completed',
-        revision: 4,
-        surveyAnswers: Object.freeze({
-          match_count: 'one_hundred_plus',
-          rally_stability: 'controls_pace',
-          glass_play: 'uses_tactically',
-          serve_return_net: 'advanced_patterns',
-          match_experience_year: 'tournament',
-        }),
+        legalPolicyCurrent: true,
         initialLevelLabel: 'A',
+        initialLevelAlgorithmVersion: 'initial_level_v2',
       });
       const calls = [];
       const completionCalls = [];
@@ -2358,7 +2352,11 @@ test.describe('backend session credential lifecycle', () => {
         different,
         malformed,
         completedOutcome: completed.outcome,
-        completedStep: completed.onboarding?.currentStep,
+        completedProjectionKeys: Object.keys(
+          completed.onboarding ?? {},
+        ).sort(),
+        completedExposesSurveyAnswers:
+          completed.onboarding?.surveyAnswers !== undefined,
         completedRetryOutcome: completedRetry.outcome,
         malformedCompletion,
         unauthorized,
@@ -2406,7 +2404,13 @@ test.describe('backend session credential lifecycle', () => {
       different: { outcome: 'rejected', reason: 'conflict' },
       malformed: { outcome: 'rejected', reason: 'internal_error' },
       completedOutcome: 'completed',
-      completedStep: 'completed',
+      completedProjectionKeys: [
+        'initialLevelAlgorithmVersion',
+        'initialLevelLabel',
+        'legalPolicyCurrent',
+        'status',
+      ],
+      completedExposesSurveyAnswers: false,
       completedRetryOutcome: 'completed',
       malformedCompletion: { outcome: 'rejected', reason: 'internal_error' },
       unauthorized: { outcome: 'rejected', reason: 'session_invalid' },

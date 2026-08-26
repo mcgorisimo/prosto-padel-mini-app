@@ -30,6 +30,49 @@ export interface ReadPublicPlayerProfilesResult {
   readonly players: readonly PublicPlayerProfileRecord[];
 }
 
+export type PublicPlayerVisibilityPolicy = Readonly<{
+  enabled: boolean;
+  requiredConsents: readonly Readonly<{
+    kind: 'terms' | 'cancellation' | 'personal_data_processing';
+    documentVersion: string;
+  }>[];
+}>;
+
+export type PublicPlayerVisibilityParameters = readonly [
+  boolean,
+  readonly string[],
+  readonly string[],
+];
+
+export function publicPlayerVisibilityParameters(
+  visibility: PublicPlayerVisibilityPolicy,
+): PublicPlayerVisibilityParameters {
+  const requiredConsents = visibility.requiredConsents;
+  if (
+    typeof visibility.enabled !== 'boolean' ||
+    !Array.isArray(requiredConsents) ||
+    requiredConsents.length !== 3 ||
+    new Set(requiredConsents.map(({ kind }) => kind)).size !== 3 ||
+    requiredConsents.some(
+      ({ kind, documentVersion }) =>
+        !['terms', 'cancellation', 'personal_data_processing'].includes(kind) ||
+        typeof documentVersion !== 'string' ||
+        !/^[a-z0-9][a-z0-9_.-]{0,63}$/u.test(documentVersion),
+    )
+  ) {
+    return Object.freeze([
+      false,
+      Object.freeze([]),
+      Object.freeze([]),
+    ]);
+  }
+  return Object.freeze([
+    visibility.enabled,
+    Object.freeze(requiredConsents.map(({ kind }) => kind)),
+    Object.freeze(requiredConsents.map(({ documentVersion }) => documentVersion)),
+  ]);
+}
+
 export type PublicPlayerProfileSearchPersistenceFailure =
   | 'invalid_input'
   | 'invalid_persisted_state'

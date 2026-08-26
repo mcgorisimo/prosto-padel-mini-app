@@ -82,6 +82,7 @@ function profileRow(
     photo_storage_prefix: null,
     language_code: 'ru',
     phone: '+79990000000',
+    normalized_email: 'player@example.test',
     side_preference: 'Right',
     rating: '3.00',
     is_verified: false,
@@ -152,6 +153,7 @@ describe('PostgresPlayerProfileReader', () => {
         photoUrl: 'https://example.test/avatar.svg',
         languageCode: 'ru',
         phone: '+79990000000',
+        normalizedEmail: 'player@example.test',
         sidePreference: 'Right',
         rating: 3,
         isVerified: false,
@@ -169,6 +171,7 @@ describe('PostgresPlayerProfileReader', () => {
           'lastName',
           'photoUrl',
           'phone',
+          'normalizedEmail',
           'rating',
           'sidePreference',
           'username',
@@ -191,7 +194,7 @@ describe('PostgresPlayerProfileReader', () => {
     expect(transaction.calls).toHaveLength(1);
     const call = transaction.calls[0];
     expect(normalizeSql(call.text)).toBe(
-      "SELECT details.account_id, details.first_name, details.last_name, details.username, details.photo_url, photo_states.account_id AS photo_state_account_id, photo_states.active_asset_id AS photo_state_active_asset_id, photo_states.version AS photo_state_version, photo_assets.account_id AS photo_asset_account_id, photo_assets.asset_id AS photo_asset_id, photo_assets.generation AS photo_asset_generation, photo_assets.storage_prefix AS photo_storage_prefix, details.language_code, details.phone, details.side_preference, rating_states.rating, rating_states.is_verified, COALESCE(( SELECT capability_events.event_type = 'granted' FROM backend_auth.admin_capability_events AS capability_events WHERE capability_events.account_id = details.account_id AND capability_events.capability = 'club_admin' ORDER BY capability_events.event_order DESC LIMIT 1 ), false) AS has_club_admin_capability FROM backend_auth.player_profile_details AS details LEFT JOIN backend_auth.player_rating_states AS rating_states ON rating_states.account_id = details.account_id LEFT JOIN backend_auth.player_profile_photo_states AS photo_states ON photo_states.account_id = details.account_id LEFT JOIN backend_auth.player_profile_photo_assets AS photo_assets ON photo_assets.account_id = photo_states.account_id AND photo_assets.generation = photo_states.version AND photo_assets.asset_id = photo_states.active_asset_id WHERE details.account_id = $1",
+      "SELECT details.account_id, details.first_name, details.last_name, details.username, details.photo_url, photo_states.account_id AS photo_state_account_id, photo_states.active_asset_id AS photo_state_active_asset_id, photo_states.version AS photo_state_version, photo_assets.account_id AS photo_asset_account_id, photo_assets.asset_id AS photo_asset_id, photo_assets.generation AS photo_asset_generation, photo_assets.storage_prefix AS photo_storage_prefix, details.language_code, details.phone, details.normalized_email, details.side_preference, rating_states.rating, rating_states.is_verified, COALESCE(( SELECT capability_events.event_type = 'granted' FROM backend_auth.admin_capability_events AS capability_events WHERE capability_events.account_id = details.account_id AND capability_events.capability = 'club_admin' ORDER BY capability_events.event_order DESC LIMIT 1 ), false) AS has_club_admin_capability FROM backend_auth.player_profile_details AS details LEFT JOIN backend_auth.player_rating_states AS rating_states ON rating_states.account_id = details.account_id LEFT JOIN backend_auth.player_profile_photo_states AS photo_states ON photo_states.account_id = details.account_id LEFT JOIN backend_auth.player_profile_photo_assets AS photo_assets ON photo_assets.account_id = photo_states.account_id AND photo_assets.generation = photo_states.version AND photo_assets.asset_id = photo_states.active_asset_id WHERE details.account_id = $1",
     );
     expect(call.values).toEqual([ACCOUNT_ID]);
     const upperSql = normalizeSql(call.text).toUpperCase();
@@ -226,6 +229,7 @@ describe('PostgresPlayerProfileReader', () => {
             photo_url: null,
             language_code: null,
             phone: null,
+            normalized_email: null,
             side_preference: null,
           }),
         ]),
@@ -407,6 +411,7 @@ describe('PostgresPlayerProfileReader', () => {
     ['invalid photo URL', { photo_url: 'http://example.test/avatar' }],
     ['non-string language', { language_code: false }],
     ['invalid phone', { phone: '79990000000' }],
+    ['non-canonical email', { normalized_email: 'Player@Example.test' }],
     ['invalid side', { side_preference: 'Center' }],
     ['missing rating state', { rating: null, is_verified: null }],
     ['invalid rating scale', { rating: '3.001' }],

@@ -38,8 +38,9 @@ describe('PostgresAdminPlayerRatingRepository', () => {
   it('uses account-id keyset pagination and returns only a bounded active-player page', async () => {
     const query = jest.fn()
       .mockResolvedValueOnce(result([{ id: ADMIN_ID, role: 'club_admin', status: 'active' }]))
+      .mockResolvedValueOnce(result([capabilityRow('granted')]))
       .mockResolvedValueOnce(result([
-        { account_id: PLAYER_ID, first_name: 'One', last_name: null, username: null, phone: null, side_preference: 'Both', rating: '3.00', is_verified: false },
+        { account_id: PLAYER_ID, first_name: 'One', last_name: null, username: null, phone: '+79991112233', side_preference: 'Both', rating: '3.00', is_verified: false },
         { account_id: OTHER_PLAYER_ID, first_name: 'Two', last_name: null, username: null, phone: null, side_preference: null, rating: '4.00', is_verified: true },
       ]));
     const repository = new PostgresAdminPlayerRatingRepository();
@@ -51,12 +52,12 @@ describe('PostgresAdminPlayerRatingRepository', () => {
     });
     expect(page).toEqual({
       outcome: 'listed',
-      players: [{ accountId: PLAYER_ID, firstName: 'One', sidePreference: 'Both', rating: 3, isVerified: false }],
+      players: [{ accountId: PLAYER_ID, firstName: 'One', phone: '+79991112233', sidePreference: 'Both', rating: 3, isVerified: false }],
       nextAfterAccountId: PLAYER_ID,
     });
-    expect(query.mock.calls[1][0]).toContain('accounts.id > $1::uuid');
-    expect(query.mock.calls[1][0]).toContain('ORDER BY accounts.id');
-    expect(query.mock.calls[1][1]).toEqual([null, '%One%', null, 2]);
+    expect(query.mock.calls[2][0]).toContain('accounts.id > $1::uuid');
+    expect(query.mock.calls[2][0]).toContain('ORDER BY accounts.id');
+    expect(query.mock.calls[2][1]).toEqual([null, '%One%', null, 2]);
   });
 
   it('fails closed when an active player has no admin capability event', async () => {
@@ -72,6 +73,19 @@ describe('PostgresAdminPlayerRatingRepository', () => {
     expect(query).toHaveBeenCalledTimes(2);
     expect(query.mock.calls[1][0]).toContain('FROM backend_auth.admin_capability_events');
     expect(query.mock.calls[1][0]).toContain('ORDER BY event_order DESC');
+  });
+
+  it('fails closed when an active club_admin has no capability grant', async () => {
+    const query = jest.fn()
+      .mockResolvedValueOnce(result([{ id: ADMIN_ID, role: 'club_admin', status: 'active' }]))
+      .mockResolvedValueOnce(result([]));
+    const repository = new PostgresAdminPlayerRatingRepository();
+    await expect(repository.listPlayers({ query }, {
+      actorAccountId: ADMIN_ID,
+      verification: 'all',
+      limit: 20,
+    })).resolves.toEqual({ outcome: 'forbidden' });
+    expect(query).toHaveBeenCalledTimes(2);
   });
 
   it('allows an active player whose latest club-admin capability event is granted', async () => {
@@ -161,6 +175,7 @@ describe('PostgresAdminPlayerRatingRepository', () => {
         { id: ADMIN_ID, role: 'club_admin', status: 'active' },
         { id: PLAYER_ID, role: 'player', status: 'active' },
       ]))
+      .mockResolvedValueOnce(result([capabilityRow('granted')]))
       .mockResolvedValueOnce(result([{ account_id: PLAYER_ID, rating: '5.00', is_verified: true, updated_at: String(NOW + 20) }]))
       .mockResolvedValueOnce(result([commandRow()]));
     const repository = new PostgresAdminPlayerRatingRepository();
@@ -178,7 +193,7 @@ describe('PostgresAdminPlayerRatingRepository', () => {
       expect(retried.command.ratingBefore).toBe(3);
       expect(retried.command.ratingAfter).toBe(4.25);
     }
-    expect(query).toHaveBeenCalledTimes(3);
+    expect(query).toHaveBeenCalledTimes(4);
   });
 
   it('rejects command-id reuse with a changed request digest', async () => {
@@ -187,6 +202,7 @@ describe('PostgresAdminPlayerRatingRepository', () => {
         { id: ADMIN_ID, role: 'club_admin', status: 'active' },
         { id: PLAYER_ID, role: 'player', status: 'active' },
       ]))
+      .mockResolvedValueOnce(result([capabilityRow('granted')]))
       .mockResolvedValueOnce(result([{ account_id: PLAYER_ID, rating: '3.00', is_verified: false, updated_at: String(NOW) }]))
       .mockResolvedValueOnce(result([commandRow('b'.repeat(64))]));
     const repository = new PostgresAdminPlayerRatingRepository();

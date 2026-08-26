@@ -191,7 +191,7 @@ export class MatchLineupService {
         if (
           players.some((player) => player === undefined) ||
           profileResult.players.some((profile) => !requestedIds.has(profile.playerId)) ||
-          new Set(profileResult.players.map((profile) => profile.playerId)).size !== requestedIds.size
+          new Set(profileResult.players.map((profile) => profile.playerId)).size !== profileResult.players.length
         ) {
           throw new MatchLineupPersistenceError('invalid_persisted_state');
         }

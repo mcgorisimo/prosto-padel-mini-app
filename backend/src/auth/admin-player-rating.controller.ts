@@ -1,9 +1,9 @@
-import { Body, Controller, Get, HttpException, HttpStatus, Param, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpException, HttpStatus, Param, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
 import { FastifyReply, FastifyRequest } from 'fastify';
 import { SessionLifecyclePublicError } from './session-lifecycle.http';
 import { SessionBearerGuard, readAuthenticatedSessionPrincipal } from './session-authentication.guard';
 import { AdminPlayerRatingApiRejection } from './admin-player-rating-api.types';
-import { readAdminPlayerId, readAdminPlayerListRequest, readSetAdminPlayerRatingStateRequest } from './admin-player-rating.http';
+import { readAdminPlayerId, readAdminPlayerListRequest, readAdminPlayerSearchRequest, readSetAdminPlayerRatingStateRequest } from './admin-player-rating.http';
 import { AdminPlayerRatingService } from './admin-player-rating.service';
 
 function publicError(statusCode: number, code: string, message: string) {
@@ -48,6 +48,23 @@ export class AdminPlayerRatingController {
   ) {
     noCache(reply);
     const parsed = readAdminPlayerListRequest(rawQuery);
+    if (parsed === undefined) throw rejection('invalid_request');
+    const actor = principal(request);
+    const result = await this.service.list({ accountId: actor.accountId, role: actor.role, request: parsed });
+    if (result.outcome === 'rejected') throw rejection(result.reason);
+    return result.response;
+  }
+
+  @Post('search')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(SessionBearerGuard)
+  async search(
+    @Body() rawBody: unknown,
+    @Req() request: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ) {
+    noCache(reply);
+    const parsed = readAdminPlayerSearchRequest(rawBody);
     if (parsed === undefined) throw rejection('invalid_request');
     const actor = principal(request);
     const result = await this.service.list({ accountId: actor.accountId, role: actor.role, request: parsed });

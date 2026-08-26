@@ -92,6 +92,9 @@ test.describe('backend match credential lifecycle', () => {
       } = await import(
         '/src/lib/backendSessionClient.js'
       );
+      const { mapBackendMatchToApp } = await import(
+        '/src/lib/backendMatchAdapter.js'
+      );
       const contracts = [];
       const detail = {
         matchId: parameters.matchId,
@@ -288,6 +291,18 @@ test.describe('backend match credential lifecycle', () => {
           ({ playerId, slotNumber }) => ({ playerId, slotNumber }),
         ),
       };
+      const partiallyVisibleFeed = {
+        ...feed,
+        participants: [{ unavailable: true, slotNumber: 2 }],
+      };
+      const partiallyVisibleDetail = {
+        ...detail,
+        owner: { unavailable: true },
+        participants: [{ unavailable: true, slotNumber: 2 }],
+      };
+      const mappedPartialDetail = mapBackendMatchToApp(
+        partiallyVisibleDetail,
+      );
 
       return {
         contracts: contracts.map((contract) => ({
@@ -347,6 +362,15 @@ test.describe('backend match credential lifecycle', () => {
         rollingUpgradeCompatible:
           isBackendMatchFeedRecord(legacyFeed) &&
           isBackendMatchDetailRecord(legacyDetail),
+        partialPublicProjectionAccepted:
+          isBackendMatchFeedRecord(partiallyVisibleFeed) &&
+          isBackendMatchDetailRecord(partiallyVisibleDetail) &&
+          mappedPartialDetail?.ownerName === 'Организатор' &&
+          mappedPartialDetail?.filledSlots[1]?.firstName === 'Игрок' &&
+          !JSON.stringify({
+            owner: partiallyVisibleDetail.owner,
+            participants: partiallyVisibleDetail.participants,
+          }).includes(parameters.otherAccountId),
         credentialAbsentFromResults:
           !serializedResults.includes(parameters.credential),
         credentialAbsentFromErrors:
@@ -383,6 +407,7 @@ test.describe('backend match credential lifecycle', () => {
     expect(summary.largeFeedAccepted).toBe(true);
     expect(summary.publicProjectionFailClosed).toBe(true);
     expect(summary.rollingUpgradeCompatible).toBe(true);
+    expect(summary.partialPublicProjectionAccepted).toBe(true);
     expect(summary.contracts).toEqual([
       {
         url: '/api/v1/matches?limit=20',
@@ -935,6 +960,17 @@ test.describe('backend match credential lifecycle', () => {
       }).searchPlayers(parameters.credential, 'player', 20);
       const mappedInvitation = mapBackendInvitationToApp(invitation);
       const mappedPlayer = mapBackendPublicPlayerToApp(invitedPlayer);
+      const partiallyVisibleInvitation = {
+        ...invitation,
+        match: {
+          ...invitation.match,
+          owner: { unavailable: true },
+        },
+        invitedPlayer: { unavailable: true },
+      };
+      const mappedPartialInvitation = mapBackendInvitationToApp(
+        partiallyVisibleInvitation,
+      );
 
       return {
         outcomes: results.map(({ outcome }) => outcome),
@@ -949,6 +985,22 @@ test.describe('backend match credential lifecycle', () => {
           largePlayerSearchResult.players.length === 20,
         validatorAcceptsCanonical:
           isBackendMatchInvitation(invitation),
+        partialProjection: {
+          accepted: isBackendMatchInvitation(
+            partiallyVisibleInvitation,
+          ),
+          organizer:
+            mappedPartialInvitation?.organizer_first_name,
+          playerName:
+            mappedPartialInvitation?.player.first_name,
+          hasProjectedPii: /firstName|lastName|username|phone|email/iu.test(
+            JSON.stringify({
+              owner: partiallyVisibleInvitation.match.owner,
+              invitedPlayer:
+                partiallyVisibleInvitation.invitedPlayer,
+            }),
+          ),
+        },
         mapped: {
           invitationId: mappedInvitation.invitation_id,
           matchId: mappedInvitation.match_id,
@@ -1075,6 +1127,12 @@ test.describe('backend match credential lifecycle', () => {
     expect(summary.backendInvitationUiEnabled).toBe(true);
     expect(summary.backendInvitationUiFailClosed).toBe(true);
     expect(summary.publicResultsHideCredential).toBe(true);
+    expect(summary.partialProjection).toEqual({
+      accepted: true,
+      organizer: 'Организатор',
+      playerName: 'Игрок недоступен',
+      hasProjectedPii: false,
+    });
   });
 
   test('uses exact private contracts for backend match waitlist', async ({
@@ -1535,6 +1593,24 @@ test.describe('backend match credential lifecycle', () => {
           },
         }), { status: 200 }),
       }).readMatchLineup(parameters.credential, parameters.matchId);
+      const partial = await createBackendSessionClient({
+        fetchImpl: async () => new Response(JSON.stringify({
+          lineup: {
+            matchId: parameters.matchId,
+            status: 'draft',
+            version: 1,
+            slots: [{
+              ...slots[0],
+              assignment: {
+                ...slots[0].assignment,
+                player: { unavailable: true },
+                isCurrentPlayer: false,
+              },
+            }, slots[1], slots[2], slots[3]],
+            unassignedPlayers: [{ unavailable: true }],
+          },
+        }), { status: 200 }),
+      }).readMatchLineup(parameters.credential, parameters.matchId);
 
       return {
         contracts,
@@ -1543,6 +1619,13 @@ test.describe('backend match credential lifecycle', () => {
           ({ teamNumber, courtSide }) => `${teamNumber}:${courtSide}`,
         ),
         malformed,
+        partialProjection: {
+          outcome: partial.outcome,
+          assignedPlayer:
+            partial.lineup?.slots[0].assignment?.player,
+          unassignedPlayer:
+            partial.lineup?.unassignedPlayers[0],
+        },
         publicResultsHideCredential:
           !JSON.stringify([loaded, assigned, released]).includes(
             parameters.credential,
@@ -1606,6 +1689,11 @@ test.describe('backend match credential lifecycle', () => {
     expect(summary.malformed).toEqual({
       outcome: 'rejected',
       reason: 'internal_error',
+    });
+    expect(summary.partialProjection).toEqual({
+      outcome: 'lineup_loaded',
+      assignedPlayer: { unavailable: true },
+      unassignedPlayer: { unavailable: true },
     });
     expect(summary.publicResultsHideCredential).toBe(true);
   });
@@ -2724,6 +2812,15 @@ test.describe('backend match credential lifecycle', () => {
           invalidSend.reason === 'invalid_request' &&
           calls.length === callsBeforeInvalid,
         malformedUnavailableSenderRejected: !malformed,
+        unavailableProjectionPiiFree:
+          Object.keys(first.messages[1].sender).join(',') ===
+            'unavailable' &&
+          first.messages[1].sender.unavailable === true &&
+          mapped[0].senderId === null &&
+          mapped[0].senderName === 'Игрок недоступен' &&
+          !/playerId|firstName|lastName|username|rating|phone|email/iu.test(
+            JSON.stringify(first.messages[1].sender),
+          ),
         providerBoundary: {
           backendSkipsSupabase:
             !shouldUseLegacyMatchMessages(
@@ -2815,6 +2912,7 @@ test.describe('backend match credential lifecycle', () => {
       },
     ]);
     expect(summary.invalidRejectedLocally).toBe(true);
+    expect(summary.unavailableProjectionPiiFree).toBe(true);
     expect(summary.malformedUnavailableSenderRejected).toBe(true);
     expect(summary.providerBoundary).toEqual({
       backendSkipsSupabase: true,

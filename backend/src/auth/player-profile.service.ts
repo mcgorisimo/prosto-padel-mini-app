@@ -119,6 +119,7 @@ function readProfileRecord(
           'fullPhotoUrl',
           'languageCode',
           'phone',
+          'normalizedEmail',
           'sidePreference',
           'rating',
           'isVerified',
@@ -136,6 +137,14 @@ function readProfileRecord(
     || (value.phone !== undefined &&
       (typeof value.phone !== 'string' ||
         !/^\+[1-9][0-9]{6,14}$/u.test(value.phone)))
+    || (value.normalizedEmail !== undefined &&
+      (typeof value.normalizedEmail !== 'string' ||
+        value.normalizedEmail.length > 320 ||
+        value.normalizedEmail.trim() !== value.normalizedEmail ||
+        value.normalizedEmail.toLowerCase() !== value.normalizedEmail ||
+        !/^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9][a-z0-9.-]*\.[a-z]{2,63}$/u.test(
+          value.normalizedEmail,
+        )))
     || (value.sidePreference !== undefined &&
       (typeof value.sidePreference !== 'string' ||
         !['Left', 'Both', 'Right'].includes(value.sidePreference)))

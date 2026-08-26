@@ -101,10 +101,21 @@ export interface OwnPlayerOnboarding {
   readonly initialLevelLabel?: PlayerOnboardingInitialLevelLabel;
 }
 
+export type OwnPlayerOnboardingResponse =
+  | (OwnPlayerOnboarding & {
+      readonly status: 'required' | 'in_progress';
+    })
+  | Readonly<{
+      readonly status: 'completed';
+      readonly legalPolicyCurrent: boolean;
+      readonly initialLevelLabel: PlayerOnboardingInitialLevelLabel | null;
+      readonly initialLevelAlgorithmVersion: string;
+    }>;
+
 export type ReadOwnPlayerOnboardingResult =
   | {
       readonly outcome: 'found';
-      readonly onboarding: OwnPlayerOnboarding;
+      readonly onboarding: OwnPlayerOnboardingResponse;
     }
   | {
       readonly outcome: 'rejected';
@@ -118,7 +129,7 @@ export type ReadOwnPlayerOnboardingResult =
 export type SaveOwnPlayerOnboardingDraftResult =
   | {
       readonly outcome: 'saved';
-      readonly onboarding: OwnPlayerOnboarding;
+      readonly onboarding: OwnPlayerOnboardingResponse;
     }
   | {
       readonly outcome: 'rejected';
@@ -135,7 +146,7 @@ export type SaveOwnPlayerOnboardingDraftResult =
 export type AdvanceOwnPlayerOnboardingResult =
   | {
       readonly outcome: 'advanced';
-      readonly onboarding: OwnPlayerOnboarding;
+      readonly onboarding: OwnPlayerOnboardingResponse;
     }
   | {
       readonly outcome: 'rejected';
@@ -153,7 +164,7 @@ export type AdvanceOwnPlayerOnboardingResult =
 export type CompleteOwnPlayerOnboardingResult =
   | {
       readonly outcome: 'completed';
-      readonly onboarding: OwnPlayerOnboarding;
+      readonly onboarding: OwnPlayerOnboardingResponse;
     }
   | {
       readonly outcome: 'rejected';
@@ -170,7 +181,7 @@ export type CompleteOwnPlayerOnboardingResult =
 export type AcceptOwnPlayerOnboardingLegalPolicyResult =
   | {
       readonly outcome: 'accepted';
-      readonly onboarding: OwnPlayerOnboarding;
+      readonly onboarding: OwnPlayerOnboardingResponse;
     }
   | {
       readonly outcome: 'rejected';
@@ -412,6 +423,33 @@ export function isOwnPlayerOnboarding(
         Object.keys(value.surveyAnswers).length > 0
       : value.currentStep !== 'completed')
   );
+}
+
+export function isOwnPlayerOnboardingResponse(
+  value: unknown,
+): value is OwnPlayerOnboardingResponse {
+  if (isPlainRecord(value) && value.status === 'completed') {
+    return (
+      hasExactlyKeys(value, [
+        'status',
+        'legalPolicyCurrent',
+        'initialLevelLabel',
+        'initialLevelAlgorithmVersion',
+      ]) &&
+      typeof value.legalPolicyCurrent === 'boolean' &&
+      (value.initialLevelLabel === null ||
+        (typeof value.initialLevelLabel === 'string' &&
+          INITIAL_LEVEL_LABELS.includes(
+            value.initialLevelLabel as PlayerOnboardingInitialLevelLabel,
+          ))) &&
+      typeof value.initialLevelAlgorithmVersion === 'string' &&
+      FLOW_VERSION_PATTERN.test(value.initialLevelAlgorithmVersion) &&
+      (value.initialLevelAlgorithmVersion === 'initial_level_v2'
+        ? value.initialLevelLabel !== null
+        : value.initialLevelLabel === null)
+    );
+  }
+  return isOwnPlayerOnboarding(value) && value.status !== 'completed';
 }
 
 export function isReadOwnPlayerOnboardingInput(

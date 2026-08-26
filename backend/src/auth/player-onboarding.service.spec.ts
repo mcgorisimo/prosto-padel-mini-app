@@ -399,7 +399,10 @@ describe('PlayerOnboardingService', () => {
         surveyAnswers: SURVEY_ANSWERS,
       },
     });
-    if (result.outcome === 'found') {
+    if (
+      result.outcome === 'found' &&
+      result.onboarding.status !== 'completed'
+    ) {
       expect(Object.isFrozen(result.onboarding)).toBe(true);
       expect(Object.isFrozen(result.onboarding.profile)).toBe(true);
       expect(Object.isFrozen(result.onboarding.contacts)).toBe(true);
@@ -428,10 +431,14 @@ describe('PlayerOnboardingService', () => {
 
     expect(result.outcome).toBe('found');
     if (result.outcome === 'found') {
-      expect(result.onboarding.initialLevelLabel).toBe('B+');
-      expect(result.onboarding).not.toHaveProperty('initialLevelScore');
+      expect(result.onboarding).toEqual({
+        status: 'completed',
+        legalPolicyCurrent: true,
+        initialLevelLabel: 'B+',
+        initialLevelAlgorithmVersion: 'initial_level_v2',
+      });
       expect(JSON.stringify(result.onboarding)).not.toMatch(
-        /isVerified|verified|rating/iu,
+        /surveyAnswers|profile|contacts|consents|revision|isVerified|verified|rating/iu,
       );
     }
   });
@@ -446,8 +453,12 @@ describe('PlayerOnboardingService', () => {
     expect(result.outcome).toBe('found');
     if (result.outcome === 'found') {
       expect(result.onboarding.status).toBe('completed');
-      expect(result.onboarding.surveyVersion).toBe('initial_level_v1');
-      expect(result.onboarding).not.toHaveProperty('initialLevelLabel');
+      expect(result.onboarding).toEqual({
+        status: 'completed',
+        legalPolicyCurrent: true,
+        initialLevelLabel: null,
+        initialLevelAlgorithmVersion: 'initial_level_v1',
+      });
     }
   });
 
@@ -977,23 +988,9 @@ describe('PlayerOnboardingService', () => {
       outcome: 'completed',
       onboarding: {
         status: 'completed',
-        flowVersion: 'tma_v1',
-        currentStep: 'completed',
-        surveyVersion: 'initial_level_v2',
-        revision: 5,
-        profile: { firstName: 'Synthetic', lastName: 'Player' },
-        contacts: {
-          phone: '+79990000000',
-          normalizedEmail: 'player@example.test',
-          assurance: 'declared',
-        },
-        consents: [
-          { kind: 'cancellation', documentVersion: '2026-08-01' },
-          { kind: 'personal_data_processing', documentVersion: '2026-08-01' },
-          { kind: 'terms', documentVersion: '2026-08-01' },
-        ],
-        surveyAnswers: SURVEY_ANSWERS,
+        legalPolicyCurrent: true,
         initialLevelLabel: 'B+',
+        initialLevelAlgorithmVersion: 'initial_level_v2',
       },
     });
     expect(harness.run).toHaveBeenCalledTimes(1);
@@ -1044,9 +1041,12 @@ describe('PlayerOnboardingService', () => {
       await harness.service.completeOwnOnboarding(completionInput());
     expect(result.outcome).toBe('completed');
     if (result.outcome === 'completed') {
-      expect(result.onboarding.contacts.assurance).toBe('declared');
-      expect(result.onboarding).not.toHaveProperty('isVerified');
-      expect(result.onboarding).not.toHaveProperty('rating');
+      expect(result.onboarding).toEqual({
+        status: 'completed',
+        legalPolicyCurrent: true,
+        initialLevelLabel: 'B+',
+        initialLevelAlgorithmVersion: 'initial_level_v2',
+      });
     }
   });
 
@@ -1189,8 +1189,9 @@ describe('PlayerOnboardingService', () => {
       outcome: 'accepted',
       onboarding: {
         status: 'completed',
-        currentStep: 'completed',
-        revision: 5,
+        legalPolicyCurrent: true,
+        initialLevelLabel: 'B+',
+        initialLevelAlgorithmVersion: 'initial_level_v2',
       },
     });
     expect(harness.accept).toHaveBeenCalledWith(harness.transaction, {

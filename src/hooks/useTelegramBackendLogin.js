@@ -1198,8 +1198,7 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
         const nextState = readPlayerOnboardingState(result?.onboarding);
         return (
           result?.outcome === 'completed' &&
-          nextState?.status === 'completed' &&
-          nextState.currentStep === 'completed'
+          nextState?.status === 'completed'
         );
       },
     );
@@ -1213,8 +1212,7 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
         const nextState = readPlayerOnboardingState(result?.onboarding);
         return (
           result?.outcome === 'accepted' &&
-          nextState?.status === 'completed' &&
-          nextState.currentStep === 'completed'
+          nextState?.status === 'completed'
         );
       },
     );

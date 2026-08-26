@@ -9158,3 +9158,151 @@
   This runtime-disabled contracts/tests/docs correction has
   `deployment=not_needed`; the pre-existing booking frontend rollout remains
   `deployment_deferred_by_user`.
+### 2026-08-26 — D5.S first PII containment candidate
+
+- The uncommitted local candidate is on
+  `codex/d5s-pii-containment-current` at exact `origin/main`
+  `178907636493c1952eaa127072d2b044edf2ba56`. It was transferred from the
+  earlier local base after `origin/main` advanced; the overlapping booking
+  controller/spec kept the integrated bounded domain events and no upstream
+  or foreign-worktree change was overwritten.
+- Authenticated public player search and every match/invitation/waitlist/lineup
+  player projection now share a fail-closed PostgreSQL predicate requiring a
+  completed onboarding state and all three current server-configured consent
+  versions. The owner-only onboarding path is unchanged and no completion or
+  ownership selector is accepted from the client.
+- Admin list remains bounded and preserves the full phone for an authorized
+  actor. Name/phone search moved to exact authenticated
+  `POST /api/v1/admin/players/search`; legacy GET `search` is rejected, the
+  body/search cursor is strictly bounded, and list/search both require the
+  latest `club_admin` capability grant. No `system_owner` path was added.
+  Existing HTTP/domain logging records route templates and bounded outcomes,
+  not query/body/contact values; regressions cover response/error/log and
+  cursor plaintext leakage.
+- Completed onboarding responses now contain only completion/current-policy
+  status, the immutable initial level label and its algorithm version.
+  `surveyAnswers`, profile, contacts, consent evidence and revision remain
+  available only to the backend after completion; incomplete owners retain the
+  existing resume state and no questionnaire is reopened automatically.
+- Booking create no longer accepts client email. Name, phone and canonical
+  email are read for the authenticated owner from the backend profile and
+  bound into the existing encrypted idempotency contact snapshot. A missing or
+  invalid profile email fails before availability, persistence or YCLIENTS
+  dispatch. Contact assurance remains explicitly `declared`, not verified;
+  payment fields were not changed.
+- Verification on the exact current base: backend typecheck passed; D5.S
+  focused backend suites passed `336/336` plus the cursor plaintext regression
+  `3/3` and final admin repository regression `9/9`; frontend unit passed
+  `120/120`; focused D5.S Playwright passed `8/8`, followed by a final admin
+  API/UI recheck `2/2`;
+  backend E2E passed `4/4`; backend and root builds passed (root `1627`
+  modules, existing chunk-size advisory only); `git diff --check` passed.
+  Full backend unit passed `3837/3838` with only the unchanged migration 038
+  contract failure. Exact full root E2E passed `110`, skipped the one
+  intentional feature-disabled case and reproduced only the already recorded
+  same-key booking refresh baseline (`3` calls instead of `2`). The failing
+  migration files and the failing same-key test/runtime hunks are unchanged by
+  D5.S.
+- No migration/schema/RLS/role/encryption/retention/delete/backups, OTP,
+  platform rate limit, payment, provider, secret or environment change was
+  made. A separate durable admin-read audit migration gate should define an
+  append-only event containing actor account, capability/action, request ID,
+  timestamp, bounded outcome and result/page counts, with least-privilege
+  grants and lifecycle policy; it must never persist search text, name, phone,
+  raw body/query, cursor or exception content. No SQL is proposed in this
+  code-only slice.
+- P0/P1 self-review found no unresolved in-scope issue; independent exact-diff
+  review is still required. Runtime impact is backend plus frontend bundle,
+  but commit, push, merge and rollout were expressly withheld:
+  `deployment_deferred_by_user`. No Selectel/SSH/DB/provider action, health,
+  smoke or log check occurred; the last documented Selectel test runtime
+  remains `866570789af2524e2a0cc0a5e225ba96514b655e`.
+
+### 2026-08-26 — D5.S P1 partial-projection correction
+
+- Independent review found one P1 availability regression: the shared public
+  profile repository now intentionally returns a visibility-filtered subset,
+  while match feed/detail, invitation and lineup enrichers still required a
+  one-to-one result. One hidden onboarding/consent profile could therefore
+  turn an otherwise authorized aggregate read into `internal_failure`.
+- The minimal code-only correction treats an absent public profile as the
+  existing exact `{ unavailable: true }` projection. Match participants retain
+  only their public slot number; frontend mapping uses generic occupied-slot
+  identities. Invitation owner/invitee and lineup assigned/unassigned players
+  use the same PII-free placeholder. Returned visible rows are still strictly
+  allowlisted, unique and limited to requested account IDs; unexpected,
+  duplicate or malformed rows remain fail-closed.
+- Aggregate regressions cover partial match feed/detail, invitation list and
+  lineup reads, including exact placeholder shapes, absence of hidden profile
+  fields and frontend validation/mapping. Focused backend suites passed
+  `48/48`; focused Playwright passed `3/3`; backend typecheck passed.
+- Mandatory gates: root E2E passed `111` with `1` intentional skip and root
+  build passed (`1627` modules, existing chunk-size advisory only); backend E2E
+  passed `4/4` and backend build passed. Full backend unit passed `3839/3840`;
+  its only failure is the unchanged migration 038 static contract outside this
+  code-only/schema-prohibited slice. `git diff --check` passed before this
+  append and is rechecked in the final handoff.
+- No migration/schema/RLS, commit, push, merge, deployment, Selectel/SSH,
+  database, provider, environment or secret action occurred. Runtime impact is
+  backend plus frontend bundle and remains `deployment_deferred_by_user`.
+  P0/P1 self-review found no unresolved issue in this correction; the next
+  gate remains independent read-only review of the exact uncommitted diff.
+
+### 2026-08-26 — D5.S candidate transfer to current main
+
+- The exact uncommitted D5.S candidate was transferred without commit or merge
+  commit to `codex/d5s-pii-containment-current-v2` at current `origin/main`
+  `e8e872cebed2f002b5621b95e549bb5a4b366088`. The previous branch remains
+  untouched. The only textual merge conflict was the append-only WORKLOG; both
+  independent upstream and D5.S histories were retained.
+- The overlapping upstream booking correction is preserved in the base:
+  service refresh clears the stale court snapshot before downstream date/time
+  loading. The D5.S diff still rejects a client-supplied booking email and uses
+  only the authenticated backend profile contact. Upstream D5 contact
+  contracts/recovery files remain base-owned and are not part of this diff.
+- Focused verification on the combined state passed: match/invitation/lineup
+  backend suites `48/48`; their Playwright projections `3/3`; booking email,
+  malformed-email rejection, backend-profile contact and stale-courts refresh
+  Playwright regressions `4/4`; backend typecheck passed.
+- Mandatory gates on the current base: root E2E `111 passed / 1 intentional
+  skip`; root build passed (`1627` modules, existing chunk-size advisory only);
+  backend E2E `4/4` and backend build passed. Full backend unit passed
+  `3896/3897`; its only failure remains the unchanged migration 038 static
+  contract outside this code-only/schema-prohibited slice.
+- The review candidate remains exactly `50` modified tracked files with no
+  staged, conflicted or untracked files. No migration/schema/RLS, commit, push,
+  merge, deployment, Selectel/SSH, database, provider, environment or secret
+  action occurred. Runtime impact remains `deployment_deferred_by_user`; the
+  next gate is a repeat independent read-only P0/P1 review of this new exact
+  current-main diff.
+
+### 2026-08-26 — D5.S match-chat visibility P1 correction
+
+- Repeat independent review found one P1: match chat hydrated active sender
+  names, usernames, ratings and stable player IDs directly, bypassing the new
+  completed-onboarding/current-consent visibility predicate used by the other
+  public match projections.
+- The code-only correction shares one validated server-configured visibility
+  parameter contract between public player search and match chat. Chat sender
+  profile/rating joins now require completed onboarding and all three current
+  consent versions. A disabled or malformed policy and an incomplete/stale
+  sender both fail closed to the existing exact `{ unavailable: true }`
+  response; message bodies and authorized chat access remain available.
+  Unexpected, duplicate, missing or privacy-leaking persisted projections
+  still fail closed. No client selector or schema change was added.
+- Regressions prove current and policy-hidden senders in one batch, exact SQL
+  policy bindings, disabled-policy fail-closed behavior, rejection of a row
+  containing hidden PII and frontend removal of sender ID/profile fields.
+  Focused backend suites passed `75/75`; focused Playwright passed `1/1`;
+  backend typecheck passed.
+- Mandatory gates: root E2E passed `111` with `1` intentional skip; root build
+  passed (`1627` modules, existing chunk-size advisory only); backend E2E
+  passed `4/4` and backend build passed. Full backend unit passed `3897/3898`;
+  its only failure remains the unchanged migration 038 static contract outside
+  this code-only/schema-prohibited slice.
+- Candidate remains uncommitted on current base
+  `e8e872cebed2f002b5621b95e549bb5a4b366088`. No migration/schema/RLS, commit,
+  push, merge, deployment, Selectel/SSH, database, provider, environment or
+  secret action occurred. Runtime impact remains
+  `deployment_deferred_by_user`; repeat independent exact-diff P0/P1 review is
+  still required after this correction.

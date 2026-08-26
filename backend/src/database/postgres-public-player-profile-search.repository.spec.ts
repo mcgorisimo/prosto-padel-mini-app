@@ -20,6 +20,23 @@ const PHOTO_ASSET_ID = deterministicUuid(
 );
 const PRIVATE_MARKER =
   'SYNTHETIC_PUBLIC_PLAYER_PROFILE_SEARCH_PRIVATE';
+const CURRENT_VISIBILITY_POLICY = Object.freeze({
+  enabled: true,
+  requiredConsents: Object.freeze([
+    Object.freeze({
+      kind: 'cancellation' as const,
+      documentVersion: 'cancellation-2026-08-26-v1',
+    }),
+    Object.freeze({
+      kind: 'personal_data_processing' as const,
+      documentVersion: 'personal-data-consent-2026-08-26-v1',
+    }),
+    Object.freeze({
+      kind: 'terms' as const,
+      documentVersion: 'terms-2026-08-26-v1',
+    }),
+  ]),
+});
 
 interface QueryCall {
   readonly text: string;
@@ -233,6 +250,9 @@ describe('PostgresPublicPlayerProfileSearchRepository', () => {
     expect(transaction.calls).toHaveLength(1);
     expect(transaction.calls[0].values).toEqual([
       [PLAYER_ID, OTHER_PLAYER_ID],
+      false,
+      [],
+      [],
     ]);
     const sql = normalizeSql(transaction.calls[0].text);
     expect(sql).toContain(
@@ -274,7 +294,13 @@ describe('PostgresPublicPlayerProfileSearchRepository', () => {
 
     expect(transaction.calls).toHaveLength(1);
     const call = transaction.calls[0];
-    expect(call.values).toEqual(['%100\\%\\_\\\\player%', 20]);
+    expect(call.values).toEqual([
+      '%100\\%\\_\\\\player%',
+      20,
+      false,
+      [],
+      [],
+    ]);
     expect(normalizeSql(call.text)).toContain(
       'LEFT JOIN backend_auth.player_profile_photo_states AS photo_states',
     );
@@ -297,6 +323,65 @@ describe('PostgresPublicPlayerProfileSearchRepository', () => {
       expect(` ${upperSql}`).not.toContain(forbidden);
     }
     expect(call.text).not.toContain('100%');
+  });
+
+  it('requires server-configured completed onboarding and every current consent for search and projections', async () => {
+    const searchTransaction = new FakeTransaction([
+      queryResult([playerRow()]),
+    ]);
+    const batchTransaction = new FakeTransaction([
+      queryResult([playerRow()]),
+    ]);
+    const repository = new PostgresPublicPlayerProfileSearchRepository(
+      new PlayerProfilePhotoUrlResolver(''),
+      CURRENT_VISIBILITY_POLICY,
+    );
+
+    await repository.search(searchTransaction, {
+      query: 'Synthetic',
+      limit: 8,
+    });
+    await repository.findByPlayerIds(batchTransaction, {
+      playerIds: [PLAYER_ID],
+    });
+
+    const consentKinds = [
+      'cancellation',
+      'personal_data_processing',
+      'terms',
+    ];
+    const consentVersions = [
+      'cancellation-2026-08-26-v1',
+      'personal-data-consent-2026-08-26-v1',
+      'terms-2026-08-26-v1',
+    ];
+    expect(searchTransaction.calls[0].values).toEqual([
+      '%Synthetic%',
+      8,
+      true,
+      consentKinds,
+      consentVersions,
+    ]);
+    expect(batchTransaction.calls[0].values).toEqual([
+      [PLAYER_ID],
+      true,
+      consentKinds,
+      consentVersions,
+    ]);
+    for (const call of [
+      searchTransaction.calls[0],
+      batchTransaction.calls[0],
+    ]) {
+      const sql = normalizeSql(call.text);
+      expect(sql).toContain("onboarding.status = 'completed'");
+      expect(sql).toContain("onboarding.current_step = 'completed'");
+      expect(sql).toContain(
+        'FROM backend_auth.account_consent_acceptances AS acceptances',
+      );
+      expect(sql).toContain(
+        'acceptances.document_version = required_consents.document_version',
+      );
+    }
   });
 
   it('returns a frozen empty result when no player matches', async () => {

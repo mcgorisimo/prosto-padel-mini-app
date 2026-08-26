@@ -17,6 +17,8 @@ const MAX_NAME_CODE_POINTS = 256;
 const MAX_SHORT_TEXT_CODE_POINTS = 64;
 const MAX_PHOTO_URL_CODE_POINTS = 2_048;
 const PHONE_PATTERN = /^\+[1-9][0-9]{6,14}$/u;
+const EMAIL_PATTERN =
+  /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9][a-z0-9.-]*\.[a-z]{2,63}$/u;
 const RATING_PATTERN = /^(?:[0-9]\.[0-9]{2}|10\.00)$/u;
 const SIDE_PREFERENCES = Object.freeze([
   'Left',
@@ -40,6 +42,7 @@ const FIND_PLAYER_PROFILE_SQL = `
     photo_assets.storage_prefix AS photo_storage_prefix,
     details.language_code,
     details.phone,
+    details.normalized_email,
     details.side_preference,
     rating_states.rating,
     rating_states.is_verified,
@@ -78,6 +81,7 @@ interface PlayerProfileRow extends QueryResultRow {
   readonly photo_storage_prefix: unknown;
   readonly language_code: unknown;
   readonly phone: unknown;
+  readonly normalized_email: unknown;
   readonly side_preference: unknown;
   readonly rating: unknown;
   readonly is_verified: unknown;
@@ -242,6 +246,22 @@ function readPhone(value: unknown): string | undefined {
   return value;
 }
 
+function readNormalizedEmail(value: unknown): string | undefined {
+  if (value === null || value === undefined) {
+    return undefined;
+  }
+  if (
+    typeof value !== 'string' ||
+    value.length > 320 ||
+    value.trim() !== value ||
+    value.toLowerCase() !== value ||
+    !EMAIL_PATTERN.test(value)
+  ) {
+    throw failure('invalid_persisted_state');
+  }
+  return value;
+}
+
 function readSidePreference(
   value: unknown,
 ): PlayerProfileRecord['sidePreference'] | undefined {
@@ -304,6 +324,7 @@ function hydrateProfile(
   );
   const photoUrls = readEffectivePhotoUrls(row, expectedAccountId, urls);
   const phone = readPhone(row.phone);
+  const normalizedEmail = readNormalizedEmail(row.normalized_email);
   const sidePreference = readSidePreference(row.side_preference);
   const rating = readRating(row.rating);
   const isVerified = readVerification(row.is_verified);
@@ -323,6 +344,7 @@ function hydrateProfile(
     ...photoUrls,
     ...(languageCode === undefined ? {} : { languageCode }),
     ...(phone === undefined ? {} : { phone }),
+    ...(normalizedEmail === undefined ? {} : { normalizedEmail }),
     ...(sidePreference === undefined ? {} : { sidePreference }),
     rating,
     isVerified,

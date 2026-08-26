@@ -272,7 +272,6 @@ test('creates exactly one authenticated booking without payment fields', async (
       serviceId: 30539679,
       courtId: 5730531,
       datetime: '2026-08-06T07:00:00+03:00',
-      email: 'test@example.test',
     });
     return { calls, result };
   }, CREDENTIAL);
@@ -300,13 +299,13 @@ test('creates exactly one authenticated booking without payment fields', async (
       serviceId: 30539679,
       courtId: 5730531,
       datetime: '2026-08-06T07:00:00+03:00',
-      email: 'test@example.test',
     },
   }]);
   expect(summary.calls[0].body).not.toHaveProperty('paymentStatus');
   expect(summary.calls[0].body).not.toHaveProperty('ownerPaid');
   expect(summary.calls[0].body).not.toHaveProperty('holdAmount');
   expect(summary.calls[0].body).not.toHaveProperty('prepay');
+  expect(summary.calls[0].body).not.toHaveProperty('email');
 });
 
 test('does not retry a booking when its network outcome is unknown', async ({
@@ -328,7 +327,6 @@ test('does not retry a booking when its network outcome is unknown', async ({
       serviceId: 30539679,
       courtId: 5730531,
       datetime: '2026-08-06T07:00:00+03:00',
-      email: 'test@example.test',
     });
     return { calls, result };
   }, CREDENTIAL);
@@ -386,7 +384,7 @@ test('keeps an unknown create handle and supports owner list/request-key recover
       },
     });
     const requestKey = '11111111-1111-4111-8111-111111111111';
-    const created = await client.createBooking(credential, { requestKey, serviceId:30539679,courtId:5730531,datetime:reservation.startsAt,email:'test@example.test' });
+    const created = await client.createBooking(credential, { requestKey, serviceId:30539679,courtId:5730531,datetime:reservation.startsAt });
     const listed = await client.listBookings(credential);
     const recovered = await client.readBookingByRequestKey(credential, requestKey);
     return { calls, created, listed, recovered };
@@ -433,7 +431,13 @@ test('rejects invalid input before fetch', async ({ page }) => {
         serviceId: 30539679,
         courtId: 5730531,
         datetime: '2026-08-06T07:00:00+03:00',
-        email: 'test@example.test',
+      }),
+      injectedEmail: await client.createBooking(credential, {
+        requestKey: '11111111-1111-4111-8111-111111111111',
+        serviceId: 30539679,
+        courtId: 5730531,
+        datetime: '2026-08-06T07:00:00+03:00',
+        email: 'attacker@example.test',
       }),
     };
   }, CREDENTIAL);
@@ -448,6 +452,7 @@ test('rejects invalid input before fetch', async ({ page }) => {
     summary.invalidDates,
     summary.invalidTimeDate,
     summary.invalidCreate,
+    summary.injectedEmail,
   ]) {
     expect(result).toEqual({ outcome: 'rejected', reason: 'invalid_request' });
   }
@@ -604,7 +609,6 @@ test('keeps the credential private while lifecycle reads booking availability', 
       serviceId: 30539679,
       courtId: 5730531,
       datetime: '2026-08-06T07:00:00+03:00',
-      email: 'test@example.test',
     });
     detach();
 
@@ -808,7 +812,6 @@ test('builds one bounded private range and keeps payment honest', async ({ page 
       bookingClient: {
         fullName: 'Test Player',
         phone: '+7 900 000-00-00',
-        email: 'test@example.test',
       },
       onBookSlot() {
         writes += 100;
@@ -1502,7 +1505,7 @@ test('uses only backend profile contacts and routes an incomplete profile out of
 
   const dialog = page.getByRole('dialog', { name: 'Подтверждение брони' });
   await expect(dialog.getByTestId('booking-contact-email')).toHaveCount(0);
-  await expect(dialog).toContainText('Заполните имя, телефон и email в профиле');
+  await expect(dialog).toContainText('Заполните имя и телефон в профиле');
   await expect(dialog.getByRole('button', { name: 'Оплатить 4 400 ₽' })).toBeDisabled();
   await dialog.getByRole('button', { name: 'Перейти в профиль' }).click();
   expect(await page.evaluate(() => window.__bookingProfileBoundary)).toEqual({

@@ -183,6 +183,48 @@ describe('MatchInvitationService', () => {
     );
   });
 
+  it('keeps invitation aggregates available when the invited public profile is hidden', async () => {
+    const harness = service();
+    harness.invitations.listIncoming.mockResolvedValue({
+      outcome: 'found',
+      invitations: [invitation()],
+    });
+    harness.publicProfiles.findByPlayerIds.mockResolvedValue({
+      outcome: 'found',
+      players: [{
+        playerId: OWNER_ID,
+        firstName: 'Owner',
+        rating: 3,
+        isVerified: true,
+      }],
+    });
+
+    const result = await harness.service.listIncoming({
+      accountId: PLAYER_ID,
+      role: 'player',
+      request: { limit: 20 },
+    });
+
+    expect(result).toMatchObject({
+      outcome: 'found',
+      invitations: [{
+        match: {
+          owner: { playerId: OWNER_ID, firstName: 'Owner' },
+        },
+        invitedPlayer: { unavailable: true },
+      }],
+    });
+    if (result.outcome !== 'found') {
+      throw new Error('Expected invitations');
+    }
+    expect(result.invitations[0].invitedPlayer).toEqual({
+      unavailable: true,
+    });
+    expect(JSON.stringify(result.invitations[0].invitedPlayer)).not.toMatch(
+      /playerId|firstName|phone|email/iu,
+    );
+  });
+
   it('binds command identity to requestKey and detects changed create payload through the digest', async () => {
     const harness = service();
     harness.invitations.create.mockResolvedValue({

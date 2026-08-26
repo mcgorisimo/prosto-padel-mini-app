@@ -173,6 +173,30 @@ function readSurveyAnswers(value, requireAnswers = false) {
 }
 
 export function readPlayerOnboardingState(value) {
+  if (
+    hasExactKeys(value, [
+      'status',
+      'legalPolicyCurrent',
+      'initialLevelLabel',
+      'initialLevelAlgorithmVersion',
+    ]) &&
+    value.status === 'completed' &&
+    typeof value.legalPolicyCurrent === 'boolean' &&
+    (value.initialLevelLabel === null ||
+      INITIAL_LEVEL_LABELS.includes(value.initialLevelLabel)) &&
+    typeof value.initialLevelAlgorithmVersion === 'string' &&
+    FLOW_VERSION_PATTERN.test(value.initialLevelAlgorithmVersion) &&
+    (value.initialLevelAlgorithmVersion === INITIAL_LEVEL_SURVEY_VERSION
+      ? value.initialLevelLabel !== null
+      : value.initialLevelLabel === null)
+  ) {
+    return Object.freeze({
+      status: 'completed',
+      legalPolicyCurrent: value.legalPolicyCurrent,
+      initialLevelLabel: value.initialLevelLabel,
+      initialLevelAlgorithmVersion: value.initialLevelAlgorithmVersion,
+    });
+  }
   const exposesInitialLevel =
     isPlainObject(value) &&
     value.status === 'completed' &&
@@ -184,7 +208,7 @@ export function readPlayerOnboardingState(value) {
         ? [...ONBOARDING_STATE_KEYS, 'initialLevelLabel']
         : ONBOARDING_STATE_KEYS,
     ) ||
-    !['required', 'in_progress', 'completed'].includes(value.status) ||
+    !['required', 'in_progress'].includes(value.status) ||
     !ONBOARDING_STEPS.includes(value.currentStep) ||
     !hasExactKeys(value.profile, ['firstName', 'lastName']) ||
     !isBoundedString(value.profile.firstName, 256) ||
@@ -210,10 +234,7 @@ export function readPlayerOnboardingState(value) {
   }
 
   const consents = readConsents(value.consents);
-  const surveyAnswers = readSurveyAnswers(
-    value.surveyAnswers,
-    value.status === 'completed',
-  );
+  const surveyAnswers = readSurveyAnswers(value.surveyAnswers);
   if (!consents || !surveyAnswers) return null;
 
   if (
@@ -229,9 +250,7 @@ export function readPlayerOnboardingState(value) {
         typeof value.surveyVersion !== 'string' ||
         !FLOW_VERSION_PATTERN.test(value.surveyVersion) ||
         !isRevision(value.revision) ||
-        (value.status === 'completed'
-          ? value.currentStep !== 'completed'
-          : value.currentStep === 'completed')
+        value.currentStep === 'completed'
   ) {
     return null;
   }

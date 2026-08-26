@@ -22,10 +22,10 @@ import {
   AcceptOwnPlayerOnboardingLegalPolicyResult,
   AdvanceOwnPlayerOnboardingResult,
   CompleteOwnPlayerOnboardingResult,
-  OwnPlayerOnboarding,
+  OwnPlayerOnboardingResponse,
   ReadOwnPlayerOnboardingResult,
   SaveOwnPlayerOnboardingDraftResult,
-  isOwnPlayerOnboarding,
+  isOwnPlayerOnboardingResponse,
   readOwnPlayerOnboardingCompletion,
   readOwnPlayerOnboardingLegalAcceptances,
   readOwnPlayerOnboardingDraft,
@@ -282,7 +282,7 @@ function disableCaching(reply: FastifyReply): void {
   reply.header('Pragma', 'no-cache');
 }
 
-function readFound(value: unknown): OwnPlayerOnboarding {
+function readFound(value: unknown): OwnPlayerOnboardingResponse {
   if (
     typeof value !== 'object' ||
     value === null ||
@@ -295,7 +295,7 @@ function readFound(value: unknown): OwnPlayerOnboarding {
     throw rejection('internal_failure');
   }
   const result = value as Record<string, unknown>;
-  if (result.outcome !== 'found' || !isOwnPlayerOnboarding(result.onboarding)) {
+  if (result.outcome !== 'found' || !isOwnPlayerOnboardingResponse(result.onboarding)) {
     throw rejection('internal_failure');
   }
   return result.onboarding;
@@ -336,7 +336,7 @@ function readRejectionReason(
     : undefined;
 }
 
-function readSaved(value: unknown): OwnPlayerOnboarding {
+function readSaved(value: unknown): OwnPlayerOnboardingResponse {
   if (
     typeof value !== 'object' ||
     value === null ||
@@ -349,7 +349,7 @@ function readSaved(value: unknown): OwnPlayerOnboarding {
     throw draftRejection('internal_failure');
   }
   const result = value as Record<string, unknown>;
-  if (result.outcome !== 'saved' || !isOwnPlayerOnboarding(result.onboarding)) {
+  if (result.outcome !== 'saved' || !isOwnPlayerOnboardingResponse(result.onboarding) || result.onboarding.status === 'completed') {
     throw draftRejection('internal_failure');
   }
   return result.onboarding;
@@ -396,7 +396,7 @@ function readDraftRejectionReason(
 function readAdvanced(
   value: unknown,
   expectedStep: 'consents' | 'level_survey',
-): OwnPlayerOnboarding {
+): OwnPlayerOnboardingResponse {
   if (
     typeof value !== 'object' ||
     value === null ||
@@ -411,7 +411,7 @@ function readAdvanced(
   const result = value as Record<string, unknown>;
   if (
     result.outcome !== 'advanced' ||
-    !isOwnPlayerOnboarding(result.onboarding) ||
+    !isOwnPlayerOnboardingResponse(result.onboarding) ||
     result.onboarding.status !== 'in_progress' ||
     result.onboarding.currentStep !== expectedStep
   ) {
@@ -459,7 +459,7 @@ function readProgressRejectionReason(
     : undefined;
 }
 
-function readCompleted(value: unknown): OwnPlayerOnboarding {
+function readCompleted(value: unknown): OwnPlayerOnboardingResponse {
   if (
     typeof value !== 'object' ||
     value === null ||
@@ -474,7 +474,7 @@ function readCompleted(value: unknown): OwnPlayerOnboarding {
   const result = value as Record<string, unknown>;
   if (
     result.outcome !== 'completed' ||
-    !isOwnPlayerOnboarding(result.onboarding) ||
+    !isOwnPlayerOnboardingResponse(result.onboarding) ||
     result.onboarding.status !== 'completed'
   ) {
     throw completionRejection('internal_failure');
@@ -520,7 +520,7 @@ function readCompletionRejectionReason(
     : undefined;
 }
 
-function readLegalAcceptanceResult(value: unknown): OwnPlayerOnboarding {
+function readLegalAcceptanceResult(value: unknown): OwnPlayerOnboardingResponse {
   if (
     typeof value !== 'object' ||
     value === null ||
@@ -533,7 +533,7 @@ function readLegalAcceptanceResult(value: unknown): OwnPlayerOnboarding {
   const result = value as Record<string, unknown>;
   if (
     result.outcome !== 'accepted' ||
-    !isOwnPlayerOnboarding(result.onboarding) ||
+    !isOwnPlayerOnboardingResponse(result.onboarding) ||
     result.onboarding.status !== 'completed'
   ) {
     throw legalAcceptanceRejection('internal_failure');
@@ -585,7 +585,7 @@ export class PlayerOnboardingController {
   async me(
     @Req() request: FastifyRequest,
     @Res({ passthrough: true }) reply: FastifyReply,
-  ): Promise<OwnPlayerOnboarding> {
+  ): Promise<OwnPlayerOnboardingResponse> {
     disableCaching(reply);
     const principal = readAuthenticatedSessionPrincipal(request);
     if (principal === undefined) {
@@ -614,7 +614,7 @@ export class PlayerOnboardingController {
     @Body() body: unknown,
     @Req() request: FastifyRequest,
     @Res({ passthrough: true }) reply: FastifyReply,
-  ): Promise<OwnPlayerOnboarding> {
+  ): Promise<OwnPlayerOnboardingResponse> {
     disableCaching(reply);
     const principal = readAuthenticatedSessionPrincipal(request);
     if (principal === undefined) {
@@ -649,7 +649,7 @@ export class PlayerOnboardingController {
     @Body() body: unknown,
     @Req() request: FastifyRequest,
     @Res({ passthrough: true }) reply: FastifyReply,
-  ): Promise<OwnPlayerOnboarding> {
+  ): Promise<OwnPlayerOnboardingResponse> {
     disableCaching(reply);
     const principal = readAuthenticatedSessionPrincipal(request);
     if (principal === undefined) {
@@ -684,7 +684,7 @@ export class PlayerOnboardingController {
     @Body() body: unknown,
     @Req() request: FastifyRequest,
     @Res({ passthrough: true }) reply: FastifyReply,
-  ): Promise<OwnPlayerOnboarding> {
+  ): Promise<OwnPlayerOnboardingResponse> {
     disableCaching(reply);
     const principal = readAuthenticatedSessionPrincipal(request);
     if (principal === undefined) {
@@ -719,7 +719,7 @@ export class PlayerOnboardingController {
     @Body() body: unknown,
     @Req() request: FastifyRequest,
     @Res({ passthrough: true }) reply: FastifyReply,
-  ): Promise<OwnPlayerOnboarding> {
+  ): Promise<OwnPlayerOnboardingResponse> {
     disableCaching(reply);
     const principal = readAuthenticatedSessionPrincipal(request);
     if (principal === undefined) {

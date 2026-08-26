@@ -9,7 +9,7 @@ import {
   MatchInvitationId,
   MatchSlotNumber,
 } from './match.types';
-import { MatchPublicPlayerResponse } from './match-api.types';
+import { MatchPlayerProjectionResponse } from './match-api.types';
 
 export interface CreateMatchInvitationRequest {
   readonly requestKey: string;
@@ -55,13 +55,13 @@ export interface MutateMatchInvitationApiInput
 
 export interface MatchInvitationMatchResponse
   extends MatchInvitationMatchSnapshot {
-  readonly owner: MatchPublicPlayerResponse;
+  readonly owner: MatchPlayerProjectionResponse;
 }
 
 export interface MatchInvitationResponse
   extends Omit<MatchInvitationRecord, 'match'> {
   readonly match: MatchInvitationMatchResponse;
-  readonly invitedPlayer: MatchPublicPlayerResponse;
+  readonly invitedPlayer: MatchPlayerProjectionResponse;
 }
 
 export interface AcceptedMatchInvitationResponse {

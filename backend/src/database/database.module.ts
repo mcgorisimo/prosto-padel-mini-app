@@ -2,6 +2,7 @@ import { Module, Provider } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { readReservationSnapshotConfiguration } from '../config/reservation-snapshot.config';
 import { YCLIENTS_API_CONFIG_KEYS } from '../config/yclients-api.config';
+import { readPlayerOnboardingPolicyConfiguration } from '../config/player-onboarding-policy.config';
 import { ReservationSnapshotCrypto } from '../reservations/reservation-snapshot.crypto';
 import {
   PlayerProfilePhotoUrlResolver,
@@ -37,6 +38,7 @@ import { PostgresPlayerInitialLevelReassessmentRepository } from './postgres-pla
 import { PostgresPlayerProfileReader } from './postgres-player-profile-reader';
 import { PostgresPlayerProfileWriter } from './postgres-player-profile-writer';
 import { PostgresPublicPlayerProfileSearchRepository } from './postgres-public-player-profile-search.repository';
+import { PublicPlayerVisibilityPolicy } from './public-player-profile-search.repository';
 import { PostgresSecurityAuditRepository } from './postgres-security-audit.repository';
 import { PostgresSessionAuthenticationRepository } from './postgres-session-authentication.repository';
 import { PostgresSessionCredentialLifecycleRepository } from './postgres-session-credential-lifecycle.repository';
@@ -49,6 +51,32 @@ import { PostgresTransactionRunner } from './postgres-transaction';
 import { PostgresTransactionExecutorAdapter } from './postgres-transaction-executor.adapter';
 import { PostgresCourtReservationRepository } from './postgres-court-reservation.repository';
 import { PostgresMatchReservationRepository } from './postgres-match-reservation.repository';
+
+function readPublicPlayerVisibilityPolicy(
+  config: ConfigService,
+): PublicPlayerVisibilityPolicy {
+  const policy = readPlayerOnboardingPolicyConfiguration(config);
+  return Object.freeze({
+    enabled: policy.enabled,
+    requiredConsents: policy.enabled
+      ? Object.freeze([
+          Object.freeze({
+            kind: 'cancellation' as const,
+            documentVersion: policy.documentVersions.cancellation,
+          }),
+          Object.freeze({
+            kind: 'personal_data_processing' as const,
+            documentVersion:
+              policy.documentVersions.personalDataProcessing,
+          }),
+          Object.freeze({
+            kind: 'terms' as const,
+            documentVersion: policy.documentVersions.terms,
+          }),
+        ])
+      : Object.freeze([]),
+  });
+}
 
 const DATABASE_WORKFLOW_PROVIDERS: Provider[] = [
   {
@@ -104,7 +132,6 @@ const DATABASE_WORKFLOW_PROVIDERS: Provider[] = [
   PostgresPlayerInitialLevelReassessmentRepository,
   PostgresPlayerProfileWriter,
   PostgresSessionAuthenticationRepository,
-  PostgresMatchChatRepository,
   PostgresMatchLineupRepository,
   PostgresMatchNotificationRepository,
   PostgresMatchResultRepository,
@@ -129,11 +156,23 @@ const DATABASE_WORKFLOW_PROVIDERS: Provider[] = [
   },
   {
     provide: PostgresPublicPlayerProfileSearchRepository,
-    inject: [PlayerProfilePhotoUrlResolver],
+    inject: [PlayerProfilePhotoUrlResolver, ConfigService],
     useFactory: (
       urls: PlayerProfilePhotoUrlResolver,
+      config: ConfigService,
     ): PostgresPublicPlayerProfileSearchRepository =>
-      new PostgresPublicPlayerProfileSearchRepository(urls),
+      new PostgresPublicPlayerProfileSearchRepository(
+        urls,
+        readPublicPlayerVisibilityPolicy(config),
+      ),
+  },
+  {
+    provide: PostgresMatchChatRepository,
+    inject: [ConfigService],
+    useFactory: (config: ConfigService): PostgresMatchChatRepository =>
+      new PostgresMatchChatRepository(
+        readPublicPlayerVisibilityPolicy(config),
+      ),
   },
   {
     provide: MATCH_COURT_CATALOG,
