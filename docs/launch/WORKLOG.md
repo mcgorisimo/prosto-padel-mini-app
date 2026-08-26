@@ -9306,3 +9306,62 @@
   secret action occurred. Runtime impact remains
   `deployment_deferred_by_user`; repeat independent exact-diff P0/P1 review is
   still required after this correction.
+
+### 2026-08-26 — D5.S Selectel test rollout and nginx PII-safe log containment
+
+- The independently reviewed D5.S application candidate was committed and
+  integrated as exact `f55ba9318c92b97c6fa5e0b0defcdd752fab56cb`, then
+  deployed to Selectel test from the expected clean checkout
+  `866570789af2524e2a0cc0a5e225ba96514b655e`. Only backend and frontend were
+  rebuilt/replaced; PostgreSQL, nginx and observability containers were not
+  changed in that rollout. Both application containers reported the exact
+  `f55ba93...` release, were healthy with zero restarts, and public/internal
+  health returned HTTP 200.
+- PII-safe unauthenticated synthetic smoke classified the legacy admin GET
+  search, protected admin POST search, completed-onboarding read and booking
+  email override at the authentication boundary without a provider or booking
+  write. The first centralized-log gate found the synthetic query and cursor
+  canaries once each in the inherited nginx access format. This proved an
+  arbitrary query-string logging surface, not a historical or real-PII leak;
+  closeout stopped until a separate nginx-only correction was authorized.
+- Exact nginx correction commit
+  `21063f7c4737f57eee6c3589877a5f2c2ced8a1a` defines one server-level JSON
+  access schema containing only event, method, status, response bytes and
+  duration. It excludes request target/path, URI, args/query, body, headers,
+  Authorization/cookies, client address, referer and user agent. The static
+  regression enforces the exact allowlist, the single active safe sink, two
+  metrics `access_log off` directives and synthetic query/cursor/body/auth
+  canary absence. Exact two-file P0/P1 self-review passed with no unresolved
+  finding.
+- Local verification passed: observability static check, root E2E
+  `111 passed / 1 intentional skip`, root build (`1627` modules; existing
+  chunk-size advisory only) and `git diff --check`. Backend gates were not
+  applicable because no backend source/image changed. On Selectel test the
+  exact fetched commit was clean and native `nginx -t` passed before rollout.
+- Controlled rollout recreated only nginx:
+  `18bc9f734eaebec91d52b194cb8fb36febfd90717f71e45b3d687bc4715b2c6a`
+  became
+  `2bd6e57a965445981828cd0f4a8c3a8bf471b8b2f96e7254e526d0ce00dbdf89`.
+  Backend
+  `1d128940f325b5b1cf8e8841e7f3526fe4178417a7ca0f501752f0483fa45bb2`,
+  frontend
+  `d9fa32574f889ee6cfc93c09c2693471b52b43653de5030b2f9edcaf0867cd73`
+  and all eight PostgreSQL/observability container IDs stayed unchanged. All
+  ten containers were running, nine healthchecks were healthy, node-exporter
+  had no healthcheck, and every restart count was zero. Public and internal
+  health remained HTTP 200; backend/frontend application release remained
+  `f55ba93...`, while server checkout/nginx config is `21063f7...`.
+- Post-rollout GET/POST admin, onboarding and booking boundary smokes all
+  returned the expected HTTP 401 without real contacts or provider writes.
+  The final Loki window contained `99` records and `46` nginx access events:
+  non-JSON `0`, unsafe nginx schemas `0`, query/cursor/admin-body/booking-email
+  canaries `0/0/0/0`, Authorization/Bearer/surveyAnswers/raw-error hits
+  `0/0/0/0`, HTTP 5xx `0`, error/fatal `0`, provider dispatch `0`, booking
+  writes `0`.
+- No compose/env/secret, database/schema/migration, provider/API, payment,
+  production or Supabase action occurred. This WORKLOG closeout is docs-only
+  with `deployment=not_needed`. Runtime status is
+  `applied_verified_pending_owner_manual_tma_smoke`; D5.S remains open until
+  the owner confirms one existing completed user can enter the Telegram Mini
+  App, use it and is not shown the questionnaire again, without creating a
+  booking.
