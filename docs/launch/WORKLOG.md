@@ -9410,3 +9410,44 @@
   secrets/env, YCLIENTS, payment fields and production were not changed.
   Deployment is `deployment=not_needed` because this candidate is unapplied SQL,
   a static backend contract test and documentation only.
+
+### 2026-08-26 — D6.1 slice 1 Selectel inventory and capacity proposal
+
+- Started from clean detached `origin/main`
+  `0fe9cfde914703cb7c61fe8589f98f0bbdcde60c`; the paused TD-004 branch was not
+  modified. D6.1 remained bounded to read-only inventory, a docs-only proposal
+  and an independent exact-diff review.
+- Read-only Selectel test inventory observed one 2 vCPU/3.82 GiB/64 GiB VM with
+  48.67 GiB free and ten running Compose services. Nine configured
+  healthchecks were healthy, node-exporter had none, all restart counts were
+  zero, and no container CPU/RAM limit was declared. Public exposure remained
+  80/443 and SSH; nginx/Grafana were loopback-only and PostgreSQL/metrics were
+  not host-published.
+- The current 15.3 MiB PostgreSQL 14.23 database is a same-VM container, not
+  Managed PostgreSQL: SSL is off, `max_connections=100`, and the backend has an
+  implicit rather than declared pool/timeouts budget. `/health` is static
+  liveness rather than DB-backed readiness. Local backup/restore tooling exists,
+  but the latest observed regular backup was from 2026-08-06, audit copies ran
+  through 2026-08-10, and all remain on the same VM.
+- Added `D6_1_SELECTEL_CAPACITY_PROPOSAL.md` with three Selectel-only reference
+  configurations: minimum paid test (core 9,082.93 RUB/month), budget
+  production (21,108.50 RUB/month, recommended launch baseline) and
+  fault-tolerant production (56,305.70 RUB/month). Each specifies compute,
+  disks, private/TLS Managed PostgreSQL, PgBouncer/application connection
+  budgets, load balancer, backup/restore boundary, 300–400-user load profile
+  and a wider planning envelope. Prices are dated 2026-08-26, include 22% VAT,
+  and exclude explicitly identified quote/metered items.
+- The inventory used only non-mutating local reads and SSH queries. No secrets
+  or environment values were printed; no Selectel resource, server, container,
+  database/schema/migration, backup restore, provider/API, DNS/TLS, runtime,
+  payment, production or Supabase action occurred.
+- Focused documentation validation passed: all required configuration fields
+  were present; independent arithmetic reproduced the three core totals; and
+  `git diff --check` passed (apart from Git's Windows LF-to-CRLF notice).
+  Independent read-only review of the exact two-file candidate reported
+  acceptance `PASS`, `P0=0`, `P1=0`; the reviewer made no file or external
+  change.
+- This slice is docs-only, so application/backend E2E, build and runtime rollout
+  are not required. `deployment=not_needed`: Selectel test remains application
+  release `f55ba9318c92b97c6fa5e0b0defcdd752fab56cb`, server/nginx checkout
+  `21063f7c4737f57eee6c3589877a5f2c2ced8a1a`, with all containers unchanged.
