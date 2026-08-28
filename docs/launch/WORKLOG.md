@@ -9523,3 +9523,48 @@
 - Remaining D5.2 blockers are provider selection/adapters, external secrets,
   runtime and UI wiring, and live phone/email verification. Each remains a
   separate approval gate.
+
+### 2026-08-28 — D5.2 runtime-disabled contact-verification snapshot repository candidate
+
+- Started from clean exact base and local `origin/main`
+  `ad5694e4eeae90440b8f10b77e189d70fe1aaf9b`. D5.2 remains `in_progress`;
+  the applied migration 042 and existing contact contracts/state machine were
+  not changed.
+- Added a provider-neutral repository contract and an unwired PostgreSQL
+  implementation that reads one owner-scoped checkout snapshot for the current
+  phone and email contact versions in one SQL statement. A current verified
+  proof wins over a later pending challenge; pending requires the same account,
+  field, contact version, subject digest/key version, method and purpose, plus
+  exclusive expiry from PostgreSQL transaction time.
+- The outer projection contains only account ID, field, coarse state, contact
+  and verified versions, verification method and verified timestamp. Contact
+  value envelopes, proof/delivery data, idempotency values, provider state and
+  audit storage are neither projected nor returned. Invalid input, foreign or
+  duplicate owners/fields, stale versions, cross-method state, malformed rows
+  and unexpected projected columns fail closed with PII-safe errors.
+- Focused repository regressions passed `22/22`; backend typecheck, backend E2E
+  `4/4`, backend build and root build (`1627` modules; existing chunk-size
+  advisory only) passed. Full backend unit passed `3933/3934`; its sole failure
+  is the unchanged migration 038 static-contract baseline already recorded
+  outside this D5.2 diff.
+- The mandatory default nine-worker root E2E run reported `109 passed / 1
+  intentional skip / 2 failed` on timeouts in two untouched booking scenarios.
+  The complete diagnostic rerun with one worker passed `111/111` with `1`
+  intentional skip, including both prior failures. The first sandboxed rerun
+  and root build could not read `vite.config.js`; their exact retries outside
+  that filesystem restriction produced the reported PASS results.
+- The first independent read-only P0/P1 review of the three repository files
+  returned acceptance `PASS`, `P0=0`, `P1=0`. A subsequent author check replaced
+  statement time with the proposal-required transaction time; focused tests and
+  typecheck passed again. The final corrected four-file exact-diff re-review
+  also passed with acceptance `PASS`, `P0=0`, `P1=0` and no actionable finding.
+- The repository is not imported, provided, exported or called by
+  `DatabaseModule`, a controller, service, worker or application bootstrap.
+  No grant, migration, schema/DB, Selectel, provider/API, secret/env, runtime,
+  UI, payment, Supabase, container, production, commit, fetch, integration or
+  push action occurred. Deployment is `not_needed` because the repository is
+  runtime-disabled and application behavior is unchanged.
+- Remaining D5.2 blockers are least-privilege runtime DB grants, encrypted
+  contact write/crypto-key handling, provider selection/adapters and secrets,
+  mutation repositories/controllers, checkout/UI wiring and live phone/email
+  verification. Each remains a separate owner approval gate.
