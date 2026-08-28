@@ -9486,3 +9486,40 @@
 - Independent read-only PostgreSQL compatibility/security/privacy review of the
   exact correction diff passed with acceptance `PASS`, `P0=0`, `P1=0` and no
   actionable finding.
+
+### 2026-08-28 — D5.2 migration 042 applied on Selectel test
+
+- Exact source commit `5e0f55ac58071018bc781d4da6293433d072dc91` was
+  already fast-forwarded to `origin/main`. Migration 042 was applied only to
+  Selectel test database `prosto_padel_test_migration_cycle`; schema status is
+  `applied_verified` and D5.2 remains `in_progress`.
+- The verified root-only backup is
+  `/root/prosto-padel-db-backups/migration042_retry_safe_20260828T092411Z_5e0f55a_PKLrcf`.
+  Its custom-format dump passed `pg_restore --list`; role passwords and
+  `PASSWORD` clauses are absent. The rejected retry backup containing a role
+  password clause was exact-path/SHA verified and removed before PRECHECK.
+- Exact Git blobs were staged at
+  `/root/prosto-padel-db-gates/migration042_retry_20260828T092827Z_5e0f55a_8yUL5Y`
+  with root-only permissions. SHA-256 values were
+  `a32a6ddc883448fe24ce44fe19aa3fceb50d6338ab5ae01f7afdc00478da7e16`
+  for PRECHECK, `b05caf6e9fb12d6d659074db8ae47df785d5595cf03cfeb4848b985a3b2da0df`
+  for migration SQL and
+  `e371cafbf3460235f47fcb7aed428d993d01c8896bb29b930daa9aceec4d8a65`
+  for POSTCHECK.
+- Read-only PRECHECK passed with `target_absent=true`,
+  `runtime_connected=false`, transaction `ROLLBACK` and empty stderr. The
+  corrected migration then committed exactly once with empty stderr. Read-only
+  POSTCHECK passed with `verified=true`, `runtime_connected=false`,
+  `provider_selected=false`, transaction `ROLLBACK`, empty stderr and all six
+  new relations empty before runtime wiring.
+- PostgreSQL and backend container IDs remained unchanged; both stayed healthy
+  with zero restarts. The server checkout remained clean at
+  `21063f7c4737f57eee6c3589877a5f2c2ced8a1a`. No runtime/controller/UI wiring,
+  provider/API call, secret/env change, application container rollout or
+  production action occurred. Application rollout is `not_needed`; HTTP/manual
+  business smoke and runtime log review were not run because runtime did not
+  change, while schema acceptance was provided by POSTCHECK and empty psql
+  stderr.
+- Remaining D5.2 blockers are provider selection/adapters, external secrets,
+  runtime and UI wiring, and live phone/email verification. Each remains a
+  separate approval gate.
