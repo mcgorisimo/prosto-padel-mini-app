@@ -9568,3 +9568,49 @@
   contact write/crypto-key handling, provider selection/adapters and secrets,
   mutation repositories/controllers, checkout/UI wiring and live phone/email
   verification. Each remains a separate owner approval gate.
+
+### 2026-08-28 — D6.2 slice 1 frontend request-budget target harness
+
+- The reviewed two-file diff from commit
+  `cb46daf55ed631d8c051ce792c49d85c13ee8509` (parent baseline
+  `ad5694e4eeae90440b8f10b77e189d70fe1aaf9b`) was transferred without commit
+  or push to exact current `origin/main`
+  `ff8321290ca5b07c452308d97d16ad105370ef97` on local branch
+  `codex/d6-2-request-budget-harness-current-v2`. The upstream D5.2
+  contact-verification snapshot repository entry was preserved append-only.
+  This slice changes only one new Vitest harness plus this WORKLOG entry; `src`,
+  `backend`, `infra`, dependency files, build configuration and scripts remain
+  byte-for-byte at the new baseline.
+- The jsdom/fake-timer harness mounts the real `App` and
+  `MatchDetailsScreen` contracts for notifications, chat, waitlist, lineup and
+  result. It covers active five-second cadence, hidden state, controlled slow
+  requests, exact public `503` retries, duplicate focus/visibility events and
+  immediate visible resume without adding test hooks or branches to runtime.
+- Nine target assertions are explicit Vitest expected failures: all five
+  pollers continue while hidden; notifications and chat are not single-flight;
+  focus plus visibility duplicates account refreshes; and visible resume does
+  not immediately refresh the five poller contracts. The harness therefore
+  records the gaps without weakening the desired acceptance or treating the
+  current behavior as a passing product contract.
+- Six current guarantees pass normally: active notifications and chat each
+  poll once per five-second tick; slow waitlist detail-pair, lineup and result
+  polling remain single-flight; and notifications/chat/waitlist/lineup/result
+  reads each stop after three physical attempts on an exact public `503`.
+  Focused verification passed `15/15`; Prettier and ESLint passed for the new
+  file; full root unit passed `135/135` on baseline `ff832129`.
+- Mandatory root gates on baseline `ff832129` passed: build transformed `1627`
+  modules with only the existing chunk-size advisory; E2E passed `111/111` with
+  one intentional feature-disabled skip. `git diff --check` and the exact
+  runtime-path no-diff guard are re-run after the final review update.
+- Initial independent exact-diff review found no P0 and one P1 false-green
+  risk: notification/chat active cadence was asserted inside inverted tests.
+  The correction adds two normally passing cadence contracts and leaves the
+  expected-failure tests bounded to their hidden/single-flight targets. Final
+  review on the previous baseline passed with acceptance `PASS`, `P0=0`,
+  `P1=0`; repeat independent review of the exact diff on baseline `ff832129`
+  also passed with acceptance `PASS`, `P0=0`, `P1=0` and no findings. No
+  commit, push, merge, Selectel/SSH,
+  database/schema/migration, provider/API, secrets/env, payment, production or
+  Supabase action occurred. This test/docs-only slice has
+  `deployment=not_needed`; the documented Selectel test application and nginx
+  releases remain unchanged.
