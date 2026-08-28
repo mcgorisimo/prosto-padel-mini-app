@@ -9696,3 +9696,47 @@
   Provider selection/adapters, real secrets, persistence mutations, grants,
   controllers/runtime, checkout/UI and live verification remain later approval
   gates.
+
+### 2026-08-28 — D6.2 slice 2 Selectel test frontend rollout
+
+- The owner-authorized rollout targeted only Selectel test and exact runtime
+  commit `14d8e74eca222974bd8c4ba6bfc984c76efc0f37`. Preflight fetched Git and
+  confirmed local and server `origin/main` at that SHA, a clean server checkout,
+  a valid two-file compose configuration and a fast-forward path from server
+  HEAD `21063f7c4737f57eee6c3589877a5f2c2ced8a1a`. The checkout was advanced to
+  the target and remained clean; no merge, database, schema, provider, secret,
+  env or production action occurred.
+- Only the frontend image was built and only the frontend service was recreated.
+  Frontend changed from container
+  `d9fa32574f889ee6cfc93c09c2693471b52b43653de5030b2f9edcaf0867cd73`
+  to `617cd532d4403bccebfb60ecc28bc4fe93b927d1336f81488b46a53b063d1387`
+  on image
+  `sha256:96e972d40bd0483d36520d5c5b7d1af8bbdd56cd9d389f5bdd8e32c26249bfa2`;
+  it is healthy with restart count `0`. Backend
+  `1d128940f325b5b1cf8e8841e7f3526fe4178417a7ca0f501752f0483fa45bb2`,
+  nginx `2bd6e57a965445981828cd0f4a8c3a8bf471b8b2f96e7254e526d0ce00dbdf89`
+  and PostgreSQL
+  `62dc6284c081162e4abac6f8ae6d1f9fed3d080f88d0f1592111412eae194179`
+  retained their preflight IDs and images, stayed healthy and kept restart
+  count `0`.
+- Internal frontend, `/healthz` and `/api/v1/health` returned HTTP `200`.
+  Public HTTPS frontend, `/healthz`, `/api/v1/health` and the exact built asset
+  `/assets/index-D__pQLaX.js` also returned `200` with TLS verification result
+  `0`. The public asset and the file inside the frontend container matched at
+  SHA-256
+  `116f3dc9f9ffeeafe641755cf27f5fd8ba303467d949ed528f9f32e80bb58a03`.
+- An isolated browser smoke loaded the deployed asset and mocked every backend
+  request, so it performed no real backend, database or provider write. With
+  the app rendered, notification calls stayed `1 -> 1` for a hidden interval,
+  visible resume immediately produced exactly `1 -> 2`, and a slow response
+  plus repeated visible/focus events stayed `2 -> 2`. All `25` API calls were
+  intercepted, Supabase/provider calls were `0`, and browser page/console
+  errors were `0`.
+- Bounded logs since rollout start `2026-08-28T10:51:34Z` contained no error or
+  fatal levels and no HTTP `5xx`: frontend `43` non-JSON startup/access lines,
+  nginx `187` structured plus `2` non-JSON lines, backend `0` lines. A later
+  full raw-line PII scan covered frontend `43`, nginx `193` and backend `0`
+  lines and found `0` authorization/cookie/credential/contact-pattern hits.
+  Deployment is `deployment=applied_verified`, deployed environment is Selectel
+  test, and deployed commit is
+  `14d8e74eca222974bd8c4ba6bfc984c76efc0f37`.
