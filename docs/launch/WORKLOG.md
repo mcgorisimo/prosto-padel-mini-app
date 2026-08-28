@@ -9654,3 +9654,45 @@
   Because `src/App.jsx` changes the frontend bundle, deployment status is
   `deployment_deferred_by_user`; no container, health, manual smoke or server-log
   gate was run under this local-only authorization.
+
+### 2026-08-28 — D5.2 runtime-disabled keyed-digest adapter candidate
+
+- Started from clean exact base
+  `ff8321290ca5b07c452308d97d16ad105370ef97`. While the local slice was in
+  progress the shared remote-tracking `origin/main` advanced independently to
+  `72417372463c0fc27bde615aa35adfc3018dc6f4` in an unrelated D6.2 frontend test
+  commit that also appends WORKLOG. No fetch, rebase, merge or integration was
+  performed in this worktree; base reconciliation remains a separate gate.
+- Added a provider-neutral digest port plus an unwired Node HMAC-SHA-256
+  adapter. HKDF derives separate subject, verifier, request and network-source
+  keys from transient constructor input; the caller secret is copied and the
+  temporary copy erased. Every length-prefixed preimage pins the domain, digest
+  kind and PostgreSQL-int4 key version. Subject digests also pin phone/email,
+  verifier digests pin the exact field/method, and request digests pin the
+  state-machine operation.
+- The adapter accepts only canonical E.164 phones, lowercase bounded emails,
+  valid field/method pairs and bounded control-free proof/request/source input.
+  It returns only lowercase protected digests and metadata required by
+  migration 042. Plaintext contacts, OTP/code/link tokens, canonical requests,
+  network source values and key material are absent from results and fixed
+  typed errors. Disabled configuration fails closed.
+- Focused digest regressions passed `26/26`; backend typecheck, backend E2E
+  `4/4`, backend build, root E2E `111/111` with `1` intentional skip and root
+  build (`1627` modules; existing chunk-size advisory only) passed. Full backend
+  unit passed `3959/3960`; its sole failure is the unchanged migration 038
+  static-contract baseline outside this D5.2 diff. Focused Prettier check and
+  whitespace checks passed.
+- Independent read-only review of the three crypto-boundary files returned
+  acceptance `PASS`, `P0=0`, `P1=0`. The final exact four-file re-review,
+  including this append-only handoff and upstream-divergence disclosure, also
+  passed with acceptance `PASS`, `P0=0`, `P1=0` and no actionable finding.
+- The port and adapter are not imported by an application, auth or database
+  module and have no env/config/secrets wiring. No provider was selected and no
+  provider/API, Selectel, database/schema, migration, runtime, UI, checkout,
+  payment, Supabase, container, production, commit or push action occurred.
+  Deployment is `not_needed` because the candidate is runtime-disabled.
+- The next bounded D5.2 implementation slice is the separate AEAD envelope
+  boundary for current contacts, active proofs and durable dispatch payloads.
+  Provider selection/adapters, real secrets, persistence mutations, grants,
+  controllers/runtime, checkout/UI and live verification remain later approval
+  gates.
