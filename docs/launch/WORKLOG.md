@@ -9451,3 +9451,38 @@
   are not required. `deployment=not_needed`: Selectel test remains application
   release `f55ba9318c92b97c6fa5e0b0defcdd752fab56cb`, server/nginx checkout
   `21063f7c4737f57eee6c3589877a5f2c2ced8a1a`, with all containers unchanged.
+
+### 2026-08-27 — D5.2 migration 042 PostgreSQL 14 correction candidate
+
+- The separately authorized Selectel test DB/schema gate used exact commit
+  `ce58f284ac3cc87e866578ce119fc417875e3fed` and database
+  `prosto_padel_test_migration_cycle`. A verified root-only backup was created at
+  `/root/prosto-padel-db-backups/migration042_20260826T205408Z_ce58f284_1c86ad64cb77`;
+  the custom-format dump passed `pg_restore --list` before PRECHECK.
+- Read-only PRECHECK passed with `target_absent=true`,
+  `runtime_connected=false`, transaction `ROLLBACK` and empty stderr. The exact
+  migration input then stopped with `psql exit=3` before `COMMIT`: PostgreSQL
+  14 rejected `pg_catalog.coalesce(...)` because `COALESCE` is SQL syntax and
+  cannot be schema-qualified. The failed session closed its uncommitted
+  transaction; no manual rollback or correction was run on Selectel, and
+  POSTCHECK was correctly not started. Migration status remains `not_applied`.
+- This local correction replaces only the four affected migration ACL fallback
+  expressions and the two matching POSTCHECK expressions with unqualified
+  `coalesce(...)`. A focused static regression rejects
+  `pg_catalog.coalesce` and pins the exact `4 + 2` compatible ACL expressions;
+  no persistence contract, privilege boundary or runtime behavior changed.
+- Focused migration contract tests passed `14/14`; backend typecheck, backend
+  E2E `4/4`, backend build and root build (`1627` modules; existing chunk-size
+  advisory only) passed. Full backend unit passed `3911/3912`; the sole failure
+  remains the unchanged migration 038 contract baseline. Default nine-worker
+  root E2E reported `108 passed / 1 skipped / 3 failed` on timeouts or delayed
+  UI state in untouched booking/profile-photo scenarios; the complete
+  diagnostic rerun with one worker passed `111/111` with `1` intentional skip.
+- The correction remains local and uncommitted pending exact-diff P0/P1 review.
+  No fetch, rebase, integration, push, Selectel/DB write after the stopped gate,
+  runtime wiring, provider/API call, secret/env change, container rollout or
+  production action occurred. Deployment is `deployment=not_needed` because
+  only unapplied SQL, its static contract test and documentation changed.
+- Independent read-only PostgreSQL compatibility/security/privacy review of the
+  exact correction diff passed with acceptance `PASS`, `P0=0`, `P1=0` and no
+  actionable finding.

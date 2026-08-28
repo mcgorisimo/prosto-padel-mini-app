@@ -639,6 +639,18 @@ describe('migration 042 backend contact verification persistence contract', () =
     }
   });
 
+  it('keeps ACL fallback expressions PostgreSQL 14 compatible', () => {
+    const sql = compact(MIGRATION);
+    const postcheck = compact(POSTCHECK);
+
+    for (const artifact of [sql, postcheck]) {
+      expect(artifact).not.toContain('pg_catalog.coalesce');
+      expect(artifact).toContain('pg_catalog.aclexplode( coalesce(');
+    }
+    expect(sql.match(/\bcoalesce\(/gu)).toHaveLength(4);
+    expect(postcheck.match(/\bcoalesce\(/gu)).toHaveLength(2);
+  });
+
   it('provides read-only gates and a strictly non-destructive rollback boundary', () => {
     const precheck = compact(PRECHECK);
     const postcheck = compact(POSTCHECK);

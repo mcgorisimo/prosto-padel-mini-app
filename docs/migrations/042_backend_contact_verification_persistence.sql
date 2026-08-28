@@ -1601,7 +1601,7 @@ begin
       select role_row.rolname
       from pg_catalog.pg_class relation_row
       cross join lateral pg_catalog.aclexplode(
-        pg_catalog.coalesce(
+        coalesce(
           relation_row.relacl,
           pg_catalog.acldefault('r', relation_row.relowner)
         )
@@ -1629,7 +1629,7 @@ begin
       select role_row.rolname
       from pg_catalog.pg_proc function_row
       cross join lateral pg_catalog.aclexplode(
-        pg_catalog.coalesce(
+        coalesce(
           function_row.proacl,
           pg_catalog.acldefault('f', function_row.proowner)
         )
@@ -1730,7 +1730,7 @@ begin
          select 1
          from pg_catalog.pg_class relation_row
          cross join lateral pg_catalog.aclexplode(
-           pg_catalog.coalesce(
+           coalesce(
              relation_row.relacl,
              pg_catalog.acldefault('r', relation_row.relowner)
            )
@@ -1784,7 +1784,7 @@ begin
          select 1
          from pg_catalog.pg_proc function_row
          cross join lateral pg_catalog.aclexplode(
-           pg_catalog.coalesce(
+           coalesce(
              function_row.proacl,
              pg_catalog.acldefault('f', function_row.proowner)
            )
