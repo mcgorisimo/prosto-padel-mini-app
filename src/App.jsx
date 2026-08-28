@@ -406,6 +406,7 @@ export default function App({
   const backendInvitationRequestRef = useRef(0);
   const backendChatRequestRef = useRef(0);
   const backendNotificationRequestRef = useRef(0);
+  const backendNotificationPollInFlightRef = useRef(null);
   const backendChatMatchRef = useRef(null);
   const [incomingInvitations, setIncomingInvitations] = useState([]);
   const [outgoingInvitations, setOutgoingInvitations] = useState([]);
@@ -974,11 +975,43 @@ export default function App({
 
   useEffect(() => {
     if (!backendMatchesReady) return undefined;
-    const intervalId = globalThis.setInterval(() => {
-      void loadNotifications({ background: true });
-    }, 5_000);
+
+    let wasHidden = document.visibilityState !== 'visible';
+    const pollNotifications = () => {
+      if (
+        document.visibilityState !== 'visible' ||
+        backendNotificationPollInFlightRef.current
+      ) return;
+
+      const request = loadNotifications({ background: true });
+      backendNotificationPollInFlightRef.current = request;
+      void request.finally(() => {
+        if (backendNotificationPollInFlightRef.current === request) {
+          backendNotificationPollInFlightRef.current = null;
+        }
+      });
+    };
+    const refreshNotificationsAfterResume = () => {
+      if (document.visibilityState !== 'visible') {
+        wasHidden = true;
+        return;
+      }
+      if (!wasHidden) return;
+      wasHidden = false;
+      pollNotifications();
+    };
+
+    const intervalId = globalThis.setInterval(pollNotifications, 5_000);
+    document.addEventListener(
+      'visibilitychange',
+      refreshNotificationsAfterResume,
+    );
     return () => {
       globalThis.clearInterval(intervalId);
+      document.removeEventListener(
+        'visibilitychange',
+        refreshNotificationsAfterResume,
+      );
       backendNotificationRequestRef.current += 1;
     };
   }, [backendMatchesReady, loadNotifications]);

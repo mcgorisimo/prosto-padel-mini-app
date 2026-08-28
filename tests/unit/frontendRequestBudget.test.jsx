@@ -393,7 +393,7 @@ describe('D6.2 frontend request-budget target harness', () => {
     expect(probe.calls).toBe(initialCalls + 1);
   });
 
-  it.fails('pauses notifications while hidden', async () => {
+  it('pauses notifications while hidden', async () => {
     vi.useFakeTimers();
     const probe = createDeferredProbe({
       outcome: 'notifications_loaded',
@@ -409,29 +409,49 @@ describe('D6.2 frontend request-budget target harness', () => {
     expect(probe.calls).toBe(hiddenBaseline);
   });
 
-  it.fails(
-    'keeps notifications single-flight when one poll is slow',
-    async () => {
-      vi.useFakeTimers();
-      const probe = createDeferredProbe({
-        outcome: 'notifications_loaded',
-        notifications: [],
-        unreadCount: 0,
-      });
-      renderNotificationProbe(probe);
-      await flushEffects();
-      probe.setSlow();
+  it('keeps notifications single-flight when one poll is slow', async () => {
+    vi.useFakeTimers();
+    const probe = createDeferredProbe({
+      outcome: 'notifications_loaded',
+      notifications: [],
+      unreadCount: 0,
+    });
+    renderNotificationProbe(probe);
+    await flushEffects();
+    probe.setSlow();
 
-      const baseline = probe.calls;
-      await advancePoll();
-      await advancePoll();
-      expect(probe.calls).toBe(baseline + 1);
-      expect(probe.maximumActive).toBe(1);
+    const baseline = probe.calls;
+    await advancePoll();
+    await advancePoll();
+    expect(probe.calls).toBe(baseline + 1);
+    expect(probe.maximumActive).toBe(1);
 
-      probe.resolveAll();
-      await flushEffects();
-    },
-  );
+    probe.resolveAll();
+    await flushEffects();
+  });
+
+  it('refreshes notifications exactly once after visible resume', async () => {
+    vi.useFakeTimers();
+    const probe = createDeferredProbe({
+      outcome: 'notifications_loaded',
+      notifications: [],
+      unreadCount: 0,
+    });
+    renderNotificationProbe(probe);
+    await flushEffects();
+
+    const baseline = probe.calls;
+    await setVisibility('hidden');
+    await setVisibility('visible');
+    expect(probe.calls).toBe(baseline + 1);
+
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await flushEffects();
+    expect(probe.calls).toBe(baseline + 1);
+  });
 
   it('polls chat exactly once per active tick', async () => {
     vi.useFakeTimers();
@@ -638,14 +658,9 @@ describe('D6.2 frontend request-budget target harness', () => {
   );
 
   it.fails(
-    'runs exactly one immediate refresh per poller after visible resume',
+    'runs exactly one immediate refresh per remaining poller after visible resume',
     async () => {
       vi.useFakeTimers();
-      const notificationProbe = createDeferredProbe({
-        outcome: 'notifications_loaded',
-        notifications: [],
-        unreadCount: 0,
-      });
       const chatProbe = createDeferredProbe(undefined);
       const waitlistProbe = createDeferredProbe(waitlistResult());
       const detailProbe = createDeferredProbe(
@@ -659,8 +674,6 @@ describe('D6.2 frontend request-budget target harness', () => {
         outcome: 'rejected',
         reason: 'result_not_found',
       });
-
-      renderNotificationProbe(notificationProbe);
       renderChatProbe(chatProbe);
       renderWaitlistProbe(waitlistProbe, detailProbe);
       renderLineupProbe(lineupProbe);
@@ -668,7 +681,6 @@ describe('D6.2 frontend request-budget target harness', () => {
       await flushEffects();
 
       const baseline = {
-        notifications: notificationProbe.calls,
         chat: chatProbe.calls,
         waitlist: waitlistProbe.calls,
         detail: detailProbe.calls,
@@ -679,14 +691,12 @@ describe('D6.2 frontend request-budget target harness', () => {
       await setVisibility('visible');
 
       expect({
-        notifications: notificationProbe.calls - baseline.notifications,
         chat: chatProbe.calls - baseline.chat,
         waitlist: waitlistProbe.calls - baseline.waitlist,
         detail: detailProbe.calls - baseline.detail,
         lineup: lineupProbe.calls - baseline.lineup,
         result: resultProbe.calls - baseline.result,
       }).toEqual({
-        notifications: 1,
         chat: 1,
         waitlist: 1,
         detail: 1,

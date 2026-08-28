@@ -9614,3 +9614,43 @@
   Supabase action occurred. This test/docs-only slice has
   `deployment=not_needed`; the documented Selectel test application and nginx
   releases remain unchanged.
+
+### 2026-08-28 — D6.2 slice 2 notification request-budget candidate
+
+- Started from clean exact local `origin/main`
+  `72417372463c0fc27bde615aa35adfc3018dc6f4` on branch
+  `codex/d6-2-notifications-request-budget`. Scope is limited to automatic
+  notification polling, its focused request-budget regressions and this
+  append-only handoff.
+- The five-second notification interval now skips non-visible documents and
+  shares one in-flight promise across interval and visible-resume triggers.
+  A dedicated `visibilitychange` transition runs one immediate background read
+  only after hidden becomes visible; repeated visible events and `window.focus`
+  do not add notification reads. Startup, manual retry and business refresh
+  calls retain their previous behavior, and no other poller was changed.
+- The focused harness now treats notification hidden pause, slow-response
+  single-flight and exact visible resume as normally passing guarantees. The
+  combined resume expected failure is narrowed only by removing notifications;
+  chat, waitlist/detail, lineup and result remain explicit expected gaps, as do
+  chat hidden/single-flight, the other hidden pollers and account focus/resume
+  coalescing. Exact public `503` attempt caps are unchanged.
+- Focused harness passed `16/16`; its Prettier and ESLint checks passed. Full
+  root unit passed `136/136`; root build passed with `1627` modules and only the
+  existing chunk-size advisory; root E2E passed `111/111` with one intentional
+  feature-disabled skip. `git diff --check` passed for the runtime and test
+  files.
+- A whole-file Prettier attempt on legacy `App.jsx` was fully discarded before
+  the minimal patch was reapplied. Direct whole-file ESLint still reports the
+  same eight pre-existing findings outside the notification diff; no reported
+  finding points to the changed effect. The final runtime diff remains limited
+  to the notification ref and effect.
+- Independent read-only review of the exact three-file candidate passed with
+  acceptance `PASS`, `P0=0`, `P1=0`. One non-blocking P2 notes that slow poll,
+  hidden/resume and lifecycle cleanup are not combined in one regression; the
+  shared promise across effect lifecycles and the existing request-generation
+  stale-response guard were verified in the exact runtime diff. No commit,
+  push, merge, Selectel/SSH, database/schema/migration, provider/API,
+  secret/env, payment, production or Supabase action occurred.
+  Because `src/App.jsx` changes the frontend bundle, deployment status is
+  `deployment_deferred_by_user`; no container, health, manual smoke or server-log
+  gate was run under this local-only authorization.
