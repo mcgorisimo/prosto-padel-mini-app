@@ -41,6 +41,7 @@ function claimed(hasDestination = true) {
       matchStartsAt: unixEpochSeconds(Number(NOW) + 3_600),
       courtName: 'Корт 1',
       sourceType: 'match_invitation' as const,
+      preferenceEnabled: true,
     }),
   });
 }
@@ -88,6 +89,7 @@ describe('TelegramNotificationDispatcher', () => {
     expect(test.sendMessage).toHaveBeenCalledWith({
       telegramChatId: '123456',
       text: expect.stringContaining('Вас пригласили в матч.'),
+      deepLink: { screen: 'match', matchId: MATCH_ID },
     });
     expect(test.repository.markSent).toHaveBeenCalledWith(transaction, {
       outboxId: OUTBOX_ID,

@@ -15,6 +15,7 @@ import {
   MatchChatSenderRecord,
 } from '../database/match-chat.repository';
 import { PostgresTransaction } from '../database/postgres-transaction';
+import { TelegramNotificationIntentRepository } from '../database/telegram-notification-intent.repository';
 import {
   ListMatchMessagesApiInput,
   ListMatchMessagesApiResult,
@@ -52,6 +53,10 @@ export interface MatchChatTransactionExecutor {
 export interface MatchChatServiceDependencies {
   readonly transactions: MatchChatTransactionExecutor;
   readonly chat: MatchChatRepository;
+  readonly notificationIntents: Pick<
+    TelegramNotificationIntentRepository,
+    'enqueueMatchAudience'
+  >;
   readonly clock: {
     nowEpochSeconds(): import('../auth/auth.types').UnixEpochSeconds;
   };
@@ -322,6 +327,21 @@ export class MatchChatService {
           );
           if (result.outcome === 'rejected') {
             return rejected(mapRepositoryRejection(result.reason));
+          }
+          if (result.persistence === 'applied') {
+            await this.dependencies.notificationIntents.enqueueMatchAudience(
+              transaction,
+              {
+                eventKey: `chat_message_created:${result.message.messageId}`,
+                eventType: 'chat_message_created',
+                category: 'chat_messages',
+                sourceId: result.message.messageId,
+                sourceVersion: 1,
+                matchId: input.matchId,
+                excludeAccountId: input.accountId,
+                occurredAt: result.message.createdAt,
+              },
+            );
           }
           const [message] = await enrichMessages(
             this.dependencies.chat,

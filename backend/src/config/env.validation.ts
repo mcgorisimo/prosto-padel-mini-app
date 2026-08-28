@@ -328,12 +328,29 @@ export const envValidationSchema = Joi.object({
     TELEGRAM_NOTIFICATION_CONFIG_KEYS.enabled,
     {
       is: true,
-      then: Joi.string()
-        .uri({ scheme: ['https'] })
-        .required(),
+      then: canonicalHttpsBaseUrl.required(),
       otherwise: Joi.string().allow('').default(''),
     },
   ),
+  [TELEGRAM_NOTIFICATION_CONFIG_KEYS.yclientsReadReconciliationEnabled]:
+    Joi.boolean()
+      .truthy('true')
+      .falsy('false')
+      .default(false)
+      .when(YCLIENTS_API_CONFIG_KEYS.enabled, {
+        is: false,
+        then: Joi.valid(false).messages({
+          'any.only':
+            'YCLIENTS_NOTIFICATION_READ_RECONCILIATION_ENABLED requires YCLIENTS_API_ENABLED to be enabled',
+        }),
+      })
+      .when(TELEGRAM_NOTIFICATION_CONFIG_KEYS.enabled, {
+        is: false,
+        then: Joi.valid(false).messages({
+          'any.only':
+            'YCLIENTS_NOTIFICATION_READ_RECONCILIATION_ENABLED requires TELEGRAM_OUTBOUND_NOTIFICATIONS_ENABLED to be enabled',
+        }),
+      }),
   [TELEGRAM_LOGIN_CONFIG_KEYS.lookupPepperBase64]: requiredWhenTelegramEnabled(
     canonicalBase64Secret,
   ),

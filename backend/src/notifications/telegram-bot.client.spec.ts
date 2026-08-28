@@ -1,4 +1,9 @@
-import { TelegramBotClient } from './telegram-bot.client';
+import { deterministicUuid } from '../../test/deterministic-uuid';
+import { MatchId } from '../matches/match.types';
+import {
+  buildTelegramMiniAppUrl,
+  TelegramBotClient,
+} from './telegram-bot.client';
 
 const TOKEN = '123456789:TEST_ONLY_TOKEN';
 const URL = 'https://app.prostopdl.ru/';
@@ -50,6 +55,22 @@ describe('TelegramBotClient', () => {
         },
       }),
     );
+  });
+
+  it('builds an HTTPS-only event-specific Mini App deep link', () => {
+    const matchId = deterministicUuid('telegram-bot-link') as MatchId;
+    expect(buildTelegramMiniAppUrl(URL, { screen: 'match', matchId })).toBe(
+      `${URL}?pp_screen=match&pp_match_id=${matchId}`,
+    );
+    expect(() => buildTelegramMiniAppUrl('http://unsafe.example/')).toThrow(
+      'unsafe',
+    );
+    expect(() => buildTelegramMiniAppUrl(`${URL}?pp_screen=admin`)).toThrow(
+      'unsafe',
+    );
+    expect(() =>
+      buildTelegramMiniAppUrl(`${URL}?token=must-not-leave-runtime`),
+    ).toThrow('unsafe');
   });
 
   it('retries rate limits using a bounded Telegram retry hint', async () => {
@@ -107,16 +128,14 @@ describe('TelegramBotClient', () => {
   });
 
   it.each([
-    [500, { ok: false }, 'telegram_unavailable'],
-    [200, { ok: true, result: {} }, 'invalid_response'],
-  ] as const)('maps status %s to a safe retry', async (status, body, failure) => {
-    const fetch = fetchMock().mockResolvedValue(
-      response(status, body),
-    );
+    [500, { ok: false }],
+    [200, { ok: true, result: {} }],
+  ] as const)('fails closed for ambiguous status %s', async (status, body) => {
+    const fetch = fetchMock().mockResolvedValue(response(status, body));
 
     await expect(
       client(fetch).sendMessage({ telegramChatId: '123456', text: 'Safe text' }),
-    ).resolves.toEqual({ outcome: 'retry', failure });
+    ).resolves.toEqual({ outcome: 'abandoned', failure: 'delivery_unknown' });
   });
 
   it('maps transport failures without leaking the exception', async () => {
@@ -126,6 +145,39 @@ describe('TelegramBotClient', () => {
 
     await expect(
       client(fetch).sendMessage({ telegramChatId: '123456', text: 'Safe text' }),
-    ).resolves.toEqual({ outcome: 'retry', failure: 'network_error' });
+    ).resolves.toEqual({
+      outcome: 'abandoned',
+      failure: 'delivery_unknown',
+    });
+  });
+
+  it('treats an invalid bot token as a terminal authentication failure', async () => {
+    const fetch = fetchMock().mockResolvedValue(response(401, { ok: false }));
+    await expect(
+      client(fetch).sendMessage({
+        telegramChatId: '123456',
+        text: 'Safe text',
+      }),
+    ).resolves.toEqual({
+      outcome: 'abandoned',
+      failure: 'telegram_unauthorized',
+    });
+  });
+
+  it('rejects an oversized response before buffering it', async () => {
+    const oversized = new Response('{}', {
+      status: 200,
+      headers: { 'content-length': '65537' },
+    });
+    const fetch = fetchMock().mockResolvedValue(oversized);
+    await expect(
+      client(fetch).sendMessage({
+        telegramChatId: '123456',
+        text: 'Safe text',
+      }),
+    ).resolves.toEqual({
+      outcome: 'abandoned',
+      failure: 'delivery_unknown',
+    });
   });
 });

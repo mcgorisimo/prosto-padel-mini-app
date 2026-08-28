@@ -59,6 +59,7 @@ interface Harness {
   readonly closeForParticipant: jest.Mock;
   readonly releaseLineupForParticipant: jest.Mock;
   readonly readCourtBookings: jest.Mock;
+  readonly enqueueMatchOwner: jest.Mock;
 }
 
 function request(
@@ -165,6 +166,7 @@ function createHarness(): Harness {
   const closeForParticipant = jest.fn().mockResolvedValue(false);
   const releaseLineupForParticipant = jest.fn().mockResolvedValue(false);
   const readCourtBookings = jest.fn(async () => new Map());
+  const enqueueMatchOwner = jest.fn().mockResolvedValue(undefined);
   const service = new MatchApiService({
     transactions: {
       run: <T>(
@@ -186,6 +188,7 @@ function createHarness(): Harness {
     waitlist: { promoteAvailable, closeForParticipant },
     lineups: { releaseForParticipantLeave: releaseLineupForParticipant },
     matchReservations: { readCourtBookings },
+    notificationIntents: { enqueueMatchOwner },
     clock: { nowEpochSeconds: clockNow },
   });
   return {
@@ -204,6 +207,7 @@ function createHarness(): Harness {
     closeForParticipant,
     releaseLineupForParticipant,
     readCourtBookings,
+    enqueueMatchOwner,
   };
 }
 
@@ -956,6 +960,24 @@ describe('MatchApiService', () => {
       ACCOUNT_ID,
       NOW,
       leaveCommand.commandId,
+    );
+    expect(harness.enqueueMatchOwner).toHaveBeenNthCalledWith(
+      1,
+      TRANSACTION,
+      expect.objectContaining({
+        eventType: 'participant_joined',
+        sourceId: joinCommand.commandId,
+        matchId: MATCH_ID,
+      }),
+    );
+    expect(harness.enqueueMatchOwner).toHaveBeenNthCalledWith(
+      2,
+      TRANSACTION,
+      expect.objectContaining({
+        eventType: 'participant_left',
+        sourceId: leaveCommand.commandId,
+        matchId: MATCH_ID,
+      }),
     );
   });
 

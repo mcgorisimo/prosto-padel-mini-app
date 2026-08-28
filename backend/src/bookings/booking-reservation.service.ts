@@ -12,6 +12,7 @@ import { PostgresCourtReservationRepository } from '../database/postgres-court-r
 import { PostgresMatchReservationRepository } from '../database/postgres-match-reservation.repository';
 import { PostgresPlayerProfileReader } from '../database/postgres-player-profile-reader';
 import { PostgresTransactionRunner } from '../database/postgres-transaction';
+import { PostgresTelegramNotificationIntentRepository } from '../database/postgres-telegram-notification-intent.repository';
 import { YclientsAdminReadClient } from '../integrations/yclients/yclients-admin-read.client';
 import { YclientsAvailabilityService } from '../integrations/yclients/yclients-availability.service';
 import { YclientsBookingService } from '../integrations/yclients/yclients-booking.service';
@@ -171,6 +172,7 @@ export class BookingReservationService {
     private readonly availability: YclientsAvailabilityService,
     private readonly booking: YclientsBookingService,
     private readonly adminRead: YclientsAdminReadClient,
+    private readonly notificationIntents: PostgresTelegramNotificationIntentRepository,
     @Inject(BOOKING_RESERVATION_CLOCK) private readonly clock: BookingReservationClock,
     @Inject(BOOKING_RESERVATION_DIAGNOSTIC_SINK)
     private readonly diagnostics: BookingReservationDiagnosticSink,
@@ -377,9 +379,24 @@ export class BookingReservationService {
     const finalizationStage: BookingReservationFinalizationStage =
       provider.outcome === 'created' ? 'confirm_binding' : 'persist_unknown';
     try {
-      const transitioned = await this.transactions.runInTransaction((tx) => {
+      const transitioned = await this.transactions.runInTransaction(async (tx) => {
         if (dispatchClaim !== 'claimed') return this.reservations.transitionOperation(tx, ownerAccountId, started.reservation.reservationId, started.operation.operationId, { type:'reject',actorAccountId:ownerAccountId,now:timestamp,reason:reservationProviderRejectionReason(provider.outcome==='not_bookable'?'not_bookable':'provider_not_dispatched') });
-        if (provider.outcome === 'created') return this.reservations.finalizeStartedCreateOperation(tx, ownerAccountId, started.reservation.reservationId, started.operation, { type:'confirm',actorAccountId:ownerAccountId,now:timestamp,providerBinding:{provider:'yclients',appointmentId:provider.appointmentId,recordId:provider.recordId,recordHash:provider.recordHash} });
+        if (provider.outcome === 'created') {
+          const result = await this.reservations.finalizeStartedCreateOperation(tx, ownerAccountId, started.reservation.reservationId, started.operation, { type:'confirm',actorAccountId:ownerAccountId,now:timestamp,providerBinding:{provider:'yclients',appointmentId:provider.appointmentId,recordId:provider.recordId,recordHash:provider.recordHash} });
+          if (result.outcome === 'transitioned' && result.operation.status === 'confirmed') {
+            await this.notificationIntents.enqueueDirect(tx, {
+              eventKey: `reservation_confirmed:${result.reservation.reservationId}`,
+              eventType: 'reservation_confirmed',
+              category: 'booking_updates',
+              sourceId: result.reservation.reservationId,
+              sourceVersion: result.reservation.version,
+              recipientAccountId: ownerAccountId,
+              reservationId: result.reservation.reservationId,
+              occurredAt: timestamp,
+            });
+          }
+          return result;
+        }
         return this.reservations.finalizeStartedCreateOperation(tx, ownerAccountId, started.reservation.reservationId, started.operation, {type:'mark_unknown',actorAccountId:ownerAccountId,now:timestamp});
       });
       if (transitioned.outcome !== 'transitioned') {

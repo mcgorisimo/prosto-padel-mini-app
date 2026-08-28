@@ -46,7 +46,9 @@ import { PostgresService } from './postgres.service';
 import { PostgresTelegramAuthenticationOperationRepository } from './postgres-telegram-authentication-operation.repository';
 import { PostgresTelegramNotificationDestinationRepository } from './postgres-telegram-notification-destination.repository';
 import { PostgresTelegramNotificationOutboxRepository } from './postgres-telegram-notification-outbox.repository';
+import { PostgresTelegramNotificationIntentRepository } from './postgres-telegram-notification-intent.repository';
 import { PostgresYclientsWebhookSignalRepository } from './postgres-yclients-webhook-signal.repository';
+import { PostgresYclientsNotificationReconciliationRepository } from './postgres-yclients-notification-reconciliation.repository';
 import { PostgresTransactionRunner } from './postgres-transaction';
 import { PostgresTransactionExecutorAdapter } from './postgres-transaction-executor.adapter';
 import { PostgresCourtReservationRepository } from './postgres-court-reservation.repository';
@@ -137,7 +139,9 @@ const DATABASE_WORKFLOW_PROVIDERS: Provider[] = [
   PostgresMatchResultRepository,
   PostgresTelegramNotificationDestinationRepository,
   PostgresTelegramNotificationOutboxRepository,
+  PostgresTelegramNotificationIntentRepository,
   PostgresYclientsWebhookSignalRepository,
+  PostgresYclientsNotificationReconciliationRepository,
   PostgresMatchWaitlistRepository,
   {
     provide: PlayerProfilePhotoUrlResolver,
@@ -263,7 +267,9 @@ const DATABASE_WORKFLOW_EXPORTS = [
   PostgresTelegramAuthenticationOperationRepository,
   PostgresTelegramNotificationDestinationRepository,
   PostgresTelegramNotificationOutboxRepository,
+  PostgresTelegramNotificationIntentRepository,
   PostgresYclientsWebhookSignalRepository,
+  PostgresYclientsNotificationReconciliationRepository,
   PostgresExternalIdentityResolutionRepository,
   PostgresAccountStatusReader,
   PostgresSessionAuthenticationRepository,

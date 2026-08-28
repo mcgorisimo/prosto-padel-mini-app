@@ -12,7 +12,7 @@ import {
   MatchWaitlistRejection,
 } from '../database/match-waitlist.repository';
 import { MatchNotificationRepository } from '../database/match-notification.repository';
-import { TelegramNotificationOutboxRepository } from '../database/telegram-notification-outbox.repository';
+import { TelegramNotificationIntentRepository } from '../database/telegram-notification-intent.repository';
 import { MatchPersistenceError, MatchRepository } from '../database/match.repository';
 import { PostgresTransaction } from '../database/postgres-transaction';
 import {
@@ -31,7 +31,6 @@ import {
 import {
   MatchNotificationId,
 } from './match-notification.types';
-import { TelegramNotificationOutboxId } from '../notifications/telegram-notification.types';
 import {
   MatchWaitlistCommandId,
   MatchWaitlistEntryId,
@@ -63,7 +62,6 @@ const DOMAINS = Object.freeze({
     command: 'prosto-padel.match-waitlist.promotion.match-command.v1',
     notification:
       'prosto-padel.match-waitlist.promotion.notification.v1',
-    outbox: 'prosto-padel.match-waitlist.promotion.telegram-outbox.v1',
     participant: 'prosto-padel.match-waitlist.promotion.participant.v1',
     request: 'prosto-padel.match-waitlist.promotion.match-request.v1',
   }),
@@ -81,9 +79,9 @@ export interface MatchWaitlistServiceDependencies {
     MatchNotificationRepository,
     'createWaitlistPromotion'
   >;
-  readonly notificationOutbox: Pick<
-    TelegramNotificationOutboxRepository,
-    'enqueueMatchNotification'
+  readonly notificationIntents: Pick<
+    TelegramNotificationIntentRepository,
+    'enqueueDirect' | 'enqueueMatchOwner'
   >;
   readonly publicProfiles: Pick<PublicPlayerProfileSearchRepository, 'findByPlayerIds'>;
   readonly clock: {
@@ -353,15 +351,32 @@ export class MatchWaitlistService {
             now,
           },
         );
-        await this.dependencies.notificationOutbox.enqueueMatchNotification(
+        await this.dependencies.notificationIntents.enqueueDirect(
           transaction,
           {
-            outboxId: bindingUuid(
-              DOMAINS.promotion.outbox,
-              [notificationId],
-            ) as TelegramNotificationOutboxId,
-            matchNotificationId: notificationId,
-            now,
+            eventKey: `waitlist_slot_available:${notificationId}`,
+            eventType: 'waitlist_slot_available',
+            category: 'match_activity',
+            sourceId: notificationId,
+            sourceVersion: 1,
+            recipientAccountId: candidate.entry.accountId,
+            matchId,
+            occurredAt: now,
+          },
+        );
+        await this.dependencies.notificationIntents.enqueueMatchOwner(
+          transaction,
+          {
+            eventKey: `participant_joined:${bindingUuid(
+              DOMAINS.promotion.command,
+              parts,
+            )}`,
+            eventType: 'participant_joined',
+            category: 'match_activity',
+            sourceId: bindingUuid(DOMAINS.promotion.command, parts),
+            sourceVersion: joined.matchVersion,
+            matchId,
+            occurredAt: now,
           },
         );
         promoted += 1;

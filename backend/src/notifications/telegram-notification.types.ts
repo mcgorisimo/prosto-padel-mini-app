@@ -32,18 +32,18 @@ export interface ClaimedTelegramNotification {
   readonly matchStartsAt: UnixEpochSeconds;
   readonly courtName: string;
   readonly sourceType: TelegramNotificationSource['sourceType'];
+  readonly preferenceEnabled: boolean;
 }
 
-export type TelegramNotificationRetryFailure =
-  | 'telegram_rate_limited'
-  | 'telegram_unavailable'
-  | 'network_error'
-  | 'invalid_response';
+export type TelegramNotificationRetryFailure = 'telegram_rate_limited';
 
 export type TelegramNotificationTerminalFailure =
   | 'destination_unavailable'
+  | 'preference_disabled'
   | 'telegram_forbidden'
-  | 'telegram_bad_request';
+  | 'telegram_bad_request'
+  | 'telegram_unauthorized'
+  | 'delivery_unknown';
 
 export type TelegramDestinationDisableReason =
   | 'telegram_forbidden'

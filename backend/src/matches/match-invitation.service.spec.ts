@@ -106,13 +106,15 @@ function service(
 ) {
   const promoteAvailable = jest.fn().mockResolvedValue(0);
   const closeForParticipant = jest.fn().mockResolvedValue(false);
-  const enqueueInvitation = jest.fn().mockResolvedValue(undefined);
+  const enqueueDirect = jest.fn().mockResolvedValue(undefined);
+  const enqueueMatchOwner = jest.fn().mockResolvedValue(undefined);
   return {
     invitations,
     publicProfiles,
     promoteAvailable,
     closeForParticipant,
-    enqueueInvitation,
+    enqueueDirect,
+    enqueueMatchOwner,
     service: new MatchInvitationService({
       transactions: {
         run: (operation) => operation(transaction),
@@ -120,7 +122,7 @@ function service(
       invitations,
       publicProfiles,
       waitlist: { promoteAvailable, closeForParticipant },
-      notificationOutbox: { enqueueInvitation },
+      notificationIntents: { enqueueDirect, enqueueMatchOwner },
       clock: { nowEpochSeconds: () => NOW },
     }),
   };
@@ -155,11 +157,13 @@ describe('MatchInvitationService', () => {
         },
       },
     });
-    expect(harness.enqueueInvitation).toHaveBeenCalledWith(
+    expect(harness.enqueueDirect).toHaveBeenCalledWith(
       transaction,
       expect.objectContaining({
-        invitationId: INVITATION_ID,
-        now: NOW,
+        eventKey: `match_invited:${INVITATION_ID}`,
+        eventType: 'match_invited',
+        recipientAccountId: PLAYER_ID,
+        occurredAt: NOW,
       }),
     );
 

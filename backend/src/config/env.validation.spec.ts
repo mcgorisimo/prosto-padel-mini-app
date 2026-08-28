@@ -633,6 +633,11 @@ describe('envValidationSchema', () => {
     expect(error).toBeUndefined();
     expect(value[TELEGRAM_NOTIFICATION_CONFIG_KEYS.enabled]).toBe(false);
     expect(value[TELEGRAM_NOTIFICATION_CONFIG_KEYS.miniAppUrl]).toBe('');
+    expect(
+      value[
+        TELEGRAM_NOTIFICATION_CONFIG_KEYS.yclientsReadReconciliationEnabled
+      ],
+    ).toBe(false);
   });
 
   it('requires Telegram auth and an HTTPS Mini App URL for outbound notifications', () => {
@@ -656,6 +661,18 @@ describe('envValidationSchema', () => {
         'http://app.prostopdl.ru/',
     });
     expect(insecureUrl.error).toBeDefined();
+
+    const querySecret = validate({
+      ...SAFE_TEST_DATABASE_CONFIG,
+      ...SAFE_TEST_TELEGRAM_CRYPTO_CONFIG,
+      TELEGRAM_AUTH_ENABLED: 'true',
+      TELEGRAM_BOT_TOKEN: SAFE_TEST_BOT_TOKEN,
+      TELEGRAM_INIT_DATA_MAX_AGE_SECONDS: '300',
+      [TELEGRAM_NOTIFICATION_CONFIG_KEYS.enabled]: 'true',
+      [TELEGRAM_NOTIFICATION_CONFIG_KEYS.miniAppUrl]:
+        'https://app.prostopdl.ru/?token=must-not-leave-runtime',
+    });
+    expect(querySecret.error).toBeDefined();
   });
 
   it('accepts explicitly enabled outbound Telegram notifications', () => {
@@ -674,8 +691,61 @@ describe('envValidationSchema', () => {
     expect(value).toMatchObject({
       [TELEGRAM_NOTIFICATION_CONFIG_KEYS.enabled]: true,
       [TELEGRAM_NOTIFICATION_CONFIG_KEYS.miniAppUrl]:
-        'https://app.prostopdl.ru/',
+        'https://app.prostopdl.ru',
     });
+  });
+
+  it('requires YCLIENTS reads and outbound Telegram for notification reconciliation', () => {
+    const missingYclients = validate({
+      ...SAFE_TEST_DATABASE_CONFIG,
+      ...SAFE_TEST_TELEGRAM_CRYPTO_CONFIG,
+      TELEGRAM_AUTH_ENABLED: 'true',
+      TELEGRAM_BOT_TOKEN: SAFE_TEST_BOT_TOKEN,
+      TELEGRAM_INIT_DATA_MAX_AGE_SECONDS: '300',
+      [TELEGRAM_NOTIFICATION_CONFIG_KEYS.enabled]: 'true',
+      [TELEGRAM_NOTIFICATION_CONFIG_KEYS.miniAppUrl]:
+        'https://app.prostopdl.ru/',
+      [TELEGRAM_NOTIFICATION_CONFIG_KEYS.yclientsReadReconciliationEnabled]:
+        'true',
+    });
+    const missingTelegram = validate({
+      ...SAFE_TEST_DATABASE_CONFIG,
+      ...SAFE_TEST_YCLIENTS_CONFIG,
+      [YCLIENTS_API_CONFIG_KEYS.enabled]: 'true',
+      [TELEGRAM_NOTIFICATION_CONFIG_KEYS.yclientsReadReconciliationEnabled]:
+        'true',
+    });
+
+    expect(missingYclients.error?.message).toContain(
+      'requires YCLIENTS_API_ENABLED',
+    );
+    expect(missingTelegram.error?.message).toContain(
+      'requires TELEGRAM_OUTBOUND_NOTIFICATIONS_ENABLED',
+    );
+  });
+
+  it('accepts explicitly enabled bounded YCLIENTS notification reconciliation', () => {
+    const { error, value } = validate({
+      ...SAFE_TEST_DATABASE_CONFIG,
+      ...SAFE_TEST_YCLIENTS_CONFIG,
+      ...SAFE_TEST_TELEGRAM_CRYPTO_CONFIG,
+      [YCLIENTS_API_CONFIG_KEYS.enabled]: 'true',
+      TELEGRAM_AUTH_ENABLED: 'true',
+      TELEGRAM_BOT_TOKEN: SAFE_TEST_BOT_TOKEN,
+      TELEGRAM_INIT_DATA_MAX_AGE_SECONDS: '300',
+      [TELEGRAM_NOTIFICATION_CONFIG_KEYS.enabled]: 'true',
+      [TELEGRAM_NOTIFICATION_CONFIG_KEYS.miniAppUrl]:
+        'https://app.prostopdl.ru/',
+      [TELEGRAM_NOTIFICATION_CONFIG_KEYS.yclientsReadReconciliationEnabled]:
+        'true',
+    });
+
+    expect(error).toBeUndefined();
+    expect(
+      value[
+        TELEGRAM_NOTIFICATION_CONFIG_KEYS.yclientsReadReconciliationEnabled
+      ],
+    ).toBe(true);
   });
 
   it('requires both crypto secrets and UUID namespace when enabled', () => {

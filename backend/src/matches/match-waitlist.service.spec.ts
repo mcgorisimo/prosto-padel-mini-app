@@ -66,7 +66,8 @@ function harness() {
   const queue = waitlist();
   const matchRepository = matches();
   const notificationRepository = notifications();
-  const enqueueMatchNotification = jest.fn().mockResolvedValue(undefined);
+  const enqueueDirect = jest.fn().mockResolvedValue(undefined);
+  const enqueueMatchOwner = jest.fn().mockResolvedValue(undefined);
   const findByPlayerIds = jest.fn<
     ReturnType<PublicPlayerProfileSearchRepository['findByPlayerIds']>,
     Parameters<PublicPlayerProfileSearchRepository['findByPlayerIds']>
@@ -78,14 +79,15 @@ function harness() {
     queue,
     matches: matchRepository,
     notifications: notificationRepository,
-    enqueueMatchNotification,
+    enqueueDirect,
+    enqueueMatchOwner,
     findByPlayerIds,
     service: new MatchWaitlistService({
       transactions: { run: (operation) => operation(transaction) },
       waitlist: queue,
       matches: matchRepository,
       notifications: notificationRepository,
-      notificationOutbox: { enqueueMatchNotification },
+      notificationIntents: { enqueueDirect, enqueueMatchOwner },
       publicProfiles: { findByPlayerIds },
       clock: { nowEpochSeconds: () => NOW },
     }),
@@ -221,11 +223,13 @@ describe('MatchWaitlistService', () => {
     expect(firstNotification.notificationId).toMatch(
       /^[0-9a-f-]{36}$/u,
     );
-    expect(test.enqueueMatchNotification).toHaveBeenCalledWith(
+    expect(test.enqueueDirect).toHaveBeenCalledWith(
       transaction,
       expect.objectContaining({
-        matchNotificationId: firstNotification.notificationId,
-        now: NOW,
+        eventKey: `waitlist_slot_available:${firstNotification.notificationId}`,
+        eventType: 'waitlist_slot_available',
+        recipientAccountId: ACTOR_ID,
+        occurredAt: NOW,
       }),
     );
   });
@@ -254,7 +258,7 @@ describe('MatchWaitlistService', () => {
     expect(test.queue.resolvePromotion).toHaveBeenCalledTimes(8);
     expect(test.matches.join).not.toHaveBeenCalled();
     expect(test.notifications.createWaitlistPromotion).not.toHaveBeenCalled();
-    expect(test.enqueueMatchNotification).not.toHaveBeenCalled();
+    expect(test.enqueueDirect).not.toHaveBeenCalled();
   });
 
   it('fails the surrounding promotion transaction when notification persistence fails', async () => {

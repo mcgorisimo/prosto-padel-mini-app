@@ -45,7 +45,7 @@ import { PostgresSessionAuthenticationRepository } from '../database/postgres-se
 import { PostgresSessionCredentialLifecycleRepository } from '../database/postgres-session-credential-lifecycle.repository';
 import { PostgresTelegramAuthenticationOperationRepository } from '../database/postgres-telegram-authentication-operation.repository';
 import { PostgresTelegramNotificationDestinationRepository } from '../database/postgres-telegram-notification-destination.repository';
-import { PostgresTelegramNotificationOutboxRepository } from '../database/postgres-telegram-notification-outbox.repository';
+import { PostgresTelegramNotificationIntentRepository } from '../database/postgres-telegram-notification-intent.repository';
 import { PostgresTransactionExecutorAdapter } from '../database/postgres-transaction-executor.adapter';
 import { MatchApiService } from '../matches/match-api.service';
 import { MatchChatController } from '../matches/match-chat.controller';
@@ -361,6 +361,7 @@ function createMatchApiService(
   publicProfiles: PostgresPublicPlayerProfileSearchRepository,
   waitlist: MatchWaitlistService,
   lineups: MatchLineupService,
+  notificationIntents: PostgresTelegramNotificationIntentRepository,
   clock: SessionAuthenticationClock,
 ): MatchApiService {
   return new MatchApiService({
@@ -370,6 +371,7 @@ function createMatchApiService(
     publicProfiles,
     waitlist,
     lineups,
+    notificationIntents,
     clock,
   });
 }
@@ -391,7 +393,7 @@ function createMatchInvitationService(
   invitations: PostgresMatchInvitationRepository,
   publicProfiles: PostgresPublicPlayerProfileSearchRepository,
   waitlist: MatchWaitlistService,
-  notificationOutbox: PostgresTelegramNotificationOutboxRepository,
+  notificationIntents: PostgresTelegramNotificationIntentRepository,
   clock: SessionAuthenticationClock,
 ): MatchInvitationService {
   return new MatchInvitationService({
@@ -399,7 +401,7 @@ function createMatchInvitationService(
     invitations,
     publicProfiles,
     waitlist,
-    notificationOutbox,
+    notificationIntents,
     clock,
   });
 }
@@ -409,7 +411,7 @@ function createMatchWaitlistService(
   waitlist: PostgresMatchWaitlistRepository,
   matches: PostgresMatchRepository,
   notifications: PostgresMatchNotificationRepository,
-  notificationOutbox: PostgresTelegramNotificationOutboxRepository,
+  notificationIntents: PostgresTelegramNotificationIntentRepository,
   publicProfiles: PostgresPublicPlayerProfileSearchRepository,
   clock: SessionAuthenticationClock,
 ): MatchWaitlistService {
@@ -418,7 +420,7 @@ function createMatchWaitlistService(
     waitlist,
     matches,
     notifications,
-    notificationOutbox,
+    notificationIntents,
     publicProfiles,
     clock,
   });
@@ -439,11 +441,13 @@ function createMatchNotificationService(
 function createMatchChatService(
   transactions: PostgresTransactionExecutorAdapter,
   chat: PostgresMatchChatRepository,
+  notificationIntents: PostgresTelegramNotificationIntentRepository,
   clock: SessionAuthenticationClock,
 ): MatchChatService {
   return new MatchChatService({
     transactions,
     chat,
+    notificationIntents,
     clock,
   });
 }
@@ -599,7 +603,7 @@ function createPlayerProfilePhotoService(
         PostgresMatchWaitlistRepository,
         PostgresMatchRepository,
         PostgresMatchNotificationRepository,
-        PostgresTelegramNotificationOutboxRepository,
+        PostgresTelegramNotificationIntentRepository,
         PostgresPublicPlayerProfileSearchRepository,
         SESSION_AUTHENTICATION_CLOCK,
       ],
@@ -610,6 +614,7 @@ function createPlayerProfilePhotoService(
       inject: [
         PostgresTransactionExecutorAdapter,
         PostgresMatchChatRepository,
+        PostgresTelegramNotificationIntentRepository,
         SESSION_AUTHENTICATION_CLOCK,
       ],
       useFactory: createMatchChatService,
@@ -621,7 +626,7 @@ function createPlayerProfilePhotoService(
         PostgresMatchInvitationRepository,
         PostgresPublicPlayerProfileSearchRepository,
         MatchWaitlistService,
-        PostgresTelegramNotificationOutboxRepository,
+        PostgresTelegramNotificationIntentRepository,
         SESSION_AUTHENTICATION_CLOCK,
       ],
       useFactory: createMatchInvitationService,
@@ -644,6 +649,7 @@ function createPlayerProfilePhotoService(
         PostgresPublicPlayerProfileSearchRepository,
         MatchWaitlistService,
         MatchLineupService,
+        PostgresTelegramNotificationIntentRepository,
         SESSION_AUTHENTICATION_CLOCK,
       ],
       useFactory: createMatchApiService,

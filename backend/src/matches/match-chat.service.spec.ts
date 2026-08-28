@@ -63,13 +63,16 @@ function repository(): jest.Mocked<MatchChatRepository> {
 }
 
 function harness(chat = repository()) {
+  const enqueueMatchAudience = jest.fn().mockResolvedValue(1);
   return {
     chat,
+    enqueueMatchAudience,
     service: new MatchChatService({
       transactions: {
         run: (operation) => operation(transaction),
       },
       chat,
+      notificationIntents: { enqueueMatchAudience },
       clock: { nowEpochSeconds: () => NOW },
     }),
   };
@@ -186,6 +189,17 @@ describe('MatchChatService', () => {
     expect(first.messageId).toMatch(/^[0-9a-f-]{36}$/u);
     expect(first.commandId).not.toBe(first.messageId);
     expect(first.requestDigest).toMatch(/^[0-9a-f]{64}$/u);
+    expect(test.enqueueMatchAudience).toHaveBeenCalledWith(
+      transaction,
+      expect.objectContaining({
+        eventType: 'chat_message_created',
+        matchId: MATCH_ID,
+        excludeAccountId: ACTOR_ID,
+      }),
+    );
+    expect(test.enqueueMatchAudience.mock.calls[0][1]).not.toHaveProperty(
+      'body',
+    );
   });
 
   it('preserves an idempotent repository result for operational logging', async () => {
@@ -205,6 +219,7 @@ describe('MatchChatService', () => {
       outcome: 'message_sent',
       persistence: 'idempotent_retry',
     });
+    expect(test.enqueueMatchAudience).not.toHaveBeenCalled();
   });
 
   it('keeps command identity but changes the digest when the body changes', async () => {

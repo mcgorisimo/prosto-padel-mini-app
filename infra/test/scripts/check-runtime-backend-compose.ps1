@@ -159,6 +159,7 @@ function Assert-RuntimeBackendContract {
         DATABASE_USER = 'backend_auth_app'
         DATABASE_PASSWORD_FILE = '/run/secrets/backend-auth-app-password'
         YCLIENTS_API_ENABLED = '${YCLIENTS_API_ENABLED:-false}'
+        YCLIENTS_NOTIFICATION_READ_RECONCILIATION_ENABLED = '${YCLIENTS_NOTIFICATION_READ_RECONCILIATION_ENABLED:-false}'
         YCLIENTS_API_BASE_URL = '${YCLIENTS_API_BASE_URL:-https://api.yclients.com}'
         YCLIENTS_PARTNER_TOKEN = '!reset null'
         YCLIENTS_USER_TOKEN = '!reset null'

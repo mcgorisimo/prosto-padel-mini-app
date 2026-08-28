@@ -26,6 +26,7 @@ import {
   MatchReservationRepository,
 } from '../database/match-reservation.repository';
 import { PostgresTransaction } from '../database/postgres-transaction';
+import { TelegramNotificationIntentRepository } from '../database/telegram-notification-intent.repository';
 import {
   PublicPlayerProfileSearchPersistenceError,
   PublicPlayerProfileSearchRepository,
@@ -107,6 +108,10 @@ export interface MatchApiServiceDependencies {
   >;
   readonly lineups: Pick<MatchLineupService, 'releaseForParticipantLeave'>;
   readonly matchReservations: Pick<MatchReservationRepository, 'readCourtBookings'>;
+  readonly notificationIntents: Pick<
+    TelegramNotificationIntentRepository,
+    'enqueueMatchOwner'
+  >;
   readonly clock: {
     nowEpochSeconds(): import('../auth/auth.types').UnixEpochSeconds;
   };
@@ -1222,6 +1227,20 @@ export class MatchApiService {
                   now,
                 );
               }
+              if (joined.outcome === 'participant_joined') {
+                await this.dependencies.notificationIntents.enqueueMatchOwner(
+                  transaction,
+                  {
+                    eventKey: `participant_joined:${commandId}`,
+                    eventType: 'participant_joined',
+                    category: 'match_activity',
+                    sourceId: commandId,
+                    sourceVersion: joined.matchVersion,
+                    matchId: input.matchId,
+                    occurredAt: now,
+                  },
+                );
+              }
               return joined;
             })
           : await this.dependencies.transactions.run(async (transaction) => {
@@ -1248,6 +1267,20 @@ export class MatchApiService {
                   transaction,
                   input.matchId,
                   now,
+                );
+              }
+              if (left.outcome === 'participant_left') {
+                await this.dependencies.notificationIntents.enqueueMatchOwner(
+                  transaction,
+                  {
+                    eventKey: `participant_left:${commandId}`,
+                    eventType: 'participant_left',
+                    category: 'match_activity',
+                    sourceId: commandId,
+                    sourceVersion: left.matchVersion,
+                    matchId: input.matchId,
+                    occurredAt: now,
+                  },
                 );
               }
               return left;

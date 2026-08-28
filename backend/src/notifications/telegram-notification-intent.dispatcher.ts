@@ -4,44 +4,22 @@ import {
   OnApplicationShutdown,
 } from '@nestjs/common';
 import { UnixEpochSeconds, isUnixEpochSeconds } from '../auth/auth.types';
+import { TelegramNotificationIntentRepository } from '../database/telegram-notification-intent.repository';
 import { PostgresTransactionRunner } from '../database/postgres-transaction';
-import { TelegramNotificationOutboxRepository } from '../database/telegram-notification-outbox.repository';
-import { ClaimedTelegramNotification } from './telegram-notification.types';
 import { TelegramBotClient } from './telegram-bot.client';
+import { ClaimedTelegramNotificationIntent } from './telegram-notification-intent.types';
+import { renderTelegramNotificationMessage } from './telegram-notification-message';
 
-const MOSCOW_TIME_ZONE = 'Europe/Moscow';
 const MAX_RETRY_DELAY_SECONDS = 900;
 
-export interface TelegramNotificationDispatcherDependencies {
+export interface TelegramNotificationIntentDispatcherDependencies {
   readonly enabled: boolean;
   readonly pollIntervalMilliseconds: number;
   readonly visibilityLeaseSeconds: number;
   readonly transactions: Pick<PostgresTransactionRunner, 'runInTransaction'>;
-  readonly outbox: TelegramNotificationOutboxRepository;
+  readonly intents: TelegramNotificationIntentRepository;
   readonly telegram: Pick<TelegramBotClient, 'sendMessage'>;
   readonly clock: { nowEpochSeconds(): UnixEpochSeconds };
-}
-
-function messageText(notification: ClaimedTelegramNotification): string {
-  const startsAt = new Intl.DateTimeFormat('ru-RU', {
-    timeZone: MOSCOW_TIME_ZONE,
-    day: 'numeric',
-    month: 'long',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(new Date(Number(notification.matchStartsAt) * 1_000));
-  if (notification.sourceType === 'match_invitation') {
-    return [
-      'Вас пригласили в матч.',
-      `${startsAt} · ${notification.courtName}`,
-      'Откройте «Просто Падел», чтобы принять или отклонить приглашение.',
-    ].join('\n');
-  }
-  return [
-    'Вы добавлены в матч из листа ожидания.',
-    `${startsAt} · ${notification.courtName}`,
-    'Откройте «Просто Падел», чтобы посмотреть детали.',
-  ].join('\n');
 }
 
 function retryDelaySeconds(
@@ -55,16 +33,20 @@ function retryDelaySeconds(
   return Math.max(exponential, requestedDelay ?? 0);
 }
 
-export class TelegramNotificationDispatcher
+export class TelegramNotificationIntentDispatcher
   implements OnApplicationBootstrap, OnApplicationShutdown
 {
-  private readonly logger = new Logger(TelegramNotificationDispatcher.name);
+  private readonly logger = new Logger(
+    TelegramNotificationIntentDispatcher.name,
+  );
   private timer: ReturnType<typeof setTimeout> | undefined;
   private active = false;
   private authenticationFailed = false;
   private running: Promise<void> | undefined;
 
-  constructor(readonly dependencies: TelegramNotificationDispatcherDependencies) {}
+  constructor(
+    readonly dependencies: TelegramNotificationIntentDispatcherDependencies,
+  ) {}
 
   onApplicationBootstrap(): void {
     if (!this.dependencies.enabled) return;
@@ -80,17 +62,14 @@ export class TelegramNotificationDispatcher
 
   async dispatchOne(): Promise<boolean> {
     if (this.authenticationFailed) return false;
-    const claimedAt = this.dependencies.clock.nowEpochSeconds();
-    if (!isUnixEpochSeconds(claimedAt)) {
-      throw new TypeError('Telegram notification clock is invalid');
-    }
+    const claimedAt = this.readNow();
     const leaseUntil = claimedAt + this.dependencies.visibilityLeaseSeconds;
     if (!isUnixEpochSeconds(leaseUntil)) {
       throw new TypeError('Telegram notification lease is invalid');
     }
     const claim = await this.dependencies.transactions.runInTransaction(
       (transaction) =>
-        this.dependencies.outbox.claimNext(transaction, {
+        this.dependencies.intents.claimNext(transaction, {
           now: claimedAt,
           leaseUntil,
         }),
@@ -98,41 +77,27 @@ export class TelegramNotificationDispatcher
     if (claim.outcome === 'none_available') return false;
     if (claim.outcome === 'retry_exhausted') return true;
 
-    const notification = claim.notification;
-    if (!notification.preferenceEnabled) {
-      await this.dependencies.transactions.runInTransaction((transaction) =>
-        this.dependencies.outbox.abandon(transaction, {
-          outboxId: notification.outboxId,
-          claimVersion: notification.claimVersion,
-          now: this.readNow(),
-          failure: 'preference_disabled',
-        }),
-      );
+    const intent = claim.intent;
+    if (intent.terminalReason !== undefined) {
+      await this.abandon(intent, intent.terminalReason);
       return true;
     }
-    if (notification.telegramChatId === undefined) {
-      await this.dependencies.transactions.runInTransaction((transaction) =>
-        this.dependencies.outbox.abandon(transaction, {
-          outboxId: notification.outboxId,
-          claimVersion: notification.claimVersion,
-          now: this.readNow(),
-          failure: 'destination_unavailable',
-        }),
-      );
+    if (intent.telegramChatId === undefined) {
+      await this.abandon(intent, 'destination_unavailable');
       return true;
     }
-
     const delivery = await this.dependencies.telegram.sendMessage({
-      telegramChatId: notification.telegramChatId,
-      text: messageText(notification),
-      deepLink: { screen: 'match', matchId: notification.matchId },
+      telegramChatId: intent.telegramChatId,
+      text: renderTelegramNotificationMessage(intent),
+      deepLink: intent.deepLink,
     });
     const completedAt = this.readNow();
     if (delivery.outcome === 'sent') {
       await this.dependencies.transactions.runInTransaction((transaction) =>
-        this.dependencies.outbox.markSent(transaction, {
-          outboxId: notification.outboxId,
-          claimVersion: notification.claimVersion,
+        this.dependencies.intents.markSent(transaction, {
+          eventKey: intent.eventKey,
+          recipientAccountId: intent.recipientAccountId,
+          claimVersion: intent.claimVersion,
           now: completedAt,
           telegramMessageId: delivery.telegramMessageId,
         }),
@@ -142,17 +107,15 @@ export class TelegramNotificationDispatcher
     if (delivery.outcome === 'retry') {
       const availableAt =
         completedAt +
-        retryDelaySeconds(
-          notification.attemptCount,
-          delivery.retryAfterSeconds,
-        );
+        retryDelaySeconds(intent.attemptCount, delivery.retryAfterSeconds);
       if (!isUnixEpochSeconds(availableAt)) {
         throw new TypeError('Telegram notification retry is invalid');
       }
       await this.dependencies.transactions.runInTransaction((transaction) =>
-        this.dependencies.outbox.scheduleRetry(transaction, {
-          outboxId: notification.outboxId,
-          claimVersion: notification.claimVersion,
+        this.dependencies.intents.scheduleRetry(transaction, {
+          eventKey: intent.eventKey,
+          recipientAccountId: intent.recipientAccountId,
+          claimVersion: intent.claimVersion,
           now: completedAt,
           availableAt,
           failure: delivery.failure,
@@ -160,20 +123,7 @@ export class TelegramNotificationDispatcher
       );
       return true;
     }
-    await this.dependencies.transactions.runInTransaction((transaction) =>
-      this.dependencies.outbox.abandon(transaction, {
-        outboxId: notification.outboxId,
-        claimVersion: notification.claimVersion,
-        now: completedAt,
-        failure: delivery.failure,
-        ...(delivery.disableDestination === undefined
-          ? {}
-          : {
-              disableDestination: delivery.disableDestination,
-              destinationVersion: notification.destinationVersion,
-            }),
-      }),
-    );
+    await this.abandon(intent, delivery.failure, delivery.disableDestination);
     if (delivery.failure === 'telegram_unauthorized') {
       this.authenticationFailed = true;
       this.logger.error(
@@ -181,6 +131,32 @@ export class TelegramNotificationDispatcher
       );
     }
     return true;
+  }
+
+  private async abandon(
+    intent: ClaimedTelegramNotificationIntent,
+    failure: Parameters<
+      TelegramNotificationIntentRepository['abandon']
+    >[1]['failure'],
+    disableDestination?: Parameters<
+      TelegramNotificationIntentRepository['abandon']
+    >[1]['disableDestination'],
+  ): Promise<void> {
+    await this.dependencies.transactions.runInTransaction((transaction) =>
+      this.dependencies.intents.abandon(transaction, {
+        eventKey: intent.eventKey,
+        recipientAccountId: intent.recipientAccountId,
+        claimVersion: intent.claimVersion,
+        now: this.readNow(),
+        failure,
+        ...(disableDestination === undefined
+          ? {}
+          : {
+              disableDestination,
+              destinationVersion: intent.destinationVersion,
+            }),
+      }),
+    );
   }
 
   private readNow(): UnixEpochSeconds {
@@ -206,7 +182,7 @@ export class TelegramNotificationDispatcher
     try {
       processed = await this.dispatchOne();
     } catch {
-      this.logger.error('Telegram notification dispatch failed safely');
+      this.logger.error('Telegram notification intent dispatch failed safely');
     } finally {
       this.schedule(processed ? 0 : this.dependencies.pollIntervalMilliseconds);
     }

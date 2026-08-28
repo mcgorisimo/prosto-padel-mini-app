@@ -62,6 +62,7 @@ function claimed() {
     recipient_account_id: ACCOUNT_ID,
     telegram_chat_id: '123456',
     destination_version: 3,
+    preference_enabled: true,
     match_id: MATCH_ID,
     starts_at: String(Number(NOW) + 3_600),
     court_name: 'Корт 1',
@@ -113,7 +114,7 @@ describe('PostgresTelegramNotificationOutboxRepository', () => {
   });
 
   it('claims in queue order with SKIP LOCKED and a version ownership token', async () => {
-    const tx = transaction(result([]), result([claimed()]));
+    const tx = transaction(result([]), result([]), result([claimed()]));
 
     await expect(
       repository.claimNext(tx, {
@@ -133,22 +134,23 @@ describe('PostgresTelegramNotificationOutboxRepository', () => {
         matchStartsAt: Number(NOW) + 3_600,
         courtName: 'Корт 1',
         sourceType: 'match_invitation',
+        preferenceEnabled: true,
       },
     });
 
-    const claimSql = tx.query.mock.calls[1][0] as string;
+    const claimSql = tx.query.mock.calls[2][0] as string;
     expect(claimSql).toContain('FOR UPDATE SKIP LOCKED');
     expect(claimSql).toContain('ORDER BY pending.available_at, pending.created_at, pending.id');
     expect(claimSql).toContain('attempt_count = outbox.attempt_count + 1');
     expect(claimSql).toContain('version = outbox.version + 1');
-    expect(tx.query.mock.calls[1][1]).toEqual([
+    expect(tx.query.mock.calls[2][1]).toEqual([
       String(NOW),
       String(Number(NOW) + 15),
     ]);
   });
 
   it('abandons an exhausted row without another delivery claim', async () => {
-    const tx = transaction(result([{ id: OUTBOX_ID }]));
+    const tx = transaction(result([]), result([{ id: OUTBOX_ID }]));
 
     await expect(
       repository.claimNext(tx, {
@@ -157,8 +159,8 @@ describe('PostgresTelegramNotificationOutboxRepository', () => {
       }),
     ).resolves.toEqual({ outcome: 'retry_exhausted' });
 
-    expect(tx.query).toHaveBeenCalledTimes(1);
-    expect(tx.query.mock.calls[0][0]).toContain("failure_code = 'retry_exhausted'");
+    expect(tx.query).toHaveBeenCalledTimes(2);
+    expect(tx.query.mock.calls[1][0]).toContain("failure_code = 'retry_exhausted'");
   });
 
   it('finalizes by id, pending status, and the exact claim version', async () => {

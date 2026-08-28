@@ -139,16 +139,18 @@ function harness() {
   }) };
   const adminRead = { getRecord: jest.fn(), listRecords: jest.fn() };
   const diagnostics = { record: jest.fn() };
+  const notificationIntents = { enqueueDirect: jest.fn() };
   const matchReservations = {
     synchronizeCanonicalRefresh: jest.fn(async () => ({ outcome: 'not_linked' })),
   };
   const service = new BookingReservationService(
     transactions as never, reservations as never, matchReservations as never, profiles as never,
     availability as never, booking as never, adminRead as never,
+    notificationIntents as never,
     { nowEpochSeconds: () => currentNow },
     diagnostics,
   );
-  return { service, transactions, reservations, matchReservations, profiles, availability, booking, adminRead, diagnostics,
+  return { service, transactions, reservations, matchReservations, profiles, availability, booking, adminRead, diagnostics, notificationIntents,
     setStored(reservation: CourtReservation, operation?: ReservationOperation) { storedReservation = reservation; storedOperation = operation ?? null; },
     setNow(value: number) { currentNow = value; },
     setAttemptStartedAt(value: number | undefined) { attemptStartedAt = value; },

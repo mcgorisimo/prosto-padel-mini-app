@@ -14,7 +14,7 @@ import {
 } from '../database/match-invitation.repository';
 import { MatchWaitlistPersistenceError } from '../database/match-waitlist.repository';
 import { PostgresTransaction } from '../database/postgres-transaction';
-import { TelegramNotificationOutboxRepository } from '../database/telegram-notification-outbox.repository';
+import { TelegramNotificationIntentRepository } from '../database/telegram-notification-intent.repository';
 import {
   PublicPlayerProfileSearchPersistenceError,
   PublicPlayerProfileSearchRepository,
@@ -51,7 +51,6 @@ import {
 } from './match-invitation.http';
 import { MatchPublicPlayerResponse } from './match-api.types';
 import { MatchWaitlistService } from './match-waitlist.service';
-import { TelegramNotificationOutboxId } from '../notifications/telegram-notification.types';
 
 const UUID_URL_NAMESPACE = '6ba7b811-9dad-11d1-80b4-00c04fd430c8';
 const DOMAINS = Object.freeze({
@@ -59,7 +58,6 @@ const DOMAINS = Object.freeze({
     invitation: 'prosto-padel.match-invitations.create.invitation.v1',
     command: 'prosto-padel.match-invitations.create.command.v1',
     request: 'prosto-padel.match-invitations.create.request.v1',
-    outbox: 'prosto-padel.match-invitations.create.telegram-outbox.v1',
   }),
   accept: Object.freeze({
     command: 'prosto-padel.match-invitations.accept.command.v1',
@@ -98,9 +96,9 @@ export interface MatchInvitationServiceDependencies {
     MatchWaitlistService,
     'promoteAvailable' | 'closeForParticipant'
   >;
-  readonly notificationOutbox: Pick<
-    TelegramNotificationOutboxRepository,
-    'enqueueInvitation'
+  readonly notificationIntents: Pick<
+    TelegramNotificationIntentRepository,
+    'enqueueDirect' | 'enqueueMatchOwner'
   >;
   readonly clock: {
     nowEpochSeconds(): import('../auth/auth.types').UnixEpochSeconds;
@@ -377,15 +375,17 @@ export class MatchInvitationService {
             },
           );
           if (mutation.outcome === 'rejected') return mutation;
-          await this.dependencies.notificationOutbox.enqueueInvitation(
+          await this.dependencies.notificationIntents.enqueueDirect(
             transaction,
             {
-              outboxId: bindingUuid(
-                DOMAINS.create.outbox,
-                [mutation.invitation.invitationId],
-              ) as TelegramNotificationOutboxId,
-              invitationId: mutation.invitation.invitationId,
-              now,
+              eventKey: `match_invited:${mutation.invitation.invitationId}`,
+              eventType: 'match_invited',
+              category: 'match_activity',
+              sourceId: mutation.invitation.invitationId,
+              sourceVersion: mutation.invitation.version,
+              recipientAccountId: mutation.invitation.invitedAccountId,
+              matchId: mutation.invitation.matchId,
+              occurredAt: now,
             },
           );
           const [invitation] = await enrich(
@@ -599,6 +599,27 @@ export class MatchInvitationService {
               mutation.invitation.matchId,
               mutation.invitation.invitedAccountId,
               now,
+            );
+          }
+          if (
+            operation === 'accept' &&
+            mutation.outcome === 'invitation_accepted'
+          ) {
+            const sourceId = bindingUuid(
+              DOMAINS.accept.matchCommand,
+              parts,
+            ) as MatchCommandId;
+            await this.dependencies.notificationIntents.enqueueMatchOwner(
+              transaction,
+              {
+                eventKey: `participant_joined:${sourceId}`,
+                eventType: 'participant_joined',
+                category: 'match_activity',
+                sourceId,
+                sourceVersion: mutation.matchVersion,
+                matchId: mutation.invitation.matchId,
+                occurredAt: now,
+              },
             );
           }
           if (

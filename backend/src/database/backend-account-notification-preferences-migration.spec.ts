@@ -9,7 +9,7 @@ function migrationFile(suffix: string): string {
         suffix,
     ),
     'utf8',
-  );
+  ).replace(/\r\n/gu, '\n');
 }
 
 const MIGRATION = migrationFile('.sql');

@@ -43,6 +43,7 @@ import {
   resolvePaidCourtCheckoutEntry,
 } from './lib/paidCourtCheckout';
 import { getMyProfile, getPublicPlayerProfiles } from './lib/profileApi';
+import { readTelegramNotificationDeepLink } from './lib/telegramNotificationDeepLink';
 import {
   acceptMatchInvitation,
   cancelMatchInvitation,
@@ -418,6 +419,10 @@ export default function App({
   const [invitationActions, setInvitationActions] = useState(() => new Set());
   const invitationActionRef = useRef(new Set());
   const handledIncomingInvitationIdsRef = useRef(new Set());
+  const notificationDeepLinkRef = useRef(
+    readTelegramNotificationDeepLink(globalThis.location?.search ?? ''),
+  );
+  const notificationDeepLinkInFlightRef = useRef(false);
 
   const hideHandledIncomingInvitation = useCallback((invitationId) => {
     if (!invitationId) return;
@@ -2261,6 +2266,61 @@ const handleBookSlot = async (booking) => {
     }
     void Promise.allSettled([loadInvitations(), loadMatches()]);
   };
+
+  useEffect(() => {
+    const deepLink = notificationDeepLinkRef.current;
+    if (deepLink === null) return;
+    if (deepLink.screen === 'booking') {
+      notificationDeepLinkRef.current = null;
+      setSelectedBookingReservationId(deepLink.reservationId);
+      setSelectedBookingMatchId(null);
+      setScreen(null);
+      setActiveTab('booking');
+      return;
+    }
+    if (!backendMatchesReady || backendMatchActions === null) return;
+    if (notificationDeepLinkInFlightRef.current) return;
+    notificationDeepLinkInFlightRef.current = true;
+    let cancelled = false;
+    void backendMatchActions
+      .loadMatch(deepLink.matchId)
+      .then((result) => {
+        if (cancelled) return;
+        notificationDeepLinkRef.current = null;
+        notificationDeepLinkInFlightRef.current = false;
+        if (result.outcome !== 'match_loaded') {
+          showToast?.('Матч недоступен или уже завершён.', 'info');
+          return;
+        }
+        const match = mapBackendMatchToApp(
+          result.match,
+          backendProfile,
+          backendCourtNamesById,
+        );
+        if (!match) return;
+        storeBackendMatch(match);
+        setActiveTab('matches');
+        setSelected(match);
+        setScreen('match-details');
+      })
+      .catch(() => {
+        if (cancelled) return;
+        notificationDeepLinkRef.current = null;
+        notificationDeepLinkInFlightRef.current = false;
+        showToast?.('Матч недоступен или уже завершён.', 'info');
+      });
+    return () => {
+      cancelled = true;
+      notificationDeepLinkInFlightRef.current = false;
+    };
+  }, [
+    backendCourtNamesById,
+    backendMatchActions,
+    backendMatchesReady,
+    backendProfile,
+    showToast,
+    storeBackendMatch,
+  ]);
 
   const closeMatchDetails = () => {
     backendDetailRequestRef.current += 1;

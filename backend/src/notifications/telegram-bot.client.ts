@@ -3,6 +3,7 @@ import {
   TelegramNotificationRetryFailure,
   TelegramNotificationTerminalFailure,
 } from './telegram-notification.types';
+import { TelegramNotificationDeepLink } from './telegram-notification-intent.types';
 
 const MAX_RESPONSE_BYTES = 65_536;
 const MAX_RETRY_AFTER_SECONDS = 86_400;
@@ -60,6 +61,72 @@ function readResponseBody(text: string): TelegramApiResponse | undefined {
   }
 }
 
+async function readBoundedResponseBody(
+  response: Response,
+): Promise<TelegramApiResponse | undefined> {
+  const contentLength = response.headers.get('content-length');
+  if (
+    contentLength !== null &&
+    (/^(?:0|[1-9][0-9]*)$/u.test(contentLength) === false ||
+      Number(contentLength) > MAX_RESPONSE_BYTES)
+  ) {
+    await response.body?.cancel().catch(() => undefined);
+    return undefined;
+  }
+  const reader = response.body?.getReader();
+  if (reader === undefined) return readResponseBody(await response.text());
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  while (true) {
+    const part = await reader.read();
+    if (part.done) break;
+    size += part.value.byteLength;
+    if (size > MAX_RESPONSE_BYTES) {
+      await reader.cancel().catch(() => undefined);
+      return undefined;
+    }
+    chunks.push(part.value);
+  }
+  const combined = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    combined.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return readResponseBody(
+    new TextDecoder('utf-8', { fatal: true }).decode(combined),
+  );
+}
+
+export function buildTelegramMiniAppUrl(
+  baseUrl: string,
+  deepLink?: TelegramNotificationDeepLink,
+): string {
+  let url: URL;
+  try {
+    url = new URL(baseUrl);
+  } catch {
+    throw new TypeError('Telegram Mini App URL is invalid');
+  }
+  if (
+    url.protocol !== 'https:' ||
+    url.username !== '' ||
+    url.password !== '' ||
+    url.hash !== '' ||
+    url.search !== ''
+  ) {
+    throw new TypeError('Telegram Mini App URL is unsafe');
+  }
+  if (deepLink?.screen === 'match') {
+    url.searchParams.set('pp_screen', 'match');
+    url.searchParams.set('pp_match_id', deepLink.matchId);
+  } else if (deepLink?.screen === 'booking') {
+    url.searchParams.set('pp_screen', 'booking');
+    url.searchParams.set('pp_reservation_id', deepLink.reservationId);
+  }
+  return url.toString();
+}
+
 function readRetryAfter(body: TelegramApiResponse | undefined): number | undefined {
   if (!isRecord(body?.parameters)) return undefined;
   const value = body.parameters.retry_after;
@@ -85,6 +152,7 @@ export class TelegramBotClient {
   async sendMessage(input: {
     readonly telegramChatId: string;
     readonly text: string;
+    readonly deepLink?: TelegramNotificationDeepLink;
   }): Promise<TelegramBotSendResult> {
     try {
       const response = await this.configuration.fetch(
@@ -101,7 +169,12 @@ export class TelegramBotClient {
                 [
                   {
                     text: 'Открыть приложение',
-                    web_app: { url: this.configuration.miniAppUrl },
+                    web_app: {
+                      url: buildTelegramMiniAppUrl(
+                        this.configuration.miniAppUrl,
+                        input.deepLink,
+                      ),
+                    },
                   },
                 ],
               ],
@@ -112,7 +185,7 @@ export class TelegramBotClient {
           ),
         },
       );
-      const body = readResponseBody(await response.text());
+      const body = await readBoundedResponseBody(response);
       if (response.status === 429) {
         const retryAfterSeconds = readRetryAfter(body);
         return Object.freeze({
@@ -123,8 +196,8 @@ export class TelegramBotClient {
       }
       if (response.status >= 500) {
         return Object.freeze({
-          outcome: 'retry' as const,
-          failure: 'telegram_unavailable' as const,
+          outcome: 'abandoned' as const,
+          failure: 'delivery_unknown' as const,
         });
       }
       if (response.status === 403) {
@@ -143,6 +216,12 @@ export class TelegramBotClient {
             : {}),
         });
       }
+      if (response.status === 401 || response.status === 404) {
+        return Object.freeze({
+          outcome: 'abandoned' as const,
+          failure: 'telegram_unauthorized' as const,
+        });
+      }
       if (
         response.status < 200 ||
         response.status >= 300 ||
@@ -151,8 +230,8 @@ export class TelegramBotClient {
         !validMessageId(body.result.message_id)
       ) {
         return Object.freeze({
-          outcome: 'retry' as const,
-          failure: 'invalid_response' as const,
+          outcome: 'abandoned' as const,
+          failure: 'delivery_unknown' as const,
         });
       }
       return Object.freeze({
@@ -161,8 +240,8 @@ export class TelegramBotClient {
       });
     } catch {
       return Object.freeze({
-        outcome: 'retry' as const,
-        failure: 'network_error' as const,
+        outcome: 'abandoned' as const,
+        failure: 'delivery_unknown' as const,
       });
     }
   }

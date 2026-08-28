@@ -27,14 +27,14 @@ import {
 const MAX_BIGINT_TEXT = '9007199254740991';
 const RETRY_FAILURES = Object.freeze([
   'telegram_rate_limited',
-  'telegram_unavailable',
-  'network_error',
-  'invalid_response',
 ] as const);
 const TERMINAL_FAILURES = Object.freeze([
   'destination_unavailable',
+  'preference_disabled',
   'telegram_forbidden',
   'telegram_bad_request',
+  'telegram_unauthorized',
+  'delivery_unknown',
 ] as const);
 const DISABLE_REASONS = Object.freeze([
   'telegram_forbidden',
@@ -118,6 +118,26 @@ const ABANDON_EXHAUSTED_SQL = `
   RETURNING outbox.id
 `;
 
+const ABANDON_AMBIGUOUS_SQL = `
+  UPDATE backend_match.telegram_notification_outbox AS outbox
+  SET status = 'abandoned',
+      updated_at = $1,
+      failure_code = 'delivery_unknown',
+      version = outbox.version + 1
+  WHERE outbox.id = (
+    SELECT pending.id
+    FROM backend_match.telegram_notification_outbox AS pending
+    WHERE pending.status = 'pending'
+      AND pending.available_at <= $1
+      AND pending.attempt_count > 0
+      AND pending.failure_code IS NULL
+    ORDER BY pending.available_at, pending.created_at, pending.id
+    FOR UPDATE SKIP LOCKED
+    LIMIT 1
+  )
+  RETURNING outbox.id
+`;
+
 const CLAIM_NEXT_SQL = `
   WITH candidate AS MATERIALIZED (
     SELECT pending.id
@@ -133,6 +153,7 @@ const CLAIM_NEXT_SQL = `
     SET available_at = $2,
         attempt_count = outbox.attempt_count + 1,
         updated_at = $1,
+        failure_code = NULL,
         version = outbox.version + 1
     FROM candidate
     WHERE outbox.id = candidate.id
@@ -164,6 +185,10 @@ const CLAIM_NEXT_SQL = `
         THEN destinations.version
       ELSE NULL
     END AS destination_version,
+    COALESCE(
+      preferences.telegram_match_notifications_enabled,
+      true
+    ) AS preference_enabled,
     matches.id AS match_id,
     matches.starts_at,
     matches.court_name
@@ -174,8 +199,13 @@ const CLAIM_NEXT_SQL = `
     ON invitations.id = claimed.invitation_id
   JOIN backend_match.matches AS matches
     ON matches.id = COALESCE(notifications.match_id, invitations.match_id)
-  LEFT JOIN backend_auth.telegram_notification_destinations AS destinations
+    LEFT JOIN backend_auth.telegram_notification_destinations AS destinations
     ON destinations.account_id = COALESCE(
+      notifications.recipient_account_id,
+      invitations.invited_account_id
+    )
+  LEFT JOIN backend_auth.account_notification_preferences AS preferences
+    ON preferences.account_id = COALESCE(
       notifications.recipient_account_id,
       invitations.invited_account_id
     )
@@ -268,6 +298,7 @@ interface ClaimedRow extends QueryResultRow {
   readonly recipient_account_id: unknown;
   readonly telegram_chat_id: unknown;
   readonly destination_version: unknown;
+  readonly preference_enabled: unknown;
   readonly match_id: unknown;
   readonly starts_at: unknown;
   readonly court_name: unknown;
@@ -410,6 +441,7 @@ function hydrateClaim(row: ClaimedRow): ClaimedTelegramNotification {
       (row.destination_version === null)) ||
     (row.telegram_chat_id !== null &&
       !validBigintText(row.telegram_chat_id)) ||
+    typeof row.preference_enabled !== 'boolean' ||
     (row.source_type === 'match_notification' &&
       (!isMatchNotificationId(row.match_notification_id) ||
         row.invitation_id !== null)) ||
@@ -443,6 +475,7 @@ function hydrateClaim(row: ClaimedRow): ClaimedTelegramNotification {
     matchStartsAt: readEpoch(row.starts_at),
     courtName: row.court_name,
     sourceType: row.source_type,
+    preferenceEnabled: row.preference_enabled,
   });
 }
 
@@ -575,6 +608,19 @@ export class PostgresTelegramNotificationOutboxRepository
   ): Promise<TelegramNotificationClaimResult> {
     try {
       const input = validateClaimInput(inputValue);
+      const ambiguous = await transaction.query<AppliedRow>(
+        ABANDON_AMBIGUOUS_SQL,
+        [input.now.toString(10)],
+      );
+      if (
+        ambiguous.rowCount !== ambiguous.rows.length ||
+        ambiguous.rows.length > 1
+      ) {
+        throw failure('invalid_persisted_state');
+      }
+      if (ambiguous.rows.length === 1) {
+        return Object.freeze({ outcome: 'retry_exhausted' as const });
+      }
       const exhausted = await transaction.query<AppliedRow>(
         ABANDON_EXHAUSTED_SQL,
         [input.now.toString(10)],
