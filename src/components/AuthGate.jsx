@@ -21,12 +21,10 @@ import {
 } from '../lib/playerOnboardingUiPolicy';
 
 export function resolveOwnProfileGate({
-  backendRequired,
   sessionReady,
   profileStatus,
   hasProfile,
 }) {
-  if (!backendRequired) return 'legacy';
   if (!sessionReady) return 'loading';
   if (profileStatus === 'loading' || profileStatus === 'inactive') {
     return 'loading';
@@ -578,14 +576,12 @@ export default function AuthGate() {
     setTimeout(() => setToastMessage(null), 3000);
   };
 
-  const backendProfileRequired = true;
   const effectiveBackendProfileStatus =
     telegramBackendLogin.sessionReady &&
     backendProfileStatus === 'inactive'
       ? 'loading'
       : backendProfileStatus;
   const ownProfileGate = resolveOwnProfileGate({
-    backendRequired: backendProfileRequired,
     sessionReady: telegramBackendLogin.sessionReady,
     profileStatus: effectiveBackendProfileStatus,
     hasProfile: backendProfile !== null,
@@ -755,7 +751,6 @@ export default function AuthGate() {
             ? playerOnboarding.initialLevelLabel
             : null)
         }
-        backendMatchRequired={backendProfileRequired}
         backendMatchLifecycleStatus={telegramBackendLogin.status}
         backendProfileStatus={effectiveBackendProfileStatus}
         backendMatchActions={backendMatchActions}

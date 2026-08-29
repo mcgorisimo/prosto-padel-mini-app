@@ -449,15 +449,7 @@
   },
   "deadCode": {
     "configSha256": "0b871f70181170857f19edb762b973a3ff663e57f04226786aecc84aefbe1e77",
-    "issueDigest": "96167f84bb3ff2a16bbe5a906913622c1920849bfb85cb9b1f60c38f704c6667",
-    "restrictedImports": [
-      "src/App.jsx::./lib/supabaseClient",
-      "src/lib/invitationApi.js::./supabaseClient",
-      "src/lib/profileApi.js::./supabaseClient",
-      "src/lib/waitlistApi.js::./supabaseClient",
-      "tests/e2e/backend-match-lifecycle.spec.js::/src/lib/supabaseClient.js",
-      "tests/e2e/backend-match-lifecycle.spec.js::/src/lib/supabaseClient.js",
-      "tests/e2e/backend-match-lifecycle.spec.js::/src/lib/supabaseClient.js"
-    ]
+    "issueDigest": "1f289803a0f7ee3223bc67bb9ec5f3fe36f25e7cd9e2f3aa4406c33ba552b891",
+    "restrictedImports": []
   }
 }

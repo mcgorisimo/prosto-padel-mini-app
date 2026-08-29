@@ -14,19 +14,15 @@ const BACKEND_FEED_STATUSES = Object.freeze([
 export const BACKEND_PRIVATE_MATCH_CREATION_ENABLED = false;
 
 export function resolveBackendMatchMode({
-  backendRequired,
   hasBackendActions,
   lifecycleStatus,
   profileStatus,
   accountId,
 }) {
-  if (!backendRequired) return 'legacy';
   if (!hasBackendActions) {
-    return (
-      profileStatus === 'error' ||
+    return profileStatus === 'error' ||
       lifecycleStatus === 'internal_error' ||
       lifecycleStatus === 'session_expired'
-    )
       ? 'error'
       : 'loading';
   }
@@ -99,9 +95,7 @@ export function applyBackendParticipantResult(
     players: occupiedSlots,
     occupiedSlots,
     filledSlots: Object.freeze(slots),
-    participants: Object.freeze(
-      slots.filter(Boolean).map(({ id }) => id),
-    ),
+    participants: Object.freeze(slots.filter(Boolean).map(({ id }) => id)),
     version: participant.matchVersion,
   });
 }
@@ -134,10 +128,7 @@ export function isBackendOwnedMatch(match) {
   return match?.backendOwned === true;
 }
 
-export function selectFutureBackendMatches(
-  matches,
-  nowEpochSeconds,
-) {
+export function selectFutureBackendMatches(matches, nowEpochSeconds) {
   if (
     !Array.isArray(matches) ||
     !Number.isSafeInteger(nowEpochSeconds) ||
@@ -146,12 +137,13 @@ export function selectFutureBackendMatches(
     return [];
   }
 
-  return matches.filter((match) => (
-    isBackendOwnedMatch(match) &&
-    BACKEND_FEED_STATUSES.includes(match.status) &&
-    Number.isSafeInteger(match.startsAt) &&
-    match.startsAt > nowEpochSeconds
-  ));
+  return matches.filter(
+    (match) =>
+      isBackendOwnedMatch(match) &&
+      BACKEND_FEED_STATUSES.includes(match.status) &&
+      Number.isSafeInteger(match.startsAt) &&
+      match.startsAt > nowEpochSeconds,
+  );
 }
 
 export function selectBackendAccountMatches(
@@ -163,35 +155,27 @@ export function selectBackendAccountMatches(
     return [];
   }
 
-  return selectFutureBackendMatches(matches, nowEpochSeconds)
-    .filter((match) => (
-      match.ownerId === accountId ||
-      match.participants?.includes(accountId)
-    ));
+  return selectFutureBackendMatches(matches, nowEpochSeconds).filter(
+    (match) =>
+      match.ownerId === accountId || match.participants?.includes(accountId),
+  );
 }
 
 export function mergeAccountUpcomingMatches(
-  legacyMatches,
   backendMatches,
   accountId,
   nowEpochSeconds,
 ) {
-  return [
-    ...(Array.isArray(legacyMatches) ? legacyMatches : []),
-    ...selectBackendAccountMatches(
-      backendMatches,
-      accountId,
-      nowEpochSeconds,
-    ),
-  ];
+  return selectBackendAccountMatches(
+    backendMatches,
+    accountId,
+    nowEpochSeconds,
+  );
 }
 
 export function mapBackendPublicPlayerToApp(player) {
-  if (
-    !player ||
-    typeof player !== 'object' ||
-    player.unavailable === true
-  ) return null;
+  if (!player || typeof player !== 'object' || player.unavailable === true)
+    return null;
   return Object.freeze({
     id: player.playerId,
     first_name: player.firstName,
@@ -212,10 +196,9 @@ export function mapBackendMatchMessageToApp(message) {
   const senderId = senderUnavailable ? null : message.sender?.playerId;
   const senderName = senderUnavailable
     ? 'Игрок недоступен'
-    : [
-        message.sender?.firstName,
-        message.sender?.lastName,
-      ].filter(Boolean).join(' ');
+    : [message.sender?.firstName, message.sender?.lastName]
+        .filter(Boolean)
+        .join(' ');
   if (
     typeof message.messageId !== 'string' ||
     typeof message.matchId !== 'string' ||
@@ -244,13 +227,10 @@ export function mapBackendMatchMessageToApp(message) {
 export function mapBackendMatchNotificationToApp(notification) {
   if (!notification || typeof notification !== 'object') return null;
   const createdAt = Number(notification.createdAt);
-  const readAt = notification.readAt === undefined
-    ? null
-    : Number(notification.readAt);
+  const readAt =
+    notification.readAt === undefined ? null : Number(notification.readAt);
   const createdAtDate = new Date(createdAt * 1_000);
-  const readAtDate = readAt === null
-    ? null
-    : new Date(readAt * 1_000);
+  const readAtDate = readAt === null ? null : new Date(readAt * 1_000);
   if (
     typeof notification.notificationId !== 'string' ||
     typeof notification.matchId !== 'string' ||
@@ -293,9 +273,7 @@ export function mapBackendMatchNotificationToApp(notification) {
     notification_type: notification.notificationType,
     match_id: notification.matchId,
     created_at: createdAtDate.toISOString(),
-    read_at: readAt === null
-      ? null
-      : readAtDate.toISOString(),
+    read_at: readAt === null ? null : readAtDate.toISOString(),
     title: 'Вы в матче',
     body: 'Освободилось место — вы автоматически добавлены в состав.',
     notification_provider: 'backend',
@@ -345,15 +323,14 @@ export function mapBackendInvitationToApp(invitation) {
       : invitation.match.owner.firstName,
     organizer_last_name: ownerUnavailable
       ? ''
-      : invitation.match.owner.lastName ?? '',
+      : (invitation.match.owner.lastName ?? ''),
     date_iso: dateTime.dateISO,
     start_time: dateTime.time,
     court_name: invitation.match.courtName,
     rating_min: invitation.match.ratingMin,
     rating_max: invitation.match.ratingMax,
     is_rating_match: invitation.match.isRatingMatch,
-    price_per_person:
-      invitation.match.pricePerPersonSnapshot ?? null,
+    price_per_person: invitation.match.pricePerPersonSnapshot ?? null,
     player: Object.freeze({
       ...invitedPlayer,
       firstName: invitedPlayer.first_name,
@@ -369,23 +346,14 @@ export function resolveMatchSource(
   matchId,
   explicitMatch = null,
   backendMatches = [],
-  legacyMatches = [],
 ) {
   const normalizedMatchId = String(matchId);
-  if (
-    explicitMatch &&
-    String(explicitMatch.id) === normalizedMatchId
-  ) {
+  if (explicitMatch && String(explicitMatch.id) === normalizedMatchId) {
     return explicitMatch;
   }
 
   return (
-    backendMatches.find(
-      (match) => String(match?.id) === normalizedMatchId,
-    ) ??
-    legacyMatches.find(
-      (match) => String(match?.id) === normalizedMatchId,
-    ) ??
+    backendMatches.find((match) => String(match?.id) === normalizedMatchId) ??
     null
   );
 }
@@ -442,10 +410,8 @@ function moscowDateTime(epochSeconds) {
 }
 
 function profilePlayer(profile, player, isOrganizer, slotIndex) {
-  const publicPlayer =
-    player && typeof player === 'object' ? player : null;
-  const playerId =
-    publicPlayer === null ? player : publicPlayer.playerId;
+  const publicPlayer = player && typeof player === 'object' ? player : null;
+  const playerId = publicPlayer === null ? player : publicPlayer.playerId;
   const isCurrentPlayer = profile?.accountId === playerId;
   const numericRating =
     typeof publicPlayer?.rating === 'number'
@@ -456,9 +422,7 @@ function profilePlayer(profile, player, isOrganizer, slotIndex) {
   const level = getLevelForRating(numericRating)?.label ?? 'C';
   const photoUrl =
     publicPlayer?.photoUrl ??
-    (isCurrentPlayer
-      ? (profile.photoUrl ?? profile.photo_url ?? null)
-      : null);
+    (isCurrentPlayer ? (profile.photoUrl ?? profile.photo_url ?? null) : null);
   return Object.freeze({
     id: playerId,
     firstName:
@@ -482,12 +446,8 @@ function profilePlayer(profile, player, isOrganizer, slotIndex) {
     ratingIdx: Math.max(0, LEVELS.indexOf(level)),
     isVerified:
       publicPlayer?.isVerified === true ||
-      (publicPlayer === null &&
-        isCurrentPlayer &&
-        profile.isVerified === true),
-    sidePreference: isCurrentPlayer
-      ? (profile.sidePreference ?? null)
-      : null,
+      (publicPlayer === null && isCurrentPlayer && profile.isVerified === true),
+    sidePreference: isCurrentPlayer ? (profile.sidePreference ?? null) : null,
     isOrganizer,
     slotIndex,
   });
@@ -500,12 +460,14 @@ function feedPlaceholders(record, owner) {
     slotNumber <= Math.min(record.occupiedSlots, 4);
     slotNumber += 1
   ) {
-    slots.push(profilePlayer(
-      null,
-      `occupied:${record.matchId}:${slotNumber}`,
-      false,
-      slotNumber - 1,
-    ));
+    slots.push(
+      profilePlayer(
+        null,
+        `occupied:${record.matchId}:${slotNumber}`,
+        false,
+        slotNumber - 1,
+      ),
+    );
   }
   return slots;
 }
@@ -524,9 +486,7 @@ export function createBackendMatchDraft(value) {
     `${value.dateISO}T${value.time}:00${MOSCOW_OFFSET}`,
   );
   const durationMinutes = Number(value.duration) * 60;
-  const scenario = value.isPrivate === true
-    ? 'private'
-    : value.scenario;
+  const scenario = value.isPrivate === true ? 'private' : value.scenario;
   const description =
     typeof value.description === 'string' ? value.description : '';
 
@@ -565,36 +525,30 @@ export function mapBackendMatchToApp(
   courtNamesById = {},
 ) {
   if (!record || typeof record !== 'object') return null;
-  const confirmedTarget = record.courtBookingStatus === 'confirmed'
-    ? record.courtBookingTarget
-    : null;
-  const effectiveStartsAt = confirmedTarget === null
-    ? record.startsAt
-    : Math.floor(Date.parse(confirmedTarget.startsAt) / 1_000);
-  const effectiveDurationMinutes = confirmedTarget === null
-    ? record.durationMinutes
-    : (Date.parse(confirmedTarget.endsAt) -
-        Date.parse(confirmedTarget.startsAt)) / 60_000;
+  const confirmedTarget =
+    record.courtBookingStatus === 'confirmed'
+      ? record.courtBookingTarget
+      : null;
+  const effectiveStartsAt =
+    confirmedTarget === null
+      ? record.startsAt
+      : Math.floor(Date.parse(confirmedTarget.startsAt) / 1_000);
+  const effectiveDurationMinutes =
+    confirmedTarget === null
+      ? record.durationMinutes
+      : (Date.parse(confirmedTarget.endsAt) -
+          Date.parse(confirmedTarget.startsAt)) /
+        60_000;
   const dateTime = moscowDateTime(effectiveStartsAt);
   if (!dateTime) return null;
   if (!Number.isInteger(effectiveDurationMinutes)) return null;
-  const providerCourtName = confirmedTarget === null
-    ? null
-    : courtNamesById?.[confirmedTarget.courtId];
+  const providerCourtName =
+    confirmedTarget === null ? null : courtNamesById?.[confirmedTarget.courtId];
 
-  const owner = record.owner?.unavailable === true
-    ? profilePlayer(
-        null,
-        `occupied:${record.matchId}:1`,
-        true,
-        0,
-      )
-    : profilePlayer(
-        profile,
-        record.owner ?? record.ownerAccountId,
-        true,
-        0,
-      );
+  const owner =
+    record.owner?.unavailable === true
+      ? profilePlayer(null, `occupied:${record.matchId}:1`, true, 0)
+      : profilePlayer(profile, record.owner ?? record.ownerAccountId, true, 0);
   let filledSlots;
   if (Array.isArray(record.participants)) {
     filledSlots = Array(4).fill(null);
@@ -614,9 +568,7 @@ export function mapBackendMatchToApp(
   } else {
     filledSlots = feedPlaceholders(record, owner);
   }
-  const participants = filledSlots
-    .filter(Boolean)
-    .map(({ id }) => id);
+  const participants = filledSlots.filter(Boolean).map(({ id }) => id);
 
   return Object.freeze({
     id: record.matchId,
@@ -629,14 +581,16 @@ export function mapBackendMatchToApp(
     dateISO: dateTime.dateISO,
     time: dateTime.time,
     duration: effectiveDurationMinutes / 60,
-    courtId: confirmedTarget === null
-      ? record.courtId
-      : `yclients:${confirmedTarget.courtId}`,
-    courtName: confirmedTarget === null
-      ? record.courtName
-      : typeof providerCourtName === 'string' && providerCourtName.trim()
-        ? providerCourtName.trim()
-        : 'Корт',
+    courtId:
+      confirmedTarget === null
+        ? record.courtId
+        : `yclients:${confirmedTarget.courtId}`,
+    courtName:
+      confirmedTarget === null
+        ? record.courtName
+        : typeof providerCourtName === 'string' && providerCourtName.trim()
+          ? providerCourtName.trim()
+          : 'Корт',
     courtType: record.courtType,
     kind: record.kind ?? 'match',
     type: record.kind ?? 'match',
@@ -649,12 +603,10 @@ export function mapBackendMatchToApp(
     isRatingMatch: record.isRatingMatch,
     is_rating_match: record.isRatingMatch,
     requiresVerifiedRating: record.isRatingMatch,
-    isPrivate:
-      record.visibility === 'private' || record.scenario === 'private',
+    isPrivate: record.visibility === 'private' || record.scenario === 'private',
     pricePerPerson: record.pricePerPersonSnapshot ?? null,
     players: filledSlots.filter(Boolean).length,
-    occupiedSlots:
-      record.occupiedSlots ?? filledSlots.filter(Boolean).length,
+    occupiedSlots: record.occupiedSlots ?? filledSlots.filter(Boolean).length,
     filledSlots: Object.freeze(filledSlots),
     participants: Object.freeze(participants),
     version: record.version,

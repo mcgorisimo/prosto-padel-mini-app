@@ -1693,19 +1693,8 @@ test.describe('backend session credential lifecycle', () => {
     await page.goto('/');
 
     const summary = await page.evaluate(async () => {
-      const { mergeProfileSources } = await import('/src/App.jsx');
-      const merged = mergeProfileSources(
-        {
-          first_name: 'Supabase',
-          last_name: 'Profile',
-          username: 'supabase_profile',
-          rating: 3.4,
-          is_verified: false,
-          phone: '+79990000000',
-          side_preference: 'Both',
-          role: 'user',
-        },
-        {
+      const { mapBackendProfileToCurrentUser } = await import('/src/App.jsx');
+      const merged = mapBackendProfileToCurrentUser({
           accountId: '11111111-1111-4111-8111-111111111111',
           role: 'player',
           firstName: 'Backend',
@@ -1718,19 +1707,8 @@ test.describe('backend session credential lifecycle', () => {
           rating: 4.25,
           isVerified: true,
           capabilities: ['club_admin'],
-        },
-        {
-          first_name: 'Metadata',
-          last_name: 'User',
-          username: 'metadata_user',
-        },
-      );
-      const uninitialized = mergeProfileSources(
-        {
-          phone: '+79990000000',
-          side_preference: 'Right',
-        },
-        {
+      });
+      const uninitialized = mapBackendProfileToCurrentUser({
           accountId: '11111111-1111-4111-8111-111111111111',
           role: 'player',
           firstName: 'Backend',
@@ -1741,8 +1719,7 @@ test.describe('backend session credential lifecycle', () => {
           phone: null,
           sidePreference: null,
           capabilities: [],
-        },
-      );
+      });
 
       return {
         firstName: merged.first_name,
@@ -1761,8 +1738,8 @@ test.describe('backend session credential lifecycle', () => {
         uninitializedSideDefaults:
           uninitialized.side_preference === 'Both',
         uninitializedUsernameIsEmpty: uninitialized.username === '',
-        legacyAdminDoesNotLeak:
-          mergeProfileSources({ role: 'admin' }, {
+        unauthorizedAdminDoesNotLeak:
+          mapBackendProfileToCurrentUser({
             accountId: '11111111-1111-4111-8111-111111111111',
             role: 'player',
             firstName: 'Backend',
@@ -1794,7 +1771,7 @@ test.describe('backend session credential lifecycle', () => {
       uninitializedPhoneIsEmpty: true,
       uninitializedSideDefaults: true,
       uninitializedUsernameIsEmpty: true,
-      legacyAdminDoesNotLeak: true,
+      unauthorizedAdminDoesNotLeak: true,
     });
   });
 

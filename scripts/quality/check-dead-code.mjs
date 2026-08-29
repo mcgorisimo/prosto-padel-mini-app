@@ -77,17 +77,18 @@ if (baseline.deadCode.issueDigest !== knipDigest) {
       'review every added or removed dead file/export before updating the baseline.',
   );
 }
-if (
-  JSON.stringify(baseline.deadCode.restrictedImports) !==
-  JSON.stringify(restrictedImports)
-) {
+if (restrictedImports.length > 0) {
   throw new Error(
-    'Restricted supabaseClient imports changed. New imports are forbidden; ' +
-      'removals require a reviewed baseline update owned by TD-006/TD-007.',
+    'Restricted supabaseClient imports are forbidden: ' +
+      restrictedImports.join(', '),
+  );
+}
+if (baseline.deadCode.restrictedImports.length > 0) {
+  throw new Error(
+    'The reviewed baseline must keep restricted imports at zero.',
   );
 }
 
 process.stdout.write(
-  `Knip PASS: issue digest unchanged; ${restrictedImports.length} legacy ` +
-    'supabaseClient imports ratcheted.\n',
+  'Knip PASS: issue digest unchanged; zero supabaseClient imports.\n',
 );

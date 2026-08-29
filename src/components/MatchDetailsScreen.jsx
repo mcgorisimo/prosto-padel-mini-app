@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
-import { getAvailableBots, getTestBots } from '../lib/testSeed';
+import { getTestBots } from '../lib/testSeed';
 import { formatParticipationPrice, getCourtCapacity, getParticipationPrice, isPrimeTime } from '../lib/pricing';
 import FinishMatchModal from './FinishMatchModal';
 import PadelCard from './ui/PadelCard';
@@ -8,15 +8,7 @@ import PadelButton from './ui/PadelButton';
 import { getMatchLevelBadges, getMatchLevelRequirement } from '../lib/matchLevelRequirement';
 import { getMatchBookingStatus } from '../lib/matchBookingStatus';
 import { isRatingMatch, requiresVerifiedRating as getRequiresVerifiedRating } from '../lib/matchRating';
-import { getPublicPlayerProfiles } from '../lib/profileApi';
 import { getLevelForRating } from '../lib/ratingEngine';
-import {
-  getMatchWaitlist,
-  getMatchWaitlistState,
-  getWaitlistErrorCode,
-  joinMatchWaitlist,
-  leaveMatchWaitlist,
-} from '../lib/waitlistApi';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -49,10 +41,6 @@ const getSideBadge = (sidePreference) => {
   ) return 'LR';
   return null;
 };
-
-export function supportsLegacyMatchExtensions(match) {
-  return match?.backendOwned !== true;
-}
 
 export function supportsBackendMatchInvitations(
   match,
@@ -136,6 +124,13 @@ export function backendMatchResultErrorMessage(reason) {
   return messages[reason] ?? 'Не удалось обновить результат. Попробуйте ещё раз.';
 }
 
+function backendWaitlistErrorCode(error) {
+  return [error?.message, error?.reason]
+    .filter(Boolean)
+    .join(' ')
+    .toUpperCase();
+}
+
 function backendWaitlistPlayer(entry) {
   const unavailable = entry.player?.unavailable === true;
   return Object.freeze({
@@ -182,14 +177,6 @@ export function normalizeBackendMatchWaitlist(result) {
   }
 }
 
-export async function refreshLegacyMatchWaitlist(
-  match,
-  refreshWaitlist,
-) {
-  if (!supportsLegacyMatchExtensions(match)) return null;
-  return refreshWaitlist();
-}
-
 export function tryBeginMatchAction(actionRef) {
   if (!actionRef || actionRef.current === true) return false;
   actionRef.current = true;
@@ -217,11 +204,6 @@ const getRatingIndexForPlayer = (player) => {
   const levelLabel = getLevelForRating(numericRating)?.label;
   const idx = RATINGS.indexOf(levelLabel);
   return idx >= 0 ? idx : null;
-};
-
-const formatPlayerRating = (player) => {
-  const numericRating = Number(player?.numericRating ?? player?.rating);
-  return Number.isFinite(numericRating) ? numericRating.toFixed(1) : '—';
 };
 
 const getPlayerRatingPresentation = (player) => {
@@ -584,98 +566,6 @@ function DescriptionEditPanel({ initialValue, saving, onSave, onClose }) {
   );
 }
 
-function CancelSheet({ onConfirm, onClose }) {
-  return (
-    <BottomSheet onClose={onClose}>
-      <div style={{ textAlign: 'center', marginBottom: '20px' }}>
-        <div style={{ color: C.text, fontSize: '18px', fontWeight: 700 }}>Отменить игру?</div>
-      </div>
-
-      <div style={{ background: 'rgba(212,175,55,0.06)', borderRadius: '12px', padding: '14px', border: '1px solid rgba(212,175,55,0.2)', marginBottom: '20px' }}>
-        <div style={{ color: C.gold, fontWeight: 700, fontSize: '13px', marginBottom: '6px' }}>Правила отмены</div>
-        <div style={{ color: C.muted, fontSize: '12px', lineHeight: 1.7 }}>
-          Бесплатная отмена за <strong style={{ color: '#fff' }}>24 часа</strong> до начала матча.<br />
-          При отмене менее чем за 24 часа — штраф <strong style={{ color: '#fff' }}>50% от стоимости корта</strong>.
-        </div>
-      </div>
-
-      <button onClick={onConfirm} style={{ width: '100%', padding: '14px', marginBottom: '10px', background: 'linear-gradient(135deg, #dc2626, #ef4444)', color: '#fff', border: 'none', borderRadius: '12px', fontSize: '15px', fontWeight: 700, cursor: 'pointer' }}>
-        Да, отменить игру
-      </button>
-      <button onClick={onClose} style={{ width: '100%', padding: '14px', background: 'transparent', color: C.muted, border: `1px solid ${C.border}`, borderRadius: '12px', fontSize: '15px', cursor: 'pointer' }}>
-        Оставить игру
-      </button>
-    </BottomSheet>
-  );
-}
-
-// ─── Invite Sheet ─────────────────────────────────────────────────────────────
-
-function InviteSheet({ matchId, onClose }) {
-  const link = 'https://t.me/+qTqqdOIDHOU1ZTcy';
-  const [copied,   setCopied]   = useState(false);
-  const [username, setUsername] = useState('');
-
-  const handleCopy = () => {
-    navigator.clipboard?.writeText(link).catch(() => {});
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  return (
-    <BottomSheet onClose={onClose}>
-      <div style={{ color: C.text, fontSize: '17px', fontWeight: 700, marginBottom: '20px' }}>+ Пригласить игрока</div>
-
-      <div style={{ fontSize: '11px', fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '8px' }}>Ссылка-приглашение</div>
-      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '20px' }}>
-        <div style={{ flex: 1, background: C.surface, borderRadius: '10px', padding: '10px 12px', color: C.muted, fontSize: '12px', border: `1px solid ${C.border}`, wordBreak: 'break-all', lineHeight: 1.5 }}>
-          {link}
-        </div>
-        <button onClick={handleCopy} style={{ width: '44px', height: '44px', flexShrink: 0, borderRadius: '10px', background: copied ? 'rgba(34,197,94,0.12)' : C.surface, border: `1px solid ${copied ? 'rgba(34,197,94,0.35)' : C.border}`, color: copied ? C.win : C.muted, fontSize: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
-          {copied ? '✓' : 'Copy'}
-        </button>
-      </div>
-
-      <div style={{ fontSize: '11px', fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '8px' }}>Поиск по username</div>
-      <div style={{ display: 'flex', gap: '8px', marginBottom: '20px' }}>
-        <input
-          value={username}
-          onChange={e => setUsername(e.target.value)}
-          placeholder="@username"
-          style={{ flex: 1, background: C.surface, border: `1px solid ${C.border}`, borderRadius: '10px', padding: '11px 14px', color: C.text, fontSize: '14px', outline: 'none' }}
-        />
-        <button style={{ padding: '0 16px', background: C.accent, color: '#fff', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>
-          Найти
-        </button>
-      </div>
-
-      <button onClick={onClose} style={{ width: '100%', padding: '14px', background: 'transparent', color: C.muted, border: `1px solid ${C.border}`, borderRadius: '12px', fontSize: '15px', cursor: 'pointer' }}>
-        Закрыть
-      </button>
-    </BottomSheet>
-  );
-}
-
-// ─── Kick Confirm ─────────────────────────────────────────────────────────────
-
-function KickConfirm({ player, onConfirm, onCancel }) {
-  return (
-    <div data-testid="match-leave-confirm" className="app-modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.92)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '20px' }}>
-      <div className="app-modal-panel" style={{ background: '#07160F', borderRadius: '16px', padding: '24px', width: '100%', maxWidth: '320px', border: '1px solid rgba(245,241,232,0.16)', textAlign: 'center' }}>
-        <div style={{ color: C.gold, fontSize: '13px', fontWeight: 900, letterSpacing: '0.12em', marginBottom: '12px' }}>PLAYER</div>
-        <div style={{ color: C.text, fontWeight: 700, fontSize: '16px', marginBottom: '8px' }}>Удалить игрока?</div>
-        <div style={{ color: C.muted, fontSize: '13px', marginBottom: '24px', lineHeight: 1.5 }}>
-          <strong style={{ color: '#fff' }}>{player.firstName}</strong> будет удалён из матча. Слот освободится для нового участника.
-        </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <button onClick={onCancel} style={{ flex: 1, padding: '12px', background: 'transparent', color: C.muted, border: `1px solid ${C.border}`, borderRadius: '10px', fontSize: '14px', cursor: 'pointer' }}>Отмена</button>
-          <button onClick={onConfirm} style={{ flex: 1, padding: '12px', background: 'linear-gradient(135deg, #dc2626, #ef4444)', color: '#fff', border: 'none', borderRadius: '10px', fontSize: '14px', fontWeight: 700, cursor: 'pointer' }}>Удалить</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function LeaveConfirm({ busy, onConfirm, onCancel }) {
   return (
     <div className="app-modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.92)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '20px' }}>
@@ -695,25 +585,7 @@ function LeaveConfirm({ busy, onConfirm, onCancel }) {
 }
 
 // ─── Slot Action Sheet ────────────────────────────────────────────────────────
-function LevelOverrideConfirm({ message, onConfirm, onCancel }) {
-  return (
-    <div data-testid="level-override-modal" className="app-modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.92)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '20px' }}>
-      <div className="app-modal-panel" style={{ background: '#07160F', borderRadius: '16px', padding: '24px', width: '100%', maxWidth: '320px', border: '1px solid rgba(245,241,232,0.16)', textAlign: 'center' }}>
-        <div style={{ color: C.gold, fontSize: '13px', fontWeight: 900, letterSpacing: '0.12em', marginBottom: '12px' }}>LEVEL</div>
-        <div style={{ color: C.text, fontWeight: 700, fontSize: '16px', marginBottom: '8px' }}>Пригласить игрока вне диапазона?</div>
-        <div style={{ color: C.muted, fontSize: '13px', marginBottom: '24px', lineHeight: 1.5 }}>
-          {message}
-        </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <button onClick={onCancel} style={{ flex: 1, padding: '12px', background: 'transparent', color: C.muted, border: `1px solid ${C.border}`, borderRadius: '10px', fontSize: '14px', cursor: 'pointer' }}>Отмена</button>
-          <button data-testid="level-override-confirm" onClick={onConfirm} style={{ flex: 1, padding: '12px', background: C.accent, color: '#07160F', border: 'none', borderRadius: '10px', fontSize: '14px', fontWeight: 800, cursor: 'pointer' }}>Пригласить</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function SlotActionSheet({ slotIndex, isOwner, currentUser, matchId, onAddGuest, onAddBot, availableBotsCount = 0, onTakeSlot, onSearchPlayers, onClose, showToast, slots }) {
+function SlotActionSheet({ slotIndex, isOwner, currentUser, onInvitePlayer, onTakeSlot, onSearchPlayers, onClose, showToast }) {
   const [copied, setCopied] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState([]);
@@ -722,8 +594,6 @@ function SlotActionSheet({ slotIndex, isOwner, currentUser, matchId, onAddGuest,
   const invitationInFlightRef = useRef(false);
   const playerSearchRequestRef = useRef(0);
 
-  // Проверяем, играет ли уже юзер в матче
-  const isParticipant = slots?.some(player => player?.id === currentUser?.id);
   const link = 'https://t.me/+qTqqdOIDHOU1ZTcy';
 
   const handleCopy = () => {
@@ -745,14 +615,10 @@ function SlotActionSheet({ slotIndex, isOwner, currentUser, matchId, onAddGuest,
     setIsSearching(true);
     const delayDebounceFn = setTimeout(async () => {
       try {
-        const data = typeof onSearchPlayers === 'function'
-          ? await onSearchPlayers(searchTerm, 5)
-          : await getPublicPlayerProfiles({
-              search: searchTerm,
-              excludeId: currentUser?.id,
-              select: 'id, first_name, last_name, username, rating, is_verified, side_preference',
-              limit: 5,
-            });
+        if (typeof onSearchPlayers !== 'function') {
+          throw new Error('BACKEND_PLAYER_SEARCH_UNAVAILABLE');
+        }
+        const data = await onSearchPlayers(searchTerm, 5);
         if (playerSearchRequestRef.current === requestId) {
           setSearchResults(data || []);
         }
@@ -779,7 +645,7 @@ function SlotActionSheet({ slotIndex, isOwner, currentUser, matchId, onAddGuest,
     invitationInFlightRef.current = true;
     setInvitingPlayerId(player.id);
     try {
-      const result = await onAddGuest(slotIndex, {
+      const result = await onInvitePlayer(slotIndex, {
         id: player.id,
         firstName: player.first_name,
         lastName: player.last_name,
@@ -834,11 +700,6 @@ function SlotActionSheet({ slotIndex, isOwner, currentUser, matchId, onAddGuest,
               </button>
             ))}
           </div>
-        )}
-        {availableBotsCount > 0 && (
-          <button onClick={() => { onAddBot?.(slotIndex); onClose(); }} style={{ width: '100%', padding: '14px', marginBottom: '10px', background: 'rgba(34,197,94,0.1)', color: '#4ade80', border: '1px solid rgba(34,197,94,0.28)', borderRadius: '12px', fontWeight: 700, cursor: 'pointer' }}>
-            🤖 Добавить бота ({availableBotsCount})
-          </button>
         )}
         <button onClick={handleCopy} style={{ width: '100%', padding: '14px', marginBottom: '12px', background: copied ? 'rgba(34,197,94,0.08)' : C.surface, color: copied ? C.win : C.text, border: `1px solid ${copied ? 'rgba(34,197,94,0.35)' : C.border}`, borderRadius: '12px', fontWeight: 700, cursor: 'pointer' }}>
           {copied ? 'Ссылка скопирована' : 'Скопировать ссылку на Telegram-группу'}
@@ -1210,7 +1071,7 @@ function MatchInvitationPanel({ accepting, declining, onAccept, onDecline }) {
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
-export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinSuccess, onDelete, onComplete, onConfirmScore, onDisputeScore, onUpdateDescription, onSlotsChange, onJoinMatch, onLeaveMatch, onRefreshMatch, onBookCourt, onLoadWaitlist, onJoinWaitlist, onLeaveWaitlist, onLoadLineup, onAssignLineupSlot, onReleaseLineupSlot, onLoadResult, onSubmitResult, onConfirmResult, onDisputeResult, incomingInvitation = null, pendingInvitations = [], invitationActions = new Set(), onAcceptInvitation, onDeclineInvitation, onCreateInvitation, onCancelInvitation, onSearchPlayers, onRemoveParticipant, allMessages, messagesLoading, messagesLoadError, hasOlderMessages = false, olderMessagesLoading = false, onLoadOlderMessages, onRefreshMessages, onRetryMessages, onSendMessage, onRevertToPrivate, showToast }) {
+export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinSuccess, onUpdateDescription, onJoinMatch, onLeaveMatch, onRefreshMatch, onBookCourt, onLoadWaitlist, onJoinWaitlist, onLeaveWaitlist, onLoadLineup, onAssignLineupSlot, onReleaseLineupSlot, onLoadResult, onSubmitResult, onConfirmResult, onDisputeResult, incomingInvitation = null, pendingInvitations = [], invitationActions = new Set(), onAcceptInvitation, onDeclineInvitation, onCreateInvitation, onCancelInvitation, onSearchPlayers, allMessages, messagesLoading, messagesLoadError, hasOlderMessages = false, olderMessagesLoading = false, onLoadOlderMessages, onRefreshMessages, onRetryMessages, onSendMessage, showToast }) {
   const isOwner = canManageMatch(currentUser, match);
   const isBackendOrganizer =
     match?.backendOwned === true &&
@@ -1228,18 +1089,14 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
   const [joined,      setJoined]      = useState(false);
   const [joining,     setJoining]     = useState(false);
   const [leaving,     setLeaving]     = useState(false);
-  const [cancelled,   setCancelled]   = useState(false);
   const [editDescription, setEditDescription] = useState(false);
   const [descriptionSaving, setDescriptionSaving] = useState(false);
-  const [cancelSheet, setCancelSheet] = useState(false);
-  const [kickTarget,  setKickTarget]  = useState(null);
   const [leaveTarget, setLeaveTarget] = useState(null);
   const [targetSlot,  setTargetSlot]  = useState(null); // index of tapped empty slot
   const [finished,    setFinished]    = useState(match.status === 'completed');
   const [finishToast, setFinishToast] = useState(null);
   const [finishModal, setFinishModal] = useState(false);
   const [chatOpen,    setChatOpen]    = useState(false);
-  const [levelOverride, setLevelOverride] = useState(null);
   const joinInFlightRef = useRef(false);
   const leaveInFlightRef = useRef(false);
   const joinSuccessTimerRef = useRef(null);
@@ -1303,65 +1160,28 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
     setWaitlistListLoading(true);
     setWaitlistListError('');
 
-    if (match.backendOwned === true) {
-      try {
-        const result = await onLoadWaitlist?.(match.id, 50);
-        if (requestId !== waitlistLoadRef.current) return null;
-        const normalized = normalizeBackendMatchWaitlist(result);
-        if (normalized === null) throw new Error(result?.reason ?? 'waitlist_load_failed');
-        setWaitlistPosition(normalized.position);
-        setWaitlistCount(normalized.count);
-        setWaitlistPlayers(normalized.players);
-        setWaitlistLoading(false);
-        setWaitlistListLoading(false);
-        return normalized.position;
-      } catch {
-        if (requestId !== waitlistLoadRef.current) return null;
-        setWaitlistPosition(null);
-        setWaitlistCount(0);
-        setWaitlistPlayers([]);
-        setWaitlistListError('Не удалось загрузить лист ожидания.');
-        setWaitlistLoading(false);
-        setWaitlistListLoading(false);
-        return null;
-      }
-    }
-
-    const [stateResult, listResult] = await Promise.allSettled([
-      getMatchWaitlistState(match.id),
-      getMatchWaitlist(match.id),
-    ]);
-
-    if (requestId !== waitlistLoadRef.current) return null;
-
-    let state = null;
-    if (stateResult.status === 'fulfilled') {
-      state = stateResult.value;
-      setWaitlistPosition(state.position);
-      setWaitlistCount(state.count);
-    }
-
-    if (listResult.status === 'fulfilled') {
-      const players = listResult.value;
-      setWaitlistPlayers(players);
-      if (!state) {
-        const currentPlayer = players.find((player) => player.is_current_user);
-        setWaitlistPosition(currentPlayer ? {
-          waitlist_id: currentPlayer.waitlist_id,
-          status: 'waiting',
-          queue_position: currentPlayer.queue_position,
-          joined_at: currentPlayer.joined_at,
-        } : null);
-        setWaitlistCount(players.length);
-      }
-    } else {
+    try {
+      const result = await onLoadWaitlist?.(match.id, 50);
+      if (requestId !== waitlistLoadRef.current) return null;
+      const normalized = normalizeBackendMatchWaitlist(result);
+      if (normalized === null) throw new Error(result?.reason ?? 'waitlist_load_failed');
+      setWaitlistPosition(normalized.position);
+      setWaitlistCount(normalized.count);
+      setWaitlistPlayers(normalized.players);
+      setWaitlistLoading(false);
+      setWaitlistListLoading(false);
+      return normalized.position;
+    } catch {
+      if (requestId !== waitlistLoadRef.current) return null;
+      setWaitlistPosition(null);
+      setWaitlistCount(0);
+      setWaitlistPlayers([]);
       setWaitlistListError('Не удалось загрузить лист ожидания.');
+      setWaitlistLoading(false);
+      setWaitlistListLoading(false);
+      return null;
     }
-
-    setWaitlistLoading(false);
-    setWaitlistListLoading(false);
-    return state;
-  }, [match.backendOwned, match.id, onLoadWaitlist]);
+  }, [match.id, onLoadWaitlist]);
 
   useEffect(() => () => {
     if (joinSuccessTimerRef.current) clearTimeout(joinSuccessTimerRef.current);
@@ -1377,7 +1197,6 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
     players      = 0,
     description: origDescription,
     status,
-    scenario,
     courtName:   origCourtName,
     courtType:   origCourt    = 'panoramic',
     time:        origTime,
@@ -1525,7 +1344,6 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
   const matchEndMs = canonicalMatchStartMs + canonicalDurationMinutes * 60_000;
   const matchHasNotStarted = !Number.isFinite(canonicalMatchStartMs) || canonicalMatchStartMs > Date.now();
   const matchHasFinished = Number.isFinite(matchEndMs) && matchEndMs <= Date.now();
-  const usesLegacyMatchExtensions = supportsLegacyMatchExtensions(match);
   const usesBackendMatchInvitations = supportsBackendMatchInvitations(
     match,
     onCreateInvitation,
@@ -1543,7 +1361,6 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
     onAssignLineupSlot,
     onReleaseLineupSlot,
   );
-  const canEditMatch = usesLegacyMatchExtensions && isOwner && !isCompletedMatch && !isScorePending && !isScoreDisputed;
   const canEditDescription = match.backendOwned === true &&
     isOwner &&
     matchHasNotStarted &&
@@ -1551,10 +1368,12 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
     !isScorePending &&
     !isScoreDisputed &&
     typeof onUpdateDescription === 'function';
-  const canInvitePlayers = (
-    usesLegacyMatchExtensions ||
-    usesBackendMatchInvitations
-  ) && isOwner && matchHasNotStarted && !isCompletedMatch && !isScorePending && !isScoreDisputed;
+  const canInvitePlayers = usesBackendMatchInvitations &&
+    isOwner &&
+    matchHasNotStarted &&
+    !isCompletedMatch &&
+    !isScorePending &&
+    !isScoreDisputed;
   const completedScoreText = fmtSetList(savedScore);
   const scoreSubmittedBy = usesBackendMatchResult
     ? backendResult?.submittedByAccountId
@@ -1646,9 +1465,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
     ? invitationActions.has(`decline:${pendingInvitationId}`)
     : false;
   const isActiveWaitlistStatus = ['open', 'searching', 'upcoming', 'confirmed'].includes(status);
-  const canViewWaitlist = (
-    usesLegacyMatchExtensions || usesBackendMatchWaitlist
-  )
+  const canViewWaitlist = usesBackendMatchWaitlist
     && match.type === 'match'
     && match.isPrivate !== true
     && isActiveWaitlistStatus
@@ -2026,19 +1843,15 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
     setWaitlistAction('join');
 
     try {
-      if (usesBackendMatchWaitlist) {
-        const result = await onJoinWaitlist(match.id);
-        if (result?.outcome !== 'waitlist_joined') {
-          throw new Error(`BACKEND_WAITLIST_${result?.reason ?? 'internal_error'}`);
-        }
-      } else {
-        await joinMatchWaitlist(match.id);
+      const result = await onJoinWaitlist(match.id);
+      if (result?.outcome !== 'waitlist_joined') {
+        throw new Error(`BACKEND_WAITLIST_${result?.reason ?? 'internal_error'}`);
       }
       setCapacityUnavailable(true);
       await refreshWaitlist();
       showToast?.('Вы добавлены в лист ожидания', 'success');
     } catch (error) {
-      const code = getWaitlistErrorCode(error);
+      const code = backendWaitlistErrorCode(error);
       if (
         code.includes('WAITLIST_MATCH_HAS_FREE_SLOT') ||
         code.includes('BACKEND_WAITLIST_MATCH_NOT_FULL')
@@ -2087,18 +1900,14 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
     setWaitlistAction('leave');
 
     try {
-      if (usesBackendMatchWaitlist) {
-        const result = await onLeaveWaitlist(match.id);
-        if (result?.outcome !== 'waitlist_left') {
-          throw new Error(`BACKEND_WAITLIST_${result?.reason ?? 'internal_error'}`);
-        }
-      } else {
-        await leaveMatchWaitlist(match.id);
+      const result = await onLeaveWaitlist(match.id);
+      if (result?.outcome !== 'waitlist_left') {
+        throw new Error(`BACKEND_WAITLIST_${result?.reason ?? 'internal_error'}`);
       }
       await refreshWaitlist();
       showToast?.('Вы вышли из листа ожидания', 'info');
     } catch (error) {
-      const code = getWaitlistErrorCode(error);
+      const code = backendWaitlistErrorCode(error);
       if (
         code.includes('WAITLIST_NOT_WAITING') ||
         code.includes('WAITLIST_ALREADY_PARTICIPANT') ||
@@ -2121,34 +1930,6 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
     }
   };
   
-  // Persist slot mutations both locally (instant UI) and up to allMatches (status/participants).
-  const commitSlots = async (nextFilled) => {
-    const updatedMatch = await onSlotsChange?.(match.id, nextFilled);
-    setLocalSlots(updatedMatch?.filledSlots ?? nextFilled);
-    await refreshWaitlist();
-    return updatedMatch;
-  };
-
-  const handleKickConfirm = async () => {
-    try {
-      if (!kickTarget?.id || !onRemoveParticipant) {
-        throw new Error('remove_match_participant RPC handler is not available');
-      }
-      const updatedMatch = await onRemoveParticipant(match.id, kickTarget.id);
-      setLocalSlots(updatedMatch?.filledSlots ?? allFilled);
-      setKickTarget(null);
-      await refreshWaitlist();
-    } catch {
-      // Parent shows the concrete RPC error.
-    }
-  };
-
-  const handleRemoveViewedPlayer = () => {
-    if (!canEditMatch || !viewPlayer || viewPlayer.isOrganizer) return;
-    setKickTarget(viewPlayer);
-    setViewPlayer(null);
-  };
-
   const canLeaveViewedPlayer = !!viewPlayer
     && viewPlayer.id === currentUser.id
     && canLeaveCurrentUser;
@@ -2208,7 +1989,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
   };
 
   // The organizer reserves a slot by invitation; the player is added only after accepting it.
-  const handleAddGuest = async (slotIndex, playerData, options = {}) => {
+  const handleInvitePlayer = async (slotIndex, playerData) => {
     if (slots[slotIndex]) {
       showToast?.('Этот слот уже занят.', 'info');
       return false;
@@ -2221,25 +2002,15 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
 
     const playerRatingIdx = getRatingIndexForPlayer(playerData);
     if (
-      !options.skipLevelWarning &&
       typeof playerData !== 'string' &&
       playerRatingIdx != null &&
       (playerRatingIdx < levelRequirement.minIdx || playerRatingIdx > levelRequirement.maxIdx)
     ) {
-      if (usesBackendMatchInvitations) {
-        showToast?.(
-          'Уровень игрока не входит в диапазон этого матча.',
-          'error',
-        );
-        return false;
-      }
-      const direction = playerRatingIdx < levelRequirement.minIdx ? 'ниже' : 'выше';
-      setLevelOverride({
-        slotIndex,
-        playerData,
-        message: `Уровень игрока ${formatPlayerRating(playerData)} ${direction} диапазона матча ${levelRequirement.numericRangeLabel}. Всё равно пригласить?`,
-      });
-      return true;
+      showToast?.(
+        'Уровень игрока не входит в диапазон этого матча.',
+        'error',
+      );
+      return false;
     }
 
     if (!playerData?.id || !onCreateInvitation) return false;
@@ -2252,165 +2023,84 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
     }
   };
 
-  const handleConfirmLevelOverride = async () => {
-    if (!levelOverride) return;
-    const pending = levelOverride;
-    setLevelOverride(null);
-    await handleAddGuest(pending.slotIndex, pending.playerData, { skipLevelWarning: true });
-  };
-
-  // Owner drops a random available test-bot into an empty slot
-  const usedBotIds = allFilled.filter(p => p?.isBot).map(p => p.id);
-  const availableBots = getAvailableBots(usedBotIds);
-  const availableBotsCount = availableBots.length;
-
-  const handleAddBot = async (slotIndex) => {
-    if (availableBots.length === 0) return;
-    const bot  = availableBots[Math.floor(Math.random() * availableBots.length)];
-    if (requiresVerifiedRating && bot?.isVerified !== true) {
-      showToast?.('Для рейтинговой игры нужен подтверждённый рейтинг участника.', 'error');
-      return;
-    }
-    const next = [...slots];
-    next[slotIndex] = bot;
-    try {
-      await commitSlots(next.filter((player) => player && !player.isPendingInvitation));
-      setTargetSlot(null);
-    } catch {
-      showToast?.('Слот не обновлен. Попробуйте еще раз.', 'error');
-    }
-  };
-
   const handleFinishMatch = () => {
-    if (usesBackendMatchResult) {
-      if (!canSubmitBackendResult) return;
-    } else if (!isFull || isCompletedMatch || isScorePending || isScoreDisputed) {
-      return;
-    }
+    if (!usesBackendMatchResult || !canSubmitBackendResult) return;
     setFinishModal(true);
   };
 
-  const handleFinalize = async ({ team1, team2, score, isTeam1Win }) => {
-    if (usesBackendMatchResult) {
-      if (!canSubmitBackendResult || resultActionRef.current) return;
-      resultActionRef.current = true;
-      setResultAction('submit');
-      try {
-        const sets = score.map(({ t1, t2 }) => ({
-          team1Games: t1,
-          team2Games: t2,
-        }));
-        const result = await onSubmitResult(match.id, sets);
-        if (result?.outcome !== 'result_submitted') {
-          throw new Error(result?.reason ?? 'result_submit_failed');
-        }
-        await Promise.all([refreshResult(), refreshLineup()]);
-        setFinishModal(false);
-        setFinishToast('Счёт отправлен на подтверждение');
-        setTimeout(() => setFinishToast(null), 4000);
-      } catch (error) {
-        showToast?.(backendMatchResultErrorMessage(error?.message), 'error');
-        if (error?.message === 'result_exists') await refreshResult();
-      } finally {
-        resultActionRef.current = false;
-        setResultAction(null);
-      }
-      return;
-    }
-
-    let updatedMatch;
+  const handleFinalize = async ({ score }) => {
+    if (!usesBackendMatchResult || !canSubmitBackendResult || resultActionRef.current) return;
+    resultActionRef.current = true;
+    setResultAction('submit');
     try {
-      updatedMatch = await onComplete?.(match.id, { score, isTeam1Win, team1, team2 });
-      setFinished(updatedMatch?.status === 'completed' || updatedMatch?.status === 'finished');
+      const sets = score.map(({ t1, t2 }) => ({
+        team1Games: t1,
+        team2Games: t2,
+      }));
+      const result = await onSubmitResult(match.id, sets);
+      if (result?.outcome !== 'result_submitted') {
+        throw new Error(result?.reason ?? 'result_submit_failed');
+      }
+      await Promise.all([refreshResult(), refreshLineup()]);
       setFinishModal(false);
-    } catch (error) {
-      const isRatingApprovalError = error?.message === 'Rated match completion requires server-side rating approval';
-      showToast?.(
-        isRatingApprovalError
-          ? 'Рейтинговый матч не завершён: требуется серверное подтверждение рейтинга.'
-          : 'Результат не сохранился. Попробуйте ещё раз.',
-        'error'
-      );
-      return;
-    }
-    const userDelta = updatedMatch?.ratingChanges?.[currentUser.id]?.delta;
-    if (typeof userDelta === 'number') {
-      const sign = userDelta >= 0 ? '+' : '';
-      setFinishToast(`Рейтинг обновлён: ${sign}${userDelta.toFixed(3)}`);
-    } else if (updatedMatch?.scoreStatus === 'pending_confirmation' || updatedMatch?.score_status === 'pending_confirmation') {
       setFinishToast('Счёт отправлен на подтверждение');
-    } else {
-      setFinishToast('Матч завершён');
+      setTimeout(() => setFinishToast(null), 4000);
+    } catch (error) {
+      showToast?.(backendMatchResultErrorMessage(error?.message), 'error');
+      if (error?.message === 'result_exists') await refreshResult();
+    } finally {
+      resultActionRef.current = false;
+      setResultAction(null);
     }
-    setTimeout(() => setFinishToast(null), 4000);
   };
 
   const handleConfirmScore = async () => {
     if (!canConfirmPendingScore) return;
-    if (usesBackendMatchResult) {
-      if (resultActionRef.current) return;
-      resultActionRef.current = true;
-      setResultAction('confirm');
-      try {
-        const result = await onConfirmResult(match.id);
-        if (result?.outcome !== 'result_confirmed') {
-          throw new Error(result?.reason ?? 'result_confirm_failed');
-        }
-        const [, refreshedMatch] = await Promise.all([
-          refreshResult(),
-          onRefreshMatch?.(match.id),
-        ]);
-        if (refreshedMatch?.status === 'completed' || refreshedMatch?.status === 'finished') {
-          setFinished(true);
-        }
-        setFinishToast(null);
-        showToast?.('Счёт подтверждён. Матч завершён.', 'success');
-      } catch (error) {
-        showToast?.(backendMatchResultErrorMessage(error?.message), 'error');
-        await refreshResult();
-      } finally {
-        resultActionRef.current = false;
-        setResultAction(null);
-      }
-      return;
-    }
+    if (!usesBackendMatchResult || resultActionRef.current) return;
+    resultActionRef.current = true;
+    setResultAction('confirm');
     try {
-      const updatedMatch = await onConfirmScore?.(match.id);
-      if (updatedMatch?.status === 'completed' || updatedMatch?.status === 'finished') {
+      const result = await onConfirmResult(match.id);
+      if (result?.outcome !== 'result_confirmed') {
+        throw new Error(result?.reason ?? 'result_confirm_failed');
+      }
+      const [, refreshedMatch] = await Promise.all([
+        refreshResult(),
+        onRefreshMatch?.(match.id),
+      ]);
+      if (refreshedMatch?.status === 'completed' || refreshedMatch?.status === 'finished') {
         setFinished(true);
       }
-    } catch {
-      // Parent already shows the concrete Supabase/RPC error.
+      setFinishToast(null);
+      showToast?.('Счёт подтверждён. Матч завершён.', 'success');
+    } catch (error) {
+      showToast?.(backendMatchResultErrorMessage(error?.message), 'error');
+      await refreshResult();
+    } finally {
+      resultActionRef.current = false;
+      setResultAction(null);
     }
   };
 
   const handleDisputeScore = async () => {
     if (!canDisputePendingScore) return;
-    if (usesBackendMatchResult) {
-      if (resultActionRef.current) return;
-      resultActionRef.current = true;
-      setResultAction('dispute');
-      try {
-        const result = await onDisputeResult(match.id);
-        if (result?.outcome !== 'result_disputed') {
-          throw new Error(result?.reason ?? 'result_dispute_failed');
-        }
-        await refreshResult();
-        setFinishToast(null);
-        showToast?.('Счёт оспорен. Обратитесь к администратору клуба.', 'info');
-      } catch (error) {
-        showToast?.(backendMatchResultErrorMessage(error?.message), 'error');
-        await refreshResult();
-      } finally {
-        resultActionRef.current = false;
-        setResultAction(null);
-      }
-      return;
-    }
+    if (!usesBackendMatchResult || resultActionRef.current) return;
+    resultActionRef.current = true;
+    setResultAction('dispute');
     try {
-      await onDisputeScore?.(match.id);
-    } catch {
-      // Parent already shows the concrete Supabase error.
+      const result = await onDisputeResult(match.id);
+      if (result?.outcome !== 'result_disputed') {
+        throw new Error(result?.reason ?? 'result_dispute_failed');
+      }
+      await refreshResult();
+      setFinishToast(null);
+      showToast?.('Счёт оспорен. Обратитесь к администратору клуба.', 'info');
+    } catch (error) {
+      showToast?.(backendMatchResultErrorMessage(error?.message), 'error');
+      await refreshResult();
+    } finally {
+      resultActionRef.current = false;
+      setResultAction(null);
     }
   };
 
@@ -2491,28 +2181,6 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
     }
   };
 
-  const handleCancelConfirm = async () => {
-    try {
-      await onDelete?.(match.id);   // remove from allMatches in parent
-      setCancelSheet(false);
-      setCancelled(true);
-      setTimeout(() => onBack?.(), 1800);
-    } catch {
-      setCancelSheet(false);
-      showToast?.('Матч не отменен. Попробуйте еще раз.', 'error');
-    }
-  };
-
-  // ── Cancelled state ───────────────────────────────────────────────────────
-  if (cancelled) {
-    return (
-      <div style={{ background: C.bg, minHeight: '100dvh', overflowY: 'auto', WebkitOverflowScrolling: 'touch', touchAction: 'pan-y', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '40px 24px', textAlign: 'center' }}>
-        <div style={{ color: C.text, fontWeight: 700, fontSize: '20px', marginBottom: '8px' }}>Игра отменена</div>
-        <div style={{ color: C.muted, fontSize: '14px' }}>Матч больше не отображается в ваших активных играх</div>
-      </div>
-    );
-  }
-
   return (
     <div style={{ background: C.bg, minHeight: '100dvh', maxHeight: '100dvh', overflowY: 'auto', overflowX: 'hidden', WebkitOverflowScrolling: 'touch', touchAction: 'pan-y', paddingBottom: 'calc(132px + env(safe-area-inset-bottom, 0px))' }}>
 
@@ -2552,24 +2220,17 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
       </div>
 
       {/* ── Owner action bar ───────────────────────────────────────────────── */}
-      {(canEditMatch || canEditDescription) && (
+      {canEditDescription && (
         <div style={{ padding: '12px 16px', display: 'flex', gap: '8px', borderBottom: `1px solid ${C.border}`, background: 'rgba(216,243,74,0.04)' }}>
-          {canEditDescription && (
-            <PadelButton
-              data-testid="match-description-edit-open"
-              variant="dark"
-              size="md"
-              fullWidth={!canEditMatch}
-              onClick={() => setEditDescription(true)}
-            >
-              Редактировать комментарий
-            </PadelButton>
-          )}
-          {canEditMatch && (
-            <PadelButton variant="danger" size="md" fullWidth onClick={() => setCancelSheet(true)}>
-              Отменить игру
-            </PadelButton>
-          )}
+          <PadelButton
+            data-testid="match-description-edit-open"
+            variant="dark"
+            size="md"
+            fullWidth
+            onClick={() => setEditDescription(true)}
+          >
+            Редактировать комментарий
+          </PadelButton>
         </div>
       )}
 
@@ -2873,7 +2534,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
               size="lg"
               fullWidth
               disabled={
-                !usesLegacyMatchExtensions ||
+                !usesBackendMatchResult ||
                 !isFull ||
                 isCompletedMatch
               }
@@ -2947,17 +2608,10 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
         <PlayerMiniProfile
           player={viewPlayer}
           onClose={() => setViewPlayer(null)}
-          onRemove={
-            canEditMatch && !viewPlayer.isOrganizer
-              ? handleRemoveViewedPlayer
-              : canLeaveViewedPlayer
-                ? handleLeaveViewedPlayer
-                : null
-          }
-          removeLabel={canLeaveViewedPlayer ? 'Выйти из матча' : 'Убрать из матча'}
+          onRemove={canLeaveViewedPlayer ? handleLeaveViewedPlayer : null}
+          removeLabel="Выйти из матча"
         />
       )}
-      {cancelSheet && canEditMatch && <CancelSheet onConfirm={handleCancelConfirm} onClose={() => setCancelSheet(false)} />}
       {editDescription && canEditDescription && (
         <DescriptionEditPanel
           initialValue={description}
@@ -2968,19 +2622,11 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
           }}
         />
       )}
-      {kickTarget  && canEditMatch && <KickConfirm player={kickTarget} onConfirm={handleKickConfirm} onCancel={() => setKickTarget(null)} />}
       {leaveTarget && (
         <LeaveConfirm
           busy={leaving}
           onConfirm={handleLeaveConfirm}
           onCancel={() => setLeaveTarget(null)}
-        />
-      )}
-      {levelOverride && canInvitePlayers && (
-        <LevelOverrideConfirm
-          message={levelOverride.message}
-          onConfirm={handleConfirmLevelOverride}
-          onCancel={() => setLevelOverride(null)}
         />
       )}
       {canUseChat && chatOpen && (
@@ -3003,16 +2649,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
           slotIndex={targetSlot}
           isOwner={isOwner}
           currentUser={currentUser}
-          matchId={match.id}
-          slots={slots} // <-- ВОТ ОНА, САМАЯ ГЛАВНАЯ СТРОКА! Передаем массив слотов родителя
-          onAddGuest={handleAddGuest}
-          onAddBot={handleAddBot}
-          availableBotsCount={
-            usesLegacyMatchExtensions &&
-            currentUser?.role === 'admin'
-              ? availableBotsCount
-              : 0
-          }
+          onInvitePlayer={handleInvitePlayer}
           onTakeSlot={handleTakeSlot}
           onSearchPlayers={onSearchPlayers}
           showToast={showToast}

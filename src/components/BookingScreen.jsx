@@ -1,8 +1,8 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { CalendarDays, Clock3, LockKeyhole, X } from 'lucide-react';
 import PullToRefresh from './PullToRefresh';
-import { BOOKING_DURATIONS, COURTS, WORKING_HOURS, checkAvailability, fromMin } from '../lib/booking';
+import { BOOKING_DURATIONS, WORKING_HOURS, fromMin } from '../lib/booking';
 import { getBackendBookingStatusPresentation } from '../lib/backendBookingHomeAdapter';
 import { getMoscowDateRange, hasMoscowSlotStarted } from '../lib/moscowDateTime';
 import {
@@ -170,7 +170,7 @@ function mergeCourts(results) {
       if (!courtsById.has(court.id)) {
         courtsById.set(court.id, {
           ...court,
-          type: COURTS[0]?.type ?? 'panoramic',
+          type: 'panoramic',
         });
       }
     }
@@ -229,7 +229,6 @@ function normalizeBookingClient(value) {
 }
 
 export default function BookingScreen({
-  allMatches = [],
   availabilityActions = null,
   bookingClient = null,
   initialReservationId = null,
@@ -239,7 +238,6 @@ export default function BookingScreen({
   courtNamesById = {},
   onCourtCatalogChange = null,
   onOpenProfile = null,
-  onBookSlot,
   showToast,
 }) {
   const dates = useMemo(() => buildDates(14), []);
@@ -732,36 +730,8 @@ export default function BookingScreen({
   ]);
 
   const selectedDate = dates.find((item) => item.dateISO === selectedDateISO) ?? dates[0];
-  const displayedCourts = usesBackendAvailability ? backendCourts : COURTS;
-  const localAvailabilityOptions = useMemo(() => {
-    if (usesBackendAvailability) return [];
-    const candidates = courtId === ANY_COURT
-      ? COURTS
-      : COURTS.filter((court) => court.id === courtId);
-    return PRIVATE_BOOKING_DURATIONS.flatMap((optionDuration) =>
-      times.flatMap(({ time, minute }) =>
-        candidates.flatMap((court) => (
-          checkAvailability(
-            allMatches,
-            court.id,
-            selectedDateISO,
-            time,
-            optionDuration,
-          )
-            ? [{
-                time,
-                startMinute: minute,
-                duration: optionDuration,
-                durationSlots: optionDuration * 2,
-                court,
-              }]
-            : []
-        ))),
-    );
-  }, [allMatches, courtId, selectedDateISO, times, usesBackendAvailability]);
-  const availabilityOptions = useMemo(() => (
-    usesBackendAvailability ? backendTimeSlots : localAvailabilityOptions
-  ), [backendTimeSlots, localAvailabilityOptions, usesBackendAvailability]);
+  const displayedCourts = backendCourts;
+  const availabilityOptions = backendTimeSlots;
   const selectedOption = selectedRange?.slotCount >= MIN_PRIVATE_BOOKING_SLOTS
     ? findPrivateBookingRangeOption(availabilityOptions, selectedRange, {
         exact: true,
@@ -857,7 +827,6 @@ export default function BookingScreen({
       } : current);
     }
   }, [
-    allMatches,
     availabilityOptions,
     backendTimeSlots,
     courtId,
@@ -953,13 +922,14 @@ export default function BookingScreen({
     }
     if (!selectedOption || !selectedRange || isSavingRef.current) return;
 
-    const isPublicFormat = false;
-
     isSavingRef.current = true;
     setIsSaving(true);
     try {
-      if (usesBackendAvailability) {
-        const requestKey = createRequestKey();
+      if (!usesBackendAvailability) {
+        showToast?.('Сервис бронирования временно недоступен.', 'error');
+        return;
+      }
+      const requestKey = createRequestKey();
         if (
           normalizedBookingClient === null ||
           requestKey === null ||
@@ -1036,31 +1006,6 @@ export default function BookingScreen({
           'error',
         );
         return;
-      }
-
-      await onBookSlot?.({
-        court: selectedOption.court,
-        time: selectedStartTime,
-        dateISO: selectedDateISO,
-        duration,
-        type: 'private',
-        isPrivate: true,
-        scenario: 'private',
-        paymentStatus: isPublicFormat ? 'partial' : 'full',
-        isRatingMatch: false,
-        is_rating_match: false,
-        ratingMin: 0,
-        ratingMax: 6,
-        description: 'Частная бронь корта',
-        total: totalPrice,
-        pricePerPerson: perPlayerPrice,
-      });
-
-      const message = 'Бронь создана. Оплата сейчас подтверждается через администратора клуба.';
-      setSuccessText(message);
-      setSelectedRange(null);
-      setIsBookingSheetOpen(false);
-      alignBookingScreenAfterCreate();
     } catch (error) {
       console.error(error);
     } finally {

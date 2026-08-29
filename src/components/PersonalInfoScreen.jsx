@@ -1,6 +1,5 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTelegram } from '../hooks/useTelegram';
-import { updateMyProfile } from '../lib/profileApi';
 import { ProfilePhotoManager } from './PlayerProfile';
 
 const C = {
@@ -118,7 +117,6 @@ export default function PersonalInfoScreen({
   user,
   onBack,
   showToast,
-  onProfileSaved,
   onBackendProfileSave,
   onPhotoUpload,
   onPhotoDelete,
@@ -144,9 +142,7 @@ export default function PersonalInfoScreen({
   }, [tg, onBack]);
 
   const handleSave = async () => {
-    const usesBackendProfile =
-      typeof onBackendProfileSave === 'function';
-    if (!usesBackendProfile && !user?.id) {
+    if (typeof onBackendProfileSave !== 'function') {
       const message = 'Не удалось определить профиль. Войдите заново и попробуйте еще раз.';
       setSaveError(message);
       showToast?.(message, 'error');
@@ -157,37 +153,17 @@ export default function PersonalInfoScreen({
     setSaveError('');
 
     try {
-      if (usesBackendProfile) {
-        const result = await onBackendProfileSave({
-          firstName: firstName.trim(),
-          lastName: lastName.trim() || null,
-          phone: normalizePhone(phone),
-          sidePreference: preferredSide,
-        });
-        if (result?.outcome !== 'profile_updated') {
-          if (result?.reason === 'content_not_allowed') {
-            throw new Error('PROFILE_CONTENT_NOT_ALLOWED');
-          }
-          throw new Error('Backend profile update was not persisted');
+      const result = await onBackendProfileSave({
+        firstName: firstName.trim(),
+        lastName: lastName.trim() || null,
+        phone: normalizePhone(phone),
+        sidePreference: preferredSide,
+      });
+      if (result?.outcome !== 'profile_updated') {
+        if (result?.reason === 'content_not_allowed') {
+          throw new Error('PROFILE_CONTENT_NOT_ALLOWED');
         }
-      } else {
-        const payload = {
-          first_name: firstName.trim(),
-          last_name: lastName.trim(),
-          phone: phone.trim(),
-          side_preference: preferredSide,
-        };
-
-        const data = await updateMyProfile(payload);
-        if (
-          data.first_name !== payload.first_name ||
-          data.last_name !== payload.last_name ||
-          (data.phone || '') !== payload.phone ||
-          (data.side_preference || 'Both') !== payload.side_preference
-        ) {
-          throw new Error('Profile update was not persisted');
-        }
-        onProfileSaved?.(data);
+        throw new Error('Backend profile update was not persisted');
       }
       showToast?.('Профиль сохранен', 'success');
       onBack?.();

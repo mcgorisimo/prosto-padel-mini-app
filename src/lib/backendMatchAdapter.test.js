@@ -4,6 +4,7 @@ import {
   mergeAccountUpcomingMatches,
   preferConfirmedBackendMatchMutation,
   resolveBackendMatchMode,
+  resolveMatchSource,
   selectBackendAccountMatches,
   selectFutureBackendMatches,
   shouldApplyBackendMatchFeedResponse,
@@ -33,20 +34,20 @@ function backendMatch(overrides = {}) {
 
 describe('backend match adapter', () => {
   it.each([
-    [{ backendRequired: false }, 'legacy'],
-    [{ backendRequired: true, hasBackendActions: false }, 'loading'],
-    [{ backendRequired: true, hasBackendActions: false, profileStatus: 'error' }, 'error'],
-    [{ backendRequired: true, hasBackendActions: true, profileStatus: 'ready', accountId }, 'ready'],
-    [{ backendRequired: true, hasBackendActions: true, profileStatus: 'error' }, 'error'],
+    [{ hasBackendActions: false }, 'loading'],
+    [{ hasBackendActions: false, profileStatus: 'error' }, 'error'],
+    [{ hasBackendActions: true, profileStatus: 'ready', accountId }, 'ready'],
+    [{ hasBackendActions: true, profileStatus: 'error' }, 'error'],
   ])('resolves the backend mode fail-closed', (partial, expected) => {
-    expect(resolveBackendMatchMode({
-      backendRequired: true,
-      hasBackendActions: false,
-      lifecycleStatus: 'idle',
-      profileStatus: 'idle',
-      accountId: null,
-      ...partial,
-    })).toBe(expected);
+    expect(
+      resolveBackendMatchMode({
+        hasBackendActions: false,
+        lifecycleStatus: 'idle',
+        profileStatus: 'idle',
+        accountId: null,
+        ...partial,
+      }),
+    ).toBe(expected);
   });
 
   it('accepts only the currently owned feed response', () => {
@@ -78,26 +79,38 @@ describe('backend match adapter', () => {
       slotIndex: 1,
       isOrganizer: false,
     });
-    expect(applyBackendParticipantResult(
-      backendMatch(),
-      { matchId: 'wrong', playerId: otherAccountId, slotNumber: 2, status: 'active', matchVersion: 5 },
-      { id: otherAccountId },
-    )).toBeNull();
+    expect(
+      applyBackendParticipantResult(
+        backendMatch(),
+        {
+          matchId: 'wrong',
+          playerId: otherAccountId,
+          slotNumber: 2,
+          status: 'active',
+          matchVersion: 5,
+        },
+        { id: otherAccountId },
+      ),
+    ).toBeNull();
   });
 
   it('never replaces a newer confirmed mutation with stale refresh data', () => {
     const confirmed = backendMatch({ version: 8 });
-    expect(preferConfirmedBackendMatchMutation(
-      confirmed,
-      backendMatch({ version: 7, title: 'stale' }),
-    )).toBe(confirmed);
-    expect(preferConfirmedBackendMatchMutation(
-      confirmed,
-      backendMatch({ version: 9, title: 'fresh' }),
-    )).toMatchObject({ version: 9, title: 'fresh' });
+    expect(
+      preferConfirmedBackendMatchMutation(
+        confirmed,
+        backendMatch({ version: 7, title: 'stale' }),
+      ),
+    ).toBe(confirmed);
+    expect(
+      preferConfirmedBackendMatchMutation(
+        confirmed,
+        backendMatch({ version: 9, title: 'fresh' }),
+      ),
+    ).toMatchObject({ version: 9, title: 'fresh' });
   });
 
-  it('selects future account matches and preserves legacy ordering on merge', () => {
+  it('selects only future backend account matches', () => {
     const owned = backendMatch();
     const participating = backendMatch({
       id: '44444444-4444-4444-8444-444444444444',
@@ -115,20 +128,25 @@ describe('backend match adapter', () => {
       startsAt: 900,
     });
 
-    expect(selectFutureBackendMatches(
-      [owned, participating, privateOther, past],
-      1_000,
-    )).toHaveLength(3);
-    expect(selectBackendAccountMatches(
-      [owned, participating, privateOther, past],
-      accountId,
-      1_000,
-    )).toEqual([owned, participating]);
-    expect(mergeAccountUpcomingMatches(
-      [{ id: 'legacy' }],
-      [owned],
-      accountId,
-      1_000,
-    )).toEqual([{ id: 'legacy' }, owned]);
+    expect(
+      selectFutureBackendMatches(
+        [owned, participating, privateOther, past],
+        1_000,
+      ),
+    ).toHaveLength(3);
+    expect(
+      selectBackendAccountMatches(
+        [owned, participating, privateOther, past],
+        accountId,
+        1_000,
+      ),
+    ).toEqual([owned, participating]);
+    expect(mergeAccountUpcomingMatches([owned], accountId, 1_000)).toEqual([
+      owned,
+    ]);
+    expect(resolveMatchSource(owned.id, null, [owned])).toBe(owned);
+    expect(
+      resolveMatchSource('77777777-7777-4777-8777-777777777777', null, [owned]),
+    ).toBeNull();
   });
 });

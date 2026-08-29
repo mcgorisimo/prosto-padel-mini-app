@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ChevronRight, User, Shield, Lock, UserCog } from 'lucide-react';
 import { useTelegram } from '../hooks/useTelegram';
 import PersonalInfoScreen from './PersonalInfoScreen';
@@ -52,7 +52,7 @@ function SettingsRow({ icon: Icon, label, onClick, isLast }) {
   );
 }
 
-export default function EditProfileScreen({ user, onBack, showToast, onProfileSaved, onBackendProfileSave, onPhotoUpload, onPhotoDelete, onLogout }) {
+export default function EditProfileScreen({ user, onBack, showToast, onBackendProfileSave, onPhotoUpload, onPhotoDelete, onLogout }) {
   const { tg } = useTelegram();
   const [subScreen, setSubScreen] = useState(null);
 
@@ -80,7 +80,6 @@ export default function EditProfileScreen({ user, onBack, showToast, onProfileSa
         user={user}
         onBack={() => setSubScreen(null)}
         showToast={showToast}
-        onProfileSaved={onProfileSaved}
         onBackendProfileSave={onBackendProfileSave}
         onPhotoUpload={onPhotoUpload}
         onPhotoDelete={onPhotoDelete}

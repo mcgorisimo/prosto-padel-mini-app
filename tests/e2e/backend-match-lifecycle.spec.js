@@ -35,48 +35,18 @@ test.beforeEach(async ({ page }) => {
 });
 
 test.describe('backend match credential lifecycle', () => {
-  test('legacy data boundary fails before any network request', async ({
+  test('runtime never requests a Supabase endpoint', async ({
     page,
   }) => {
-    await page.goto('/');
-
-    const summary = await page.evaluate(async () => {
-      const { supabase } = await import('/src/lib/supabaseClient.js');
-      const operations = [
-        () => supabase.from('matches'),
-        () => supabase.rpc('join_match'),
-        () => supabase.channel('public:matches'),
-        () => supabase.removeChannel({}),
-        () => supabase.auth.getSession(),
-        () => supabase.auth.onAuthStateChange(() => {}),
-        () => supabase.auth.signInWithPassword({}),
-        () => supabase.auth.signOut(),
-        () => supabase.auth.signUp({}),
-      ];
-      const errors = operations.map((operation) => {
-        try {
-          operation();
-          return null;
-        } catch (error) {
-          return error instanceof Error ? error.message : String(error);
-        }
-      });
-
-      return {
-        errors,
-        hasNetworkConfiguration:
-          Object.prototype.hasOwnProperty.call(supabase, 'supabaseUrl') ||
-          Object.prototype.hasOwnProperty.call(supabase, 'url') ||
-          Object.prototype.hasOwnProperty.call(supabase, 'fetch'),
-      };
+    const forbiddenRequests = [];
+    page.on('request', (request) => {
+      if (/supabase\.co|\/rest\/v1|\/auth\/v1|realtime\/v1/iu.test(request.url())) {
+        forbiddenRequests.push(request.url());
+      }
     });
-
-    expect(summary.hasNetworkConfiguration).toBe(false);
-    expect(summary.errors).toHaveLength(9);
-    expect(summary.errors.every((message) =>
-      message ===
-        'Legacy data runtime is unavailable; use the bearer-protected backend API',
-    )).toBe(true);
+    await page.goto('/');
+    await page.waitForTimeout(250);
+    expect(forbiddenRequests).toEqual([]);
   });
 
   test('uses exact no-store contracts for public/account feeds, detail, create, join and leave', async ({
@@ -281,10 +251,13 @@ test.describe('backend match credential lifecycle', () => {
         participants: _feedParticipants,
         ...legacyFeed
       } = feed;
+      void _feedOwner;
+      void _feedParticipants;
       const {
         owner: _detailOwner,
         ...legacyDetailBase
       } = detail;
+      void _detailOwner;
       const legacyDetail = {
         ...legacyDetailBase,
         participants: detail.participants.map(
@@ -2616,7 +2589,6 @@ test.describe('backend match credential lifecycle', () => {
       const root = createRoot(container);
       root.render(React.createElement(App, {
         backendProfile,
-        backendMatchRequired: true,
         backendMatchLifecycleStatus: 'authenticated',
         backendProfileStatus: 'ready',
         backendMatchActions,
@@ -2669,9 +2641,6 @@ test.describe('backend match credential lifecycle', () => {
       const {
         mapBackendMatchMessageToApp,
       } = await import('/src/lib/backendMatchAdapter.js');
-      const {
-        shouldUseLegacyMatchMessages,
-      } = await import('/src/App.jsx');
       const calls = [];
       const activeSender = {
         playerId: parameters.accountId,
@@ -2821,20 +2790,6 @@ test.describe('backend match credential lifecycle', () => {
           !/playerId|firstName|lastName|username|rating|phone|email/iu.test(
             JSON.stringify(first.messages[1].sender),
           ),
-        providerBoundary: {
-          backendSkipsSupabase:
-            !shouldUseLegacyMatchMessages(
-              { backendOwned: true },
-              true,
-            ),
-          legacyPrivatePreservedInBackendMode:
-            shouldUseLegacyMatchMessages(
-              { backendOwned: false, isPrivate: true },
-              true,
-            ),
-          legacyPreserved:
-            shouldUseLegacyMatchMessages(null, false),
-        },
         sensitiveAbsent:
           !JSON.stringify({
             first,
@@ -2914,11 +2869,6 @@ test.describe('backend match credential lifecycle', () => {
     expect(summary.invalidRejectedLocally).toBe(true);
     expect(summary.unavailableProjectionPiiFree).toBe(true);
     expect(summary.malformedUnavailableSenderRejected).toBe(true);
-    expect(summary.providerBoundary).toEqual({
-      backendSkipsSupabase: true,
-      legacyPrivatePreservedInBackendMode: true,
-      legacyPreserved: true,
-    });
     expect(summary.sensitiveAbsent).toBe(true);
   });
 
@@ -3747,18 +3697,11 @@ test.describe('backend match credential lifecycle', () => {
       const reactDomClientModule = await import('/@id/react-dom/client');
       const { createRoot } =
         reactDomClientModule.default ?? reactDomClientModule;
-      const { supabase } = await import('/src/lib/supabaseClient.js');
       const { default: App } = await import('/src/App.jsx');
       const { createBackendMatchActions } = await import(
         '/src/components/AuthGate.jsx'
       );
 
-      const originalSupabase = {
-        rpc: supabase.rpc,
-        from: supabase.from,
-        channel: supabase.channel,
-        removeChannel: supabase.removeChannel,
-      };
       const nativeSetTimeout = window.setTimeout.bind(window);
       const nativeClearTimeout = window.clearTimeout.bind(window);
       const trackedTimers = new Set();
@@ -3775,66 +3718,6 @@ test.describe('backend match credential lifecycle', () => {
         trackedTimers.delete(timeoutId);
         nativeClearTimeout(timeoutId);
       };
-
-      const legacyUserId =
-        '99999999-9999-4999-8999-999999999999';
-      const legacyBooking = {
-        id: 'legacy-private-booking',
-        owner_id: legacyUserId,
-        participants: [legacyUserId],
-        filled_slots: [],
-        type: 'private',
-        isPrivate: true,
-        status: 'upcoming',
-        title: 'Legacy private booking',
-        description: 'Legacy private booking comment',
-        date_iso: '2035-01-02',
-        time: '10:00',
-        duration: 1.5,
-        court_id: 'legacy-court',
-        court_name: 'Legacy court',
-        court_type: 'indoor',
-        price_per_person: 0,
-      };
-      const query = {
-        select() {
-          return this;
-        },
-        order() {
-          return Promise.resolve({
-            data: [legacyBooking],
-            error: null,
-          });
-        },
-      };
-      window.__legacyMatchReads = 0;
-      supabase.from = () => {
-        window.__legacyMatchReads += 1;
-        return query;
-      };
-      window.__legacyProfileCalls = 0;
-      supabase.rpc = async (name) => {
-        if (name === 'get_my_profile') {
-          window.__legacyProfileCalls += 1;
-          throw new Error('SUPABASE_PROFILE_MUST_NOT_LOAD_IN_BACKEND_MODE');
-        }
-        if (name === 'get_unread_notification_count') {
-          return { data: 0, error: null };
-        }
-        return { data: [], error: null };
-      };
-      supabase.channel = () => {
-        const channel = {
-          on() {
-            return channel;
-          },
-          subscribe() {
-            return channel;
-          },
-        };
-        return channel;
-      };
-      supabase.removeChannel = () => {};
 
       const owner = {
         playerId: parameters.accountId,
@@ -4039,7 +3922,6 @@ test.describe('backend match credential lifecycle', () => {
           isVerified: true,
           role: 'player',
         },
-        backendMatchRequired: true,
         backendMatchLifecycleStatus: 'authenticated',
         backendProfileStatus: 'ready',
         backendMatchActions,
@@ -4056,10 +3938,6 @@ test.describe('backend match credential lifecycle', () => {
       window.__backendHomeUnmount = () => {
         root.unmount();
         container.remove();
-        supabase.rpc = originalSupabase.rpc;
-        supabase.from = originalSupabase.from;
-        supabase.channel = originalSupabase.channel;
-        supabase.removeChannel = originalSupabase.removeChannel;
         window.setTimeout = nativeSetTimeout;
         window.clearTimeout = nativeClearTimeout;
       };
@@ -4077,11 +3955,6 @@ test.describe('backend match credential lifecycle', () => {
     await expect(
       harness.getByText('Participant account match comment').first(),
     ).toBeVisible();
-    await expect(
-      harness.getByText('Legacy private booking comment'),
-    ).toHaveCount(0);
-    expect(await page.evaluate(() => window.__legacyProfileCalls)).toBe(0);
-    expect(await page.evaluate(() => window.__legacyMatchReads)).toBe(0);
     await expect(
       harness.getByText('Public-only unrelated match comment'),
     ).toHaveCount(0);
@@ -4257,52 +4130,34 @@ test.describe('backend match credential lifecycle', () => {
       const { resolveOwnProfileGate } = await import(
         '/src/components/AuthGate.jsx'
       );
-      const { mergeProfileSources } = await import('/src/App.jsx');
-      const backendWithoutRating = mergeProfileSources(
-        {
-          first_name: 'Legacy',
-          rating: 1.5,
-          is_verified: true,
-        },
-        {
-          firstName: 'Backend',
-          lastName: 'Player',
-          username: 'backend_player',
-        },
-      );
+      const { mapBackendProfileToCurrentUser } = await import('/src/App.jsx');
+      const backendWithoutRating = mapBackendProfileToCurrentUser({
+        firstName: 'Backend',
+        lastName: 'Player',
+        username: 'backend_player',
+      });
       return {
-        legacy: resolveOwnProfileGate({
-          backendRequired: false,
-          sessionReady: false,
-          profileStatus: 'inactive',
-          hasProfile: false,
-        }),
         loginPending: resolveOwnProfileGate({
-          backendRequired: true,
           sessionReady: false,
           profileStatus: 'inactive',
           hasProfile: false,
         }),
         profilePending: resolveOwnProfileGate({
-          backendRequired: true,
           sessionReady: true,
           profileStatus: 'loading',
           hasProfile: false,
         }),
         profileRejected: resolveOwnProfileGate({
-          backendRequired: true,
           sessionReady: true,
           profileStatus: 'error',
           hasProfile: false,
         }),
         profileMissing: resolveOwnProfileGate({
-          backendRequired: true,
           sessionReady: true,
           profileStatus: 'ready',
           hasProfile: false,
         }),
         ready: resolveOwnProfileGate({
-          backendRequired: true,
           sessionReady: true,
           profileStatus: 'ready',
           hasProfile: true,
@@ -4316,7 +4171,6 @@ test.describe('backend match credential lifecycle', () => {
     });
 
     expect(states).toEqual({
-      legacy: 'legacy',
       loginPending: 'loading',
       profilePending: 'loading',
       profileRejected: 'error',
@@ -4364,10 +4218,8 @@ test.describe('backend match credential lifecycle', () => {
         resolvePaidCourtCheckoutEntry,
       } = await import('/src/lib/paidCourtCheckout.js');
       const {
-         refreshLegacyMatchWaitlist,
-         supportsMatchChat,
-         tryBeginMatchAction,
-        supportsLegacyMatchExtensions,
+        supportsMatchChat,
+        tryBeginMatchAction,
       } = await import('/src/components/MatchDetailsScreen.jsx');
       const draft = createBackendMatchDraft({
         dateISO: '2030-01-02',
@@ -4476,6 +4328,8 @@ test.describe('backend match credential lifecycle', () => {
         participants: _legacyParticipants,
         ...legacyFeedRecord
       } = detailRecord;
+      void _legacyOwner;
+      void _legacyParticipants;
       const legacyFeedMatch = mapBackendMatchToApp(
         {
           ...legacyFeedRecord,
@@ -4543,7 +4397,6 @@ test.describe('backend match credential lifecycle', () => {
         draft.startsAt - 1,
       );
       const mergedUpcomingMatches = mergeAccountUpcomingMatches(
-        [{ id: 'legacy-private-booking', type: 'private' }],
         [match, exactStartMatch, unrelatedMatch, participantMatch],
         parameters.accountId,
         draft.startsAt - 1,
@@ -4637,42 +4490,17 @@ test.describe('backend match credential lifecycle', () => {
       const secondLeaveStarted = tryBeginMatchAction(leaveActionRef);
       leaveActionRef.current = false;
       const laterLeaveStarted = tryBeginMatchAction(leaveActionRef);
-      let backendWaitlistCalls = 0;
-      let legacyWaitlistCalls = 0;
-      await refreshLegacyMatchWaitlist(match, () => {
-        backendWaitlistCalls += 1;
-      });
-      await refreshLegacyMatchWaitlist(
-        { backendOwned: false },
-        () => {
-          legacyWaitlistCalls += 1;
-          return 'legacy-refreshed';
-        },
-      );
-
       return {
         draft,
         routing: {
-          backendSelectedWithLegacyCollision:
+          explicitBackendSelected:
             isBackendOwnedMatch(resolveMatchSource(
               parameters.matchId,
               match,
               [],
-              [{
-                id: parameters.matchId,
-                backendOwned: false,
-              }],
             )),
-          legacySelectedWhileBackendAvailable:
-            !isBackendOwnedMatch(resolveMatchSource(
-              'legacy-match',
-              {
-                id: 'legacy-match',
-                backendOwned: false,
-              },
-              [match],
-              [],
-            )),
+          unknownMatchRejected:
+            resolveMatchSource('unknown-match', null, [match]) === null,
           matchingDetailApplies:
             shouldApplyBackendMatchDetail(
               match,
@@ -4699,7 +4527,6 @@ test.describe('backend match credential lifecycle', () => {
             ),
           backendProfileLoadingDoesNotFallBack:
             resolveBackendMatchMode({
-              backendRequired: true,
               hasBackendActions: true,
               lifecycleStatus: 'checking',
               profileStatus: 'loading',
@@ -4707,7 +4534,6 @@ test.describe('backend match credential lifecycle', () => {
             }) === 'loading',
           backendProfileErrorDoesNotFallBack:
             resolveBackendMatchMode({
-              backendRequired: true,
               hasBackendActions: true,
               lifecycleStatus: 'session_restored',
               profileStatus: 'error',
@@ -4715,7 +4541,6 @@ test.describe('backend match credential lifecycle', () => {
             }) === 'error',
           backendProfileReady:
             resolveBackendMatchMode({
-              backendRequired: true,
               hasBackendActions: true,
               lifecycleStatus: 'session_restored',
               profileStatus: 'ready',
@@ -4723,7 +4548,6 @@ test.describe('backend match credential lifecycle', () => {
             }) === 'ready',
           backendBootstrapDoesNotFallBack:
             resolveBackendMatchMode({
-              backendRequired: true,
               hasBackendActions: false,
               lifecycleStatus: 'checking',
               profileStatus: 'inactive',
@@ -4731,20 +4555,18 @@ test.describe('backend match credential lifecycle', () => {
             }) === 'loading',
           invalidBackendSessionDoesNotFallBack:
             resolveBackendMatchMode({
-              backendRequired: true,
               hasBackendActions: false,
               lifecycleStatus: 'idle',
               profileStatus: 'error',
               accountId: null,
             }) === 'error',
-          legacyWithoutBackendActions:
+          missingBackendActionsFailsClosed:
             resolveBackendMatchMode({
-              backendRequired: false,
               hasBackendActions: false,
               lifecycleStatus: 'disabled',
               profileStatus: 'inactive',
               accountId: null,
-            }) === 'legacy',
+            }) === 'loading',
           staleFeedRejected:
             !shouldApplyBackendMatchFeedResponse(2, 1),
           latestFeedApplied:
@@ -4796,10 +4618,6 @@ test.describe('backend match credential lifecycle', () => {
           secondLeaveBlocked: !secondLeaveStarted,
           laterLeaveStarted,
         },
-        waitlistBoundary: {
-          backendWaitlistCalls,
-          legacyWaitlistCalls,
-        },
         privateCreation: {
           backendCapability:
             BACKEND_PRIVATE_MATCH_CREATION_ENABLED,
@@ -4833,16 +4651,10 @@ test.describe('backend match credential lifecycle', () => {
           hiddenForConfirmed: resolvePaidCourtCheckoutEntry(confirmedMatch),
           message: YOOKASSA_COURT_CHECKOUT_PENDING_MESSAGE,
         },
-         legacyExtensions: {
-           backendPinnedMessageHidden:
-             !supportsLegacyMatchExtensions(match),
-           legacyPinnedMessagePreserved:
-             supportsLegacyMatchExtensions({ backendOwned: false }),
-           backendChatEnabled:
-             supportsMatchChat(true, () => {}, () => {}),
-           backendChatFailsClosedWithoutBoundary:
-             !supportsMatchChat(true, null, () => {}),
-         },
+        backendChatBoundary: {
+          enabled: supportsMatchChat(true, () => {}, () => {}),
+          failsClosedWithoutBoundary: !supportsMatchChat(true, null, () => {}),
+        },
         match: {
           id: match.id,
           ownerId: match.ownerId,
@@ -4977,7 +4789,6 @@ test.describe('backend match credential lifecycle', () => {
         'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
       ],
       mergedIds: [
-        'legacy-private-booking',
         MATCH_ID,
         'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
       ],
@@ -4986,8 +4797,8 @@ test.describe('backend match credential lifecycle', () => {
       unrelatedExcluded: true,
     });
     expect(summary.routing).toEqual({
-      backendSelectedWithLegacyCollision: true,
-      legacySelectedWhileBackendAvailable: true,
+      explicitBackendSelected: true,
+      unknownMatchRejected: true,
       matchingDetailApplies: true,
       staleDetailRejected: true,
       olderSameMatchDetailRejected: true,
@@ -4996,7 +4807,7 @@ test.describe('backend match credential lifecycle', () => {
       backendProfileReady: true,
       backendBootstrapDoesNotFallBack: true,
       invalidBackendSessionDoesNotFallBack: true,
-      legacyWithoutBackendActions: true,
+      missingBackendActionsFailsClosed: true,
       staleFeedRejected: true,
       latestFeedApplied: true,
     });
@@ -5012,10 +4823,6 @@ test.describe('backend match credential lifecycle', () => {
       firstLeaveStarted: true,
       secondLeaveBlocked: true,
       laterLeaveStarted: true,
-    });
-    expect(summary.waitlistBoundary).toEqual({
-      backendWaitlistCalls: 0,
-      legacyWaitlistCalls: 1,
     });
     expect(summary.privateCreation).toEqual({
       backendCapability: false,
@@ -5055,11 +4862,9 @@ test.describe('backend match credential lifecycle', () => {
       },
       message: 'Оплата корта через ЮKassa подключается. Бронь без оплаты не создаётся.',
     });
-    expect(summary.legacyExtensions).toEqual({
-      backendPinnedMessageHidden: true,
-      legacyPinnedMessagePreserved: true,
-      backendChatEnabled: true,
-      backendChatFailsClosedWithoutBoundary: true,
+    expect(summary.backendChatBoundary).toEqual({
+      enabled: true,
+      failsClosedWithoutBoundary: true,
     });
     expect(summary.sensitiveAbsent).toBe(true);
   });
@@ -5369,6 +5174,10 @@ test.describe('backend match credential lifecycle', () => {
               disputedByAccountId,
               ...pendingResult
             } = resultRecord;
+            void confirmedAt;
+            void confirmedByAccountId;
+            void disputedAt;
+            void disputedByAccountId;
             resultRecord = {
               ...pendingResult,
               status: 'submitted',
@@ -5594,55 +5403,12 @@ test.describe('backend match credential lifecycle', () => {
       const reactDomClientModule = await import('/@id/react-dom/client');
       const { createRoot } =
         reactDomClientModule.default ?? reactDomClientModule;
-      const { supabase } = await import('/src/lib/supabaseClient.js');
       const { default: App } = await import('/src/App.jsx');
-      const originalSupabase = {
-        rpc: supabase.rpc,
-        from: supabase.from,
-        channel: supabase.channel,
-        removeChannel: supabase.removeChannel,
-      };
       const boundary = {
-        rpcNames: [],
-        channelNames: [],
         listNotifications: 0,
         markRead: 0,
         loadMatch: 0,
       };
-      supabase.rpc = async (name) => {
-        boundary.rpcNames.push(name);
-        if (name === 'get_my_profile') {
-          return {
-            data: [{
-              id: parameters.accountId,
-              first_name: 'Current',
-              last_name: 'Player',
-              username: 'current_player',
-              rating: 3,
-              is_verified: true,
-              role: 'user',
-            }],
-            error: null,
-          };
-        }
-        return { data: [], error: null };
-      };
-      supabase.from = () => ({
-        select() { return this; },
-        order() {
-          return Promise.resolve({ data: [], error: null });
-        },
-      });
-      supabase.channel = (name) => {
-        boundary.channelNames.push(name);
-        const channel = {
-          on() { return channel; },
-          subscribe() { return channel; },
-        };
-        return channel;
-      };
-      supabase.removeChannel = () => {};
-
       const startsAt = Math.floor(Date.now() / 1_000) + 86_400;
       const owner = {
         playerId: parameters.otherAccountId,
@@ -5746,7 +5512,6 @@ test.describe('backend match credential lifecycle', () => {
       const root = createRoot(container);
       root.render(React.createElement(App, {
         backendProfile,
-        backendMatchRequired: true,
         backendMatchLifecycleStatus: 'authenticated',
         backendProfileStatus: 'ready',
         backendMatchActions,
@@ -5757,10 +5522,6 @@ test.describe('backend match credential lifecycle', () => {
       window.__backendNotificationUiUnmount = () => {
         root.unmount();
         container.remove();
-        supabase.rpc = originalSupabase.rpc;
-        supabase.from = originalSupabase.from;
-        supabase.channel = originalSupabase.channel;
-        supabase.removeChannel = originalSupabase.removeChannel;
       };
     }, {
       accountId: ACCOUNT_ID,
@@ -5789,10 +5550,6 @@ test.describe('backend match credential lifecycle', () => {
     expect(boundary.listNotifications).toBeGreaterThanOrEqual(2);
     expect(boundary.markRead).toBe(1);
     expect(boundary.loadMatch).toBeGreaterThanOrEqual(1);
-    expect(boundary.rpcNames).not.toContain('get_my_notifications');
-    expect(boundary.rpcNames).not.toContain('get_unread_notification_count');
-    expect(boundary.rpcNames).not.toContain('mark_notification_read');
-    expect(boundary.channelNames).not.toContain('public:notifications');
     expect(pageErrors).toEqual([]);
     await page.evaluate(() => window.__backendNotificationUiUnmount());
   });

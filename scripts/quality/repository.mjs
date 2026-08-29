@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
@@ -46,5 +47,10 @@ export function listQualityFiles() {
       'Unable to enumerate versioned files for static quality gates.',
     );
   }
-  return result.stdout.split('\0').filter(Boolean).map(normalizePath).sort();
+  return result.stdout
+    .split('\0')
+    .filter(Boolean)
+    .map(normalizePath)
+    .filter((filePath) => existsSync(path.resolve(REPOSITORY_ROOT, filePath)))
+    .sort();
 }

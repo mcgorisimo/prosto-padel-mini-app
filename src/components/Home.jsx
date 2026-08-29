@@ -1,8 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { CalendarDays, Dumbbell, LayoutGrid, Swords } from 'lucide-react';
 import PadelButton from './ui/PadelButton';
 import PadelCard from './ui/PadelCard';
-import TrainingModal from './TrainingModal';
 import { CLUB } from '../lib/clubConfig';
 import { getBackendBookingStatusPresentation } from '../lib/backendBookingHomeAdapter';
 import { resolvePlayerLevelPresentation } from '../lib/playerLevelPresentation';
@@ -21,7 +20,7 @@ const getDisplayDate = (dateISO) => {
 
   try {
     return new Date(dateISO).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
-  } catch (e) {
+  } catch {
     return 'Дата';
   }
 };
@@ -58,71 +57,6 @@ function CountdownBadge({ matchDateISO, matchTime }) {
     <span className="inline-flex items-center rounded-full border border-accent-light/[0.16] bg-accent-light/[0.07] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-accent-light/80">
       {hours > 0 ? `${hours}ч ` : ''}{minutes}мин
     </span>
-  );
-}
-
-function ActionModal({ match, onClose, onConvertToMatch, onSetupTraining }) {
-  const [step, setStep] = useState('actions');
-
-  if (!match) return null;
-
-  const handleConvert = (isRatingMatch) => {
-    onConvertToMatch(match.id, isRatingMatch);
-    onClose();
-  };
-
-  return (
-    <div
-      onClick={onClose}
-      className="app-modal-overlay fixed inset-0 z-[9998] flex items-center justify-center p-4"
-    >
-      <PadelCard onClick={(e) => e.stopPropagation()} padding="lg" className="app-modal-panel w-full max-w-sm">
-        <h3 className="mb-2 text-center text-lg font-bold text-warm-white">
-          {step === 'match-type' ? 'Тип матча' : 'Действие с бронью'}
-        </h3>
-        <p className="mb-6 text-center text-sm text-warm-white/60">
-          {getDisplayDate(match.dateISO)}, {match.time}
-        </p>
-        {step === 'actions' ? (
-          <div className="flex flex-col gap-3">
-            <PadelButton
-              variant="ghost"
-              size="lg"
-              fullWidth
-              onClick={() => {
-                onSetupTraining(match);
-                onClose();
-              }}
-            >
-              Тренировка
-            </PadelButton>
-            <PadelButton
-              variant="yellow"
-              size="lg"
-              fullWidth
-              onClick={() => setStep('match-type')}
-            >
-              Создать открытый матч
-            </PadelButton>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-3">
-            <PadelButton variant="ghost" size="lg" fullWidth onClick={() => handleConvert(false)}>
-              Обычный матч
-            </PadelButton>
-            <PadelButton variant="yellow" size="lg" fullWidth onClick={() => handleConvert(true)}>
-              Рейтинговый матч
-            </PadelButton>
-            <p className="text-center text-xs leading-relaxed text-warm-white/48">
-              Рейтинг изменится после подтверждения счёта.
-            </p>
-          </div>
-        )}
-        <button onClick={onClose} className="mt-5 w-full text-center text-sm text-warm-white/45">
-          Отмена
-        </button>
-      </PadelCard>
-    </div>
   );
 }
 
@@ -192,15 +126,9 @@ export default function Home({
   onBookCourt,
   onOpenBooking,
   onViewDetails,
-  onConvertToPublic,
-  onSetupTraining,
   showToast,
   user,
-  onOpenMatches,
-  onOpenRating,
 }) {
-  const [actionMatch, setActionMatch] = useState(null);
-  const [trainingSetupMatch, setTrainingSetupMatch] = useState(null);
   const [eventsFilter, setEventsFilter] = useState('all');
 
   const gamesWithPartners = upcomingMatches.filter(m => m.type === 'match');
@@ -245,12 +173,6 @@ export default function Home({
 
     if (match.type === 'match') {
       onViewDetails(match);
-      return;
-    }
-
-    if (match.type === 'private') {
-      if (match.isTraining) setTrainingSetupMatch(match);
-      else setActionMatch(match);
     }
   };
 
@@ -378,23 +300,6 @@ export default function Home({
         )}
       </section>
 
-      {actionMatch && (
-        <ActionModal
-          match={actionMatch}
-          onClose={() => setActionMatch(null)}
-          onConvertToMatch={onConvertToPublic}
-          onSetupTraining={setTrainingSetupMatch}
-        />
-      )}
-
-      {trainingSetupMatch && (
-        <TrainingModal
-          match={trainingSetupMatch}
-          onClose={() => setTrainingSetupMatch(null)}
-          showToast={showToast}
-          onConfirm={(data) => { onSetupTraining(data); setTrainingSetupMatch(null); }}
-        />
-      )}
     </div>
   );
 }

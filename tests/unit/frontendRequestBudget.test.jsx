@@ -240,7 +240,6 @@ function renderNotificationProbe(probe, overrides = {}) {
         isVerified: true,
         capabilities: [],
       }}
-      backendMatchRequired
       backendMatchLifecycleStatus="authenticated"
       backendProfileStatus="ready"
       backendMatchActions={actions}
