@@ -8,6 +8,7 @@
   },
   "scripts": {
     "start:dev": "nest start --watch",
+    "start:telegram-invitation-canary": "node dist/notifications/telegram-invitation-canary.main.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "build": "nest build",
     "test:unit": "jest --config ./test/jest-unit.json --runInBand",

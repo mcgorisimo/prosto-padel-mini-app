@@ -18,6 +18,7 @@ function repository(): jest.Mocked<TelegramNotificationIntentRepository> {
     enqueueMatchAudience: jest.fn(),
     enqueueDueReminders: jest.fn(),
     claimNext: jest.fn(),
+    claimExactInvitationCanary: jest.fn(),
     markSent: jest.fn().mockResolvedValue({ outcome: 'applied' }),
     scheduleRetry: jest.fn().mockResolvedValue({ outcome: 'applied' }),
     abandon: jest.fn().mockResolvedValue({ outcome: 'applied' }),

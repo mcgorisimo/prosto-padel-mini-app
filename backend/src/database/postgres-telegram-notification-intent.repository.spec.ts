@@ -10,6 +10,7 @@ const NOW = unixEpochSeconds(1_800_000_000);
 const MATCH_ID = deterministicUuid('intent-match') as MatchId;
 const ACCOUNT_ID = deterministicUuid('intent-account') as AccountId;
 const SOURCE_ID = deterministicUuid('intent-source');
+const INVITATION_ID = deterministicUuid('intent-canary-invitation');
 
 function result(rows: readonly Record<string, unknown>[]): QueryResult {
   return {
@@ -55,6 +56,24 @@ function persisted(inserted = true) {
     reservation_id: null,
     occurred_at: String(NOW),
     inserted,
+  };
+}
+
+function canaryPersisted() {
+  return {
+    event_key: `match_invited:${INVITATION_ID}`,
+    event_type: 'match_invited',
+    category: 'match_activity',
+    source_id: INVITATION_ID,
+    source_version: '1',
+    recipient_account_id: ACCOUNT_ID,
+    match_id: MATCH_ID,
+    reservation_id: null,
+    occurred_at: String(NOW),
+    attempt_count: 1,
+    version: 2,
+    telegram_chat_id: '123456',
+    destination_version: 3,
   };
 }
 
@@ -120,6 +139,60 @@ describe('PostgresTelegramNotificationIntentRepository', () => {
     expect(sql).toContain('telegram_match_activity_enabled');
     expect(sql).toContain('telegram_delivery_rate_budget');
     expect(sql).toContain('FOR UPDATE OF intent, rate SKIP LOCKED');
+  });
+
+  it('claims only one fresh exact pending invitation for one exact recipient', async () => {
+    const tx = transaction(result([canaryPersisted()]));
+    await expect(
+      repository.claimExactInvitationCanary(tx, {
+        eventKey: `match_invited:${INVITATION_ID}`,
+        recipientAccountId: ACCOUNT_ID,
+        now: NOW,
+        leaseUntil: unixEpochSeconds(Number(NOW) + 15),
+      }),
+    ).resolves.toMatchObject({
+      outcome: 'claimed',
+      intent: {
+        eventKey: `match_invited:${INVITATION_ID}`,
+        eventType: 'match_invited',
+        recipientAccountId: ACCOUNT_ID,
+        attemptCount: 1,
+      },
+    });
+    const [sql, values] = tx.query.mock.calls[0] as [string, unknown[]];
+    expect(values).toEqual([
+      String(NOW),
+      String(Number(NOW) + 15),
+      `match_invited:${INVITATION_ID}`,
+      ACCOUNT_ID,
+    ]);
+    expect(sql).toContain('event_scope.recipient_count=1');
+    expect(sql).toContain("intent.event_type='match_invited'");
+    expect(sql).toContain('intent.attempt_count=0');
+    expect(sql).toContain("invitation.status='pending'");
+    expect(sql).toContain(
+      'invitation.invited_account_id=intent.recipient_account_id',
+    );
+    expect(sql).toContain(
+      "matches.status IN ('open','searching','confirmed','upcoming')",
+    );
+    expect(sql).toContain("destination.status='enabled'");
+    expect(sql).toContain('telegram_match_notifications_enabled');
+    expect(sql).toContain('telegram_match_activity_enabled');
+    expect(sql).toContain('FOR UPDATE OF intent, rate SKIP LOCKED');
+  });
+
+  it('returns no canary target without touching any other pending intent', async () => {
+    const tx = transaction(result([]));
+    await expect(
+      repository.claimExactInvitationCanary(tx, {
+        eventKey: `match_invited:${INVITATION_ID}`,
+        recipientAccountId: ACCOUNT_ID,
+        now: NOW,
+        leaseUntil: unixEpochSeconds(Number(NOW) + 15),
+      }),
+    ).resolves.toEqual({ outcome: 'none_available' });
+    expect(tx.query).toHaveBeenCalledTimes(1);
   });
 
   it('schedules durable 24h/2h eligibility without starving work behind the match limit', async () => {

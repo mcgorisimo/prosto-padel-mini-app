@@ -21,6 +21,7 @@ import {
 import { classifyPostgresError } from './postgres-error-classifier';
 import { PostgresTransaction } from './postgres-transaction';
 import {
+  ClaimExactTelegramInvitationCanaryInput,
   ClaimTelegramNotificationIntentInput,
   EnqueueDirectTelegramNotificationIntentInput,
   EnqueueMatchAudienceTelegramNotificationIntentInput,
@@ -36,6 +37,7 @@ import {
 const MAX_BIGINT_TEXT = '9007199254740991';
 const EVENT_KEY_PATTERN = /^[a-z0-9][a-z0-9:_-]{0,255}$/u;
 const MAX_ATTEMPTS = 20;
+const INVITATION_CANARY_MAX_AGE_SECONDS = 3_600;
 
 const EVENT_CATEGORY: Readonly<
   Record<TelegramNotificationEventType, TelegramNotificationCategory>
@@ -335,6 +337,65 @@ const CLAIM_NEXT_SQL = `
     ON destination.account_id=claimed.recipient_account_id
 `;
 
+const CLAIM_EXACT_INVITATION_CANARY_SQL = `
+  WITH event_scope AS MATERIALIZED (
+    SELECT count(*)::bigint AS recipient_count
+    FROM backend_notification.telegram_delivery_intents
+    WHERE event_key=$3
+  ), candidate AS MATERIALIZED (
+    SELECT intent.*, destination.telegram_chat_id,
+      destination.version AS destination_version
+    FROM backend_notification.telegram_delivery_intents AS intent
+    JOIN backend_match.match_invitations AS invitation
+      ON invitation.id=intent.source_id
+      AND invitation.match_id=intent.match_id
+      AND invitation.invited_account_id=intent.recipient_account_id
+    JOIN backend_match.matches AS matches ON matches.id=intent.match_id
+    JOIN backend_auth.telegram_notification_destinations AS destination
+      ON destination.account_id=intent.recipient_account_id
+    LEFT JOIN backend_auth.account_notification_preferences AS preference
+      ON preference.account_id=intent.recipient_account_id
+    CROSS JOIN backend_notification.telegram_delivery_rate_budget AS rate
+    CROSS JOIN event_scope
+    WHERE intent.event_key=$3 AND intent.recipient_account_id=$4
+      AND intent.event_key='match_invited:' || intent.source_id::text
+      AND intent.event_type='match_invited'
+      AND intent.category='match_activity'
+      AND intent.status='pending' AND intent.available_at <= $1
+      AND intent.attempt_count=0 AND intent.failure_code IS NULL
+      AND intent.occurred_at >= $1-${INVITATION_CANARY_MAX_AGE_SECONDS}
+      AND invitation.status='pending' AND invitation.version=1
+      AND invitation.created_at=intent.occurred_at
+      AND intent.source_version=invitation.version
+      AND matches.status IN ('open','searching','confirmed','upcoming')
+      AND matches.starts_at > $1
+      AND destination.status='enabled'
+      AND COALESCE(preference.telegram_match_notifications_enabled, true)
+      AND COALESCE(preference.telegram_match_activity_enabled, true)
+      AND rate.singleton=true AND rate.next_send_at <= $1
+      AND event_scope.recipient_count=1
+    FOR UPDATE OF intent, rate SKIP LOCKED
+  ), claimed AS (
+    UPDATE backend_notification.telegram_delivery_intents AS intent
+    SET available_at=$2, attempt_count=1, updated_at=$1,
+      failure_code=NULL, version=intent.version+1
+    FROM candidate
+    WHERE intent.event_key=candidate.event_key
+      AND intent.recipient_account_id=candidate.recipient_account_id
+    RETURNING intent.*
+  ), budget AS (
+    UPDATE backend_notification.telegram_delivery_rate_budget AS rate
+    SET next_send_at=$1+1, updated_at=$1, version=rate.version+1
+    WHERE rate.singleton=true AND EXISTS (SELECT 1 FROM claimed)
+    RETURNING singleton
+  )
+  SELECT claimed.*, destination.telegram_chat_id,
+    destination.version AS destination_version
+  FROM claimed
+  JOIN backend_auth.telegram_notification_destinations AS destination
+    ON destination.account_id=claimed.recipient_account_id
+`;
+
 const MARK_SENT_SQL = `
   UPDATE backend_notification.telegram_delivery_intents
   SET status='sent', updated_at=$4, sent_at=$4, telegram_message_id=$5,
@@ -518,6 +579,25 @@ function validateClaim(value: unknown): ClaimTelegramNotificationIntentInput {
     throw failure('invalid_input');
   }
   return value as unknown as ClaimTelegramNotificationIntentInput;
+}
+
+function validateExactInvitationCanaryClaim(
+  value: unknown,
+): ClaimExactTelegramInvitationCanaryInput {
+  if (
+    !isPlainRecord(value) ||
+    Object.keys(value).length !== 4 ||
+    !isUnixEpochSeconds(value.now) ||
+    !isUnixEpochSeconds(value.leaseUntil) ||
+    value.leaseUntil <= value.now ||
+    typeof value.eventKey !== 'string' ||
+    !value.eventKey.startsWith('match_invited:') ||
+    !isInternalUuid(value.eventKey.slice('match_invited:'.length)) ||
+    !isAccountId(value.recipientAccountId)
+  ) {
+    throw failure('invalid_input');
+  }
+  return value as unknown as ClaimExactTelegramInvitationCanaryInput;
 }
 
 function hydrateClaim(row: IntentRow): ClaimedTelegramNotificationIntent {
@@ -831,6 +911,43 @@ export class PostgresTelegramNotificationIntentRepository implements TelegramNot
         outcome: 'claimed' as const,
         intent: hydrateClaim(claimed.rows[0]),
       });
+    } catch (error) {
+      throw mapError(error);
+    }
+  }
+
+  async claimExactInvitationCanary(
+    transaction: PostgresTransaction,
+    raw: ClaimExactTelegramInvitationCanaryInput,
+  ): Promise<TelegramNotificationIntentClaimResult> {
+    try {
+      const input = validateExactInvitationCanaryClaim(raw);
+      const claimed = await transaction.query<IntentRow>(
+        CLAIM_EXACT_INVITATION_CANARY_SQL,
+        [
+          input.now.toString(10),
+          input.leaseUntil.toString(10),
+          input.eventKey,
+          input.recipientAccountId,
+        ],
+      );
+      if (claimed.rows.length === 0) {
+        return Object.freeze({ outcome: 'none_available' as const });
+      }
+      if (claimed.rows.length !== 1 || claimed.rowCount !== 1) {
+        throw failure('invalid_persisted_state');
+      }
+      const intent = hydrateClaim(claimed.rows[0]);
+      if (
+        intent.eventType !== 'match_invited' ||
+        intent.eventKey !== input.eventKey ||
+        intent.recipientAccountId !== input.recipientAccountId ||
+        intent.attemptCount !== 1 ||
+        intent.terminalReason !== undefined
+      ) {
+        throw failure('invalid_persisted_state');
+      }
+      return Object.freeze({ outcome: 'claimed' as const, intent });
     } catch (error) {
       throw mapError(error);
     }

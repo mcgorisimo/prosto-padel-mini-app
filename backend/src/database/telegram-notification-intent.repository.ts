@@ -37,6 +37,11 @@ export interface ClaimTelegramNotificationIntentInput {
   readonly leaseUntil: UnixEpochSeconds;
 }
 
+export interface ClaimExactTelegramInvitationCanaryInput extends ClaimTelegramNotificationIntentInput {
+  readonly eventKey: string;
+  readonly recipientAccountId: AccountId;
+}
+
 export interface FinalizeTelegramNotificationIntentInput {
   readonly eventKey: string;
   readonly recipientAccountId: AccountId;
@@ -101,6 +106,11 @@ export interface TelegramNotificationIntentRepository {
   claimNext(
     transaction: PostgresTransaction,
     input: ClaimTelegramNotificationIntentInput,
+  ): Promise<TelegramNotificationIntentClaimResult>;
+
+  claimExactInvitationCanary(
+    transaction: PostgresTransaction,
+    input: ClaimExactTelegramInvitationCanaryInput,
   ): Promise<TelegramNotificationIntentClaimResult>;
 
   markSent(
