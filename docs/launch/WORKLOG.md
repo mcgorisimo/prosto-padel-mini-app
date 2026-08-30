@@ -9872,3 +9872,58 @@
   environment/commit, changed containers, health/HTTP, write-free business
   smoke and logs remain `not_run` pending a separate owner-authorized Selectel
   test rollout. `PAYMENT_PROVIDER_READY=false` remains the shared D4 gate.
+
+### 2026-08-30 — D3.1 Selectel test rollout
+
+- The owner authorized a Selectel-test-only rollout of exact remote `main`
+  `8112547b4187f4fd0b336b7bf7c382928cd33383`. Read-only preflight found the
+  clean detached server checkout and backend runtime at
+  `2abb888e71ea8901cbebeaf23e72710b73263b50`, confirmed an exact fast-forward
+  path, Compose `config --quiet`, migration 043 already applied and the existing
+  Telegram outbound plus YCLIENTS notification-reconciliation workers disabled.
+  No migration/schema/database write, environment/secret change, production
+  action or provider call was performed.
+- Only backend and frontend changed from the deployed base. Both exact target
+  images built successfully; the existing frontend chunk advisory and backend
+  npm engine/audit warnings remained non-blocking. Reproducible rollback images
+  were built from exact previous SHA `2abb888e71ea8901cbebeaf23e72710b73263b50`
+  before switching. The controlled rollout ran from `2026-08-30T11:32:06Z` to
+  healthy at `11:32:15Z`. Backend changed from container
+  `ddf46a3bf9bb2a06ca54c03642682f957bb1c15b6a473e16363fb420008ea666`
+  to `41cf6fe476a0b5d46f7fd55a355a14725d4ad0fb71d2d310639376b96a6eb4c6`
+  on image
+  `sha256:9cef574a71dd4571bce821a4aba9797459bf92c0576734236547a5ebdc692614`;
+  frontend changed from
+  `21bc643ad5ee686c99cbed54416af6934a98bcc85d4670f1ca9281fa5daa4dd2`
+  to `0cfb5e356a2bb5ee434cf6549fa63089883e800bd45c729094fd649e44d2180cb`
+  on image
+  `sha256:f0bc6c21fd7c6fc29654d9e726c78940c8177908a5b13453f706db68e60e3389`.
+  Nginx `2bd6e57a965445981828cd0f4a8c3a8bf471b8b2f96e7254e526d0ce00dbdf89`,
+  PostgreSQL
+  `62dc6284c081162e4abac6f8ae6d1f9fed3d080f88d0f1592111412eae194179`
+  and all observability containers retained their identities. All ten services
+  finished running, healthy where healthchecks exist, with restart count `0`.
+- Internal frontend `/healthz` and backend `/api/v1/health` passed. Public root,
+  `/healthz` and `/api/v1/health` returned HTTP `200` with TLS verify result `0`;
+  public `/api/v1/metrics` remained correctly closed at `404`. Public asset
+  `/assets/index-DQD-I-sJ.js` matched the file inside the frontend container at
+  SHA-256
+  `d2fb3a3dc45b919ce89c1675f695892180b7269a522439931cc9190637885f58a`.
+  Its deployed contract markers confirmed the 1-2 hour range, two-hour maximum,
+  shared match-booking path, match checkout CTA and payment fail-closed copy.
+- The write-free business smoke sent one unauthenticated match-create request;
+  it returned `401`. Read-only counts for reservations, matches and reservation
+  links remained exactly `14|19|0` before and after, proving the smoke created no
+  booking, match or link. No authenticated or provider-writing smoke was run;
+  `PAYMENT_PROVIDER_READY=false` remains the shared D4 runtime gate.
+- Bounded Loki audit from rollout start contained backend `98`, frontend `31`
+  and nginx `136` records (`265` total): error/fatal `0`, HTTP 5xx `0`, PII
+  pattern hits `0`, backend release mismatches `0`. Provider-attempt/write log
+  signals were `0`; two generic YCLIENTS keyword records did not contain a
+  provider-attempt signal. Final verification completed at
+  `2026-08-30T11:44:33Z` with the clean server checkout, `origin/main` and
+  backend runtime all at exact deployed SHA
+  `8112547b4187f4fd0b336b7bf7c382928cd33383`.
+- Deployment is `deployment=applied_verified` for Selectel test. This append-only
+  closeout changes documentation only and has `deployment=not_needed`; the
+  deployed runtime remains exact `8112547b4187f4fd0b336b7bf7c382928cd33383`.
