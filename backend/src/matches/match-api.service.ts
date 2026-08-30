@@ -67,13 +67,18 @@ import { MatchWaitlistService } from './match-waitlist.service';
 import { MatchLineupService } from './match-lineup.service';
 import { courtBookingResponse } from './match-reservation-api.service';
 import { MatchCourtBookingProjection } from './match-reservation.types';
+import {
+  CourtReservation,
+  ReservationTarget,
+} from '../reservations/reservation.types';
 
 const UUID_URL_NAMESPACE = '6ba7b811-9dad-11d1-80b4-00c04fd430c8';
 const BINDING_DOMAINS = Object.freeze({
   create: Object.freeze({
-    match: 'prosto-padel.matches.create.match.v1',
-    command: 'prosto-padel.matches.create.command.v1',
-    request: 'prosto-padel.matches.create.request.v1',
+    match: 'prosto-padel.matches.create-from-reservation.match.v1',
+    command: 'prosto-padel.matches.create-from-reservation.command.v1',
+    link: 'prosto-padel.matches.create-from-reservation.link.v1',
+    request: 'prosto-padel.matches.create-from-reservation.request.v1',
   }),
   join: Object.freeze({
     participant: 'prosto-padel.matches.join.participant.v1',
@@ -107,7 +112,10 @@ export interface MatchApiServiceDependencies {
     'promoteAvailable' | 'closeForParticipant'
   >;
   readonly lineups: Pick<MatchLineupService, 'releaseForParticipantLeave'>;
-  readonly matchReservations: Pick<MatchReservationRepository, 'readCourtBookings'>;
+  readonly matchReservations: Pick<
+    MatchReservationRepository,
+    'linkConfirmed' | 'lockReservationForMatchCreate' | 'readCourtBookings'
+  >;
   readonly notificationIntents: Pick<
     TelegramNotificationIntentRepository,
     'enqueueMatchOwner'
@@ -244,6 +252,76 @@ function mapPersistenceFailure(error: unknown): MatchApiRejection {
     case 'referential_integrity':
     case 'permission_denied':
     case 'storage_failure':
+      return 'internal_failure';
+  }
+}
+
+class CreateMatchReservationRejection extends Error {
+  readonly name = 'CreateMatchReservationRejection';
+
+  constructor(readonly reason: MatchApiRejection) {
+    super('Confirmed reservation could not be bound to the match');
+  }
+}
+
+function sameReservationTarget(
+  left: ReservationTarget,
+  right: ReservationTarget,
+): boolean {
+  return left.serviceId === right.serviceId &&
+    left.courtId === right.courtId &&
+    left.startsAt === right.startsAt &&
+    left.endsAt === right.endsAt;
+}
+
+function confirmedMatchTarget(
+  reservation: CourtReservation,
+  now: import('../auth/auth.types').UnixEpochSeconds,
+): Readonly<{
+  startsAt: import('../auth/auth.types').UnixEpochSeconds;
+  durationMinutes: 60 | 90 | 120;
+  courtId: string;
+}> | MatchApiRejection {
+  if (reservation.status !== 'confirmed') return 'reservation_not_confirmed';
+  if (reservation.providerBinding === undefined) return 'provider_binding_missing';
+  const startsAtMilliseconds = Date.parse(reservation.target.startsAt);
+  const endsAtMilliseconds = Date.parse(reservation.target.endsAt);
+  const durationMinutes =
+    (endsAtMilliseconds - startsAtMilliseconds) / 60_000;
+  if (
+    !Number.isInteger(durationMinutes) ||
+    ![60, 90, 120].includes(durationMinutes) ||
+    startsAtMilliseconds % (30 * 60_000) !== 0
+  ) {
+    return 'unsupported_duration';
+  }
+  const startsAt = startsAtMilliseconds / 1_000;
+  if (!isUnixEpochSeconds(startsAt)) return 'invalid_request';
+  if (startsAt <= now) return 'match_started';
+  return Object.freeze({
+    startsAt,
+    durationMinutes: durationMinutes as 60 | 90 | 120,
+    courtId: `yclients:${reservation.target.courtId}`,
+  });
+}
+
+function createReservationLinkRejection(reason: string): MatchApiRejection {
+  switch (reason) {
+    case 'reservation_not_found':
+    case 'reservation_not_confirmed':
+    case 'provider_binding_missing':
+    case 'unsupported_duration':
+      return reason;
+    case 'forbidden':
+      return 'forbidden';
+    case 'match_terminal':
+      return 'match_closed';
+    case 'match_already_linked':
+    case 'reservation_already_linked':
+    case 'conflict':
+      return 'match_conflict';
+    case 'match_not_found':
+    default:
       return 'internal_failure';
   }
 }
@@ -734,7 +812,7 @@ export class MatchApiService {
       if (!isUnixEpochSeconds(now)) {
         return rejected('invalid_request');
       }
-      const idParts = [input.accountId, request.requestKey];
+      const idParts = [input.accountId, request.reservationId];
       const matchId = bindingUuid(
         BINDING_DOMAINS.create.match,
         idParts,
@@ -743,56 +821,63 @@ export class MatchApiService {
         BINDING_DOMAINS.create.command,
         idParts,
       ) as MatchCommandId;
-      const digest = requestDigest([
-        BINDING_DOMAINS.create.request,
-        request.requestKey,
-        input.accountId,
-        String(request.startsAt),
-        String(request.durationMinutes),
-        request.courtId ?? '',
-        request.scenario,
-        request.description,
-        request.ratingMin === undefined
-          ? ''
-          : String(request.ratingMin),
-        request.ratingMax === undefined
-          ? ''
-          : String(request.ratingMax),
-        String(request.isRatingMatch),
-      ]);
-      const command: CreateMatchPersistenceInput = Object.freeze({
-        type: 'create_match',
-        matchId,
-        commandId,
-        actorAccountId: input.accountId,
-        requestDigest: digest,
-        now,
-        startsAt: request.startsAt,
-        durationMinutes: request.durationMinutes,
-        ...(request.courtId === undefined
-          ? {}
-          : { courtId: request.courtId }),
-        kind: request.scenario === 'private' ? 'private' : 'match',
-        visibility:
-          request.scenario === 'private' ? 'private' : 'public',
-        scenario: request.scenario,
-        status:
-          request.scenario === 'private'
-            ? 'upcoming'
-            : request.scenario === 'community'
-              ? 'searching'
-              : 'confirmed',
-        description: request.description,
-        ...(request.ratingMin === undefined
-          ? {}
-          : { ratingMin: request.ratingMin }),
-        ...(request.ratingMax === undefined
-          ? {}
-          : { ratingMax: request.ratingMax }),
-        isRatingMatch: request.isRatingMatch,
-      });
       const completed = await this.dependencies.transactions.run(
         async (transaction) => {
+          const reservation = await this.dependencies.matchReservations.lockReservationForMatchCreate(
+            transaction,
+            input.accountId,
+            request.reservationId,
+          );
+          if (reservation === null) {
+            throw new CreateMatchReservationRejection('reservation_not_found');
+          }
+          const target = confirmedMatchTarget(reservation, now);
+          if (typeof target === 'string') {
+            throw new CreateMatchReservationRejection(target);
+          }
+          const digest = requestDigest([
+            BINDING_DOMAINS.create.request,
+            input.accountId,
+            request.reservationId,
+            String(reservation.target.serviceId),
+            String(reservation.target.courtId),
+            reservation.target.startsAt,
+            reservation.target.endsAt,
+            request.scenario,
+            request.description,
+            request.ratingMin === undefined ? '' : String(request.ratingMin),
+            request.ratingMax === undefined ? '' : String(request.ratingMax),
+            String(request.isRatingMatch),
+          ]);
+          const command: CreateMatchPersistenceInput = Object.freeze({
+            type: 'create_match',
+            matchId,
+            commandId,
+            actorAccountId: input.accountId,
+            requestDigest: digest,
+            now,
+            startsAt: target.startsAt,
+            durationMinutes: target.durationMinutes,
+            courtId: target.courtId,
+            kind: request.scenario === 'private' ? 'private' : 'match',
+            visibility:
+              request.scenario === 'private' ? 'private' : 'public',
+            scenario: request.scenario,
+            status:
+              request.scenario === 'private'
+                ? 'upcoming'
+                : request.scenario === 'community'
+                  ? 'searching'
+                  : 'confirmed',
+            description: request.description,
+            ...(request.ratingMin === undefined
+              ? {}
+              : { ratingMin: request.ratingMin }),
+            ...(request.ratingMax === undefined
+              ? {}
+              : { ratingMax: request.ratingMax }),
+            isRatingMatch: request.isRatingMatch,
+          });
           const result = await this.dependencies.matches.create(
             transaction,
             command,
@@ -808,21 +893,42 @@ export class MatchApiService {
           ) {
             throw invalidReadModel();
           }
+          const link = await this.dependencies.matchReservations.linkConfirmed(
+            transaction,
+            {
+              linkId: bindingUuid(
+                BINDING_DOMAINS.create.link,
+                idParts,
+              ) as import('./match-reservation.types').MatchReservationLinkId,
+              matchId,
+              reservationId: request.reservationId,
+              ownerAccountId: input.accountId,
+              now,
+            },
+          );
+          if (link.outcome === 'rejected') {
+            throw new CreateMatchReservationRejection(
+              createReservationLinkRejection(link.reason),
+            );
+          }
+          if (
+            link.projection.status !== 'confirmed' ||
+            link.projection.reservationId !== request.reservationId ||
+            !sameReservationTarget(link.projection.target, reservation.target)
+          ) {
+            throw invalidReadModel();
+          }
           const players = await readPublicPlayers(
             this.dependencies.publicProfiles,
             transaction,
             [record],
-          );
-          const courtBookings = await this.dependencies.matchReservations.readCourtBookings(
-            transaction,
-            [record.matchId],
           );
           return Object.freeze({
             result,
             match: enrichDetail(
               record,
               players,
-              courtBookings.get(record.matchId) ?? Object.freeze({ status: 'unbooked', stale: false }),
+              link.projection,
             ),
           });
         },
@@ -841,6 +947,9 @@ export class MatchApiService {
         match: completed.match,
       });
     } catch (error) {
+      if (error instanceof CreateMatchReservationRejection) {
+        return rejected(error.reason);
+      }
       return rejected(
         mapPersistenceFailure(error),
       );

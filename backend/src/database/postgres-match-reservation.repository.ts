@@ -455,6 +455,29 @@ export class PostgresMatchReservationRepository
     }
   }
 
+  async lockReservationForMatchCreate(
+    transaction: PostgresTransaction,
+    ownerAccountId: AccountId,
+    reservationId: CourtReservationId,
+  ): Promise<CourtReservation | null> {
+    try {
+      if (
+        !isAccountId(ownerAccountId) ||
+        !isCourtReservationId(reservationId)
+      ) {
+        throw failure('invalid_input');
+      }
+      await this.lockReservationScope(transaction, reservationId);
+      return this.lockReservation(
+        transaction,
+        ownerAccountId,
+        reservationId,
+      );
+    } catch (error) {
+      throw mapPersistenceError(error);
+    }
+  }
+
   async linkConfirmed(
     transaction: PostgresTransaction,
     input: Readonly<{

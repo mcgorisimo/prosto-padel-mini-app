@@ -1,150 +1,97 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { COURTS, HOURS, WORKING_HOURS, checkAvailability, generateDates } from '../lib/booking';
-import { formatMoscowDateISO, getMoscowDateISO, hasMoscowSlotStarted } from '../lib/moscowDateTime';
-import { getTotalPrice, isPrimeTime, fmtPrice as fmtPriceLib } from '../lib/pricing';
-import {
-  YOOKASSA_COURT_CHECKOUT_ENABLED,
-  YOOKASSA_COURT_CHECKOUT_PENDING_MESSAGE,
-} from '../lib/paidCourtCheckout';
-
-// ─── Constants ────────────────────────────────────────────────────────────────
+import { useMemo, useState } from 'react';
+import BookingScreen from './BookingScreen';
 
 const RATINGS = ['D', 'D+', 'C', 'C+', 'B', 'B+', 'A'];
 const MATCH_COMMENT_MAX_LENGTH = 240;
 const commentCodePointLength = (value) => [...String(value ?? '')].length;
 
-const START_HOUR = WORKING_HOURS.startHour;
-const END_HOUR   = WORKING_HOURS.endHour;
-
-const TIME_SLOTS = HOURS;
-
-const isPrime = (time, dateISO) => isPrimeTime(time, dateISO);
-
-const toMin = (time) => {
-  let [h, m] = (time || '0:0').split(':').map(Number);
-  if (h < START_HOUR) h += 24;
-  return h * 60 + m;
-};
-
-const courtTotal = (time, dur, ct, dateISO) =>
-  getTotalPrice(time, dur, ct, dateISO);
-
-const maxDuration = (time) => {
-  let [h, m] = time.split(':').map(Number);
-  if (h < START_HOUR) h += 24;
-  const remaining = (END_HOUR * 60 - (h * 60 + m)) / 60;
-  return Math.max(0.5, Math.floor(remaining * 2) / 2);
-};
-
-const fmtPrice = fmtPriceLib;
-
-// ─── Design tokens ────────────────────────────────────────────────────────────
-
 const T = {
-  bg:      '#050F0B',
+  bg: '#050F0B',
   surface: 'rgba(255,255,255,0.045)',
-  border:  'rgba(245,241,232,0.10)',
-  accent:  '#D8F34A',
+  border: 'rgba(245,241,232,0.10)',
+  accent: '#D8F34A',
   accentL: '#D8F34A',
-  text:    '#F5F1E8',
-  muted:   'rgba(245,241,232,0.62)',
-  gold:    '#FF6F61',
-  win:     '#D8F34A',
+  text: '#F5F1E8',
+  muted: 'rgba(245,241,232,0.62)',
+  gold: '#FF6F61',
 };
-
-// ─── Section wrapper ──────────────────────────────────────────────────────────
 
 function Section({ title, children }) {
   return (
-    <div style={{ marginBottom: '16px', background: 'rgba(255,255,255,0.035)', border: `1px solid ${T.border}`, borderRadius: '20px', padding: '14px' }}>
+    <section style={{ marginBottom: '16px', background: 'rgba(255,255,255,0.035)', border: `1px solid ${T.border}`, borderRadius: '20px', padding: '14px' }}>
       {title && (
         <div style={{ fontSize: '11px', fontWeight: 700, color: T.muted, textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: '12px' }}>
           {title}
         </div>
       )}
       {children}
-    </div>
+    </section>
   );
 }
 
-// ─── Scenario Selector (Step 0) ───────────────────────────────────────────────
-
-export const MATCH_SCENARIO_DEFS = [
-  {
+export const MATCH_SCENARIO_DEFS = Object.freeze([
+  Object.freeze({
     id: 'community',
     mark: '01',
     title: 'Только сбор игроков',
     badge: 'Community Search',
-    desc: 'Матч создается в ленте без бронирования корта. Онлайн-оплата будет доступна позже.',
-    pros: ['Договоритесь о корте сами'],
-    warn: 'Бронь корта сейчас подтверждается вне приложения',
+    desc: 'Создайте открытый сбор игроков с заранее подтверждённым кортом.',
+    pros: ['Корт бронируется до публикации матча'],
+    warn: 'Доступность и цена подтверждаются через YCLIENTS',
     color: T.muted,
     bg: 'rgba(255,255,255,0.045)',
     border: 'rgba(245,241,232,0.10)',
-  },
-  {
+  }),
+  Object.freeze({
     id: 'social',
     mark: '02',
     title: 'Матч с кортом',
-    badge: 'ЮKassa checkout',
-    desc: 'Организатор выбирает дату, время и корт, затем оплачивает полную стоимость корта.',
-    pros: ['Матч создаётся после оплаты и подтверждения YCLIENTS'],
-    warn: 'Временно недоступно до подключения ЮKassa',
-    disabled: !YOOKASSA_COURT_CHECKOUT_ENABLED,
+    badge: 'Court booking',
+    desc: 'Выберите параметры матча, затем забронируйте корт тем же способом.',
+    pros: ['Матч создаётся только после подтверждения брони'],
+    warn: 'Онлайн-оплата подключается отдельным этапом',
     color: T.gold,
     bg: 'rgba(216,243,74,0.08)',
     border: 'rgba(216,243,74,0.22)',
-  },
-];
+  }),
+]);
 
 export const SOCIAL_MATCH_CONFIRMATION_COPY = Object.freeze({
-  title: 'Оплата корта',
+  title: 'Подтверждение корта',
   priceLabel: 'Полная стоимость корта',
-  noticeTitle: 'Оплата обязательна',
-  noticeBody: 'Матч с кортом будет создан только после подтверждённой оплаты ЮKassa и подтверждённой брони YCLIENTS.',
-  confirmLabel: 'Перейти к оплате',
+  noticeTitle: 'Бронь обязательна',
+  noticeBody: 'Матч будет создан только после подтверждённой брони YCLIENTS.',
+  confirmLabel: 'Выбрать корт и время',
 });
 
 function ScenarioSelector({ onSelect }) {
   return (
     <div style={{ padding: '0 16px' }}>
-      <div style={{ color: T.muted, fontSize: '13px', marginBottom: '20px', lineHeight: 1.5 }}>
-        Выберите способ организации игры
-      </div>
+      <p style={{ color: T.muted, fontSize: '13px', margin: '0 0 20px', lineHeight: 1.5 }}>
+        Выберите формат организации игры
+      </p>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-        {MATCH_SCENARIO_DEFS.map(({ id, mark, title, badge, desc, pros, warn, color, bg, border, disabled = false }) => (
+        {MATCH_SCENARIO_DEFS.map((definition) => (
           <button
-            key={id}
-            data-testid={`match-scenario-${id}`}
-            disabled={disabled}
-            onClick={() => !disabled && onSelect(id)}
-            style={{ display: 'block', width: '100%', textAlign: 'left', background: bg, borderRadius: '16px', border: `1px solid ${border}`, padding: '20px', cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.58 : 1 }}
+            key={definition.id}
+            type="button"
+            data-testid={`match-scenario-${definition.id}`}
+            onClick={() => onSelect(definition.id)}
+            style={{ display: 'block', width: '100%', minHeight: '48px', textAlign: 'left', background: definition.bg, borderRadius: '16px', border: `1px solid ${definition.border}`, padding: '20px', cursor: 'pointer' }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '10px' }}>
-              <span style={{ color, fontSize: '12px', fontWeight: 900, letterSpacing: '0.12em', lineHeight: 1 }}>{mark}</span>
+              <span style={{ color: definition.color, fontSize: '12px', fontWeight: 900, letterSpacing: '0.12em' }}>{definition.mark}</span>
               <div>
-                <div style={{ color: T.text, fontWeight: 700, fontSize: '16px' }}>{title}</div>
-                <div style={{ color, fontSize: '11px', fontWeight: 700, letterSpacing: '0.06em', marginTop: '2px' }}>{badge}</div>
+                <div style={{ color: T.text, fontWeight: 700, fontSize: '16px' }}>{definition.title}</div>
+                <div style={{ color: definition.color, fontSize: '11px', fontWeight: 700, letterSpacing: '0.06em', marginTop: '2px' }}>{definition.badge}</div>
               </div>
             </div>
-            <div style={{ color: T.muted, fontSize: '12px', lineHeight: 1.6, marginBottom: '12px' }}>{desc}</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              {pros.map(text => (
-                <div key={text} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <span style={{ color: T.win, fontSize: '12px' }}>✓</span>
-                  <span style={{ color: T.muted, fontSize: '12px' }}>{text}</span>
-                </div>
-              ))}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px' }}>
-                <span style={{ color: id === 'community' ? T.muted : T.gold, fontSize: '12px', fontWeight: 900 }}>!</span>
-                <span style={{ color: id === 'community' ? T.muted : T.gold, fontSize: '12px' }}>{warn}</span>
-              </div>
+            <div style={{ color: T.muted, fontSize: '12px', lineHeight: 1.6, marginBottom: '12px' }}>{definition.desc}</div>
+            <div style={{ color: T.muted, fontSize: '12px', lineHeight: 1.55 }}>
+              <div><span style={{ color: T.accent }}>✓</span> {definition.pros[0]}</div>
+              <div style={{ marginTop: '4px', color: definition.color }}>! {definition.warn}</div>
             </div>
-            <div style={{ marginTop: '14px', textAlign: 'right' }}>
-              <span style={{ color, fontSize: '13px', fontWeight: 700 }}>
-                {disabled ? 'Оплата подключается' : 'Выбрать'}
-              </span>
-            </div>
+            <div style={{ marginTop: '14px', textAlign: 'right', color: definition.color, fontSize: '13px', fontWeight: 700 }}>Выбрать</div>
           </button>
         ))}
       </div>
@@ -152,128 +99,9 @@ function ScenarioSelector({ onSelect }) {
   );
 }
 
-// ─── 1. TimePicker ────────────────────────────────────────────────────────────
-
-function TimePicker({
-  time,
-  onTime,
-  duration,
-  onDuration,
-  maxDur,
-  minDur = 0.5,
-  selectedDate,
-}) {
-  const card = { background: 'rgba(255,255,255,0.045)', borderRadius: '16px', border: `1px solid ${T.border}`, padding: '12px 16px' };
-  const canIncrease = duration + 0.5 <= maxDur;
-
-  const scrollContainerRef = useRef(null);
-  const firstAvailableNodeRef = useRef(null);
-
-  const isToday = selectedDate.dateISO === getMoscowDateISO();
-
-  useEffect(() => {
-    // This effect runs when the component mounts and when the date changes.
-    if (isToday && firstAvailableNodeRef.current) {
-      // A small timeout can help ensure the DOM is fully ready for scrolling.
-      setTimeout(() => {
-        firstAvailableNodeRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      }, 100);
-    } else if (scrollContainerRef.current) {
-      scrollContainerRef.current.scrollTop = 0;
-    }
-  }, [isToday, selectedDate.dateISO]);
-
-  let firstAvailableFound = false;
-  return (
-    <Section title="Время и продолжительность">
-      <div style={{ ...card, display: 'flex', alignItems: 'center', marginBottom: '12px' }}>
-        <span style={{ color: T.muted, fontSize: '14px', flex: 1 }}>Продолжительность</span>
-        <button onClick={() => onDuration(Math.max(minDur, duration - 0.5))} style={styles.dBtn}>−</button>
-        <span style={{ color: T.text, fontWeight: 700, fontSize: '16px', width: '52px', textAlign: 'center' }}>{duration}ч</span>
-        <button onClick={() => canIncrease && onDuration(duration + 0.5)} style={{ ...styles.dBtn, opacity: canIncrease ? 1 : 0.3, cursor: canIncrease ? 'pointer' : 'default' }}>
-          +
-        </button>
-      </div>
-      {!canIncrease && (
-        <div style={{ fontSize: '11px', color: T.gold, marginBottom: '10px', paddingLeft: '4px' }}>
-          Максимум для этого слота — {maxDur}ч (клуб закрывается в 00:00)
-        </div>
-      )}
-      <div ref={scrollContainerRef} className="grid grid-cols-4 gap-2 max-h-60 overflow-y-auto pr-1 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]" style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-y' }}>
-        {TIME_SLOTS.map((slot) => {
-          const prime  = isPrime(slot, selectedDate.dateISO);
-          const active = time === slot;
-          const isPast =
-            hasMoscowSlotStarted(selectedDate.dateISO, slot) ||
-            maxDuration(slot) < minDur;
-
-          const setFirstAvailableRef = (node) => {
-            if (node && !isPast && !firstAvailableFound) {
-              firstAvailableNodeRef.current = node;
-              firstAvailableFound = true;
-            }
-          };
-
-          return (
-            <button
-              key={slot}
-              ref={setFirstAvailableRef}
-              onClick={() => onTime(slot)}
-              disabled={isPast}
-              style={{
-                padding: '9px 0 7px', borderRadius: '10px',
-                border: active ? '1px solid rgba(216,243,74,0.34)' : prime ? '1px solid rgba(216,243,74,0.22)' : `1px solid ${T.border}`,
-                background: active ? 'rgba(216,243,74,0.14)' : prime ? 'rgba(216,243,74,0.07)' : 'rgba(255,255,255,0.045)',
-                color: active ? T.accent : prime ? T.accent : T.muted,
-                fontSize: '13px', fontWeight: active ? 700 : 500, lineHeight: 1.2,
-                transition: 'opacity 0.2s, background 0.2s, color 0.2s',
-                ...(isPast ? { opacity: 0.2, cursor: 'not-allowed', pointerEvents: 'none', filter: 'grayscale(1)' } : { cursor: 'pointer' }),
-              }}
-            >
-              {slot}
-              {prime && !active && <div style={{ fontSize: '8px', letterSpacing: '0.04em', marginTop: '2px', opacity: 0.85 }}>PRIME</div>}
-            </button>
-          );
-        })}
-      </div>
-    </Section>
-  );
-}
-
-// ─── 2. CourtTypeToggle ───────────────────────────────────────────────────────
-
-function CourtTypeToggle({ value, onChange }) {
-  const opts = [
-    { val: 'panoramic', label: 'Ультрапанорама', note: '4 игрока · тариф по дате и времени' },
-  ];
-  return (
-    <Section title="Тип корта">
-      <div style={{ display: 'flex', gap: '8px' }}>
-        {opts.map(({ val, label, note }) => {
-          const active = value === val;
-          return (
-            <button key={val} onClick={() => onChange(val)} style={{
-              flex: 1, padding: '12px 8px', borderRadius: '12px', cursor: 'pointer', textAlign: 'center',
-              background: active ? 'rgba(216,243,74,0.12)' : 'rgba(255,255,255,0.045)',
-              color: active ? T.accentL : T.muted,
-              border: active ? `1px solid ${T.accent}` : `1px solid ${T.border}`,
-              fontWeight: active ? 700 : 500, fontSize: '13px',
-            }}>
-              <div>{label}</div>
-              <div style={{ fontSize: '10px', marginTop: '3px', opacity: 0.7 }}>{note}</div>
-            </button>
-          );
-        })}
-      </div>
-    </Section>
-  );
-}
-
-// ─── 3. RatingRangeSlider ─────────────────────────────────────────────────────
-
 function RatingRangeSlider({ minIdx, maxIdx, onChange }) {
   const max = RATINGS.length - 1;
-  const pct = (i) => `${(i / max) * 100}%`;
+  const pct = (index) => `${(index / max) * 100}%`;
 
   return (
     <Section title="Уровень игроков">
@@ -296,18 +124,14 @@ function RatingRangeSlider({ minIdx, maxIdx, onChange }) {
 
       <div style={{ background: T.surface, borderRadius: '12px', padding: '16px', border: `1px solid ${T.border}` }}>
         <div style={{ display: 'flex', marginBottom: '12px' }}>
-          {RATINGS.map((r, i) => (
-            <span key={r} style={{ flex: 1, textAlign: 'center', fontSize: '12px', fontWeight: 600, color: i >= minIdx && i <= maxIdx ? T.accentL : T.border, transition: 'color 0.2s' }}>{r}</span>
+          {RATINGS.map((rating, index) => (
+            <span key={rating} style={{ flex: 1, textAlign: 'center', fontSize: '12px', fontWeight: 600, color: index >= minIdx && index <= maxIdx ? T.accentL : T.border, transition: 'color 0.2s' }}>{rating}</span>
           ))}
         </div>
         <div style={{ position: 'relative', height: '6px', borderRadius: '3px', background: T.border, margin: '0 0 20px' }}>
           <div style={{ position: 'absolute', left: pct(minIdx), right: `${100 - (maxIdx / max) * 100}%`, top: 0, bottom: 0, background: 'rgba(216,243,74,0.55)', borderRadius: '3px' }} />
-          <input className="rating-range" type="range" min={0} max={max} value={minIdx}
-            onChange={e => onChange(Math.min(Number(e.target.value), maxIdx - 1), maxIdx)}
-            style={{ zIndex: maxIdx === max ? 5 : 3 }} />
-          <input className="rating-range" type="range" min={0} max={max} value={maxIdx}
-            onChange={e => onChange(minIdx, Math.max(Number(e.target.value), minIdx + 1))}
-            style={{ zIndex: 4 }} />
+          <input aria-label="Минимальный уровень игроков" className="rating-range" type="range" min={0} max={max} value={minIdx} onChange={(event) => onChange(Math.min(Number(event.target.value), maxIdx - 1), maxIdx)} style={{ zIndex: maxIdx === max ? 5 : 3 }} />
+          <input aria-label="Максимальный уровень игроков" className="rating-range" type="range" min={0} max={max} value={maxIdx} onChange={(event) => onChange(minIdx, Math.max(Number(event.target.value), minIdx + 1))} style={{ zIndex: 4 }} />
         </div>
         <div style={{ textAlign: 'center', marginBottom: '8px' }}>
           <span style={{ color: T.text, fontWeight: 700, fontSize: '16px' }}>{RATINGS[minIdx]} — {RATINGS[maxIdx]}</span>
@@ -320,522 +144,170 @@ function RatingRangeSlider({ minIdx, maxIdx, onChange }) {
   );
 }
 
-function CourtSelector({ courtType, selectedDate, time, duration, allMatches, selectedId, onChange }) {
-  const courtsOfType = COURTS.filter(c => c.type === courtType);
-
+function RatingMatchToggle({ value, onChange }) {
   return (
-    <Section title="Номер корта">
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px' }}>
-        {courtsOfType.map(court => {
-          const isAvailable = checkAvailability(allMatches, court.id, selectedDate.dateISO, time, duration);
-          const isActive = court.id === selectedId;
-
-          return (
-            <button
-              key={court.id}
-              disabled={!isAvailable}
-              onClick={() => onChange(court.id)}
-              style={{
-                padding: '12px 0',
-                borderRadius: '10px',
-                border: isActive ? 'none' : `1px solid ${isAvailable ? T.border : 'rgba(239,68,68,0.2)'}`,
-                background: isActive ? 'rgba(216,243,74,0.12)' : (isAvailable ? 'rgba(255,255,255,0.045)' : 'rgba(255,111,97,0.05)'),
-                color: isActive ? T.accent : (isAvailable ? T.muted : '#FF6F61'),
-                fontSize: '13px',
-                fontWeight: isActive ? 700 : (isAvailable ? 500 : 600),
-                cursor: isAvailable ? 'pointer' : 'not-allowed',
-                lineHeight: 1.2,
-                opacity: isAvailable ? 1 : 0.8,
-              }}
-            >
-              {isAvailable ? court.name.replace('Корт ', '') : 'Занят'}
-            </button>
-          );
-        })}
-      </div>
-    </Section>
-  );
-}
-
-// ─── Social Match Confirmation ────────────────────────────────────────────────
-
-function SocialMatchConfirmationSheet({ time, duration, courtType, dateISO, onConfirm, onClose }) {
-  const isP       = isPrime(time, dateISO);
-  const total     = courtTotal(time, duration, courtType, dateISO);
-
-  return (
-    <div
-      onClick={onClose}
-      className="app-modal-overlay"
-      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.92)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', zIndex: 9999, touchAction: 'pan-y' }}
-    >
-      <div
-        onClick={e => e.stopPropagation()}
-        className="app-modal-panel"
-        style={{ background: '#07160F', borderRadius: '24px 24px 0 0', width: '100%', maxWidth: '480px', padding: '0 20px calc(48px + env(safe-area-inset-bottom, 0px))', border: '1px solid rgba(245,241,232,0.16)', maxHeight: '92dvh', overflowY: 'auto', WebkitOverflowScrolling: 'touch', touchAction: 'pan-y', scrollbarWidth: 'none', msOverflowStyle: 'none' }}
-      >
-        <div style={{ padding: '12px 0 20px', textAlign: 'center' }}>
-          <div style={{ width: '40px', height: '4px', background: T.border, borderRadius: '2px', display: 'inline-block' }} />
-        </div>
-
-        <div style={{ textAlign: 'center', marginBottom: '20px' }}>
-          <div style={{ color: '#fff', fontSize: '18px', fontWeight: 700 }}>{SOCIAL_MATCH_CONFIRMATION_COPY.title}</div>
-          <div style={{ color: T.muted, fontSize: '12px', marginTop: '4px' }}>
-            {courtType === 'panoramic' ? 'Ультрапанорамный корт' : 'Корт'} · {time} · {duration}ч
-          </div>
-        </div>
-
-        {/* Price breakdown */}
-        <div style={{ background: T.surface, borderRadius: '14px', padding: '16px', marginBottom: '16px', border: `1px solid ${T.border}` }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div>
-              <div style={{ color: T.muted, fontSize: '12px' }}>{SOCIAL_MATCH_CONFIRMATION_COPY.priceLabel}</div>
-            </div>
-            <div style={{ color: '#fff', fontSize: '20px', fontWeight: 800 }}>{fmtPrice(total)}</div>
-          </div>
-        </div>
-
-        <div style={{ background: 'rgba(216,243,74,0.06)', borderRadius: '16px', padding: '14px', border: '1px solid rgba(216,243,74,0.18)', marginBottom: '20px' }}>
-          <div style={{ color: T.accentL, fontWeight: 700, fontSize: '13px', marginBottom: '8px' }}>
-            {SOCIAL_MATCH_CONFIRMATION_COPY.noticeTitle}
-          </div>
-          <div style={{ color: T.muted, fontSize: '12px', lineHeight: 1.7 }}>
-            {SOCIAL_MATCH_CONFIRMATION_COPY.noticeBody}
-          </div>
-        </div>
-
-        <button
-          onClick={onConfirm}
-          style={{
-            width: '100%', padding: '16px', marginBottom: '10px',
-            background: 'rgba(216,243,74,0.12)',
-            color: T.accent, border: '1px solid rgba(216,243,74,0.32)', borderRadius: '16px', fontSize: '15px', fontWeight: 800, cursor: 'pointer',
-          }}
-        >
-          {SOCIAL_MATCH_CONFIRMATION_COPY.confirmLabel}
-        </button>
-        <button onClick={onClose} style={{ width: '100%', padding: '14px', background: 'transparent', color: T.muted, border: `1px solid ${T.border}`, borderRadius: '16px', fontSize: '15px', cursor: 'pointer' }}>
-          Отмена
-        </button>
-      </div>
-    </div>
+    <label style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', background: T.surface, borderRadius: '12px', padding: '14px', border: value ? '1px solid rgba(216,243,74,0.34)' : `1px solid ${T.border}`, cursor: 'pointer', marginBottom: '16px' }}>
+      <input data-testid="match-rating-toggle" type="checkbox" checked={value} onChange={(event) => onChange(event.target.checked)} style={{ width: '20px', height: '20px', accentColor: T.accent, flexShrink: 0, cursor: 'pointer', marginTop: '2px' }} />
+      <span style={{ flex: 1 }}>
+        <span style={{ display: 'block', color: T.text, fontSize: '14px', fontWeight: 600 }}>Рейтинговая игра</span>
+        <span style={{ display: 'block', color: T.muted, fontSize: '12px', marginTop: '3px', lineHeight: 1.45 }}>Рейтинговая игра влияет на клубный рейтинг после завершения матча. Участникам нужен подтверждённый рейтинг.</span>
+      </span>
+    </label>
   );
 }
 
 function PrivacyToggle({ value, onChange }) {
   return (
-    <label style={{
-      display: 'flex',
-      alignItems: 'center',
-      gap: '12px',
-      background: T.surface,
-      borderRadius: '12px',
-      padding: '14px',
-      border: `1px solid ${T.border}`,
-      cursor: 'pointer',
-      marginBottom: '16px'
-    }}>
-      <input
-        type="checkbox"
-        checked={value}
-        onChange={(e) => onChange(e.target.checked)}
-        style={{ width: '20px', height: '20px', accentColor: T.accent, flexShrink: 0, cursor: 'pointer' }}
-      />
-      <div style={{ flex: 1 }}>
-        <div style={{ color: T.text, fontSize: '14px', fontWeight: 600 }}>Приватный матч</div>
-        <div style={{ color: T.muted, fontSize: '12px', marginTop: '3px', lineHeight: 1.4 }}>
-          Доступ только по прямой ссылке. Матч не будет виден в общей ленте.
-        </div>
-      </div>
+    <label style={{ display: 'flex', alignItems: 'center', gap: '12px', background: T.surface, borderRadius: '12px', padding: '14px', border: `1px solid ${T.border}`, cursor: 'pointer', marginBottom: '16px' }}>
+      <input data-testid="match-private-toggle" type="checkbox" checked={value} onChange={(event) => onChange(event.target.checked)} style={{ width: '20px', height: '20px', accentColor: T.accent, flexShrink: 0, cursor: 'pointer' }} />
+      <span style={{ flex: 1 }}>
+        <span style={{ display: 'block', color: T.text, fontSize: '14px', fontWeight: 600 }}>Приватный матч</span>
+        <span style={{ display: 'block', color: T.muted, fontSize: '12px', marginTop: '3px', lineHeight: 1.4 }}>Доступ только по прямой ссылке. Матч не будет виден в общей ленте.</span>
+      </span>
     </label>
   );
 }
 
-function RatingMatchToggle({ value, onChange }) {
-  return (
-    <label style={{
-      display: 'flex',
-      alignItems: 'flex-start',
-      gap: '12px',
-      background: T.surface,
-      borderRadius: '12px',
-      padding: '14px',
-      border: value ? '1px solid rgba(216,243,74,0.34)' : `1px solid ${T.border}`,
-      cursor: 'pointer',
-      marginBottom: '16px'
-    }}>
-      <input
-        type="checkbox"
-        checked={value}
-        onChange={(e) => onChange(e.target.checked)}
-        style={{ width: '20px', height: '20px', accentColor: T.accent, flexShrink: 0, cursor: 'pointer', marginTop: '2px' }}
-      />
-      <div style={{ flex: 1 }}>
-        <div style={{ color: T.text, fontSize: '14px', fontWeight: 600 }}>Рейтинговая игра</div>
-        <div style={{ color: T.muted, fontSize: '12px', marginTop: '3px', lineHeight: 1.45 }}>
-          Рейтинговая игра влияет на клубный рейтинг после завершения матча. Участникам нужен подтверждённый рейтинг.
-        </div>
-      </div>
-    </label>
-  );
-}
-
-export function isPrivateMatchCreationEnabled(
-  allowPrivateMatches,
-  isPrivate,
-) {
+export function isPrivateMatchCreationEnabled(allowPrivateMatches, isPrivate) {
   return allowPrivateMatches === true && isPrivate === true;
 }
 
-// ─── Main Screen ──────────────────────────────────────────────────────────────
+export function createMatchBookingMetadata({ scenario, ratingMin, ratingMax, description, isPrivate, isRatingMatch, allowPrivateMatches }) {
+  if (!['community', 'social'].includes(scenario)) return null;
+  const privateMatch = isPrivateMatchCreationEnabled(allowPrivateMatches, isPrivate);
+  return Object.freeze({
+    scenario: privateMatch ? 'private' : scenario,
+    isPrivate: privateMatch,
+    isRatingMatch: privateMatch ? false : isRatingMatch === true,
+    description: typeof description === 'string' ? description : '',
+    ...(privateMatch ? {} : { ratingMin, ratingMax }),
+  });
+}
 
 export default function MatchCreationScreen({
   onBack,
   onSuccess,
   user,
-  allMatches,
+  availabilityActions = null,
+  bookingClient = null,
+  courtNamesById = {},
+  onCourtCatalogChange = null,
+  onOpenProfile = null,
   showToast,
-  minimumDuration = 0.5,
   allowPrivateMatches = true,
 }) {
-  const [step,       setStep]       = useState(0); // 0 = scenario select, 1 = form
-  const [scenario,   setScenario]   = useState(null); // 'community' | 'social'
-  const [time,       setTime]       = useState('10:00');
-  const [duration,   setDuration]   = useState(1.5);
-  const [courtType,  setCourtType]  = useState('panoramic');
-  const [selectedCourtId, setSelectedCourtId] = useState(null);
-  const [ratingMin,  setRatingMin]  = useState(2);
-  const [ratingMax,  setRatingMax]  = useState(5);
-  const [showSocial, setShowSocial] = useState(false);
-  const [selectedDate, setSelectedDate] = useState(generateDates()[0]); // Default to today
-  const [timeError,   setTimeError]   = useState('');
+  const [step, setStep] = useState('scenario');
+  const [scenario, setScenario] = useState(null);
+  const [ratingMin, setRatingMin] = useState(2);
+  const [ratingMax, setRatingMax] = useState(5);
   const [description, setDescription] = useState('');
   const [isPrivate, setIsPrivate] = useState(false);
   const [isRatingMatch, setIsRatingMatch] = useState(false);
-  const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    if (hasMoscowSlotStarted(selectedDate.dateISO, time)) {
-      setTimeError('Нельзя забронировать время в прошлом');
-    } else {
-      setTimeError('');
-    }
-  }, [selectedDate, time]);
-
-  useEffect(() => {
-    if (!allowPrivateMatches) setIsPrivate(false);
-  }, [allowPrivateMatches]);
-
-  const handleTimeSelect = (newTime) => {
-    setTime(newTime);
-    const cap = maxDuration(newTime);
-    if (duration > cap) setDuration(Math.max(minimumDuration, cap));
-  };
-
-  const handleCourtTypeChange = (newType) => {
-    setCourtType(newType);
-    setSelectedCourtId(null); // Reset court selection when type changes
-  };
-
-  const handleScenarioSelect = (s) => {
-    if (s === 'social' && !YOOKASSA_COURT_CHECKOUT_ENABLED) {
-      showToast?.(YOOKASSA_COURT_CHECKOUT_PENDING_MESSAGE, 'info');
-      return;
-    }
-    if (s === 'community') setIsPrivate(false);
-    setScenario(s);
-    setStep(1);
-  };
+  const scenarioDefinition = MATCH_SCENARIO_DEFS.find((item) => item.id === scenario);
+  const metadata = useMemo(
+    () => createMatchBookingMetadata({ scenario, ratingMin, ratingMax, description, isPrivate, isRatingMatch, allowPrivateMatches }),
+    [allowPrivateMatches, description, isPrivate, isRatingMatch, ratingMax, ratingMin, scenario],
+  );
 
   const handleBack = () => {
-    if (step === 1) { setStep(0); setScenario(null); }
-    else onBack?.();
+    if (step === 'booking') {
+      setStep('details');
+    } else if (step === 'details') {
+      setStep('scenario');
+      setScenario(null);
+    } else {
+      onBack?.();
+    }
   };
 
-  const handleCTA = async () => {
-    if (saving) return;
-    if (isRatingMatch && user?.isVerified !== true) {
+  const continueToBooking = () => {
+    if (isRatingMatch && !isPrivate && user?.isVerified !== true) {
       showToast?.('Для рейтинговой игры нужен подтверждённый рейтинг.', 'error');
       return;
     }
-    const selectedCourt = COURTS.find(c => c.id === selectedCourtId);
-  if (scenario === 'community') {
-    setSaving(true);
-    try {
-      await onSuccess?.({
-      time,
-      duration, 
-      courtType, 
-      courtId: selectedCourt?.id,
-      courtName: selectedCourt?.name,
-      ratingMin, 
-      ratingMax, 
-      scenario: 'community', 
-      status: 'searching',
-      isPrivate: isPrivateMatchCreationEnabled(
-        allowPrivateMatches,
-        isPrivate,
-      ),
-      isRatingMatch,
-      dateISO: selectedDate.dateISO,
-      date: formatMoscowDateISO(selectedDate.dateISO, { day: 'numeric', month: 'long' }).replace(' г.', ''),
-      description,
-      });
-    } catch {
-      showToast?.('Матч не создан. Попробуйте еще раз.', 'error');
-    } finally {
-      setSaving(false);
+    if (metadata !== null) setStep('booking');
+  };
+
+  const completeConfirmedReservation = async (reservation) => {
+    if (metadata === null || reservation?.status !== 'confirmed') {
+      showToast?.('Матч не создан: бронь ещё не подтверждена.', 'error');
+      return false;
     }
-  } else {
-    if (!selectedCourt) return;
-    setShowSocial(true);
-    // The actual success call is in handleSocialConfirm
+    return onSuccess?.({ ...metadata, reservationId: reservation.reservationId });
+  };
+
+  if (step === 'booking') {
+    return (
+      <BookingScreen
+        availabilityActions={availabilityActions}
+        bookingClient={bookingClient}
+        reservationPurpose="match"
+        onConfirmedReservation={completeConfirmedReservation}
+        onBack={handleBack}
+        courtNamesById={courtNamesById}
+        onCourtCatalogChange={onCourtCatalogChange}
+        onOpenProfile={onOpenProfile}
+        showToast={showToast}
+      />
+    );
   }
-};
-
-  const handleSocialConfirm = async () => {
-    if (saving) return;
-    if (isRatingMatch && user?.isVerified !== true) {
-      showToast?.('Для рейтинговой игры нужен подтверждённый рейтинг.', 'error');
-      return;
-    }
-    const selectedCourt = COURTS.find(c => c.id === selectedCourtId);
-    if (!selectedCourt) return;
-    setSaving(true);
-    try {
-      await onSuccess?.({
-      time, duration, courtType, ratingMin, ratingMax,
-  scenario: 'social',
-  status: 'confirmed',
-      ownerPaid: courtTotal(time, duration, courtType, selectedDate.dateISO),
-      holdAmount: 0,
-      isPrivate: isPrivateMatchCreationEnabled(
-        allowPrivateMatches,
-        isPrivate,
-      ),
-      isRatingMatch,
-      courtId: selectedCourt.id,
-      courtName: selectedCourt.name,
-  dateISO: selectedDate.dateISO,
-  date: formatMoscowDateISO(selectedDate.dateISO, { day: 'numeric', month: 'long' }).replace(' г.', ''),
-      description,
-      });
-      setShowSocial(false);
-    } catch {
-      showToast?.('Матч не создан. Попробуйте еще раз.', 'error');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const isP       = isPrime(time, selectedDate.dateISO);
-  const total     = courtTotal(time, duration, courtType, selectedDate.dateISO);
-  const scenarioDef = MATCH_SCENARIO_DEFS.find(s => s.id === scenario);
-  const canBook = (scenario === 'social' ? !!selectedCourtId : true) && !timeError;
 
   return (
-    <div style={{ background: T.bg, minHeight: '100dvh', maxHeight: '100dvh', overflowY: 'auto', overflowX: 'hidden', WebkitOverflowScrolling: 'touch', touchAction: 'pan-y', paddingBottom: 'calc(116px + env(safe-area-inset-bottom, 0px))' }}>
-
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', padding: '20px 16px 16px', gap: '12px' }}>
-        <button onClick={handleBack} style={{ background: 'none', border: 'none', color: T.muted, fontSize: '22px', cursor: 'pointer', lineHeight: 1, padding: '4px' }}>
-          ←
-        </button>
+    <div style={{ background: T.bg, minHeight: '100dvh', overflowY: 'auto', paddingBottom: 'calc(116px + env(safe-area-inset-bottom, 0px))' }}>
+      <header style={{ display: 'flex', alignItems: 'center', padding: '20px 16px 16px', gap: '12px' }}>
+        <button type="button" aria-label="Назад" onClick={handleBack} style={{ minWidth: '44px', minHeight: '44px', background: 'none', border: 'none', color: T.muted, fontSize: '22px', cursor: 'pointer', lineHeight: 1, padding: '4px' }}>←</button>
         <h1 style={{ color: T.text, fontSize: '20px', fontWeight: 700, margin: 0 }}>
-          {step === 0 ? 'Создать матч' : scenarioDef?.title ?? 'Создать матч'}
+          {step === 'scenario' ? 'Создать матч' : scenarioDefinition?.title ?? 'Создать матч'}
         </h1>
-      </div>
+      </header>
 
-      {step === 0 ? (
-        <ScenarioSelector onSelect={handleScenarioSelect} />
+      {step === 'scenario' ? (
+        <ScenarioSelector onSelect={(nextScenario) => { setScenario(nextScenario); setStep('details'); }} />
       ) : (
         <>
-          {/* Scenario chip — tap to change */}
           <div style={{ padding: '0 16px 16px' }}>
-            <div
-              onClick={() => { setStep(0); setScenario(null); }}
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: '6px',
-                background: scenarioDef?.bg, borderRadius: '8px', padding: '5px 10px',
-                border: `1px solid ${scenarioDef?.border}`, cursor: 'pointer',
-              }}
-            >
-              <span style={{ fontSize: '11px', fontWeight: 900, letterSpacing: '0.12em' }}>{scenarioDef?.mark}</span>
-              <span style={{ color: scenarioDef?.color, fontSize: '12px', fontWeight: 700 }}>{scenarioDef?.badge}</span>
+            <button type="button" onClick={() => { setStep('scenario'); setScenario(null); }} style={{ minHeight: '44px', display: 'inline-flex', alignItems: 'center', gap: '6px', background: scenarioDefinition?.bg, borderRadius: '8px', padding: '5px 10px', border: `1px solid ${scenarioDefinition?.border}`, cursor: 'pointer' }}>
+              <span style={{ fontSize: '11px', fontWeight: 900, letterSpacing: '0.12em' }}>{scenarioDefinition?.mark}</span>
+              <span style={{ color: scenarioDefinition?.color, fontSize: '12px', fontWeight: 700 }}>{scenarioDefinition?.badge}</span>
               <span style={{ color: T.muted, fontSize: '11px' }}>· изменить</span>
-            </div>
+            </button>
           </div>
 
-          {/* Form */}
-          <div style={{ padding: '0 16px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
-            <Section title="Дата игры">
-  <div className="overflow-x-auto flex gap-2 pb-2.5 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-    {generateDates().map((day) => {
-      const isActive = day.dateISO === selectedDate?.dateISO;
-      return (
-        <button
-          key={day.dateISO}
-          onClick={() => setSelectedDate(day)}
-          style={{
-            flexShrink: 0, minWidth: '60px', padding: '10px', borderRadius: '12px',
-            border: isActive ? '1px solid rgba(216,243,74,0.36)' : '1px solid rgba(245,241,232,0.10)',
-            background: isActive ? 'rgba(216,243,74,0.14)' : 'rgba(255,255,255,0.045)',
-            color: isActive ? '#D8F34A' : 'rgba(245,241,232,0.62)',
-            cursor: 'pointer', textAlign: 'center'
-          }}
-        >
-          <div style={{ fontSize: '10px', textTransform: 'uppercase', marginBottom: '4px' }}>{day.dayOfWeek}</div>
-          <div style={{ fontSize: '18px', fontWeight: 700 }}>{day.dayOfMonth}</div>
-        </button>
-      );
-    })}
-  </div>
-</Section>
-            <TimePicker
-              time={time} onTime={handleTimeSelect}
-              duration={duration} onDuration={d => setDuration(Math.min(d, maxDuration(time)))}
-              maxDur={maxDuration(time)}
-              minDur={minimumDuration}
-              selectedDate={selectedDate}
-            />
-            <CourtTypeToggle value={courtType} onChange={handleCourtTypeChange} />
-            <CourtSelector
-              courtType={courtType}
-              selectedDate={selectedDate}
-              time={time}
-              duration={duration}
-              allMatches={allMatches}
-              selectedId={selectedCourtId}
-              onChange={setSelectedCourtId}
-            />
-            <RatingRangeSlider
-              minIdx={ratingMin} maxIdx={ratingMax}
-              onChange={(a, b) => { setRatingMin(a); setRatingMax(b); }}
-            />
+          <div style={{ padding: '0 16px' }}>
+            {!isPrivate && <RatingRangeSlider minIdx={ratingMin} maxIdx={ratingMax} onChange={(minimum, maximum) => { setRatingMin(minimum); setRatingMax(maximum); }} />}
+
             <Section title="Комментарий (необязательно)">
               <textarea
                 value={description}
                 onChange={(event) => {
-                  if (
-                    commentCodePointLength(event.target.value) <=
-                    MATCH_COMMENT_MAX_LENGTH
-                  ) {
-                    setDescription(event.target.value);
-                  }
+                  if (commentCodePointLength(event.target.value) <= MATCH_COMMENT_MAX_LENGTH) setDescription(event.target.value);
                 }}
                 placeholder="Например: играем в спокойном темпе, для удовольствия."
-                rows={2}
-                style={{
-                  width: '100%', padding: '12px 14px',
-                  background: T.surface, border: `1px solid ${T.border}`,
-                  borderRadius: '12px', color: T.text, fontSize: '15px',
-                  outline: 'none', boxSizing: 'border-box', resize: 'none',
-                }}
+                rows={3}
+                style={{ width: '100%', padding: '12px 14px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: '12px', color: T.text, fontSize: '15px', outline: 'none', boxSizing: 'border-box', resize: 'vertical' }}
               />
-              <div style={{ marginTop: '6px', color: T.muted, fontSize: '11px', textAlign: 'right' }}>
-                {commentCodePointLength(description)}/{MATCH_COMMENT_MAX_LENGTH}
-              </div>
+              <div style={{ marginTop: '6px', color: T.muted, fontSize: '11px', textAlign: 'right' }}>{commentCodePointLength(description)}/{MATCH_COMMENT_MAX_LENGTH}</div>
             </Section>
-          </div>
 
-          {/* Community warning */}
-          {scenario === 'community' && (
-            <div style={{ margin: '0 16px 16px', background: 'rgba(212,175,55,0.06)', borderRadius: '12px', padding: '12px 16px', border: '1px solid rgba(212,175,55,0.25)', display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
-              <span style={{ fontSize: '14px', fontWeight: 900, flexShrink: 0 }}>!</span>
-              <div style={{ color: T.gold, fontSize: '12px', lineHeight: 1.6 }}>
-                <strong>Корт не забронирован.</strong> Сейчас это заявка на сбор игроков без онлайн-оплаты. Бронь корта нужно подтвердить отдельно.
-              </div>
-            </div>
-          )}
-
-          {/* Social planned-court preview */}
-          {scenario === 'social' && (
-            <div style={{
-              margin: '0 16px 16px',
-              background: 'rgba(216,243,74,0.06)',
-              borderRadius: '18px', padding: '12px 16px',
-              border: '1px solid rgba(216,243,74,0.18)',
-            }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ color: T.muted, fontSize: '12px' }}>Ориентировочная стоимость корта</span>
-                <span style={{ color: isP ? T.gold : T.accentL, fontWeight: 800, fontSize: '18px' }}>{fmtPrice(total)}</span>
-              </div>
-              <div style={{ color: T.gold, fontSize: '12px', lineHeight: 1.55, marginTop: '8px' }}>
-                Корт не забронирован. После создания матча подтвердите бронь отдельно в его деталях.
-              </div>
-            </div>
-          )}
-
-          {timeError && (
-            <div style={{ margin: '0 16px 16px', fontSize: '12px', textAlign: 'center', color: '#ef4444' }}>
-              {timeError}
-            </div>
-          )}
-
-          {/* Privacy Toggle */}
-          <div style={{ padding: '0 16px' }}>
-            <RatingMatchToggle value={isRatingMatch} onChange={setIsRatingMatch} />
-            {scenario === 'social' && allowPrivateMatches && (
-              <PrivacyToggle value={isPrivate} onChange={setIsPrivate} />
+            {!isPrivate && <RatingMatchToggle value={isRatingMatch} onChange={setIsRatingMatch} />}
+            {allowPrivateMatches && (
+              <PrivacyToggle
+                value={isPrivate}
+                onChange={(nextValue) => { setIsPrivate(nextValue); if (nextValue) setIsRatingMatch(false); }}
+              />
             )}
-          </div>
 
-          {/* CTA */}
-          <div style={{ padding: '0 16px' }}>
-            <button
-              onClick={handleCTA}
-              disabled={!canBook || saving}
-              style={{
-                ...styles.ctaBtn,
-                background: 'rgba(216,243,74,0.12)',
-                color: T.accent,
-                border: '1px solid rgba(216,243,74,0.32)',
-                opacity: canBook && !saving ? 1 : 0.5,
-                cursor: canBook && !saving ? 'pointer' : 'not-allowed',
-              }}
-            >
-              {saving
-                ? 'Сохраняем...'
-                : scenario === 'community'
-                ? 'Создать матч'
-                : canBook
-                  ? 'Продолжить'
-                  : 'Выберите свободный корт'
-              }
+            <div style={{ marginBottom: '16px', borderRadius: '14px', border: '1px solid rgba(216,243,74,0.18)', background: 'rgba(216,243,74,0.06)', padding: '12px 14px', color: T.muted, fontSize: '12px', lineHeight: 1.55 }}>
+              Следующий шаг — единая сетка свободных слотов 30 минут. Матч появится только после подтверждения и привязки брони.
+            </div>
+
+            <button type="button" data-testid="match-continue-to-booking" onClick={continueToBooking} style={{ width: '100%', minHeight: '52px', padding: '16px', background: 'rgba(216,243,74,0.12)', color: T.accent, border: '1px solid rgba(216,243,74,0.32)', borderRadius: '18px', fontSize: '16px', fontWeight: 800, cursor: 'pointer', boxShadow: '0 14px 36px rgba(216,243,74,0.16)' }}>
+              Выбрать корт и время
             </button>
           </div>
         </>
       )}
-
-      {showSocial && (
-        <SocialMatchConfirmationSheet
-          time={time}
-          duration={duration}
-          courtType={courtType}
-          dateISO={selectedDate.dateISO}
-          onConfirm={handleSocialConfirm}
-          onClose={() => setShowSocial(false)}
-        />
-      )}
     </div>
   );
 }
-
-// ─── Shared styles ────────────────────────────────────────────────────────────
-
-const styles = {
-  dBtn: {
-    width: '34px', height: '34px', borderRadius: '8px',
-    border: `1px solid ${T.border}`, background: T.bg,
-    color: '#fff', fontSize: '20px', cursor: 'pointer',
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    lineHeight: 1, flexShrink: 0,
-  },
-  ctaBtn: {
-    width: '100%', padding: '18px',
-    background: 'rgba(216,243,74,0.12)',
-    color: '#D8F34A', border: '1px solid rgba(216,243,74,0.32)', borderRadius: '18px',
-    fontSize: '16px', fontWeight: 800, cursor: 'pointer',
-    boxShadow: '0 14px 36px rgba(216,243,74,0.16)',
-  },
-};

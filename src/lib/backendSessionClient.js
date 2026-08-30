@@ -66,14 +66,12 @@ const MATCH_FEED_STATUSES = Object.freeze([
   'upcoming',
 ]);
 const MATCH_CREATE_REQUIRED_KEYS = Object.freeze([
-  'startsAt',
-  'durationMinutes',
+  'reservationId',
   'scenario',
   'description',
   'isRatingMatch',
 ]);
 const MATCH_CREATE_OPTIONAL_KEYS = Object.freeze([
-  'courtId',
   'ratingMin',
   'ratingMax',
 ]);
@@ -93,6 +91,8 @@ const MATCH_NOTIFICATION_TYPES = Object.freeze([
 const OFFSET_DATE_TIME_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/u;
 const MATCH_CHAT_MAX_BODY_CODE_POINTS = 2_000;
+// Protocol strings must reject the complete ASCII/C1 control ranges.
+// eslint-disable-next-line no-control-regex
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f-\u009f]/u;
 const LEGACY_PROFILE_KEYS = Object.freeze([
   'accountId',
@@ -236,12 +236,8 @@ export function isBackendCreateMatchDraft(value) {
       MATCH_CREATE_REQUIRED_KEYS,
       MATCH_CREATE_OPTIONAL_KEYS,
     ) ||
-    !isUnixEpochSeconds(value.startsAt) ||
-    !MATCH_DURATIONS.includes(value.durationMinutes) ||
+    !isMatchId(value.reservationId) ||
     !MATCH_SCENARIOS.includes(value.scenario) ||
-    (value.courtId !== undefined &&
-      (!isBoundedString(value.courtId, 64) ||
-        value.courtId.trim() !== value.courtId)) ||
     typeof value.description !== 'string' ||
     [...value.description].length > MATCH_COMMENT_MAX_CODE_POINTS ||
     typeof value.isRatingMatch !== 'boolean'
@@ -251,7 +247,6 @@ export function isBackendCreateMatchDraft(value) {
 
   if (value.scenario === 'private') {
     return (
-      value.courtId !== undefined &&
       value.isRatingMatch === false &&
       !Object.prototype.hasOwnProperty.call(value, 'ratingMin') &&
       !Object.prototype.hasOwnProperty.call(value, 'ratingMax')
@@ -259,7 +254,6 @@ export function isBackendCreateMatchDraft(value) {
   }
 
   return (
-    (value.scenario !== 'social' || value.courtId !== undefined) &&
     isMatchRating(value.ratingMin) &&
     isMatchRating(value.ratingMax) &&
     value.ratingMin <= value.ratingMax
@@ -336,6 +330,8 @@ function isCanonicalMatchMessageBody(value) {
     value.length > 0 &&
     [...value].length <= MATCH_CHAT_MAX_BODY_CODE_POINTS &&
     value.trim() === value &&
+    // Chat permits tab/newline/carriage-return but rejects other controls.
+    // eslint-disable-next-line no-control-regex
     !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/u.test(value)
   );
 }

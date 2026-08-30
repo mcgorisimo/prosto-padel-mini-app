@@ -1071,11 +1071,8 @@ function MatchInvitationPanel({ accepting, declining, onAccept, onDecline }) {
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
-export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinSuccess, onUpdateDescription, onJoinMatch, onLeaveMatch, onRefreshMatch, onBookCourt, onLoadWaitlist, onJoinWaitlist, onLeaveWaitlist, onLoadLineup, onAssignLineupSlot, onReleaseLineupSlot, onLoadResult, onSubmitResult, onConfirmResult, onDisputeResult, incomingInvitation = null, pendingInvitations = [], invitationActions = new Set(), onAcceptInvitation, onDeclineInvitation, onCreateInvitation, onCancelInvitation, onSearchPlayers, allMessages, messagesLoading, messagesLoadError, hasOlderMessages = false, olderMessagesLoading = false, onLoadOlderMessages, onRefreshMessages, onRetryMessages, onSendMessage, showToast }) {
+export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinSuccess, onUpdateDescription, onJoinMatch, onLeaveMatch, onRefreshMatch, onLoadWaitlist, onJoinWaitlist, onLeaveWaitlist, onLoadLineup, onAssignLineupSlot, onReleaseLineupSlot, onLoadResult, onSubmitResult, onConfirmResult, onDisputeResult, incomingInvitation = null, pendingInvitations = [], invitationActions = new Set(), onAcceptInvitation, onDeclineInvitation, onCreateInvitation, onCancelInvitation, onSearchPlayers, allMessages, messagesLoading, messagesLoadError, hasOlderMessages = false, olderMessagesLoading = false, onLoadOlderMessages, onRefreshMessages, onRetryMessages, onSendMessage, showToast }) {
   const isOwner = canManageMatch(currentUser, match);
-  const isBackendOrganizer =
-    match?.backendOwned === true &&
-    isOwner;
 
   const allBots = useMemo(() => getTestBots(), []);
   const botsById = useMemo(() => {
@@ -2238,21 +2235,6 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
 
         {/* ── Scenario status block ─────────────────────────────────────── */}
         <ScenarioInfoBlock match={match} />
-        {isBackendOrganizer &&
-          match.courtBookingStatus === 'unbooked' &&
-          typeof onBookCourt === 'function' && (
-            <div style={{ marginTop: '-8px', marginBottom: '16px' }}>
-              <PadelButton
-                data-testid="match-book-court"
-                variant="primary"
-                size="md"
-                fullWidth
-                onClick={() => onBookCourt(match)}
-              >
-                Забронировать корт
-              </PadelButton>
-            </div>
-          )}
         <RatingTypeBadge match={match} />
         {(isScorePending || isScoreDisputed || isScoreConfirmed) && (
           <div style={{

@@ -32,6 +32,7 @@ const MATCH_ID = deterministicUuid(
   'match-controller-match',
 ) as MatchId;
 const REQUEST_KEY = deterministicUuid('match-controller-request');
+const RESERVATION_ID = deterministicUuid('match-controller-reservation');
 const NOW = unixEpochSeconds(1_800_000_000);
 const PRIVATE_MARKER = 'SYNTHETIC_MATCH_CONTROLLER_PRIVATE';
 
@@ -279,9 +280,7 @@ describe('MatchController HTTP boundary', () => {
       headers: headers(),
       payload: {
         requestKey: REQUEST_KEY,
-        startsAt: NOW + 3_600,
-        durationMinutes: 90,
-        courtId: 'p1',
+        reservationId: RESERVATION_ID,
         scenario: 'social',
         description: '',
         ratingMin: 2,
@@ -447,9 +446,7 @@ describe('MatchController HTTP boundary', () => {
       headers: headers(),
       payload: {
         requestKey: REQUEST_KEY,
-        startsAt: NOW + 3_600,
-        durationMinutes: 90,
-        courtId: 'p1',
+        reservationId: RESERVATION_ID,
         scenario: 'social',
         description: '',
         ratingMin: 2,
@@ -520,9 +517,7 @@ describe('MatchController HTTP boundary', () => {
       headers: headers(),
       payload: {
         requestKey: REQUEST_KEY,
-        startsAt: NOW + 3_600,
-        durationMinutes: 90,
-        courtId: 'p1',
+        reservationId: RESERVATION_ID,
         courtName: 'Forged court',
         scenario: 'social',
         description: '',
@@ -542,9 +537,7 @@ describe('MatchController HTTP boundary', () => {
       headers: headers(),
       payload: {
         requestKey: REQUEST_KEY,
-        startsAt: NOW + 3_600,
-        durationMinutes: 90,
-        courtId: 'p1',
+        reservationId: RESERVATION_ID,
         scenario: 'social',
         title: 'Retired title',
         description: '',
@@ -645,9 +638,7 @@ describe('MatchController HTTP boundary', () => {
       headers: headers(),
       payload: {
         requestKey: REQUEST_KEY,
-        startsAt: NOW + 3_600,
-        durationMinutes: 90,
-        courtId: 'p1',
+        reservationId: RESERVATION_ID,
         scenario: 'social',
         description: privateText,
         ratingMin: 2,

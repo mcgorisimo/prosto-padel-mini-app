@@ -9,13 +9,12 @@ import {
 
 const REQUEST_KEY = deterministicUuid('match-api-http-request');
 const MATCH_ID = deterministicUuid('match-api-http-match');
+const RESERVATION_ID = deterministicUuid('match-api-http-reservation');
 
 function publicRequest(): Record<string, unknown> {
   return {
     requestKey: REQUEST_KEY,
-    startsAt: 1_800_003_600,
-    durationMinutes: 90,
-    courtId: 'p1',
+    reservationId: RESERVATION_ID,
     scenario: 'social',
     description: '',
     ratingMin: 2,
@@ -47,7 +46,7 @@ describe('match API HTTP parsers', () => {
     ).toBeUndefined();
   });
 
-  it('accepts private create only without public rating controls', () => {
+  it('accepts the existing private metadata with the same reservation contract', () => {
     const request = publicRequest();
     request.scenario = 'private';
     request.isRatingMatch = false;
@@ -57,10 +56,9 @@ describe('match API HTTP parsers', () => {
     expect(readCreateMatchRequest(request)).toEqual(request);
   });
 
-  it('accepts community create without a selected court', () => {
+  it('accepts community create with the same reservation contract', () => {
     const request = publicRequest();
     request.scenario = 'community';
-    delete request.courtId;
 
     expect(readCreateMatchRequest(request)).toEqual(request);
   });
@@ -73,13 +71,15 @@ describe('match API HTTP parsers', () => {
     ['client actor id', { ...publicRequest(), actorAccountId: MATCH_ID }],
     ['client digest', { ...publicRequest(), requestDigest: 'aa'.repeat(32) }],
     ['bad request key', { ...publicRequest(), requestKey: 'not-a-uuid' }],
-    ['bad duration', { ...publicRequest(), durationMinutes: 75 }],
-    ['missing social court', (() => {
+    ['bad reservation id', { ...publicRequest(), reservationId: 'not-a-uuid' }],
+    ['missing reservation id', (() => {
       const value = publicRequest();
-      delete value.courtId;
+      delete value.reservationId;
       return value;
     })()],
-    ['trimmed court required', { ...publicRequest(), courtId: ' court ' }],
+    ['client startsAt', { ...publicRequest(), startsAt: 1_800_003_600 }],
+    ['client duration', { ...publicRequest(), durationMinutes: 90 }],
+    ['client court id', { ...publicRequest(), courtId: 'p1' }],
     ['control character', { ...publicRequest(), description: 'x\u0000y' }],
     ['client court name', { ...publicRequest(), courtName: 'Court 1' }],
     ['client court type', { ...publicRequest(), courtType: 'indoor' }],

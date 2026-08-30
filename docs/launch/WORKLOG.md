@@ -9753,3 +9753,87 @@
 - Added a separate Selectel-test-only one-shot launcher for one exact fresh `match_invited` intent and account. It requires exact release/approval/test URL, both shared workers `OFF`, one canonical pending recipient, an active future match, enabled destination/preferences, `attempt_count=0`, global rate budget and `FOR UPDATE ... SKIP LOCKED`; it never starts legacy dispatch or reminders and never retries a provider response.
 - Focused regressions passed `23/23`; backend typecheck, unit `4044/4044`, E2E `4/4`, build, root E2E isolated rerun `111/111` with `1` intentional skip, root build and `git diff --check` passed. The first root E2E run under concurrent backend-unit load had six timeouts; all six and the full suite passed on the required isolated rerun. Independent exact-diff review: `CLEAR`, `P0=0`, `P1=0`.
 - No schema/migration, config/secret, database, Telegram/YCLIENTS/provider, server, push or deployment action occurred. `deployment=deployment_deferred_by_user` pending a separate exact-SHA push/Selectel backend rollout and read-only canary preflight; YCLIENTS reconciliation remains runtime-disabled and transferred to Admin Mode review.
+
+### 2026-08-30 — D3.1 match slot-selection candidate blocked at persistence review
+
+- Started from exact `origin/main` `2abb888e71ea8901cbebeaf23e72710b73263b50`
+  on `codex/d31-match-slot-selection`. The local candidate preserves the existing
+  match-creation styling and replaces the separate duration control with a
+  contiguous 30-minute grid from 07:00 through 23:30. It requires 2–4 slots
+  (1–2 hours), permits an exact 00:00 end, rejects gaps, occupied/colliding
+  intervals and a fifth slot, and ignores the unsupported 2.5-hour service.
+- Availability uses the completed D2.1 read-only service/court/date/time
+  contract. The selection summary recomputes the existing price contract, and
+  synchronous submit guarding prevents duplicate create calls. Focused coverage
+  verifies min/max, deselection, gaps, occupied and half-open overlap, 07:00,
+  valid 22:00/22:30/23:00 midnight endings, invalid standalone 23:30, price
+  recomputation, the persisted app target, and card/detail display.
+- Full root unit passed `151/151`; root build passed (`1626` modules, existing
+  chunk-size advisory only); root E2E passed `112/112` with one intentional
+  feature-disabled skip. After review, the provider-offset validation P1 was
+  fixed and its focused unit/ESLint regression passed `10/10`.
+- Independent read-only review reported `P0=0` and initially two P1 findings.
+  The offset finding is fixed: a provider datetime must now resolve to the same
+  Moscow instant that the existing backend adapter persists. One P1 remains:
+  `slotBinding` is validated by the frontend create handler but the current
+  backend match-create allow-list and storage do not accept or persist provider
+  `serviceId`, numeric court ID or `endsAt`; therefore save-time provider
+  availability cannot be revalidated atomically. Migration 034 deliberately
+  keeps unbooked planned matches separate from confirmed reservation links, so
+  inventing a persisted provider hold in this UI slice would change the D2.1
+  domain contract.
+- The required clean-review gate is not met, so there is no D3.1 commit, push,
+  merge or integration yet. No database/schema/migration, Selectel/SSH,
+  YCLIENTS/provider API, booking create, payment, secret/env, production or
+  Supabase action occurred. Because the candidate changes the frontend bundle,
+  `deployment=deployment_deferred_by_user`; no health, smoke or log gate ran.
+- Next gate is an owner decision: either authorize a separate backend planned
+  slot-binding/persistence design (including its database and concurrency
+  semantics), or explicitly define the YCLIENTS binding as a point-in-time UI
+  availability proof while only the planned app court/time/duration is persisted
+  for an unbooked match. The candidate must be re-reviewed before any commit.
+
+### 2026-08-30 — D3.1 canonical D2.1 booking integration local checkpoint
+
+- The owner rejected the unbooked-match candidate above and selected the
+  completed D2.1 private-booking flow as the only match-booking path. The current
+  replacement reuses `BookingScreen` for community/social and open/private
+  match metadata, including the D2.1 services, courts, dates, 30-minute
+  contiguous 1–2 hour selection, price, confirmation sheet, profile contacts,
+  reservation create and request-key recovery. The existing match-creation
+  visual language is preserved; its original rating range and toggle styling
+  remain in place. The unsupported 2.5-hour service is not offered or accepted.
+- `POST /matches` now accepts one confirmed owner `reservationId` instead of a
+  client-authored time/court/duration. In one PostgreSQL transaction it locks
+  the reservation using the canonical reservation-before-match order, derives
+  the exact provider court/start/end/duration binding, creates the match and
+  links that reservation. A missing, unconfirmed, unbound, started or unsupported
+  reservation is rejected before publication; link failure rolls the match back.
+  Match/link identifiers are reservation-derived so recovery with a new
+  transport request key cannot create a duplicate match or reservation.
+- The frontend no longer exposes the separate post-create booking action and
+  accepts creation success only when the response contains the same confirmed
+  reservation. A confirmed reservation whose match finalization failed can
+  retry only the atomic match-create/link step. `PAYMENT_PROVIDER_READY=false`
+  remains the shared D2.1 runtime gate, so neither private booking nor match
+  booking bypasses the deferred payment stage. Payment fields/runtime, result
+  rating mechanics, chat, migrations and Supabase were not changed.
+- Local gates passed: root unit `149/149`; root E2E `111/112` with the one
+  intentional feature-disabled skip; root build (`1624` modules, existing chunk
+  size advisory only); backend typecheck; backend unit `4053/4053`; backend E2E
+  `4/4`; backend build; `git diff --check`. Focused booking coverage includes
+  min/max, contiguous selection, deselection, occupied/gap/overlap rejection,
+  07:00 and exact 00:00 endings, price recomputation, profile contacts and
+  create recovery; match coverage verifies both scenarios, exact persisted
+  target and card/detail mapping.
+- Independent review initially found two P1 issues. Both were fixed: a fresh
+  viewer now receives a target-derived provider court fallback after a court
+  move, and a component regression executes confirmed booking, failed match
+  finalization and retry while proving that no second reservation is created.
+  Final independent review is `CLEAR`, `P0=0`, `P1=0`. This checkpoint is
+  recorded by the local D3.1 commit containing this entry. No push, merge,
+  database/provider/YCLIENTS/API call, Selectel/SSH or deployment action
+  occurred. Runtime/frontend/backend changed, therefore
+  `deployment=deployment_deferred_by_user`; deployed environment/commit,
+  containers, health/HTTP, business smoke and logs are all `not_run` until a
+  separate owner-authorized integration and Selectel rollout gate.

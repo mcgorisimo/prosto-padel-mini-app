@@ -8,6 +8,10 @@ import {
 } from '../database/match.repository';
 import { PostgresTransaction } from '../database/postgres-transaction';
 import {
+  CourtReservation,
+  CourtReservationId,
+} from '../reservations/reservation.types';
+import {
   PublicPlayerProfileSearchPersistenceError,
   PublicPlayerProfileSearchRepository,
 } from '../database/public-player-profile-search.repository';
@@ -26,6 +30,9 @@ const OTHER_ACCOUNT_ID = deterministicUuid(
   'match-api-other-account',
 ) as AccountId;
 const REQUEST_KEY = deterministicUuid('match-api-request');
+const RESERVATION_ID = deterministicUuid(
+  'match-api-reservation',
+) as CourtReservationId;
 const MATCH_ID = deterministicUuid('match-api-match') as MatchId;
 const PARTICIPANT_ID = deterministicUuid(
   'match-api-participant',
@@ -37,6 +44,8 @@ interface Harness {
   readonly service: MatchApiService;
   readonly run: jest.Mock;
   readonly create: jest.MockedFunction<MatchRepository['create']>;
+  readonly findReservationById: jest.Mock;
+  readonly linkConfirmed: jest.Mock;
   readonly listPublicFeed: jest.MockedFunction<
     MatchRepository['listPublicFeed']
   >;
@@ -67,9 +76,7 @@ function request(
 ): CreateMatchRequest {
   return {
     requestKey: REQUEST_KEY,
-    startsAt: unixEpochSeconds(NOW + 3_600),
-    durationMinutes: 90,
-    courtId: 'p1',
+    reservationId: RESERVATION_ID,
     scenario: 'social',
     description: '',
     ratingMin: 2,
@@ -77,6 +84,34 @@ function request(
     isRatingMatch: true,
     ...overrides,
   };
+}
+
+function reservation(
+  overrides: Partial<CourtReservation> = {},
+): CourtReservation {
+  const startsAt = new Date((NOW + 3_600) * 1_000).toISOString();
+  const endsAt = new Date((NOW + 9_000) * 1_000).toISOString();
+  return Object.freeze({
+    reservationId: RESERVATION_ID,
+    ownerAccountId: ACCOUNT_ID,
+    status: 'confirmed',
+    target: Object.freeze({
+      serviceId: 11,
+      courtId: 55,
+      startsAt,
+      endsAt,
+    }),
+    providerBinding: Object.freeze({
+      provider: 'yclients',
+      appointmentId: 101,
+      recordId: 202,
+      recordHash: 'synthetic-record-hash',
+    }),
+    createdAt: NOW,
+    updatedAt: NOW,
+    version: 1,
+    ...overrides,
+  });
 }
 
 function detail(
@@ -166,6 +201,17 @@ function createHarness(): Harness {
   const closeForParticipant = jest.fn().mockResolvedValue(false);
   const releaseLineupForParticipant = jest.fn().mockResolvedValue(false);
   const readCourtBookings = jest.fn(async () => new Map());
+  const findReservationById = jest.fn(async () => reservation());
+  const linkConfirmed = jest.fn(async () => Object.freeze({
+    outcome: 'linked' as const,
+    persistence: 'applied' as const,
+    projection: Object.freeze({
+      status: 'confirmed' as const,
+      stale: false,
+      reservationId: RESERVATION_ID,
+      target: reservation().target,
+    }),
+  }));
   const enqueueMatchOwner = jest.fn().mockResolvedValue(undefined);
   const service = new MatchApiService({
     transactions: {
@@ -187,7 +233,11 @@ function createHarness(): Harness {
     publicProfiles: { findByPlayerIds },
     waitlist: { promoteAvailable, closeForParticipant },
     lineups: { releaseForParticipantLeave: releaseLineupForParticipant },
-    matchReservations: { readCourtBookings },
+    matchReservations: {
+      lockReservationForMatchCreate: findReservationById,
+      linkConfirmed,
+      readCourtBookings,
+    },
     notificationIntents: { enqueueMatchOwner },
     clock: { nowEpochSeconds: clockNow },
   });
@@ -195,6 +245,8 @@ function createHarness(): Harness {
     service,
     run,
     create,
+    findReservationById,
+    linkConfirmed,
     listPublicFeed,
     listAccountFeed,
     findVisibleById,
@@ -244,6 +296,9 @@ describe('MatchApiService', () => {
       visibility: 'public',
       status: 'confirmed',
       now: NOW,
+      startsAt: NOW + 3_600,
+      durationMinutes: 90,
+      courtId: 'yclients:55',
     });
     expect(firstCommand).not.toHaveProperty('courtName');
     expect(firstCommand).not.toHaveProperty('courtType');
@@ -254,6 +309,14 @@ describe('MatchApiService', () => {
     expect(secondCommand.matchId).toBe(firstCommand.matchId);
     expect(secondCommand.commandId).toBe(firstCommand.commandId);
     expect(secondCommand.requestDigest).toBe(firstCommand.requestDigest);
+    expect(harness.findReservationById).toHaveBeenCalledTimes(2);
+    expect(harness.linkConfirmed).toHaveBeenCalledTimes(2);
+    expect(harness.linkConfirmed.mock.calls[0][0]).toBe(TRANSACTION);
+    expect(harness.linkConfirmed.mock.calls[0][1]).toMatchObject({
+      matchId: firstCommand.matchId,
+      reservationId: RESERVATION_ID,
+      ownerAccountId: ACCOUNT_ID,
+    });
     expect(JSON.stringify(firstCommand)).not.toContain(PRIVATE_MARKER);
   });
 
@@ -351,28 +414,26 @@ describe('MatchApiService', () => {
     expect(harness.updateDescription).toHaveBeenCalledTimes(2);
   });
 
-  it('passes community without a selected court through the private repository boundary', async () => {
+  it('derives the same confirmed reservation court for a community match', async () => {
     const harness = createHarness();
     harness.create.mockImplementation(async (_transaction, command) => ({
       outcome: 'match_created',
       persistence: 'applied',
       match: {
         ...detail(command.matchId, command.actorAccountId),
-        courtId: `unassigned:${command.matchId}`,
-        courtName: 'Корт не выбран',
-        courtType: 'unassigned',
+        courtId: 'yclients:55',
+        courtName: 'Корт 55',
+        courtType: 'panoramic',
         scenario: 'community',
         status: 'searching',
         isRatingMatch: false,
-        pricePerPersonSnapshot: undefined,
+        pricePerPersonSnapshot: 1000.5,
       },
     }));
     const communityRequest = request({
-      courtId: undefined,
       scenario: 'community',
       isRatingMatch: false,
     });
-    delete (communityRequest as { courtId?: string }).courtId;
 
     const result = await harness.service.create({
       accountId: ACCOUNT_ID,
@@ -384,27 +445,128 @@ describe('MatchApiService', () => {
       outcome: 'created',
       persistence: 'applied',
       match: {
-        courtName: 'Корт не выбран',
-        courtType: 'unassigned',
+        courtName: 'Корт 55',
+        courtType: 'panoramic',
         scenario: 'community',
         status: 'searching',
+        courtBookingStatus: 'confirmed',
+        courtReservationId: RESERVATION_ID,
       },
     });
     expect(harness.create.mock.calls[0][1]).toMatchObject({
       scenario: 'community',
       status: 'searching',
+      courtId: 'yclients:55',
     });
-    expect(harness.create.mock.calls[0][1]).not.toHaveProperty('courtId');
+    expect(harness.linkConfirmed).toHaveBeenCalledTimes(1);
   });
 
-  it('lets the repository resolve a durable create retry after startsAt', async () => {
+  it.each([
+    ['pending_confirmation', 'reservation_not_confirmed'],
+    ['unknown', 'reservation_not_confirmed'],
+  ] as const)(
+    'does not create a match from a %s reservation',
+    async (status, reason) => {
+      const harness = createHarness();
+      harness.findReservationById.mockResolvedValue(
+        reservation({ status }),
+      );
+
+      await expect(harness.service.create({
+        accountId: ACCOUNT_ID,
+        role: 'player',
+        request: request(),
+      })).resolves.toEqual({ outcome: 'rejected', reason });
+      expect(harness.create).not.toHaveBeenCalled();
+      expect(harness.linkConfirmed).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects a 2.5 hour reservation before match persistence', async () => {
     const harness = createHarness();
-    harness.clockNow.mockReturnValue(unixEpochSeconds(NOW + 7_200));
+    const current = reservation();
+    harness.findReservationById.mockResolvedValue(reservation({
+      target: Object.freeze({
+        ...current.target,
+        endsAt: new Date((NOW + 12_600) * 1_000).toISOString(),
+      }),
+    }));
+
+    await expect(harness.service.create({
+      accountId: ACCOUNT_ID,
+      role: 'player',
+      request: request(),
+    })).resolves.toEqual({
+      outcome: 'rejected',
+      reason: 'unsupported_duration',
+    });
+    expect(harness.create).not.toHaveBeenCalled();
+  });
+
+  it('fails the atomic transaction when reservation linking is rejected', async () => {
+    const harness = createHarness();
     harness.create.mockImplementation(async (_transaction, command) => ({
       outcome: 'match_created',
-      persistence: 'idempotent_retry',
+      persistence: 'applied',
       match: detail(command.matchId, command.actorAccountId),
     }));
+    harness.linkConfirmed.mockResolvedValue({
+      outcome: 'rejected',
+      reason: 'reservation_already_linked',
+    });
+
+    await expect(harness.service.create({
+      accountId: ACCOUNT_ID,
+      role: 'player',
+      request: request(),
+    })).resolves.toEqual({ outcome: 'rejected', reason: 'match_conflict' });
+    expect(harness.create.mock.calls[0][0]).toBe(TRANSACTION);
+    expect(harness.linkConfirmed.mock.calls[0][0]).toBe(TRANSACTION);
+    expect(harness.findByPlayerIds).not.toHaveBeenCalled();
+  });
+
+  it('recovers the same match with a new transport request key', async () => {
+    const harness = createHarness();
+    harness.create.mockImplementation(async (_transaction, command) => ({
+      outcome: 'match_created',
+      persistence:
+        harness.create.mock.calls.length === 1
+          ? 'applied'
+          : 'idempotent_retry',
+      match: detail(command.matchId, command.actorAccountId),
+    }));
+    const otherRequestKey = deterministicUuid('match-api-recovery-request');
+
+    const first = await harness.service.create({
+      accountId: ACCOUNT_ID,
+      role: 'player',
+      request: request(),
+    });
+    const recovered = await harness.service.create({
+      accountId: ACCOUNT_ID,
+      role: 'player',
+      request: request({ requestKey: otherRequestKey }),
+    });
+
+    expect(first.outcome).toBe('created');
+    expect(recovered.outcome).toBe('created');
+    expect(harness.create.mock.calls[1][1].matchId).toBe(
+      harness.create.mock.calls[0][1].matchId,
+    );
+    expect(harness.create.mock.calls[1][1].commandId).toBe(
+      harness.create.mock.calls[0][1].commandId,
+    );
+    expect(harness.create.mock.calls[1][1].requestDigest).toBe(
+      harness.create.mock.calls[0][1].requestDigest,
+    );
+    expect(harness.linkConfirmed.mock.calls[1][1].linkId).toBe(
+      harness.linkConfirmed.mock.calls[0][1].linkId,
+    );
+  });
+
+  it('does not publish a match when the confirmed reservation has started', async () => {
+    const harness = createHarness();
+    harness.clockNow.mockReturnValue(unixEpochSeconds(NOW + 7_200));
 
     await expect(
       harness.service.create({
@@ -412,15 +574,15 @@ describe('MatchApiService', () => {
         role: 'player',
         request: request(),
       }),
-    ).resolves.toMatchObject({
-      outcome: 'created',
-      persistence: 'idempotent_retry',
+    ).resolves.toEqual({
+      outcome: 'rejected',
+      reason: 'match_started',
     });
-    expect(harness.create).toHaveBeenCalledTimes(1);
-    expect(harness.create.mock.calls[0][1].now).toBe(NOW + 7_200);
+    expect(harness.create).not.toHaveBeenCalled();
+    expect(harness.linkConfirmed).not.toHaveBeenCalled();
   });
 
-  it('derives private format without public rating fields', async () => {
+  it('derives the existing private format from the same confirmed reservation', async () => {
     const harness = createHarness();
     harness.create.mockImplementation(async (_transaction, command) => ({
       outcome: 'match_created',
@@ -461,6 +623,7 @@ describe('MatchApiService', () => {
     });
     expect(harness.create.mock.calls[0][1]).not.toHaveProperty('ratingMin');
     expect(harness.create.mock.calls[0][1]).not.toHaveProperty('ratingMax');
+    expect(harness.linkConfirmed).toHaveBeenCalledTimes(1);
   });
 
   it('lists and reads only safe repository records', async () => {
@@ -1133,7 +1296,7 @@ describe('MatchApiService', () => {
     expect(JSON.stringify(result)).not.toContain(PRIVATE_MARKER);
   });
 
-  it('fails closed for admin writes, new started create and malformed repository output', async () => {
+  it('fails closed for admin writes, invalid persistence and malformed repository output', async () => {
     const harness = createHarness();
     await expect(
       harness.service.create({
@@ -1149,7 +1312,7 @@ describe('MatchApiService', () => {
       harness.service.create({
         accountId: ACCOUNT_ID,
         role: 'player',
-        request: request({ startsAt: NOW }),
+        request: request(),
       }),
     ).resolves.toEqual({
       outcome: 'rejected',

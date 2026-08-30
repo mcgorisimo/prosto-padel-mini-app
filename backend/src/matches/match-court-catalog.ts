@@ -128,8 +128,9 @@ export class SystemMatchCourtCatalog implements MatchCourtCatalog {
         : undefined;
     }
     const court = COURTS.get(input.courtId);
+    const providerCourt = /^yclients:([1-9]\d*)$/u.exec(input.courtId);
     const local = localStart(input.startsAt);
-    if (court === undefined || local === undefined) {
+    if ((court === undefined && providerCourt === null) || local === undefined) {
       return undefined;
     }
     const price = pricePerPlayer(
@@ -140,10 +141,12 @@ export class SystemMatchCourtCatalog implements MatchCourtCatalog {
     return price === undefined
       ? undefined
       : Object.freeze({
-          ...court,
-          ...(input.scenario === 'community'
-            ? {}
-            : { pricePerPersonSnapshot: price }),
+          ...(court ?? {
+            courtId: input.courtId,
+            courtName: `Корт ${providerCourt?.[1]}`,
+            courtType: 'panoramic' as const,
+          }),
+          pricePerPersonSnapshot: price,
         });
   }
 }

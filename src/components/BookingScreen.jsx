@@ -2,12 +2,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { CalendarDays, Clock3, LockKeyhole, X } from 'lucide-react';
 import PullToRefresh from './PullToRefresh';
-import { BOOKING_DURATIONS, WORKING_HOURS, fromMin } from '../lib/booking';
+import { WORKING_HOURS, fromMin } from '../lib/booking';
 import { getBackendBookingStatusPresentation } from '../lib/backendBookingHomeAdapter';
+import {
+  groupRentalServices,
+  mergeBookingCourts,
+} from '../lib/bookingServiceCatalog';
+import { YOOKASSA_COURT_CHECKOUT_ENABLED } from '../lib/paidCourtCheckout';
 import { getMoscowDateRange, hasMoscowSlotStarted } from '../lib/moscowDateTime';
 import {
   MIN_PRIVATE_BOOKING_SLOTS,
-  MAX_PRIVATE_BOOKING_SLOTS,
   PRIVATE_BOOKING_SLOT_MINUTES,
   findPrivateBookingRangeOption,
   formatPrivateBookingMinute,
@@ -19,16 +23,10 @@ import {
 import { fmtPrice, getPerPlayerPrice, getTotalPrice } from '../lib/pricing';
 
 const ANY_COURT = 'any';
-const PAYMENT_PROVIDER_READY = false;
+const PAYMENT_PROVIDER_READY = YOOKASSA_COURT_CHECKOUT_ENABLED;
 const MAX_BOOKING_SERVICE_VARIANTS = 16;
 const MAX_BOOKING_QUERY_COURTS = 8;
 const MAX_BOOKING_AVAILABILITY_REQUESTS = 64;
-const PRIVATE_BOOKING_DURATIONS = BOOKING_DURATIONS.filter(
-  (duration) =>
-    duration * 60 <=
-    MAX_PRIVATE_BOOKING_SLOTS * PRIVATE_BOOKING_SLOT_MINUTES,
-);
-
 const TIME_SECTIONS = [
   { id: 'morning', title: 'Утро', from: 7 * 60, to: 12 * 60 },
   { id: 'day', title: 'День', from: 12 * 60, to: 17 * 60 },
@@ -138,46 +136,6 @@ function getSelectionHint(reason, targetMinute, range = null) {
   return 'Этот диапазон недоступен целиком. Выберите соседний свободный слот.';
 }
 
-function readRentalServiceDuration(title) {
-  if (typeof title !== 'string') return null;
-  const match = /^Аренда корта\s+(\d+(?:[.,]\d+)?)\s*ч\./iu.exec(title);
-  if (!match) return null;
-  const duration = Number(match[1].replace(',', '.'));
-  return PRIVATE_BOOKING_DURATIONS.includes(duration) ? duration : null;
-}
-
-function groupRentalServices(services) {
-  const groups = new Map();
-  for (const service of services) {
-    const duration = readRentalServiceDuration(service?.title);
-    if (duration === null) continue;
-    const current = groups.get(duration) ?? [];
-    current.push(service);
-    groups.set(duration, current);
-  }
-  return PRIVATE_BOOKING_DURATIONS.flatMap((duration) => {
-    const matchingServices = groups.get(duration);
-    return matchingServices
-      ? [{ duration, services: matchingServices }]
-      : [];
-  });
-}
-
-function mergeCourts(results) {
-  const courtsById = new Map();
-  for (const result of results) {
-    for (const court of result.courts) {
-      if (!courtsById.has(court.id)) {
-        courtsById.set(court.id, {
-          ...court,
-          type: 'panoramic',
-        });
-      }
-    }
-  }
-  return [...courtsById.values()].sort((left, right) => left.id - right.id);
-}
-
 function mergeDates(results) {
   return [...new Set(results.flatMap((result) => result.dates))].sort();
 }
@@ -232,8 +190,9 @@ export default function BookingScreen({
   availabilityActions = null,
   bookingClient = null,
   initialReservationId = null,
-  matchIdToLink = null,
-  onLinkMatchReservation = null,
+  reservationPurpose = 'private',
+  onConfirmedReservation = null,
+  onBack = null,
   onCloseReservation = null,
   courtNamesById = {},
   onCourtCatalogChange = null,
@@ -245,6 +204,7 @@ export default function BookingScreen({
   const usesBackendAvailability = availabilityActions !== null;
   const isReservationDetailsMode =
     typeof initialReservationId === 'string' && initialReservationId.length > 0;
+  const isMatchCreation = reservationPurpose === 'match';
   const normalizedBookingClient = useMemo(
     () => normalizeBookingClient(bookingClient),
     [bookingClient],
@@ -257,10 +217,12 @@ export default function BookingScreen({
   const [isSaving, setIsSaving] = useState(false);
   const [successText, setSuccessText] = useState('');
   const [latestReservation, setLatestReservation] = useState(null);
-  const [matchLinkStatus, setMatchLinkStatus] = useState('idle');
+  const [completionStatus, setCompletionStatus] = useState('idle');
+  const [pendingCompletionReservation, setPendingCompletionReservation] = useState(null);
   const [reservationReadStatus, setReservationReadStatus] = useState('idle');
   const bookingSheetCloseScrollRef = useRef(null);
   const reservationRefreshInFlightRef = useRef(false);
+  const completionInFlightRef = useRef(false);
   const servicesRequestRef = useRef(0);
   const [servicesState, setServicesState] = useState({
     status: 'idle',
@@ -289,38 +251,43 @@ export default function BookingScreen({
     bookingSheetCloseScrollRef.current = 0;
   }, []);
 
-  const linkReservationToMatch = useCallback(async (reservation) => {
+  const completeConfirmedReservation = useCallback(async (reservation) => {
+    if (!isMatchCreation) return true;
     if (
-      typeof matchIdToLink !== 'string' ||
+      completionInFlightRef.current ||
+      reservation?.status !== 'confirmed' ||
       typeof reservation?.reservationId !== 'string' ||
-      typeof onLinkMatchReservation !== 'function'
-    ) return true;
-    setMatchLinkStatus('linking');
+      typeof onConfirmedReservation !== 'function'
+    ) return false;
+    completionInFlightRef.current = true;
+    setCompletionStatus('linking');
     try {
-      const result = await onLinkMatchReservation(
-        matchIdToLink,
-        reservation.reservationId,
-      );
-      if (result?.outcome !== 'match_reservation_linked') {
-        setMatchLinkStatus('failed');
+      const result = await onConfirmedReservation(reservation);
+      if (result?.outcome !== 'match_created') {
+        setCompletionStatus('failed');
+        setPendingCompletionReservation(reservation);
         showToast?.(
-          'Бронь создана, но пока не связана с матчем. Повторите привязку в карточке брони.',
+          'Корт подтверждён, но матч пока не создан. Повторите завершение — новая бронь не появится.',
           'error',
         );
         return false;
       }
-      setMatchLinkStatus('linked');
-      setSuccessText('Корт забронирован и подтверждён для матча.');
+      setCompletionStatus('completed');
+      setPendingCompletionReservation(null);
+      setSuccessText('Корт подтверждён, матч создан и связан с бронью.');
       return true;
     } catch {
-      setMatchLinkStatus('failed');
+      setCompletionStatus('failed');
+      setPendingCompletionReservation(reservation);
       showToast?.(
-        'Бронь создана, но пока не связана с матчем. Повторите привязку в карточке брони.',
+        'Корт подтверждён, но матч пока не создан. Повторите завершение — новая бронь не появится.',
         'error',
       );
       return false;
+    } finally {
+      completionInFlightRef.current = false;
     }
-  }, [matchIdToLink, onLinkMatchReservation, showToast]);
+  }, [isMatchCreation, onConfirmedReservation, showToast]);
 
   useEffect(() => {
     const canReadExact =
@@ -434,7 +401,7 @@ export default function BookingScreen({
         setCourtsState({ status: 'error', serviceKey, courts: [], pairs: [] });
         return;
       }
-      const courts = mergeCourts(results);
+      const courts = mergeBookingCourts(results);
       const pairs = results.flatMap((result, index) =>
         result.courts.map((court) => ({
           serviceId: selectedServiceIds[index],
@@ -951,9 +918,11 @@ export default function BookingScreen({
           datetime: selectedOption.datetime,
         });
         if (result?.outcome === 'booking_created') {
-          const message =
-            'Бронь создана в YCLIENTS без онлайн-оплаты. Оплату подтвердит администратор клуба.';
-          setSuccessText(message);
+          setSuccessText(
+            isMatchCreation
+              ? 'Корт подтверждён. Завершаем создание матча…'
+              : 'Бронь создана в YCLIENTS без онлайн-оплаты. Оплату подтвердит администратор клуба.',
+          );
           setTimesState((current) => ({
             ...current,
             slots: current.slots.filter((slot) =>
@@ -965,7 +934,7 @@ export default function BookingScreen({
           setSelectedRange(null);
           setIsBookingSheetOpen(false);
           alignBookingScreenAfterCreate();
-          await linkReservationToMatch(result.reservation);
+          await completeConfirmedReservation(result.reservation);
           return;
         }
         if (result?.outcome === 'booking_unknown') {
@@ -989,8 +958,23 @@ export default function BookingScreen({
         if (result?.reason === 'unknown_outcome') {
           if (typeof availabilityActions.readBookingByRequestKey === 'function') {
             const recovered = await availabilityActions.readBookingByRequestKey(requestKey);
-            if (recovered?.outcome === 'booking_loaded') {
-              await linkReservationToMatch(recovered.reservation);
+            if (
+              recovered?.outcome === 'booking_loaded' &&
+              recovered.reservation?.status === 'confirmed'
+            ) {
+              const completed = await completeConfirmedReservation(
+                recovered.reservation,
+              );
+              if (completed) {
+                setSelectedRange(null);
+                setIsBookingSheetOpen(false);
+                setSuccessText(
+                  isMatchCreation
+                    ? 'Корт подтверждён, матч создан и связан с бронью.'
+                    : 'Бронь восстановлена и подтверждена.',
+                );
+                return;
+              }
             }
           }
           setSelectedRange(null);
@@ -1181,10 +1165,22 @@ export default function BookingScreen({
     >
     <div className="booking-screen min-h-screen bg-app-bg px-4 text-warm-white">
       <header className="booking-hero">
+        {typeof onBack === 'function' && (
+          <button
+            type="button"
+            aria-label="Назад к параметрам матча"
+            onClick={onBack}
+            className="mb-4 min-h-11 min-w-11 rounded-xl border border-warm-white/10 bg-warm-white/5 px-3 text-left text-xl text-warm-white/64"
+          >
+            ←
+          </button>
+        )}
         <div className="booking-hero-icon flex items-center justify-center text-coral">
           <CalendarDays size={20} />
         </div>
-        <h1 className="booking-title text-[30px] font-black leading-tight">Бронирование корта</h1>
+        <h1 className="booking-title text-[30px] font-black leading-tight">
+          {isMatchCreation ? 'Корт для матча' : 'Бронирование корта'}
+        </h1>
         <p className="booking-subtitle text-sm leading-relaxed text-warm-white/58">
           Выберите соседние свободные интервалы от 1 до 2 часов.
         </p>
@@ -1209,9 +1205,24 @@ export default function BookingScreen({
         </div>
       )}
 
-      {matchLinkStatus === 'linking' && (
+      {completionStatus === 'linking' && (
         <div className="booking-success mb-4 p-4 text-sm font-semibold">
-          Связываем подтверждённую бронь с матчем…
+          Создаём матч и атомарно связываем подтверждённую бронь…
+        </div>
+      )}
+
+      {completionStatus === 'failed' && pendingCompletionReservation && (
+        <div className="mb-4 rounded-2xl border border-coral/30 bg-coral/10 p-4 text-sm leading-relaxed">
+          <p>Бронь уже подтверждена. Повторите только создание и привязку матча.</p>
+          <button
+            type="button"
+            data-testid="match-finalize-retry"
+            disabled={isSaving}
+            onClick={() => completeConfirmedReservation(pendingCompletionReservation)}
+            className="mt-3 min-h-11 w-full rounded-xl border border-warm-white/14 bg-warm-white/8 px-3 font-black text-warm-white"
+          >
+            Завершить создание матча
+          </button>
         </div>
       )}
 
@@ -1395,7 +1406,7 @@ export default function BookingScreen({
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <div className="mb-1 text-[10px] font-extrabold uppercase tracking-[0.18em] text-warm-white/42">
-                    Подтверждение
+                    {isMatchCreation ? 'Корт для матча' : 'Подтверждение'}
                   </div>
                   <h2 className="text-xl font-black">
                     {selectedDate?.eyebrow}, {selectedDate?.label}
@@ -1433,9 +1444,13 @@ export default function BookingScreen({
                   <LockKeyhole size={18} />
                 </span>
                 <span>
-                  <span className="block text-sm font-black">Частная бронь</span>
+                  <span className="block text-sm font-black">
+                    {isMatchCreation ? 'Бронь корта для матча' : 'Частная бронь'}
+                  </span>
                   <span className="mt-1 block text-xs leading-relaxed text-warm-white/52">
-                    Только ваша бронь. В ленте матчей не показывается.
+                    {isMatchCreation
+                      ? 'Матч будет создан только после подтверждения и привязки этой брони.'
+                      : 'Только ваша бронь. В ленте матчей не показывается.'}
                   </span>
                 </span>
               </div>
@@ -1473,7 +1488,7 @@ export default function BookingScreen({
               >
                 {isSaving
                   ? 'Переходим к оплате...'
-                  : `Оплатить ${fmtPrice(totalPrice)}`}
+                  : `${isMatchCreation ? 'Оплатить и создать матч' : 'Оплатить'} ${fmtPrice(totalPrice)}`}
               </button>
             </div>
           </div>

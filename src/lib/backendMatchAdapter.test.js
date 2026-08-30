@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyBackendParticipantResult,
+  createBackendMatchDraft,
   mergeAccountUpcomingMatches,
   preferConfirmedBackendMatchMutation,
   resolveBackendMatchMode,
@@ -33,6 +34,49 @@ function backendMatch(overrides = {}) {
 }
 
 describe('backend match adapter', () => {
+  it('builds match creation only from the canonical reservation id', () => {
+    const reservationId = '88888888-8888-4888-8888-888888888888';
+
+    expect(createBackendMatchDraft({
+      reservationId,
+      scenario: 'community',
+      description: 'Игра вечером',
+      ratingMin: 2,
+      ratingMax: 5,
+      isRatingMatch: true,
+    })).toEqual({
+      reservationId,
+      scenario: 'community',
+      description: 'Игра вечером',
+      ratingMin: 2,
+      ratingMax: 5,
+      isRatingMatch: true,
+    });
+    expect(createBackendMatchDraft({
+      scenario: 'community',
+      dateISO: '2027-01-01',
+      time: '10:00',
+      duration: 1,
+    })).toBeNull();
+  });
+
+  it('keeps the existing private metadata boundary on the same reservation path', () => {
+    expect(createBackendMatchDraft({
+      reservationId: '99999999-9999-4999-8999-999999999999',
+      scenario: 'social',
+      isPrivate: true,
+      description: '',
+      isRatingMatch: true,
+      ratingMin: 1,
+      ratingMax: 6,
+    })).toEqual({
+      reservationId: '99999999-9999-4999-8999-999999999999',
+      scenario: 'private',
+      description: '',
+      isRatingMatch: false,
+    });
+  });
+
   it.each([
     [{ hasBackendActions: false }, 'loading'],
     [{ hasBackendActions: false, profileStatus: 'error' }, 'error'],

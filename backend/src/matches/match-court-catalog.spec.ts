@@ -89,7 +89,7 @@ describe('SystemMatchCourtCatalog', () => {
     expect(result).not.toHaveProperty('pricePerPersonSnapshot');
   });
 
-  it('does not attach a booking price to a selected community court', () => {
+  it('attaches the same booking price to a selected community court', () => {
     expect(
       catalog.resolve({
         matchId,
@@ -102,7 +102,30 @@ describe('SystemMatchCourtCatalog', () => {
       courtId: 'p1',
       courtName: 'Корт 1',
       courtType: 'panoramic',
+      pricePerPersonSnapshot: 1550,
     });
+  });
+
+  it('accepts a provider court and an exact midnight end', () => {
+    expect(catalog.resolve({
+      matchId,
+      scenario: 'social',
+      courtId: 'yclients:55',
+      startsAt: epoch('2026-07-27T20:00:00.000Z'),
+      durationMinutes: 60,
+    })).toEqual({
+      courtId: 'yclients:55',
+      courtName: 'Корт 55',
+      courtType: 'panoramic',
+      pricePerPersonSnapshot: 1100,
+    });
+    expect(catalog.resolve({
+      matchId,
+      scenario: 'social',
+      courtId: 'yclients:55',
+      startsAt: epoch('2026-07-27T20:30:00.000Z'),
+      durationMinutes: 60,
+    })).toBeUndefined();
   });
 
   it.each(['social', 'private'] as const)(

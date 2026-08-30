@@ -52,6 +52,12 @@ export class MatchReservationPersistenceError extends Error {
 }
 
 export interface MatchReservationRepository {
+  lockReservationForMatchCreate(
+    transaction: PostgresTransaction,
+    ownerAccountId: AccountId,
+    reservationId: CourtReservationId,
+  ): Promise<CourtReservation | null>;
+
   linkConfirmed(
     transaction: PostgresTransaction,
     input: Readonly<{

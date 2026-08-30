@@ -107,6 +107,31 @@ function matchRow() {
 }
 
 describe('PostgresMatchReservationRepository', () => {
+  it('locks the reservation scope before match creation using the canonical link order', async () => {
+    const stored = reservation();
+    const reservations = { findById: jest.fn(async () => stored) };
+    const transaction = new FakeTransaction([
+      result([{ locked: null }]),
+      result([{ reservation_id: RESERVATION_ID }]),
+    ]);
+    const repository = new PostgresMatchReservationRepository(
+      reservations as never,
+    );
+
+    await expect(repository.lockReservationForMatchCreate(
+      transaction,
+      OWNER,
+      RESERVATION_ID,
+    )).resolves.toBe(stored);
+    expect(transaction.calls[0].text).toContain('pg_advisory_xact_lock');
+    expect(transaction.calls[1].text).toContain('FOR UPDATE');
+    expect(reservations.findById).toHaveBeenCalledWith(
+      transaction,
+      OWNER,
+      RESERVATION_ID,
+    );
+  });
+
   it('atomically links only a confirmed owner reservation and appends all recipients', async () => {
     const stored = reservation();
     const reservations = { findById: jest.fn(async () => stored) };

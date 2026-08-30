@@ -1,11 +1,10 @@
 import { AccountId, UserRole } from '../accounts/account.types';
-import { UnixEpochSeconds } from '../auth/auth.types';
+import { CourtReservationId } from '../reservations/reservation.types';
 import {
   MatchDetailRecord,
   MatchFeedRecord,
 } from '../database/match.repository';
 import {
-  MatchDurationMinutes,
   MatchId,
   MatchScenario,
   MatchSlotNumber,
@@ -14,9 +13,7 @@ import { MatchCourtBookingResponse } from './match-reservation-api.types';
 
 export interface CreateMatchRequest {
   readonly requestKey: string;
-  readonly startsAt: UnixEpochSeconds;
-  readonly durationMinutes: MatchDurationMinutes;
-  readonly courtId?: string;
+  readonly reservationId: CourtReservationId;
   readonly scenario: MatchScenario;
   readonly description: string;
   readonly ratingMin?: number;
@@ -124,6 +121,10 @@ export type MatchApiRejection =
   | 'match_closed'
   | 'match_not_joinable'
   | 'match_started'
+  | 'reservation_not_found'
+  | 'reservation_not_confirmed'
+  | 'provider_binding_missing'
+  | 'unsupported_duration'
   | 'content_not_allowed'
   | 'rating_verification_required'
   | 'rating_out_of_range'

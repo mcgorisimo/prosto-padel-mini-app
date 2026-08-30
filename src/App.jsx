@@ -35,10 +35,6 @@ import {
   selectBackendReservationsForHome,
   selectMissingBookingCourtServiceIds,
 } from './lib/backendBookingHomeAdapter';
-import {
-  YOOKASSA_COURT_CHECKOUT_PENDING_MESSAGE,
-  resolvePaidCourtCheckoutEntry,
-} from './lib/paidCourtCheckout';
 import { readTelegramNotificationDeepLink } from './lib/telegramNotificationDeepLink';
 
 const MAX_EXPLICIT_HOME_BOOKING_REFRESHES = 3;
@@ -189,7 +185,6 @@ export default function App({
   const [activeTab, setActiveTab]    = useState('home');
   const [selectedMatch, setSelected] = useState(null);
   const [selectedBookingReservationId, setSelectedBookingReservationId] = useState(null);
-  const [selectedBookingMatchId, setSelectedBookingMatchId] = useState(null);
   const [screen, setScreen] = useState(null);
   const backendDetailRequestRef = useRef(0);
   const backendFeedRequestRef = useRef(0);
@@ -1197,7 +1192,6 @@ export default function App({
     if (deepLink.screen === 'booking') {
       notificationDeepLinkRef.current = null;
       setSelectedBookingReservationId(deepLink.reservationId);
-      setSelectedBookingMatchId(null);
       setScreen(null);
       setActiveTab('booking');
       return;
@@ -1259,46 +1253,6 @@ export default function App({
     setOutgoingInvitations([]);
     setSelected(null);
     setScreen(null);
-  };
-
-  const openCourtBookingForMatch = (match) => {
-    const checkoutEntry = resolvePaidCourtCheckoutEntry(match);
-    if (!checkoutEntry.visible) return;
-    if (!checkoutEntry.canStart) {
-      showToast?.(YOOKASSA_COURT_CHECKOUT_PENDING_MESSAGE, 'info');
-      return;
-    }
-    backendDetailRequestRef.current += 1;
-    setSelectedBookingReservationId(null);
-    setSelectedBookingMatchId(match.id);
-    setSelected(null);
-    setScreen(null);
-    setActiveTab('booking');
-  };
-
-  const linkCreatedReservationToMatch = async (matchId, reservationId) => {
-    if (
-      !backendMatchesReady ||
-      typeof backendMatchActions?.linkMatchReservation !== 'function'
-    ) {
-      return Object.freeze({ outcome: 'rejected', reason: 'unavailable' });
-    }
-    const result = await backendMatchActions.linkMatchReservation(
-      matchId,
-      reservationId,
-    );
-    if (result?.outcome !== 'match_reservation_linked') return result;
-    setSelectedBookingMatchId(null);
-    const refreshed = await backendMatchActions.loadMatch(matchId);
-    if (refreshed?.outcome === 'match_loaded') {
-      const match = mapBackendMatchToApp(
-        refreshed.match,
-        backendProfile,
-        backendCourtNamesById,
-      );
-      if (match) storeBackendMatch(match);
-    }
-    return result;
   };
 
   const beginInvitationAction = (key) => {
@@ -1664,6 +1618,14 @@ export default function App({
       );
       throw safeError;
     }
+    if (
+      result.match?.courtBookingStatus !== 'confirmed' ||
+      result.match?.courtReservationId !== data.reservationId
+    ) {
+      const unlinkedMatch = new Error('match_reservation_binding_missing');
+      showToast?.('Матч не опубликован: подтверждённая бронь не привязана.', 'error');
+      throw unlinkedMatch;
+    }
     const createdMatch = mapBackendMatchToApp(
       result.match,
       backendProfile,
@@ -1678,10 +1640,11 @@ export default function App({
       storeBackendMatch(createdMatch);
       setScreen(null);
       setActiveTab('matches');
-      return;
+      return result;
     }
     setSelected(createdMatch);
     setScreen('match-details');
+    return result;
   };
 
   // Upcoming = ALL non-completed matches user participates in (open / upcoming / private booking).
@@ -1741,10 +1704,17 @@ export default function App({
   if (screen === 'create-match') {
     return (
       <MatchCreationScreen
+        availabilityActions={backendBookingAvailabilityActions}
+        bookingClient={privateBookingClient}
+        courtNamesById={backendCourtNamesById}
+        onCourtCatalogChange={mergeBackendCourtCatalog}
+        onOpenProfile={() => {
+          setScreen(null);
+          setActiveTab('profile');
+        }}
         onBack={() => setScreen(null)}
         onSuccess={handleMatchSuccess}
         user={backendMatchCurrentUser}
-        minimumDuration={1}
         allowPrivateMatches={BACKEND_PRIVATE_MATCH_CREATION_ENABLED}
         showToast={showToast}
       />
@@ -1765,7 +1735,6 @@ export default function App({
         onJoinMatch={handleJoinMatch}
         onLeaveMatch={handleLeaveMatch}
         onRefreshMatch={handleRefreshMatch}
-        onBookCourt={openCourtBookingForMatch}
         onLoadWaitlist={
           isBackendOwnedMatch(selectedMatch)
             ? backendMatchActions?.listMatchWaitlist
@@ -1916,7 +1885,6 @@ export default function App({
             onViewDetails={openMatchDetails}
             onBookCourt={() => {
               setSelectedBookingReservationId(null);
-              setSelectedBookingMatchId(null);
               setActiveTab('booking');
             }}
             onOpenBooking={(reservationId) => {
@@ -1990,11 +1958,8 @@ export default function App({
           <BookingScreen
             availabilityActions={backendBookingAvailabilityActions}
             initialReservationId={selectedBookingReservationId}
-            matchIdToLink={selectedBookingMatchId}
-            onLinkMatchReservation={linkCreatedReservationToMatch}
             onCloseReservation={() => {
               setSelectedBookingReservationId(null);
-              setSelectedBookingMatchId(null);
               setActiveTab('home');
             }}
             courtNamesById={backendCourtNamesById}
@@ -2002,7 +1967,6 @@ export default function App({
             bookingClient={privateBookingClient}
             onOpenProfile={() => {
               setSelectedBookingReservationId(null);
-              setSelectedBookingMatchId(null);
               setActiveTab('profile');
             }}
             showToast={showToast}
@@ -2016,7 +1980,6 @@ export default function App({
         setActive={(nextTab) => {
           if (nextTab === 'booking') {
             setSelectedBookingReservationId(null);
-            setSelectedBookingMatchId(null);
           }
           setActiveTab(nextTab);
         }}

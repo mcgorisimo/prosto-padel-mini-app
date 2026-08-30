@@ -1,9 +1,6 @@
 import { getLevelForRating } from './ratingEngine';
 
 const LEVELS = Object.freeze(['D', 'D+', 'C', 'C+', 'B', 'B+', 'A']);
-const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/u;
-const TIME_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/u;
-const MOSCOW_OFFSET = '+03:00';
 const BACKEND_FEED_STATUSES = Object.freeze([
   'open',
   'searching',
@@ -11,7 +8,7 @@ const BACKEND_FEED_STATUSES = Object.freeze([
   'upcoming',
 ]);
 
-export const BACKEND_PRIVATE_MATCH_CREATION_ENABLED = false;
+export const BACKEND_PRIVATE_MATCH_CREATION_ENABLED = true;
 
 export function resolveBackendMatchMode({
   hasBackendActions,
@@ -476,34 +473,26 @@ export function createBackendMatchDraft(value) {
   if (
     !value ||
     typeof value !== 'object' ||
-    !DATE_PATTERN.test(value.dateISO ?? '') ||
-    !TIME_PATTERN.test(value.time ?? '')
+    typeof value.reservationId !== 'string' ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
+      value.reservationId,
+    )
   ) {
     return null;
   }
 
-  const startsAtMilliseconds = Date.parse(
-    `${value.dateISO}T${value.time}:00${MOSCOW_OFFSET}`,
-  );
-  const durationMinutes = Number(value.duration) * 60;
   const scenario = value.isPrivate === true ? 'private' : value.scenario;
   const description =
     typeof value.description === 'string' ? value.description : '';
 
   if (
-    !Number.isFinite(startsAtMilliseconds) ||
-    ![60, 90, 120, 150].includes(durationMinutes) ||
     !['community', 'social', 'private'].includes(scenario)
   ) {
     return null;
   }
 
   const draft = {
-    startsAt: Math.floor(startsAtMilliseconds / 1_000),
-    durationMinutes,
-    ...(typeof value.courtId === 'string' && value.courtId.length > 0
-      ? { courtId: value.courtId }
-      : {}),
+    reservationId: value.reservationId,
     scenario,
     description,
     ...(scenario === 'private'
@@ -542,8 +531,22 @@ export function mapBackendMatchToApp(
   const dateTime = moscowDateTime(effectiveStartsAt);
   if (!dateTime) return null;
   if (!Number.isInteger(effectiveDurationMinutes)) return null;
+  const confirmedCourtId =
+    confirmedTarget === null
+      ? null
+      : `yclients:${confirmedTarget.courtId}`;
   const providerCourtName =
     confirmedTarget === null ? null : courtNamesById?.[confirmedTarget.courtId];
+  const persistedCourtName =
+    typeof record.courtName === 'string' && record.courtName.trim()
+      ? record.courtName.trim()
+      : 'Корт';
+  const confirmedCourtFallbackName =
+    confirmedTarget === null
+      ? persistedCourtName
+      : record.courtId === confirmedCourtId
+        ? persistedCourtName
+        : `Корт ${confirmedTarget.courtId}`;
 
   const owner =
     record.owner?.unavailable === true
@@ -584,13 +587,13 @@ export function mapBackendMatchToApp(
     courtId:
       confirmedTarget === null
         ? record.courtId
-        : `yclients:${confirmedTarget.courtId}`,
+        : confirmedCourtId,
     courtName:
       confirmedTarget === null
         ? record.courtName
         : typeof providerCourtName === 'string' && providerCourtName.trim()
           ? providerCourtName.trim()
-          : 'Корт',
+          : confirmedCourtFallbackName,
     courtType: record.courtType,
     kind: record.kind ?? 'match',
     type: record.kind ?? 'match',

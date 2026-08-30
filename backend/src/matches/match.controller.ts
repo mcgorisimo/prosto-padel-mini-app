@@ -81,6 +81,30 @@ function rejection(reason: MatchApiRejection): HttpException {
         'match_started',
         'Match has already started',
       );
+    case 'reservation_not_found':
+      return publicError(
+        HttpStatus.NOT_FOUND,
+        'match_reservation_not_found',
+        'Court reservation was not found',
+      );
+    case 'reservation_not_confirmed':
+      return publicError(
+        HttpStatus.CONFLICT,
+        'match_reservation_not_confirmed',
+        'Court reservation is not confirmed',
+      );
+    case 'provider_binding_missing':
+      return publicError(
+        HttpStatus.CONFLICT,
+        'match_reservation_binding_missing',
+        'Court reservation provider binding is missing',
+      );
+    case 'unsupported_duration':
+      return publicError(
+        HttpStatus.CONFLICT,
+        'match_reservation_duration_unsupported',
+        'Court reservation duration is not supported',
+      );
     case 'content_not_allowed':
       return publicError(
         HttpStatus.UNPROCESSABLE_ENTITY,

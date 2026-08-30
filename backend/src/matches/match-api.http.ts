@@ -1,5 +1,5 @@
-import { isUnixEpochSeconds } from '../auth/auth.types';
 import { isInternalUuid } from '../common/internal-uuid';
+import { isCourtReservationId } from '../reservations/reservation.types';
 import {
   CreateMatchRequest,
   MatchActionRequest,
@@ -8,7 +8,6 @@ import {
 } from './match-api.types';
 import {
   MATCH_COMMENT_MAX_CODE_POINTS,
-  MatchDurationMinutes,
   MatchId,
   MatchScenario,
 } from './match.types';
@@ -17,14 +16,12 @@ const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f-\u009f]/u;
 const FEED_LIMIT_PATTERN = /^(?:[1-9]|[1-4][0-9]|50)$/u;
 const CREATE_REQUIRED_KEYS = Object.freeze([
   'requestKey',
-  'startsAt',
-  'durationMinutes',
+  'reservationId',
   'scenario',
   'description',
   'isRatingMatch',
 ] as const);
 const CREATE_OPTIONAL_KEYS = Object.freeze([
-  'courtId',
   'ratingMin',
   'ratingMax',
 ] as const);
@@ -45,20 +42,6 @@ function isQueryRecord(
   value: unknown,
 ): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function isBoundedText(
-  value: unknown,
-  minimum: number,
-  maximum: number,
-): value is string {
-  return (
-    typeof value === 'string' &&
-    value.trim() === value &&
-    [...value].length >= minimum &&
-    [...value].length <= maximum &&
-    !CONTROL_CHARACTER_PATTERN.test(value)
-  );
 }
 
 function isDescription(value: unknown): value is string {
@@ -108,10 +91,7 @@ export function readCreateMatchRequest(
       CREATE_OPTIONAL_KEYS,
     ) ||
     !isInternalUuid(value.requestKey) ||
-    !isUnixEpochSeconds(value.startsAt) ||
-    ![60, 90, 120, 150].includes(value.durationMinutes as number) ||
-    (value.courtId !== undefined &&
-      !isBoundedText(value.courtId, 1, 64)) ||
+    !isCourtReservationId(value.reservationId) ||
     !['community', 'social', 'private'].includes(
       value.scenario as string,
     ) ||
@@ -123,8 +103,6 @@ export function readCreateMatchRequest(
 
   const scenario = value.scenario as MatchScenario;
   if (
-    ((scenario === 'social' || scenario === 'private') &&
-      value.courtId === undefined) ||
     (scenario === 'private'
       ? Object.prototype.hasOwnProperty.call(value, 'ratingMin') ||
         Object.prototype.hasOwnProperty.call(value, 'ratingMax') ||
@@ -138,9 +116,7 @@ export function readCreateMatchRequest(
 
   return Object.freeze({
     requestKey: value.requestKey,
-    startsAt: value.startsAt,
-    durationMinutes: value.durationMinutes as MatchDurationMinutes,
-    ...(value.courtId === undefined ? {} : { courtId: value.courtId }),
+    reservationId: value.reservationId,
     scenario,
     description: value.description,
     ...(scenario === 'private'

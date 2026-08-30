@@ -193,9 +193,7 @@ test.describe('backend match credential lifecycle', () => {
         },
       });
       const draft = {
-        startsAt: detail.startsAt,
-        durationMinutes: detail.durationMinutes,
-        courtId: detail.courtId,
+        reservationId: parameters.reservationId,
         scenario: detail.scenario,
         description: detail.description,
         ratingMin: detail.ratingMin,
@@ -291,7 +289,7 @@ test.describe('backend match credential lifecycle', () => {
             contract.url !== '/api/v1/matches' ||
             (
               Object.keys(contract.body).sort().join(',') ===
-                'courtId,description,durationMinutes,isRatingMatch,ratingMax,ratingMin,requestKey,scenario,startsAt' &&
+                'description,isRatingMatch,ratingMax,ratingMin,requestKey,reservationId,scenario' &&
               contract.body.requestKey === parameters.requestKey &&
               !Object.prototype.hasOwnProperty.call(
                 contract.body,
@@ -363,6 +361,7 @@ test.describe('backend match credential lifecycle', () => {
       otherAccountId: OTHER_ACCOUNT_ID,
       matchId: MATCH_ID,
       requestKey: REQUEST_KEY,
+      reservationId: RESULT_ID,
     });
 
     expect(summary.outcomes).toEqual([
@@ -4214,18 +4213,11 @@ test.describe('backend match credential lifecycle', () => {
         isPrivateMatchCreationEnabled,
       } = await import('/src/components/MatchCreationScreen.jsx');
       const {
-        YOOKASSA_COURT_CHECKOUT_PENDING_MESSAGE,
-        resolvePaidCourtCheckoutEntry,
-      } = await import('/src/lib/paidCourtCheckout.js');
-      const {
         supportsMatchChat,
         tryBeginMatchAction,
       } = await import('/src/components/MatchDetailsScreen.jsx');
       const draft = createBackendMatchDraft({
-        dateISO: '2030-01-02',
-        time: '10:30',
-        duration: 1.5,
-        courtId: 'court-1',
+        reservationId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
         scenario: 'social',
         title: '  Match title  ',
         description: 'Synthetic description',
@@ -4233,12 +4225,13 @@ test.describe('backend match credential lifecycle', () => {
         ratingMax: 5,
         isRatingMatch: true,
       });
+      const plannedStartsAt = 1_893_569_400;
       const detailRecord = {
         matchId: parameters.matchId,
         ownerAccountId: parameters.accountId,
         createdAt: 1_893_499_200,
         updatedAt: 1_893_499_200,
-        startsAt: draft.startsAt,
+        startsAt: plannedStartsAt,
         durationMinutes: 90,
         courtId: 'court-1',
         courtName: 'Корт 1',
@@ -4310,6 +4303,31 @@ test.describe('backend match credential lifecycle', () => {
         },
         { 5762241: 'Court 2' },
       );
+      const confirmedMatchWithoutLocalCatalog = mapBackendMatchToApp(
+        {
+          ...detailRecord,
+          courtBookingStatus: 'confirmed',
+          courtBookingStale: false,
+          courtReservationId:
+            'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+          courtBookingTarget: {
+            serviceId: 30539679,
+            courtId: 5762241,
+            startsAt: '2030-01-03T12:30:00+03:00',
+            endsAt: '2030-01-03T14:00:00+03:00',
+          },
+        },
+        {
+          accountId: parameters.otherAccountId,
+          firstName: 'Viewer',
+          lastName: '',
+          username: '',
+          photoUrl: null,
+          sidePreference: 'Left',
+          rating: 1,
+          isVerified: false,
+        },
+      );
       const matchForOtherViewer = mapBackendMatchToApp(
         detailRecord,
         {
@@ -4349,7 +4367,7 @@ test.describe('backend match credential lifecycle', () => {
       const exactStartMatch = Object.freeze({
         ...match,
         id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
-        startsAt: draft.startsAt - 1,
+        startsAt: plannedStartsAt - 1,
       });
       const unrelatedMatch = Object.freeze({
         ...match,
@@ -4383,7 +4401,7 @@ test.describe('backend match credential lifecycle', () => {
           participantMatch,
           terminalMatch,
         ],
-        draft.startsAt - 1,
+        plannedStartsAt - 1,
       );
       const accountMatches = selectBackendAccountMatches(
         [
@@ -4394,19 +4412,19 @@ test.describe('backend match credential lifecycle', () => {
           terminalMatch,
         ],
         parameters.accountId,
-        draft.startsAt - 1,
+        plannedStartsAt - 1,
       );
       const mergedUpcomingMatches = mergeAccountUpcomingMatches(
         [match, exactStartMatch, unrelatedMatch, participantMatch],
         parameters.accountId,
-        draft.startsAt - 1,
+        plannedStartsAt - 1,
       );
       const joinableMatch = mapBackendMatchToApp({
         matchId: parameters.matchId,
         ownerAccountId: parameters.accountId,
         createdAt: 1_893_499_200,
         updatedAt: 1_893_499_200,
-        startsAt: draft.startsAt,
+        startsAt: plannedStartsAt,
         durationMinutes: 90,
         courtId: 'court-1',
         courtName: 'РљРѕСЂС‚ 1',
@@ -4621,8 +4639,8 @@ test.describe('backend match credential lifecycle', () => {
         privateCreation: {
           backendCapability:
             BACKEND_PRIVATE_MATCH_CREATION_ENABLED,
-          backendRequestRejected:
-            !isPrivateMatchCreationEnabled(
+          backendRequestAccepted:
+            isPrivateMatchCreationEnabled(
               BACKEND_PRIVATE_MATCH_CREATION_ENABLED,
               true,
             ),
@@ -4643,14 +4661,6 @@ test.describe('backend match credential lifecycle', () => {
           };
         })(),
         socialConfirmationCopy: SOCIAL_MATCH_CONFIRMATION_COPY,
-        paidCourtCheckoutGate: {
-          pending: resolvePaidCourtCheckoutEntry(match),
-          enabled: resolvePaidCourtCheckoutEntry(match, {
-            checkoutEnabled: true,
-          }),
-          hiddenForConfirmed: resolvePaidCourtCheckoutEntry(confirmedMatch),
-          message: YOOKASSA_COURT_CHECKOUT_PENDING_MESSAGE,
-        },
         backendChatBoundary: {
           enabled: supportsMatchChat(true, () => {}, () => {}),
           failsClosedWithoutBoundary: !supportsMatchChat(true, null, () => {}),
@@ -4694,6 +4704,8 @@ test.describe('backend match credential lifecycle', () => {
             courtName: confirmedMatch.courtName,
             plannedStartsAt: confirmedMatch.plannedStartsAt,
             plannedCourtId: confirmedMatch.plannedCourtId,
+            freshViewerCourtName:
+              confirmedMatchWithoutLocalCatalog.courtName,
           },
         },
         crossViewerPublicNames:
@@ -4724,9 +4736,7 @@ test.describe('backend match credential lifecycle', () => {
     });
 
     expect(summary.draft).toEqual({
-      startsAt: 1893569400,
-      durationMinutes: 90,
-      courtId: 'court-1',
+      reservationId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
       scenario: 'social',
       description: 'Synthetic description',
       ratingMin: 1,
@@ -4768,6 +4778,7 @@ test.describe('backend match credential lifecycle', () => {
         courtName: 'Court 2',
         plannedStartsAt: 1893569400,
         plannedCourtId: 'court-1',
+        freshViewerCourtName: 'Корт 5762241',
       },
     });
     expect(summary.crossViewerPublicNames).toEqual([
@@ -4825,42 +4836,24 @@ test.describe('backend match credential lifecycle', () => {
       laterLeaveStarted: true,
     });
     expect(summary.privateCreation).toEqual({
-      backendCapability: false,
-      backendRequestRejected: true,
+      backendCapability: true,
+      backendRequestAccepted: true,
       legacyRequestPreserved: true,
     });
     expect(summary.socialCreationDisclosure).toEqual({
       title: 'Матч с кортом',
-      badge: 'ЮKassa checkout',
-      desc: 'Организатор выбирает дату, время и корт, затем оплачивает полную стоимость корта.',
-      pros: ['Матч создаётся после оплаты и подтверждения YCLIENTS'],
-      warn: 'Временно недоступно до подключения ЮKassa',
-      disabled: true,
+      badge: 'Court booking',
+      desc: 'Выберите параметры матча, затем забронируйте корт тем же способом.',
+      pros: ['Матч создаётся только после подтверждения брони'],
+      warn: 'Онлайн-оплата подключается отдельным этапом',
+      disabled: undefined,
     });
     expect(summary.socialConfirmationCopy).toEqual({
-      title: 'Оплата корта',
+      title: 'Подтверждение корта',
       priceLabel: 'Полная стоимость корта',
-      noticeTitle: 'Оплата обязательна',
-      noticeBody: 'Матч с кортом будет создан только после подтверждённой оплаты ЮKassa и подтверждённой брони YCLIENTS.',
-      confirmLabel: 'Перейти к оплате',
-    });
-    expect(summary.paidCourtCheckoutGate).toEqual({
-      pending: {
-        visible: true,
-        canStart: false,
-        reason: 'yookassa_pending',
-      },
-      enabled: {
-        visible: true,
-        canStart: true,
-        reason: null,
-      },
-      hiddenForConfirmed: {
-        visible: false,
-        canStart: false,
-        reason: null,
-      },
-      message: 'Оплата корта через ЮKassa подключается. Бронь без оплаты не создаётся.',
+      noticeTitle: 'Бронь обязательна',
+      noticeBody: 'Матч будет создан только после подтверждённой брони YCLIENTS.',
+      confirmLabel: 'Выбрать корт и время',
     });
     expect(summary.backendChatBoundary).toEqual({
       enabled: true,
@@ -4869,7 +4862,7 @@ test.describe('backend match credential lifecycle', () => {
     expect(summary.sensitiveAbsent).toBe(true);
   });
 
-  test('keeps the paid-court match entry visible but fail-closed until YooKassa is ready', async ({
+  test('routes both match scenarios to the canonical booking step', async ({
     page,
   }) => {
     await page.goto('/');
@@ -4903,12 +4896,9 @@ test.describe('backend match credential lifecycle', () => {
 
     const harness = page.getByTestId('paid-court-entry-test-root');
     await expect(harness.getByTestId('match-scenario-community')).toBeEnabled();
-    await expect(harness.getByTestId('match-scenario-social')).toBeDisabled();
-    await expect(harness.getByTestId('match-scenario-social')).toContainText(
-      'Оплата подключается',
-    );
+    await expect(harness.getByTestId('match-scenario-social')).toBeEnabled();
     await expect(harness).toContainText(
-      'Матч создаётся после оплаты и подтверждения YCLIENTS',
+      'Матч создаётся только после подтверждения брони',
     );
 
     await page.evaluate(() => window.__paidCourtEntryUiUnmount?.());
