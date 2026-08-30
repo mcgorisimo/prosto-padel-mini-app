@@ -9951,3 +9951,51 @@
   Selectel test, backend/frontend are rolled out with both notification and
   offer switches `OFF`, and health, write-free business smoke and bounded logs
   pass. Production is not authorized.
+
+### 2026-08-30 — waitlist 15-minute confirmation Selectel test rollout
+
+- The reviewed implementation was fast-forwarded without a merge commit to
+  remote `main`. An initial migration 044 attempt from
+  `d23a3a5071402922d48776c2657f6acf3ab982ec` stopped on invalid dynamic comment
+  syntax and rolled its transaction back completely; PRECHECK again proved
+  both target relations absent. The two-file correction used trusted regclass
+  values with `format(%s,%L)`, passed focused `3/3`, `git diff --check` and a
+  repeat independent review with `P0=0`, `P1=0`, then fast-forwarded `main` to
+  exact source commit `af3728ceb2fb57331bf2614523859db25dca3cd8`.
+- A fresh verified backup
+  `20260830T134532Z_9cb19164-e007-4e6e-91dd-21ca980e8799` preceded the successful
+  migration. PRECHECK, apply and POSTCHECK passed on Selectel test database
+  `prosto_padel_test_migration_cycle`; both new relations and all nine indexes
+  are present, fingerprints/grants match, and offer/command row counts are `0`.
+- Rollback images for previous exact runtime
+  `8112547b4187f4fd0b336b7bf7c382928cd33383` were retained before switching.
+  Only backend and frontend were recreated at `2026-08-30T13:46:05Z`: backend
+  container `873c080738afa4e23e0a236b04c15df8283652d98e23bcc155e0ccb9d701f73f`
+  uses image
+  `sha256:579ead267414e979039fd005d0a3b7893a54708f0924694d21ae1740d86f83cd`;
+  frontend container
+  `0c0d0070911d3ef917472c99ff0f08a8ff638254057658e1f30feccfeed2e77d`
+  uses image
+  `sha256:21833da1d7e934fee2ab6b11c64d308f6a850829013eb9d1b19905dc01d2b844`.
+  PostgreSQL, nginx and observability container identities were unchanged.
+  All ten services are running, nine healthchecks are healthy, node-exporter is
+  running, and every restart count is `0`.
+- Runtime release is exact `af3728ceb2fb57331bf2614523859db25dca3cd8`.
+  `TELEGRAM_OUTBOUND_NOTIFICATIONS_ENABLED=false`,
+  `MATCH_WAITLIST_OFFERS_ENABLED=false` and
+  `YCLIENTS_NOTIFICATION_READ_RECONCILIATION_ENABLED=false`; no offer was
+  created and no Telegram/YCLIENTS provider action occurred. Internal frontend
+  and backend health are `200`; public root, `/healthz` and backend health are
+  `200` with TLS verify `0`; public metrics remains closed at `404`.
+- Public asset `/assets/index-Dn6brdM8.js` matched its container file at SHA-256
+  `59f547310c9f2fb352941dfe6df882acd2f44d47f14336302ad23249cbd3b520`
+  and contained all four waitlist-offer contract markers. An unauthenticated
+  synthetic accept smoke returned `401`; read-only counts for waitlist entries,
+  participants, offers and commands remained `0|7|0|0` before and after.
+- One nginx `502` occurred during the brief container replacement window. The
+  bounded post-health Loki audit from `2026-08-30T13:47:00Z` covered `115`
+  application records and found error/fatal `0`, HTTP 5xx `0`, PII-pattern hits
+  `0`, release mismatches `0` and provider-attempt signals `0`.
+  Deployment is `deployment=applied_verified` for Selectel test at exact runtime
+  commit `af3728ceb2fb57331bf2614523859db25dca3cd8`. Production was not touched;
+  this append-only closeout is docs-only and `deployment=not_needed`.

@@ -40,6 +40,6 @@ describe('migration 044 waitlist offer contract', () => {
     expect(rollback).toContain(
       'drop table backend_match.match_waitlist_offers restrict',
     );
-    expect(artifact('_README.md')).toContain('unapplied_local_artifact');
+    expect(artifact('_README.md')).toContain('applied_verified_selectel_test');
   });
 });
