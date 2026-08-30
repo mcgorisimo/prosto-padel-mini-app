@@ -159,16 +159,27 @@ grant insert (
   command_type,result_type,applied_at,offer_status,offer_version
 ) on backend_match.match_waitlist_offer_commands to backend_auth_app;
 
-comment on table backend_match.match_waitlist_offers is
-  '044_backend_match_waitlist_offers:'
-  || backend_auth.relation_fingerprint(
-    'backend_match.match_waitlist_offers'::pg_catalog.regclass
+do $comments$
+declare
+  offers_relation pg_catalog.regclass :=
+    'backend_match.match_waitlist_offers'::pg_catalog.regclass;
+  commands_relation pg_catalog.regclass :=
+    'backend_match.match_waitlist_offer_commands'::pg_catalog.regclass;
+begin
+  execute pg_catalog.format(
+    'comment on table %s is %L',
+    offers_relation,
+    '044_backend_match_waitlist_offers:'
+      || backend_auth.relation_fingerprint(offers_relation)
   );
-comment on table backend_match.match_waitlist_offer_commands is
-  '044_backend_match_waitlist_offers:'
-  || backend_auth.relation_fingerprint(
-    'backend_match.match_waitlist_offer_commands'::pg_catalog.regclass
+  execute pg_catalog.format(
+    'comment on table %s is %L',
+    commands_relation,
+    '044_backend_match_waitlist_offers:'
+      || backend_auth.relation_fingerprint(commands_relation)
   );
+end;
+$comments$;
 
 do $assertions$
 begin

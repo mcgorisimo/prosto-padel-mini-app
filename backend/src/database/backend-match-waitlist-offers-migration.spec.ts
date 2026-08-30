@@ -30,6 +30,8 @@ describe('migration 044 waitlist offer contract', () => {
   });
 
   it('ships read-only gates and a guarded, empty-only rollback', () => {
+    expect(migration).toContain("'comment on table %s is %l'");
+    expect(migration).toContain('execute pg_catalog.format');
     expect(artifact('_PRECHECK.sql')).toContain('offers_target_absent');
     expect(artifact('_POSTCHECK.sql')).toContain('relation_fingerprint');
     const rollback = artifact('_ROLLBACK.sql');
