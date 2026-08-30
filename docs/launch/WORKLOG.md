@@ -9837,3 +9837,20 @@
   `deployment=deployment_deferred_by_user`; deployed environment/commit,
   containers, health/HTTP, business smoke and logs are all `not_run` until a
   separate owner-authorized integration and Selectel rollout gate.
+
+### 2026-08-30 — D3.1 Git integration gate
+
+- The owner separately authorized push and integration after the clean local
+  checkpoint. Preflight refreshed `origin/main`, confirmed the D3.1 branch and
+  the dedicated `main` worktree were clean, and verified that the integration
+  path from `2abb888e71ea8901cbebeaf23e72710b73263b50` is fast-forward only.
+- This docs-only handoff does not change the reviewed frontend/backend runtime
+  diff or its completed gates. The D3.1 branch and `main` are to be pushed at
+  the exact commit containing this entry; the resulting remote SHA is the only
+  eligible Selectel test rollout target.
+- Selectel rollout remains a separate owner gate. Until it is authorized and
+  the exact integrated SHA passes container, health/HTTP, write-free business
+  smoke and bounded log checks, `deployment=deployment_deferred_by_user`;
+  deployed environment/commit, changed containers, health, smoke and logs
+  remain `not_run`. `PAYMENT_PROVIDER_READY=false` remains unchanged and keeps
+  both private and match booking creation fail-closed pending D4.
