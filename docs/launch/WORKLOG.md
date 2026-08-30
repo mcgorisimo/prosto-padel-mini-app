@@ -9854,3 +9854,21 @@
   deployed environment/commit, changed containers, health, smoke and logs
   remain `not_run`. `PAYMENT_PROVIDER_READY=false` remains unchanged and keeps
   both private and match booking creation fail-closed pending D4.
+
+### 2026-08-30 — D3.1 Git integration completed
+
+- The trusted GitHub remote accepted `codex/d31-match-slot-selection`, and the
+  clean dedicated `main` worktree advanced by fast-forward only. The first
+  remote `main` update was `2abb888e71ea8901cbebeaf23e72710b73263b50` to
+  `5ce5a74112f1b3947e78f7d90775432e945dae91`; there was no merge commit and no
+  conflict. This docs-only closure commit is the final integrated handoff SHA
+  after the matching branch and `main` pushes.
+- No runtime file changed after the reviewed `7a4673ff1cac956c59d3bfb3e1c6950f691c38f1`
+  implementation checkpoint, so its completed root/backend gates and independent
+  `CLEAR`, `P0=0`, `P1=0` review remain applicable. The only later changes are
+  WORKLOG handoff records; `git diff --check` is the required docs-only gate.
+- No Selectel/SSH, database, migration, provider, YCLIENTS/API or production
+  action occurred. `deployment=deployment_deferred_by_user`; deployed
+  environment/commit, changed containers, health/HTTP, write-free business
+  smoke and logs remain `not_run` pending a separate owner-authorized Selectel
+  test rollout. `PAYMENT_PROVIDER_READY=false` remains the shared D4 gate.
