@@ -1514,10 +1514,25 @@ function sameBackendMatchWaitlistEntry(left, right) {
   );
 }
 
+function isBackendMatchWaitlistOffer(value) {
+  return (
+    isPlainObject(value) &&
+    hasExactKeys(
+      Object.keys(value).sort(),
+      ['expiresAt', 'offerId', 'offeredAt', 'status'],
+    ) &&
+    isMatchId(value.offerId) &&
+    value.status === 'active' &&
+    isUnixEpochSeconds(value.offeredAt) &&
+    isUnixEpochSeconds(value.expiresAt) &&
+    value.expiresAt > value.offeredAt
+  );
+}
+
 function matchWaitlistListSuccess(body, maximumLength = 50) {
   if (
     !isPlainObject(body) ||
-    !hasOnlyAllowedKeys(body, ['entries', 'count'], ['current']) ||
+    !hasOnlyAllowedKeys(body, ['entries', 'count'], ['current', 'offer']) ||
     !Array.isArray(body.entries) ||
     body.entries.length > maximumLength ||
     !body.entries.every(isBackendMatchWaitlistEntry) ||
@@ -1556,7 +1571,10 @@ function matchWaitlistListSuccess(body, maximumLength = 50) {
     (
       body.current === undefined &&
       body.entries.some(({ isCurrentPlayer }) => isCurrentPlayer)
-    )
+    ) ||
+    (body.offer !== undefined &&
+      (!isBackendMatchWaitlistOffer(body.offer) ||
+        body.current === undefined))
   ) {
     return null;
   }
@@ -1568,8 +1586,41 @@ function matchWaitlistListSuccess(body, maximumLength = 50) {
     ...(body.current === undefined
       ? {}
       : { current: freezeBackendMatchWaitlistEntry(body.current) }),
+    ...(body.offer === undefined
+      ? {}
+      : { offer: Object.freeze({ ...body.offer }) }),
     count: body.count,
   });
+}
+
+function matchWaitlistOfferMutationSuccess(
+  body,
+  expectedMatchId,
+  expectedOfferId,
+  status,
+) {
+  if (
+    !isPlainObject(body) ||
+    !hasExactKeys(Object.keys(body).sort(), ['offer']) ||
+    !isPlainObject(body.offer) ||
+    !hasExactKeys(
+      Object.keys(body.offer).sort(),
+      ['appliedAt', 'matchId', 'offerId', 'status', 'version'],
+    ) ||
+    body.offer.offerId !== expectedOfferId ||
+    body.offer.matchId !== expectedMatchId ||
+    body.offer.status !== status ||
+    !isUnixEpochSeconds(body.offer.appliedAt) ||
+    body.offer.version !== 2
+  ) {
+    return null;
+  }
+  return frozen(
+    status === 'accepted'
+      ? 'waitlist_offer_accepted'
+      : 'waitlist_offer_declined',
+    { offer: Object.freeze({ ...body.offer }) },
+  );
 }
 
 function matchWaitlistMutationSuccess(
@@ -2206,6 +2257,11 @@ function classifyMatchWaitlist(status, body) {
     match_waitlist_invitation_pending: 'invitation_pending',
     match_waitlist_already_waiting: 'already_waiting',
     match_waitlist_not_waiting: 'not_waiting',
+    match_waitlist_offer_disabled: 'feature_disabled',
+    match_waitlist_offer_not_found: 'offer_not_found',
+    match_waitlist_offer_expired: 'offer_expired',
+    match_waitlist_offer_resolved: 'offer_resolved',
+    match_waitlist_offer_unavailable: 'offer_unavailable',
     match_waitlist_player_not_found: 'player_not_found',
     match_waitlist_verification_required: 'rating_verification_required',
     match_waitlist_rating_out_of_range: 'rating_out_of_range',
@@ -2466,6 +2522,7 @@ export function createBackendSessionClient(dependencies = {}) {
         `${MATCHES_PATH}/${encodeURIComponent(matchId)}/messages`;
       const matchWaitlistPath =
         `${MATCHES_PATH}/${encodeURIComponent(matchId)}/waitlist`;
+      const waitlistOfferId = operationPayload?.offerId;
       const matchLineupPath =
         `${MATCHES_PATH}/${encodeURIComponent(matchId)}/lineup`;
       const matchResultPath =
@@ -2538,6 +2595,10 @@ export function createBackendSessionClient(dependencies = {}) {
                           ? `${matchWaitlistPath}/join`
                         : operation === 'match_waitlist_leave'
                           ? `${matchWaitlistPath}/leave`
+                        : operation === 'match_waitlist_offer_accept'
+                          ? `${matchWaitlistPath}/offers/${encodeURIComponent(waitlistOfferId)}/accept`
+                        : operation === 'match_waitlist_offer_decline'
+                          ? `${matchWaitlistPath}/offers/${encodeURIComponent(waitlistOfferId)}/decline`
                         : operation === 'match_lineup_read'
                           ? matchLineupPath
                         : operation === 'match_lineup_assign'
@@ -2847,6 +2908,22 @@ export function createBackendSessionClient(dependencies = {}) {
           matchId,
           joining ? 'waitlist_joined' : 'waitlist_left',
           joining ? 'waiting' : 'left',
+        );
+        return result
+          ? frozen('success', { result })
+          : frozen('malformed_response');
+      }
+      if (
+        (operation === 'match_waitlist_offer_accept' ||
+          operation === 'match_waitlist_offer_decline') &&
+        response.status === 201
+      ) {
+        const accepting = operation === 'match_waitlist_offer_accept';
+        const result = matchWaitlistOfferMutationSuccess(
+          body,
+          matchId,
+          waitlistOfferId,
+          accepting ? 'accepted' : 'declined',
         );
         return result
           ? frozen('success', { result })
@@ -3163,6 +3240,10 @@ export function createBackendSessionClient(dependencies = {}) {
       ((operation === 'match_waitlist_join' ||
         operation === 'match_waitlist_leave') &&
         !isMatchId(operationPayload?.matchId)) ||
+      ((operation === 'match_waitlist_offer_accept' ||
+        operation === 'match_waitlist_offer_decline') &&
+        (!isMatchId(operationPayload?.matchId) ||
+          !isMatchId(operationPayload?.offerId))) ||
       (operation === 'match_lineup_read' &&
         !isMatchId(operationPayload?.matchId)) ||
       (operation === 'match_lineup_assign' &&
@@ -3230,6 +3311,8 @@ export function createBackendSessionClient(dependencies = {}) {
       operation === 'match_chat_send' ||
       operation === 'match_waitlist_join' ||
       operation === 'match_waitlist_leave' ||
+      operation === 'match_waitlist_offer_accept' ||
+      operation === 'match_waitlist_offer_decline' ||
       operation === 'match_lineup_assign' ||
       operation === 'match_lineup_release' ||
       operation === 'match_result_submit' ||
@@ -3459,6 +3542,20 @@ export function createBackendSessionClient(dependencies = {}) {
         credential,
         options,
         { matchId },
+      ),
+    acceptMatchWaitlistOffer: (credential, matchId, offerId, options) =>
+      execute(
+        'match_waitlist_offer_accept',
+        credential,
+        options,
+        { matchId, offerId },
+      ),
+    declineMatchWaitlistOffer: (credential, matchId, offerId, options) =>
+      execute(
+        'match_waitlist_offer_decline',
+        credential,
+        options,
+        { matchId, offerId },
       ),
     readMatchLineup: (credential, matchId, options) =>
       execute(

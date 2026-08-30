@@ -232,6 +232,27 @@ describe('PostgresMatchWaitlistRepository', () => {
     });
   });
 
+  it('keeps the waiting entry intact when an active offer owns the leave action', async () => {
+    const leaveCommand = deterministicUuid('waitlist-repository-offered-leave-command') as MatchWaitlistCommandId;
+    const transaction = new FakeTransaction([
+      result([matchRow()]),
+      result([]),
+      result([{ id: deterministicUuid('waitlist-repository-active-offer') }]),
+    ]);
+
+    await expect(new PostgresMatchWaitlistRepository(true).leave(transaction, {
+      commandId: leaveCommand,
+      matchId: MATCH_ID,
+      actorAccountId: ACTOR_ID,
+      requestDigest: DIGEST,
+      now: NOW,
+    })).resolves.toEqual({ outcome: 'rejected', reason: 'not_waiting' });
+
+    expect(transaction.calls[0].text).toContain('FOR UPDATE');
+    expect(transaction.calls[2].text).toContain('match_waitlist_offers');
+    expect(transaction.calls).toHaveLength(3);
+  });
+
   it('locks and returns the oldest FIFO promotion candidate with trusted account availability', async () => {
     const transaction = new FakeTransaction([
       result([matchRow()]),

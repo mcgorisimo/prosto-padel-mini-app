@@ -22,6 +22,7 @@ import {
   readListMatchWaitlistRequest,
   readMatchWaitlistActionRequest,
   readWaitlistMatchId,
+  readWaitlistOfferId,
 } from './match-waitlist.http';
 import { MatchWaitlistService } from './match-waitlist.service';
 
@@ -43,6 +44,11 @@ function rejection(reason: MatchWaitlistApiRejection) {
     invitation_pending: [HttpStatus.CONFLICT, 'match_waitlist_invitation_pending', 'Player has a pending match invitation'],
     already_waiting: [HttpStatus.CONFLICT, 'match_waitlist_already_waiting', 'Player is already waiting'],
     not_waiting: [HttpStatus.CONFLICT, 'match_waitlist_not_waiting', 'Player is not waiting'],
+    feature_disabled: [HttpStatus.CONFLICT, 'match_waitlist_offer_disabled', 'Waitlist offers are disabled'],
+    offer_not_found: [HttpStatus.NOT_FOUND, 'match_waitlist_offer_not_found', 'Waitlist offer was not found'],
+    offer_expired: [HttpStatus.CONFLICT, 'match_waitlist_offer_expired', 'Waitlist offer has expired'],
+    offer_resolved: [HttpStatus.CONFLICT, 'match_waitlist_offer_resolved', 'Waitlist offer is already resolved'],
+    offer_unavailable: [HttpStatus.CONFLICT, 'match_waitlist_offer_unavailable', 'Waitlist offer is no longer available'],
     player_not_found: [HttpStatus.NOT_FOUND, 'match_waitlist_player_not_found', 'Player was not found'],
     rating_verification_required: [HttpStatus.CONFLICT, 'match_waitlist_verification_required', 'Verified rating is required'],
     rating_out_of_range: [HttpStatus.CONFLICT, 'match_waitlist_rating_out_of_range', 'Player rating is outside the match range'],
@@ -92,6 +98,7 @@ export class MatchWaitlistController {
     return Object.freeze({
       entries: result.entries,
       ...(result.current === undefined ? {} : { current: result.current }),
+      ...(result.offer === undefined ? {} : { offer: result.offer }),
       count: result.count,
     });
   }
@@ -118,6 +125,44 @@ export class MatchWaitlistController {
     return this.mutate('leave', rawMatchId, body, request, reply);
   }
 
+  @Post('offers/:offerId/accept')
+  @UseGuards(SessionBearerGuard)
+  acceptOffer(
+    @Param('matchId') rawMatchId: unknown,
+    @Param('offerId') rawOfferId: unknown,
+    @Body() body: unknown,
+    @Req() request: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ) {
+    return this.mutateOffer(
+      'accept',
+      rawMatchId,
+      rawOfferId,
+      body,
+      request,
+      reply,
+    );
+  }
+
+  @Post('offers/:offerId/decline')
+  @UseGuards(SessionBearerGuard)
+  declineOffer(
+    @Param('matchId') rawMatchId: unknown,
+    @Param('offerId') rawOfferId: unknown,
+    @Body() body: unknown,
+    @Req() request: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ) {
+    return this.mutateOffer(
+      'decline',
+      rawMatchId,
+      rawOfferId,
+      body,
+      request,
+      reply,
+    );
+  }
+
   private async mutate(
     operation: 'join' | 'leave',
     rawMatchId: unknown,
@@ -138,5 +183,35 @@ export class MatchWaitlistController {
     });
     if (result.outcome === 'rejected') throw rejection(result.reason);
     return Object.freeze({ entry: result.entry });
+  }
+
+  private async mutateOffer(
+    action: 'accept' | 'decline',
+    rawMatchId: unknown,
+    rawOfferId: unknown,
+    body: unknown,
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ) {
+    disableCaching(reply);
+    const matchId = readWaitlistMatchId(rawMatchId);
+    const offerId = readWaitlistOfferId(rawOfferId);
+    const parsed = readMatchWaitlistActionRequest(body);
+    if (
+      matchId === undefined ||
+      offerId === undefined ||
+      parsed === undefined
+    ) {
+      throw rejection('invalid_request');
+    }
+    const actor = principal(request);
+    const result = await this.service[action === 'accept' ? 'acceptOffer' : 'declineOffer']({
+      accountId: actor.accountId,
+      role: actor.role,
+      matchId,
+      request: Object.freeze({ offerId, requestKey: parsed.requestKey }),
+    });
+    if (result.outcome === 'rejected') throw rejection(result.reason);
+    return Object.freeze({ offer: result.offer });
   }
 }

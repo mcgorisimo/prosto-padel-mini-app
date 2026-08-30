@@ -1669,6 +1669,40 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
     );
   }
 
+  function acceptMatchWaitlistOffer(matchId, offerId) {
+    return runMatchOperation(
+      (credential, signal) =>
+        matches.acceptMatchWaitlistOffer(
+          credential,
+          matchId,
+          offerId,
+          { signal },
+        ),
+      (result) =>
+        result?.outcome === 'waitlist_offer_accepted' &&
+        result.offer?.matchId === matchId &&
+        result.offer?.offerId === offerId &&
+        result.offer?.status === 'accepted',
+    );
+  }
+
+  function declineMatchWaitlistOffer(matchId, offerId) {
+    return runMatchOperation(
+      (credential, signal) =>
+        matches.declineMatchWaitlistOffer(
+          credential,
+          matchId,
+          offerId,
+          { signal },
+        ),
+      (result) =>
+        result?.outcome === 'waitlist_offer_declined' &&
+        result.offer?.matchId === matchId &&
+        result.offer?.offerId === offerId &&
+        result.offer?.status === 'declined',
+    );
+  }
+
   function readMatchLineup(matchId) {
     return runMatchOperation(
       (credential, signal) =>
@@ -1892,6 +1926,8 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
     markMatchNotificationRead,
     joinMatchWaitlist,
     leaveMatchWaitlist,
+    acceptMatchWaitlistOffer,
+    declineMatchWaitlistOffer,
     readMatchLineup,
     assignMatchLineupSlot,
     releaseMatchLineupSlot,
@@ -2382,6 +2418,32 @@ export function useTelegramBackendLogin() {
     return telegramBackendLoginLifecycle.leaveMatchWaitlist(matchId);
   }, []);
 
+  const acceptMatchWaitlistOffer = useCallback((matchId, offerId) => {
+    if (!FEATURE_ENABLED) {
+      return Promise.resolve(Object.freeze({
+        outcome: 'rejected',
+        reason: 'not_authenticated',
+      }));
+    }
+    return telegramBackendLoginLifecycle.acceptMatchWaitlistOffer(
+      matchId,
+      offerId,
+    );
+  }, []);
+
+  const declineMatchWaitlistOffer = useCallback((matchId, offerId) => {
+    if (!FEATURE_ENABLED) {
+      return Promise.resolve(Object.freeze({
+        outcome: 'rejected',
+        reason: 'not_authenticated',
+      }));
+    }
+    return telegramBackendLoginLifecycle.declineMatchWaitlistOffer(
+      matchId,
+      offerId,
+    );
+  }, []);
+
   const readMatchLineup = useCallback((matchId) => {
     if (!FEATURE_ENABLED) {
       return Promise.resolve(Object.freeze({
@@ -2551,6 +2613,8 @@ export function useTelegramBackendLogin() {
     markMatchNotificationRead,
     joinMatchWaitlist,
     leaveMatchWaitlist,
+    acceptMatchWaitlistOffer,
+    declineMatchWaitlistOffer,
     readMatchLineup,
     assignMatchLineupSlot,
     releaseMatchLineupSlot,

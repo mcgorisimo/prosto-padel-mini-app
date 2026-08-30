@@ -11,6 +11,7 @@ const PARTICIPANT_ID = '66666666-6666-4666-8666-666666666666';
 const MESSAGE_ID = '77777777-7777-4777-8777-777777777777';
 const OLDER_MESSAGE_ID = '88888888-8888-4888-8888-888888888888';
 const WAITLIST_ENTRY_ID = '99999999-9999-4999-8999-999999999999';
+const WAITLIST_OFFER_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 const RESULT_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const NOTIFICATION_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 
@@ -1169,6 +1170,12 @@ test.describe('backend match credential lifecycle', () => {
             return new Response(JSON.stringify({
               entries: [first, current],
               current,
+              offer: {
+                offerId: parameters.waitlistOfferId,
+                status: 'active',
+                offeredAt: 1_900_000_020,
+                expiresAt: 1_900_000_920,
+              },
               count: 2,
             }), { status: 200 });
           }
@@ -1180,6 +1187,28 @@ test.describe('backend match credential lifecycle', () => {
                 status: 'waiting',
                 appliedAt: 1_900_000_010,
                 version: 1,
+              },
+            }), { status: 201 });
+          }
+          if (url.endsWith(`/offers/${parameters.waitlistOfferId}/accept`)) {
+            return new Response(JSON.stringify({
+              offer: {
+                offerId: parameters.waitlistOfferId,
+                matchId: parameters.matchId,
+                status: 'accepted',
+                appliedAt: 1_900_000_030,
+                version: 2,
+              },
+            }), { status: 201 });
+          }
+          if (url.endsWith(`/offers/${parameters.waitlistOfferId}/decline`)) {
+            return new Response(JSON.stringify({
+              offer: {
+                offerId: parameters.waitlistOfferId,
+                matchId: parameters.matchId,
+                status: 'declined',
+                appliedAt: 1_900_000_040,
+                version: 2,
               },
             }), { status: 201 });
           }
@@ -1208,6 +1237,16 @@ test.describe('backend match credential lifecycle', () => {
         parameters.credential,
         parameters.matchId,
       );
+      const accepted = await client.acceptMatchWaitlistOffer(
+        parameters.credential,
+        parameters.matchId,
+        parameters.waitlistOfferId,
+      );
+      const declined = await client.declineMatchWaitlistOffer(
+        parameters.credential,
+        parameters.matchId,
+        parameters.waitlistOfferId,
+      );
       const malformed = await createBackendSessionClient({
         fetchImpl: async () => new Response(JSON.stringify({
           entries: [current, first],
@@ -1223,7 +1262,13 @@ test.describe('backend match credential lifecycle', () => {
 
       return {
         contracts,
-        outcomes: [listed.outcome, joined.outcome, left.outcome],
+        outcomes: [
+          listed.outcome,
+          joined.outcome,
+          left.outcome,
+          accepted.outcome,
+          declined.outcome,
+        ],
         malformed,
         normalized: {
           playerIds: normalized?.players.map(({ user_id }) => user_id),
@@ -1231,10 +1276,12 @@ test.describe('backend match credential lifecycle', () => {
             ({ queue_position }) => queue_position,
           ),
           currentPosition: normalized?.position?.queue_position,
+          offerId: normalized?.offer?.offer_id,
+          offerExpiresAt: normalized?.offer?.expires_at,
           count: normalized?.count,
         },
         publicResultsHideCredential:
-          !JSON.stringify([listed, joined, left]).includes(
+          !JSON.stringify([listed, joined, left, accepted, declined]).includes(
             parameters.credential,
           ),
       };
@@ -1245,6 +1292,7 @@ test.describe('backend match credential lifecycle', () => {
       matchId: MATCH_ID,
       requestKey: REQUEST_KEY,
       waitlistEntryId: WAITLIST_ENTRY_ID,
+      waitlistOfferId: WAITLIST_OFFER_ID,
       firstWaitlistEntryId: OLDER_MESSAGE_ID,
     });
 
@@ -1269,11 +1317,23 @@ test.describe('backend match credential lifecycle', () => {
         credentials: 'omit',
         redirect: 'error',
       })),
+      ...['accept', 'decline'].map((action) => ({
+        url: `/api/v1/matches/${MATCH_ID}/waitlist/offers/${WAITLIST_OFFER_ID}/${action}`,
+        method: 'POST',
+        bearerMatches: true,
+        contentType: 'application/json',
+        body: { requestKey: REQUEST_KEY },
+        cache: 'no-store',
+        credentials: 'omit',
+        redirect: 'error',
+      })),
     ]);
     expect(summary.outcomes).toEqual([
       'waitlist_loaded',
       'waitlist_joined',
       'waitlist_left',
+      'waitlist_offer_accepted',
+      'waitlist_offer_declined',
     ]);
     expect(summary.malformed).toEqual({
       outcome: 'rejected',
@@ -1283,6 +1343,8 @@ test.describe('backend match credential lifecycle', () => {
       playerIds: [OTHER_ACCOUNT_ID, ACCOUNT_ID],
       positions: [1, 2],
       currentPosition: 2,
+      offerId: WAITLIST_OFFER_ID,
+      offerExpiresAt: 1_900_000_920,
       count: 2,
     });
     expect(summary.publicResultsHideCredential).toBe(true);
@@ -3371,6 +3433,185 @@ test.describe('backend match credential lifecycle', () => {
     expect(waitlistUiCalls.refresh).toBe(refreshCallsAfterPromotion);
     expect(legacyWaitlistCalls).toBe(0);
     await page.evaluate(() => window.__backendWaitlistUiUnmount());
+  });
+
+  test('shows a 15-minute waitlist offer and joins only after confirmation', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await isolateComponentHarness(page);
+
+    await page.evaluate(async (parameters) => {
+      const reactModule = await import('/@id/react');
+      const React = reactModule.default ?? reactModule;
+      const reactDomClientModule = await import('/@id/react-dom/client');
+      const { createRoot } =
+        reactDomClientModule.default ?? reactDomClientModule;
+      const { default: MatchDetailsScreen } = await import(
+        '/src/components/MatchDetailsScreen.jsx'
+      );
+      const container = document.createElement('div');
+      container.dataset.testid = 'backend-waitlist-offer-test-root';
+      document.body.append(container);
+      const currentUser = {
+        id: parameters.accountId,
+        role: 'user',
+        firstName: 'Waiting',
+        lastName: 'Player',
+        rating: 3,
+        numericRating: 3,
+        ratingIdx: 2,
+        isVerified: true,
+      };
+      const playerIds = [
+        parameters.ownerAccountId,
+        'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+        'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+      ];
+      const initialMatch = {
+        id: parameters.matchId,
+        backendOwned: true,
+        ownerId: parameters.ownerAccountId,
+        owner_id: parameters.ownerAccountId,
+        title: 'Backend waitlist offer match',
+        description: '',
+        date: '1 января',
+        dateISO: '2030-01-01',
+        time: '10:00',
+        duration: 1.5,
+        courtName: 'Корт 1',
+        courtType: 'panoramic',
+        type: 'match',
+        scenario: 'social',
+        status: 'upcoming',
+        isPrivate: false,
+        isRatingMatch: false,
+        ratingMin: 0,
+        ratingMax: 6,
+        participants: playerIds,
+        filledSlots: playerIds.map((id, slotIndex) => ({
+          id,
+          firstName: `Player ${slotIndex + 1}`,
+          lastName: '',
+          numericRating: 3,
+          ratingIdx: 2,
+          isVerified: true,
+          isOrganizer: slotIndex === 0,
+          slotIndex,
+        })),
+      };
+      const currentEntry = {
+        entryId: parameters.waitlistEntryId,
+        player: {
+          playerId: parameters.accountId,
+          firstName: 'Waiting',
+          lastName: 'Player',
+          rating: 3,
+          isVerified: true,
+        },
+        queuePosition: 1,
+        joinedAt: parameters.offerNow - 60,
+        isCurrentPlayer: true,
+      };
+      window.__backendWaitlistOfferCalls = { accept: 0, refresh: 0 };
+
+      function Harness() {
+        const [match, setMatch] = React.useState(initialMatch);
+        return React.createElement(MatchDetailsScreen, {
+          match,
+          currentUser,
+          onLoadWaitlist() {
+            return Promise.resolve({
+              outcome: 'waitlist_loaded',
+              entries: [currentEntry],
+              current: currentEntry,
+              offer: {
+                offerId: parameters.waitlistOfferId,
+                status: 'active',
+                offeredAt: parameters.offerNow,
+                expiresAt: parameters.offerNow + 900,
+              },
+              count: 1,
+            });
+          },
+          onJoinWaitlist() {},
+          onLeaveWaitlist() {},
+          onAcceptWaitlistOffer(matchId, offerId) {
+            window.__backendWaitlistOfferCalls.accept += 1;
+            return Promise.resolve({
+              outcome: 'waitlist_offer_accepted',
+              offer: {
+                offerId,
+                matchId,
+                status: 'accepted',
+                appliedAt: parameters.offerNow,
+                version: 2,
+              },
+            });
+          },
+          onDeclineWaitlistOffer() {},
+          onRefreshMatch() {
+            window.__backendWaitlistOfferCalls.refresh += 1;
+            const acceptedMatch = {
+              ...match,
+              participants: [...match.participants.slice(0, 3), parameters.accountId],
+              filledSlots: [
+                ...match.filledSlots.slice(0, 3),
+                {
+                  id: parameters.accountId,
+                  firstName: 'Waiting',
+                  lastName: 'Player',
+                  numericRating: 3,
+                  ratingIdx: 2,
+                  isVerified: true,
+                  isOrganizer: false,
+                  slotIndex: 3,
+                },
+              ],
+            };
+            setMatch(acceptedMatch);
+            return Promise.resolve(acceptedMatch);
+          },
+          onBack() {},
+          onJoinSuccess() {},
+          onJoinMatch() {},
+          onLeaveMatch() {},
+          pendingInvitations: [],
+          invitationActions: new Set(),
+          allMessages: [],
+          messagesLoading: false,
+          messagesLoadError: '',
+          showToast() {},
+        });
+      }
+
+      const root = createRoot(container);
+      root.render(React.createElement(Harness));
+      window.__backendWaitlistOfferUnmount = () => {
+        root.unmount();
+        container.remove();
+      };
+    }, {
+      accountId: ACCOUNT_ID,
+      ownerAccountId: OTHER_ACCOUNT_ID,
+      matchId: MATCH_ID,
+      waitlistEntryId: WAITLIST_ENTRY_ID,
+      waitlistOfferId: WAITLIST_OFFER_ID,
+      offerNow: Math.floor(Date.now() / 1_000),
+    });
+
+    const harness = page.getByTestId('backend-waitlist-offer-test-root');
+    await expect(
+      harness.getByTestId('match-waitlist-offer-countdown'),
+    ).toContainText(/1[45]:/u);
+    await harness.getByTestId('match-waitlist-offer-accept-button').click();
+    await expect(harness.getByTestId('match-joined-state')).toBeVisible();
+    expect(await page.evaluate(() => window.__backendWaitlistOfferCalls)).toEqual({
+      accept: 1,
+      refresh: 1,
+    });
+    await page.evaluate(() => window.__backendWaitlistOfferUnmount());
   });
 
   test('renders fixed backend pairs and blocks direct changes after a pair is formed', async ({

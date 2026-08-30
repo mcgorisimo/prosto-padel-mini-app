@@ -15,6 +15,7 @@ import {
   MatchVisibility,
   UpdateMatchDescriptionCommand,
 } from '../matches/match.types';
+import { MatchWaitlistOfferId } from '../matches/match-waitlist-offer.types';
 import { PostgresTransaction } from './postgres-transaction';
 
 export type MatchCommandPersistence = 'applied' | 'idempotent_retry';
@@ -170,6 +171,7 @@ export type JoinMatchInput = Omit<
   | 'reservedSlotNumbers'
 > & {
   readonly invitationId?: MatchInvitationId;
+  readonly waitlistOfferId?: MatchWaitlistOfferId;
 };
 
 export type MatchPersistenceFailure =

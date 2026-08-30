@@ -13,6 +13,7 @@ import {
   readPlayerProfilePhotoStorageConfiguration,
 } from '../config/player-profile-photo.config';
 import { readPlayerOnboardingPolicyConfiguration } from '../config/player-onboarding-policy.config';
+import { readMatchWaitlistOfferEnabled } from '../config/match-waitlist-offer.config';
 import { DatabaseModule } from '../database/database.module';
 import { ContentModerationController } from '../common/content-moderation.controller';
 import { PostgresAccountStatusReader } from '../database/postgres-account-status.reader';
@@ -29,6 +30,7 @@ import { PostgresMatchRepository } from '../database/postgres-match.repository';
 import { PostgresMatchReservationRepository } from '../database/postgres-match-reservation.repository';
 import { PostgresMatchInvitationRepository } from '../database/postgres-match-invitation.repository';
 import { PostgresMatchWaitlistRepository } from '../database/postgres-match-waitlist.repository';
+import { PostgresMatchWaitlistOfferRepository } from '../database/postgres-match-waitlist-offer.repository';
 import { PostgresPlayerAccountProvisioningRepository } from '../database/postgres-player-account-provisioning.repository';
 import { PostgresPlayerProfileDetailsRepository } from '../database/postgres-player-profile-details.repository';
 import { PostgresPlayerProfilePhotoRepository } from '../database/postgres-player-profile-photo.repository';
@@ -63,6 +65,7 @@ import { MatchResultController } from '../matches/match-result.controller';
 import { MatchResultService } from '../matches/match-result.service';
 import { MatchWaitlistController } from '../matches/match-waitlist.controller';
 import { MatchWaitlistService } from '../matches/match-waitlist.service';
+import { MatchWaitlistOfferExpiryProcessor } from '../matches/match-waitlist-offer-expiry.processor';
 import { PlayerProfilePhotoProcessor } from '../profiles/player-profile-photo.processor';
 import { PlayerProfilePhotoService } from '../profiles/player-profile-photo.service';
 import {
@@ -409,15 +412,19 @@ function createMatchInvitationService(
 function createMatchWaitlistService(
   transactions: PostgresTransactionExecutorAdapter,
   waitlist: PostgresMatchWaitlistRepository,
+  offers: PostgresMatchWaitlistOfferRepository,
   matches: PostgresMatchRepository,
   notifications: PostgresMatchNotificationRepository,
   notificationIntents: PostgresTelegramNotificationIntentRepository,
   publicProfiles: PostgresPublicPlayerProfileSearchRepository,
   clock: SessionAuthenticationClock,
+  config: ConfigService,
 ): MatchWaitlistService {
   return new MatchWaitlistService({
     transactions,
     waitlist,
+    offers,
+    offersEnabled: readMatchWaitlistOfferEnabled(config),
     matches,
     notifications,
     notificationIntents,
@@ -601,14 +608,17 @@ function createPlayerProfilePhotoService(
       inject: [
         PostgresTransactionExecutorAdapter,
         PostgresMatchWaitlistRepository,
+        PostgresMatchWaitlistOfferRepository,
         PostgresMatchRepository,
         PostgresMatchNotificationRepository,
         PostgresTelegramNotificationIntentRepository,
         PostgresPublicPlayerProfileSearchRepository,
         SESSION_AUTHENTICATION_CLOCK,
+        ConfigService,
       ],
       useFactory: createMatchWaitlistService,
     },
+    MatchWaitlistOfferExpiryProcessor,
     {
       provide: MatchChatService,
       inject: [

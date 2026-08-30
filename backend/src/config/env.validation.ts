@@ -8,6 +8,7 @@ import {
   TELEGRAM_SESSION_TTL_SECONDS,
 } from './telegram-login.config';
 import { TELEGRAM_NOTIFICATION_CONFIG_KEYS } from './telegram-notification.config';
+import { MATCH_WAITLIST_OFFER_CONFIG_KEYS } from './match-waitlist-offer.config';
 import {
   PLAYER_PROFILE_PHOTO_CONFIG_KEYS,
   normalizePlayerProfilePhotoHttpsBaseUrl,
@@ -332,6 +333,17 @@ export const envValidationSchema = Joi.object({
       otherwise: Joi.string().allow('').default(''),
     },
   ),
+  [MATCH_WAITLIST_OFFER_CONFIG_KEYS.enabled]: Joi.boolean()
+    .truthy('true')
+    .falsy('false')
+    .default(false)
+    .when(TELEGRAM_NOTIFICATION_CONFIG_KEYS.enabled, {
+      is: false,
+      then: Joi.valid(false).messages({
+        'any.only':
+          'MATCH_WAITLIST_OFFERS_ENABLED requires TELEGRAM_OUTBOUND_NOTIFICATIONS_ENABLED to be enabled',
+      }),
+    }),
   [TELEGRAM_NOTIFICATION_CONFIG_KEYS.yclientsReadReconciliationEnabled]:
     Joi.boolean()
       .truthy('true')

@@ -147,11 +147,21 @@ function backendWaitlistPlayer(entry) {
 }
 
 export function normalizeBackendMatchWaitlist(result) {
+  const offerIsValid = result?.offer === undefined || (
+    result.offer !== null &&
+    typeof result.offer === 'object' &&
+    typeof result.offer.offerId === 'string' &&
+    result.offer.status === 'active' &&
+    Number.isSafeInteger(result.offer.offeredAt) &&
+    Number.isSafeInteger(result.offer.expiresAt) &&
+    result.offer.expiresAt > result.offer.offeredAt
+  );
   if (
     result?.outcome !== 'waitlist_loaded' ||
     !Array.isArray(result.entries) ||
     !Number.isSafeInteger(result.count) ||
-    result.count < result.entries.length
+    result.count < result.entries.length ||
+    !offerIsValid
   ) {
     return null;
   }
@@ -160,6 +170,14 @@ export function normalizeBackendMatchWaitlist(result) {
     const current = result.current === undefined
       ? null
       : backendWaitlistPlayer(result.current);
+    const offer = result.offer === undefined
+      ? undefined
+      : Object.freeze({
+          offer_id: result.offer.offerId,
+          status: 'active',
+          offered_at: result.offer.offeredAt,
+          expires_at: result.offer.expiresAt,
+        });
     return Object.freeze({
       players,
       position: current === null
@@ -171,6 +189,7 @@ export function normalizeBackendMatchWaitlist(result) {
             joined_at: current.joined_at,
           }),
       count: result.count,
+      ...(offer === undefined ? {} : { offer }),
     });
   } catch {
     return null;
@@ -989,9 +1008,16 @@ function MatchLineupPanel({
   );
 }
 
-function WaitlistPanel({ position, count, loading, action, onJoin, onLeave }) {
+function formatWaitlistOfferCountdown(expiresAt, now) {
+  const seconds = Math.max(0, Math.ceil(expiresAt - now));
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}:${String(seconds % 60).padStart(2, '0')}`;
+}
+
+function WaitlistPanel({ position, count, offer, now, loading, action, onJoin, onLeave, onAcceptOffer, onDeclineOffer }) {
   const queuePosition = Number(position?.queue_position);
   const isWaiting = Number.isFinite(queuePosition) && queuePosition > 0;
+  const hasActiveOffer = offer?.status === 'active' && offer.expires_at > now;
 
   return (
     <section
@@ -999,7 +1025,23 @@ function WaitlistPanel({ position, count, loading, action, onJoin, onLeave }) {
       style={{ padding: '16px', borderRadius: '16px', border: '1px solid rgba(216,243,74,0.22)', background: 'rgba(216,243,74,0.055)' }}
       aria-live="polite"
     >
-      {isWaiting ? (
+      {hasActiveOffer ? (
+        <>
+          <div style={{ color: C.gold, fontSize: '10px', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Место освободилось</div>
+          <div style={{ color: C.text, fontSize: '19px', fontWeight: 900, marginTop: '5px' }}>Подтвердите участие</div>
+          <div data-testid="match-waitlist-offer-countdown" style={{ color: C.muted, fontSize: '12px', marginTop: '5px', fontVariantNumeric: 'tabular-nums' }}>
+            Место сохранено за вами ещё {formatWaitlistOfferCountdown(offer.expires_at, now)}
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginTop: '13px' }}>
+            <PadelButton data-testid="match-waitlist-offer-decline-button" variant="danger" size="lg" fullWidth onClick={onDeclineOffer} disabled={loading || action !== null}>
+              {action === 'decline-offer' ? 'Отказываемся…' : 'Отказаться'}
+            </PadelButton>
+            <PadelButton data-testid="match-waitlist-offer-accept-button" variant="success" size="lg" fullWidth onClick={onAcceptOffer} disabled={loading || action !== null}>
+              {action === 'accept-offer' ? 'Подтверждаем…' : 'Занять место'}
+            </PadelButton>
+          </div>
+        </>
+      ) : isWaiting ? (
         <>
           <div style={{ color: C.gold, fontSize: '10px', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Вы в листе ожидания</div>
           <div data-testid="match-waitlist-position" style={{ color: C.text, fontSize: '19px', fontWeight: 900, marginTop: '5px', fontVariantNumeric: 'tabular-nums' }}>
@@ -1007,6 +1049,9 @@ function WaitlistPanel({ position, count, loading, action, onJoin, onLeave }) {
           </div>
           <div data-testid="match-waitlist-count" style={{ color: C.muted, fontSize: '11px', marginTop: '5px' }}>
             Всего ожидают: {count}
+          </div>
+          <div style={{ color: C.muted, fontSize: '11px', lineHeight: 1.45, marginTop: '7px' }}>
+            Когда место освободится, у вас будет 15 минут на подтверждение.
           </div>
           <PadelButton data-testid="match-waitlist-leave-button" variant="danger" size="lg" fullWidth className="mt-3" onClick={onLeave} disabled={loading || action !== null}>
             {action === 'leave' ? 'Выходим…' : 'Выйти из листа ожидания'}
@@ -1016,7 +1061,7 @@ function WaitlistPanel({ position, count, loading, action, onJoin, onLeave }) {
         <>
           <div style={{ color: C.text, fontSize: '15px', fontWeight: 850 }}>Все места заняты</div>
           <div style={{ color: C.muted, fontSize: '11px', lineHeight: 1.45, marginTop: '5px' }}>
-            Встаньте в очередь — если место освободится, сервер автоматически добавит первого игрока в состав.
+            Встаньте в очередь — первому игроку дадим 15 минут, чтобы подтвердить свободное место.
           </div>
           <div data-testid="match-waitlist-count" style={{ color: C.muted, fontSize: '11px', marginTop: '7px' }}>
             В очереди: {loading ? '…' : count}
@@ -1071,7 +1116,7 @@ function MatchInvitationPanel({ accepting, declining, onAccept, onDecline }) {
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
-export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinSuccess, onUpdateDescription, onJoinMatch, onLeaveMatch, onRefreshMatch, onLoadWaitlist, onJoinWaitlist, onLeaveWaitlist, onLoadLineup, onAssignLineupSlot, onReleaseLineupSlot, onLoadResult, onSubmitResult, onConfirmResult, onDisputeResult, incomingInvitation = null, pendingInvitations = [], invitationActions = new Set(), onAcceptInvitation, onDeclineInvitation, onCreateInvitation, onCancelInvitation, onSearchPlayers, allMessages, messagesLoading, messagesLoadError, hasOlderMessages = false, olderMessagesLoading = false, onLoadOlderMessages, onRefreshMessages, onRetryMessages, onSendMessage, showToast }) {
+export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinSuccess, onUpdateDescription, onJoinMatch, onLeaveMatch, onRefreshMatch, onLoadWaitlist, onJoinWaitlist, onLeaveWaitlist, onAcceptWaitlistOffer, onDeclineWaitlistOffer, onLoadLineup, onAssignLineupSlot, onReleaseLineupSlot, onLoadResult, onSubmitResult, onConfirmResult, onDisputeResult, incomingInvitation = null, pendingInvitations = [], invitationActions = new Set(), onAcceptInvitation, onDeclineInvitation, onCreateInvitation, onCancelInvitation, onSearchPlayers, allMessages, messagesLoading, messagesLoadError, hasOlderMessages = false, olderMessagesLoading = false, onLoadOlderMessages, onRefreshMessages, onRetryMessages, onSendMessage, showToast }) {
   const isOwner = canManageMatch(currentUser, match);
 
   const allBots = useMemo(() => getTestBots(), []);
@@ -1102,6 +1147,8 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
   const waitlistPollInFlightRef = useRef(false);
   const [waitlistPosition, setWaitlistPosition] = useState(null);
   const [waitlistCount, setWaitlistCount] = useState(0);
+  const [waitlistOffer, setWaitlistOffer] = useState(null);
+  const [waitlistOfferNow, setWaitlistOfferNow] = useState(() => Math.floor(Date.now() / 1_000));
   const [waitlistLoading, setWaitlistLoading] = useState(false);
   const [waitlistPlayers, setWaitlistPlayers] = useState([]);
   const [waitlistListLoading, setWaitlistListLoading] = useState(false);
@@ -1164,6 +1211,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
       if (normalized === null) throw new Error(result?.reason ?? 'waitlist_load_failed');
       setWaitlistPosition(normalized.position);
       setWaitlistCount(normalized.count);
+      setWaitlistOffer(normalized.offer ?? null);
       setWaitlistPlayers(normalized.players);
       setWaitlistLoading(false);
       setWaitlistListLoading(false);
@@ -1172,6 +1220,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
       if (requestId !== waitlistLoadRef.current) return null;
       setWaitlistPosition(null);
       setWaitlistCount(0);
+      setWaitlistOffer(null);
       setWaitlistPlayers([]);
       setWaitlistListError('Не удалось загрузить лист ожидания.');
       setWaitlistLoading(false);
@@ -1473,7 +1522,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
     && !isParticipant
     && !pendingInvitation;
   const showWaitlist = canUseWaitlist
-    && (isCapacityReserved || capacityUnavailable || waitlistPosition?.status === 'waiting');
+    && (isCapacityReserved || capacityUnavailable || waitlistPosition?.status === 'waiting' || waitlistOffer?.status === 'active');
   const waitlistRefreshKey = [
     status,
     match.updated_at ?? match.updatedAt ?? '',
@@ -1743,6 +1792,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
     waitlistLoadRef.current += 1;
     setWaitlistPosition(null);
     setWaitlistCount(0);
+    setWaitlistOffer(null);
     setWaitlistPlayers([]);
     setWaitlistListError('');
     setWaitlistLoading(false);
@@ -1753,6 +1803,7 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
     if (!canViewWaitlist) {
       setWaitlistPosition(null);
       setWaitlistCount(0);
+      setWaitlistOffer(null);
       setWaitlistPlayers([]);
       setWaitlistListError('');
       setWaitlistLoading(false);
@@ -1762,6 +1813,15 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
     }
     refreshWaitlist();
   }, [canViewWaitlist, isParticipant, refreshWaitlist, waitlistRefreshKey]);
+
+  useEffect(() => {
+    if (waitlistOffer?.status !== 'active') return undefined;
+    setWaitlistOfferNow(Math.floor(Date.now() / 1_000));
+    const interval = globalThis.setInterval(() => {
+      setWaitlistOfferNow(Math.floor(Date.now() / 1_000));
+    }, 1_000);
+    return () => globalThis.clearInterval(interval);
+  }, [waitlistOffer?.offer_id, waitlistOffer?.status]);
 
   useEffect(() => {
     if (
@@ -1921,6 +1981,56 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
         await refreshWaitlist();
         showToast?.('Не удалось выйти из листа ожидания. Попробуйте ещё раз.', 'error');
       }
+    } finally {
+      waitlistActionRef.current = false;
+      setWaitlistAction(null);
+    }
+  };
+
+  const handleAcceptWaitlistOffer = async () => {
+    if (waitlistActionRef.current || waitlistOffer?.status !== 'active') return;
+    waitlistActionRef.current = true;
+    setWaitlistAction('accept-offer');
+    try {
+      const result = await onAcceptWaitlistOffer(match.id, waitlistOffer.offer_id);
+      if (result?.outcome !== 'waitlist_offer_accepted') {
+        throw new Error(`BACKEND_WAITLIST_${result?.reason ?? 'internal_error'}`);
+      }
+      setWaitlistOffer(null);
+      const updatedMatch = await onRefreshMatch?.(match.id, match);
+      if (updatedMatch?.filledSlots) setLocalSlots(updatedMatch.filledSlots);
+      showToast?.('Место подтверждено — вы в составе матча', 'success');
+    } catch (error) {
+      await refreshMatchAndWaitlist();
+      const code = backendWaitlistErrorCode(error);
+      const noLongerActive = code.includes('WAITLIST_OFFER_EXPIRED') || code.includes('WAITLIST_OFFER_RESOLVED');
+      showToast?.(
+        noLongerActive
+          ? 'Время подтверждения закончилось. Лист ожидания обновлён.'
+          : 'Не удалось подтвердить место. Попробуйте ещё раз.',
+        noLongerActive ? 'info' : 'error',
+      );
+    } finally {
+      waitlistActionRef.current = false;
+      setWaitlistAction(null);
+    }
+  };
+
+  const handleDeclineWaitlistOffer = async () => {
+    if (waitlistActionRef.current || waitlistOffer?.status !== 'active') return;
+    waitlistActionRef.current = true;
+    setWaitlistAction('decline-offer');
+    try {
+      const result = await onDeclineWaitlistOffer(match.id, waitlistOffer.offer_id);
+      if (result?.outcome !== 'waitlist_offer_declined') {
+        throw new Error(`BACKEND_WAITLIST_${result?.reason ?? 'internal_error'}`);
+      }
+      setWaitlistOffer(null);
+      await refreshWaitlist();
+      showToast?.('Вы отказались от места', 'info');
+    } catch {
+      await refreshWaitlist();
+      showToast?.('Лист ожидания обновлён', 'info');
     } finally {
       waitlistActionRef.current = false;
       setWaitlistAction(null);
@@ -2561,10 +2671,14 @@ export default function MatchDetailsScreen({ match, currentUser, onBack, onJoinS
           <WaitlistPanel
             position={waitlistPosition}
             count={waitlistCount}
+            offer={waitlistOffer}
+            now={waitlistOfferNow}
             loading={waitlistLoading}
             action={waitlistAction}
             onJoin={handleJoinWaitlist}
             onLeave={handleLeaveWaitlist}
+            onAcceptOffer={handleAcceptWaitlistOffer}
+            onDeclineOffer={handleDeclineWaitlistOffer}
           />
         ) : (
           <>

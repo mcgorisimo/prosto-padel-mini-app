@@ -7,6 +7,10 @@ import {
 import { encodeLengthPrefixedUtf8, uuidV5FromParts } from '../auth/crypto-encoding';
 import { UnixEpochSeconds, isUnixEpochSeconds } from '../auth/auth.types';
 import {
+  MatchWaitlistOfferPersistenceError,
+  MatchWaitlistOfferRepository,
+} from '../database/match-waitlist-offer.repository';
+import {
   MatchWaitlistPersistenceError,
   MatchWaitlistRepository,
   MatchWaitlistRejection,
@@ -27,10 +31,19 @@ import {
   MatchWaitlistEntryResponse,
   MutateMatchWaitlistApiInput,
   MutateMatchWaitlistApiResult,
+  MutateMatchWaitlistOfferApiInput,
+  MutateMatchWaitlistOfferApiResult,
 } from './match-waitlist-api.types';
 import {
   MatchNotificationId,
 } from './match-notification.types';
+import {
+  MatchWaitlistOfferCommandId,
+  MatchWaitlistOfferId,
+  MatchWaitlistOfferRequestDigest,
+  isMatchWaitlistOfferId,
+  isMatchWaitlistOfferRequestDigest,
+} from './match-waitlist-offer.types';
 import {
   MatchWaitlistCommandId,
   MatchWaitlistEntryId,
@@ -48,6 +61,8 @@ import {
 
 const UUID_URL_NAMESPACE = '6ba7b811-9dad-11d1-80b4-00c04fd430c8';
 const MAX_PROMOTION_ATTEMPTS = 8;
+const OFFER_TTL_SECONDS = 15 * 60;
+const MAX_EXPIRY_SWEEP_BATCH = 100;
 const DOMAINS = Object.freeze({
   join: Object.freeze({
     command: 'prosto-padel.match-waitlist.join.command.v1',
@@ -65,6 +80,16 @@ const DOMAINS = Object.freeze({
     participant: 'prosto-padel.match-waitlist.promotion.participant.v1',
     request: 'prosto-padel.match-waitlist.promotion.match-request.v1',
   }),
+  offer: Object.freeze({
+    id: 'prosto-padel.match-waitlist.offer.id.v1',
+    notification: 'prosto-padel.match-waitlist.offer.notification.v1',
+  }),
+  offerAction: Object.freeze({
+    command: 'prosto-padel.match-waitlist.offer-action.command.v1',
+    participant: 'prosto-padel.match-waitlist.offer-action.participant.v1',
+    request: 'prosto-padel.match-waitlist.offer-action.request.v1',
+    matchRequest: 'prosto-padel.match-waitlist.offer-action.match-request.v1',
+  }),
 });
 
 export interface MatchWaitlistTransactionExecutor {
@@ -74,6 +99,8 @@ export interface MatchWaitlistTransactionExecutor {
 export interface MatchWaitlistServiceDependencies {
   readonly transactions: MatchWaitlistTransactionExecutor;
   readonly waitlist: MatchWaitlistRepository;
+  readonly offers: MatchWaitlistOfferRepository;
+  readonly offersEnabled: boolean;
   readonly matches: MatchRepository;
   readonly notifications: Pick<
     MatchNotificationRepository,
@@ -133,6 +160,17 @@ function matchDigest(domain: string, parts: readonly string[]): MatchRequestDige
   return value;
 }
 
+function offerDigest(
+  domain: string,
+  parts: readonly string[],
+): MatchWaitlistOfferRequestDigest {
+  const value = digest(domain, parts);
+  if (!isMatchWaitlistOfferRequestDigest(value)) {
+    throw new TypeError('Waitlist offer request binding is invalid');
+  }
+  return value;
+}
+
 function rejected(reason: MatchWaitlistApiRejection) {
   return Object.freeze({ outcome: 'rejected' as const, reason });
 }
@@ -142,6 +180,14 @@ function mapRepositoryRejection(reason: MatchWaitlistRejection): MatchWaitlistAp
 }
 
 function mapPersistence(error: unknown): MatchWaitlistApiRejection {
+  if (error instanceof MatchWaitlistOfferPersistenceError) {
+    return error.reason === 'database_unavailable' ||
+      error.reason === 'transaction_conflict'
+      ? 'temporary_unavailable'
+      : error.reason === 'command_conflict'
+        ? 'request_conflict'
+        : 'internal_failure';
+  }
   if (error instanceof PublicPlayerProfileSearchPersistenceError) {
     return error.reason === 'database_unavailable' || error.reason === 'transaction_conflict'
       ? 'temporary_unavailable'
@@ -239,10 +285,27 @@ export class MatchWaitlistService {
         });
         const entries = result.entries.map(response);
         const current = result.current === undefined ? undefined : response(result.current);
+        const offer = this.dependencies.offersEnabled
+          ? await this.dependencies.offers.readCurrentForAccount(transaction, {
+              matchId: input.matchId,
+              accountId: input.accountId,
+              now: this.dependencies.clock.nowEpochSeconds(),
+            })
+          : undefined;
         return Object.freeze({
           outcome: 'found' as const,
           entries: Object.freeze(entries),
           ...(current === undefined ? {} : { current }),
+          ...(offer === undefined
+            ? {}
+            : {
+                offer: Object.freeze({
+                  offerId: offer.offerId,
+                  status: 'active' as const,
+                  offeredAt: offer.offeredAt,
+                  expiresAt: offer.expiresAt,
+                }),
+              }),
           count: result.count,
         });
       });
@@ -297,6 +360,265 @@ export class MatchWaitlistService {
     }
   }
 
+  acceptOffer(
+    input: MutateMatchWaitlistOfferApiInput,
+  ): Promise<MutateMatchWaitlistOfferApiResult> {
+    return this.mutateOffer('accept', input);
+  }
+
+  declineOffer(
+    input: MutateMatchWaitlistOfferApiInput,
+  ): Promise<MutateMatchWaitlistOfferApiResult> {
+    return this.mutateOffer('decline', input);
+  }
+
+  private async mutateOffer(
+    action: 'accept' | 'decline',
+    input: MutateMatchWaitlistOfferApiInput,
+  ): Promise<MutateMatchWaitlistOfferApiResult> {
+    if (!this.dependencies.offersEnabled) return rejected('feature_disabled');
+    if (
+      !validActor(input) ||
+      !exactKeys(input, ['accountId', 'role', 'matchId', 'request']) ||
+      input.role !== 'player' ||
+      !isMatchId(input.matchId) ||
+      !isRecord(input.request) ||
+      !exactKeys(input.request, ['offerId', 'requestKey']) ||
+      !isMatchWaitlistOfferId(input.request.offerId) ||
+      !requestKey(input.request.requestKey)
+    ) {
+      return rejected(
+        validActor(input) && input.role !== 'player'
+          ? 'forbidden'
+          : 'invalid_request',
+      );
+    }
+    const parts = [
+      input.request.offerId,
+      input.matchId,
+      input.accountId,
+      input.request.requestKey,
+      action,
+    ];
+    const actionInput = Object.freeze({
+      commandId: bindingUuid(
+        DOMAINS.offerAction.command,
+        parts,
+      ) as MatchWaitlistOfferCommandId,
+      offerId: input.request.offerId,
+      matchId: input.matchId,
+      accountId: input.accountId,
+      action,
+      requestDigest: offerDigest(DOMAINS.offerAction.request, parts),
+    });
+    try {
+      const now = this.dependencies.clock.nowEpochSeconds();
+      if (!isUnixEpochSeconds(now)) return rejected('internal_failure');
+      return await this.dependencies.transactions.run(async (transaction) => {
+        const ready = await this.dependencies.offers.readAction(transaction, {
+          ...actionInput,
+          now,
+        });
+        if (ready.outcome === 'command_reuse_conflict') {
+          return rejected('request_conflict');
+        }
+        if (ready.outcome === 'offer_not_found') {
+          return rejected('offer_not_found');
+        }
+        if (ready.outcome === 'offer_expired') {
+          return rejected('offer_expired');
+        }
+        if (ready.outcome === 'offer_resolved') {
+          return rejected('offer_resolved');
+        }
+        if (ready.outcome === 'match_unavailable') {
+          return rejected('offer_unavailable');
+        }
+        if (ready.outcome === 'idempotent_retry') {
+          return Object.freeze({
+            outcome:
+              ready.mutation.status === 'accepted'
+                ? ('waitlist_offer_accepted' as const)
+                : ('waitlist_offer_declined' as const),
+            offer: ready.mutation,
+          });
+        }
+        if (ready.outcome !== 'ready') return rejected('internal_failure');
+        const offer = ready.offer;
+        if (action === 'accept') {
+          const joined = await this.dependencies.matches.join(transaction, {
+            type: 'join_match',
+            matchId: input.matchId,
+            commandId: bindingUuid(
+              DOMAINS.offerAction.command,
+              [offer.offerId, 'join'],
+            ) as MatchCommandId,
+            actorAccountId: input.accountId,
+            participantId: bindingUuid(
+              DOMAINS.offerAction.participant,
+              [offer.offerId],
+            ) as MatchParticipantId,
+            requestDigest: matchDigest(
+              DOMAINS.offerAction.matchRequest,
+              [offer.offerId, input.matchId, input.accountId],
+            ),
+            waitlistOfferId: offer.offerId,
+            now,
+          });
+          if (joined.outcome === 'rejected') {
+            return rejected('offer_unavailable');
+          }
+          const mutation = await this.dependencies.offers.resolve(transaction, {
+            ...actionInput,
+            entryId: offer.entryId,
+            status: 'accepted',
+            now,
+          });
+          const notificationId = bindingUuid(
+            DOMAINS.promotion.notification,
+            [offer.entryId, input.matchId, input.accountId],
+          ) as MatchNotificationId;
+          await this.dependencies.notifications.createWaitlistPromotion(
+            transaction,
+            {
+              notificationId,
+              waitlistEntryId: offer.entryId,
+              matchId: input.matchId,
+              recipientAccountId: input.accountId,
+              now,
+            },
+          );
+          await this.dependencies.notificationIntents.enqueueMatchOwner(
+            transaction,
+            {
+              eventKey: `participant_joined:${actionInput.commandId}`,
+              eventType: 'participant_joined',
+              category: 'match_activity',
+              sourceId: actionInput.commandId,
+              sourceVersion: joined.matchVersion,
+              matchId: input.matchId,
+              occurredAt: now,
+            },
+          );
+          await this.createNextOffer(transaction, input.matchId, now);
+          return Object.freeze({
+            outcome: 'waitlist_offer_accepted' as const,
+            offer: mutation,
+          });
+        }
+        const mutation = await this.dependencies.offers.resolve(transaction, {
+          ...actionInput,
+          entryId: offer.entryId,
+          status: 'declined',
+          now,
+        });
+        await this.createNextOffer(transaction, input.matchId, now);
+        return Object.freeze({
+          outcome: 'waitlist_offer_declined' as const,
+          offer: mutation,
+        });
+      });
+    } catch (error) {
+      return rejected(mapPersistence(error));
+    }
+  }
+
+  async sweepExpiredOffers(limit = 25): Promise<number> {
+    if (!this.dependencies.offersEnabled) return 0;
+    if (!Number.isInteger(limit) || limit < 1 || limit > MAX_EXPIRY_SWEEP_BATCH) {
+      throw new MatchWaitlistOfferPersistenceError('invalid_input');
+    }
+    const now = this.dependencies.clock.nowEpochSeconds();
+    if (!isUnixEpochSeconds(now)) {
+      throw new MatchWaitlistOfferPersistenceError('invalid_input');
+    }
+    const matchIds = await this.dependencies.transactions.run((transaction) =>
+      this.dependencies.offers.listDueMatchIds(transaction, { now, limit }),
+    );
+    let resolved = 0;
+    for (const matchId of matchIds) {
+      const changed = await this.dependencies.transactions.run(
+        async (transaction) => {
+          const expiry = await this.dependencies.offers.expireForMatch(
+            transaction,
+            { matchId, now },
+          );
+          if (expiry.outcome === 'none') return false;
+          if (expiry.outcome === 'expired') {
+            await this.createNextOffer(transaction, matchId, now);
+          }
+          return true;
+        },
+      );
+      if (changed) resolved += 1;
+    }
+    return resolved;
+  }
+
+  private async createNextOffer(
+    transaction: PostgresTransaction,
+    matchId: MatchId,
+    now: UnixEpochSeconds,
+  ): Promise<number> {
+    for (let attempt = 0; attempt < MAX_PROMOTION_ATTEMPTS; attempt += 1) {
+      const candidate = await this.dependencies.waitlist.readPromotionCandidate(
+        transaction,
+        { matchId, now },
+      );
+      if (candidate.outcome !== 'candidate') return 0;
+      if (!candidate.playerIsActive) {
+        await this.dependencies.waitlist.resolvePromotion(transaction, {
+          entryId: candidate.entry.entryId,
+          matchId,
+          accountId: candidate.entry.accountId,
+          outcome: 'skipped',
+          now,
+        });
+        continue;
+      }
+      const offerId = bindingUuid(DOMAINS.offer.id, [
+        candidate.entry.entryId,
+        matchId,
+        candidate.entry.accountId,
+      ]) as MatchWaitlistOfferId;
+      const expiresAt = now + OFFER_TTL_SECONDS;
+      if (!isUnixEpochSeconds(expiresAt)) {
+        throw new MatchWaitlistOfferPersistenceError('invalid_input');
+      }
+      const created = await this.dependencies.offers.create(transaction, {
+        offerId,
+        entryId: candidate.entry.entryId,
+        matchId,
+        accountId: candidate.entry.accountId,
+        now,
+        expiresAt,
+      });
+      if (created.outcome === 'candidate_unavailable') {
+        await this.dependencies.waitlist.resolvePromotion(transaction, {
+          entryId: candidate.entry.entryId,
+          matchId,
+          accountId: candidate.entry.accountId,
+          outcome: 'skipped',
+          now,
+        });
+        continue;
+      }
+      if (created.outcome !== 'created') return 0;
+      await this.dependencies.notificationIntents.enqueueDirect(transaction, {
+        eventKey: `waitlist_slot_available:${offerId}`,
+        eventType: 'waitlist_slot_available',
+        category: 'match_activity',
+        sourceId: offerId,
+        sourceVersion: 1,
+        recipientAccountId: candidate.entry.accountId,
+        matchId,
+        occurredAt: now,
+      });
+      return 1;
+    }
+    return 0;
+  }
+
   async promoteAvailable(
     transaction: PostgresTransaction,
     matchId: MatchId,
@@ -304,6 +626,9 @@ export class MatchWaitlistService {
   ): Promise<number> {
     if (!isMatchId(matchId) || !isUnixEpochSeconds(now)) {
       throw new MatchWaitlistPersistenceError('invalid_input');
+    }
+    if (this.dependencies.offersEnabled) {
+      return this.createNextOffer(transaction, matchId, now);
     }
     let promoted = 0;
     for (let attempt = 0; attempt < MAX_PROMOTION_ATTEMPTS; attempt += 1) {

@@ -1750,6 +1750,16 @@ export default function App({
             ? backendMatchActions?.leaveMatchWaitlist
             : null
         }
+        onAcceptWaitlistOffer={
+          isBackendOwnedMatch(selectedMatch)
+            ? backendMatchActions?.acceptMatchWaitlistOffer
+            : null
+        }
+        onDeclineWaitlistOffer={
+          isBackendOwnedMatch(selectedMatch)
+            ? backendMatchActions?.declineMatchWaitlistOffer
+            : null
+        }
         onLoadLineup={
           isBackendOwnedMatch(selectedMatch)
             ? backendMatchActions?.readMatchLineup

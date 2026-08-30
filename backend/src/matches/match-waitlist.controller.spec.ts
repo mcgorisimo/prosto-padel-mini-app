@@ -12,7 +12,9 @@ import { SessionAuthenticationResult } from '../auth/session-authentication.type
 import {
   ListMatchWaitlistApiResult,
   MutateMatchWaitlistApiResult,
+  MutateMatchWaitlistOfferApiResult,
 } from './match-waitlist-api.types';
+import { MatchWaitlistOfferId } from './match-waitlist-offer.types';
 import { MatchWaitlistController } from './match-waitlist.controller';
 import { MatchWaitlistService } from './match-waitlist.service';
 import { MatchWaitlistEntryId } from './match-waitlist.types';
@@ -22,6 +24,7 @@ const CREDENTIAL = Buffer.alloc(32, 0x77).toString('base64url');
 const ACCOUNT_ID = deterministicUuid('waitlist-controller-account') as AccountId;
 const MATCH_ID = deterministicUuid('waitlist-controller-match') as MatchId;
 const ENTRY_ID = deterministicUuid('waitlist-controller-entry') as MatchWaitlistEntryId;
+const OFFER_ID = deterministicUuid('waitlist-controller-offer') as MatchWaitlistOfferId;
 const REQUEST_KEY = deterministicUuid('waitlist-controller-request');
 const NOW = unixEpochSeconds(1_800_000_000);
 
@@ -30,6 +33,8 @@ interface Harness {
   readonly list: jest.Mock<Promise<ListMatchWaitlistApiResult>, [unknown]>;
   readonly join: jest.Mock<Promise<MutateMatchWaitlistApiResult>, [unknown]>;
   readonly leave: jest.Mock<Promise<MutateMatchWaitlistApiResult>, [unknown]>;
+  readonly acceptOffer: jest.Mock<Promise<MutateMatchWaitlistOfferApiResult>, [unknown]>;
+  readonly declineOffer: jest.Mock<Promise<MutateMatchWaitlistOfferApiResult>, [unknown]>;
 }
 
 async function harness(): Promise<Harness> {
@@ -42,6 +47,12 @@ async function harness(): Promise<Harness> {
       joinedAt: NOW,
       isCurrentPlayer: true,
     }],
+    offer: {
+      offerId: OFFER_ID,
+      status: 'active',
+      offeredAt: NOW,
+      expiresAt: unixEpochSeconds(Number(NOW) + 900),
+    },
     count: 1,
   });
   const mutation = {
@@ -53,6 +64,23 @@ async function harness(): Promise<Harness> {
     outcome: 'waitlist_left',
     entry: { ...mutation.entry, status: 'left', version: 2 },
   });
+  const acceptedOffer = {
+    outcome: 'waitlist_offer_accepted' as const,
+    offer: {
+      offerId: OFFER_ID,
+      matchId: MATCH_ID,
+      status: 'accepted' as const,
+      appliedAt: NOW,
+      version: 2 as const,
+    },
+  };
+  const acceptOffer = jest.fn<Promise<MutateMatchWaitlistOfferApiResult>, [unknown]>()
+    .mockResolvedValue(acceptedOffer);
+  const declineOffer = jest.fn<Promise<MutateMatchWaitlistOfferApiResult>, [unknown]>()
+    .mockResolvedValue({
+      outcome: 'waitlist_offer_declined',
+      offer: { ...acceptedOffer.offer, status: 'declined' },
+    });
   const authenticate = jest.fn<Promise<SessionAuthenticationResult>, [unknown]>().mockResolvedValue({
     outcome: 'authenticated',
     principal: { accountId: ACCOUNT_ID, role: 'player', expiresAt: unixEpochSeconds(Number(NOW) + 3_600) },
@@ -61,7 +89,10 @@ async function harness(): Promise<Harness> {
     controllers: [MatchWaitlistController],
     providers: [
       SessionBearerGuard,
-      { provide: MatchWaitlistService, useValue: { list, join, leave } },
+      {
+        provide: MatchWaitlistService,
+        useValue: { list, join, leave, acceptOffer, declineOffer },
+      },
       { provide: SessionAuthenticationService, useValue: { authenticate } },
       { provide: SESSION_AUTHENTICATION_CLOCK, useValue: { nowEpochSeconds: () => NOW } },
     ],
@@ -70,7 +101,7 @@ async function harness(): Promise<Harness> {
   app.useLogger(false);
   await app.init();
   await app.getHttpAdapter().getInstance().ready();
-  return { app, list, join, leave };
+  return { app, list, join, leave, acceptOffer, declineOffer };
 }
 
 function headers() {
@@ -115,5 +146,58 @@ describe('MatchWaitlistController', () => {
       code: 'match_waitlist_not_full',
       message: 'Match still has an available slot',
     });
+  });
+
+  it('accepts and declines a concrete offer with bearer and no-store protection', async () => {
+    const accepted = await test.app.inject({
+      method: 'POST',
+      url: `/matches/${MATCH_ID}/waitlist/offers/${OFFER_ID}/accept`,
+      headers: headers(),
+      payload: { requestKey: REQUEST_KEY },
+    });
+    const declined = await test.app.inject({
+      method: 'POST',
+      url: `/matches/${MATCH_ID}/waitlist/offers/${OFFER_ID}/decline`,
+      headers: headers(),
+      payload: { requestKey: REQUEST_KEY },
+    });
+
+    expect(accepted.statusCode).toBe(201);
+    expect(declined.statusCode).toBe(201);
+    expect(accepted.headers['cache-control']).toBe('no-store');
+    expect(accepted.json().offer).toMatchObject({
+      offerId: OFFER_ID,
+      status: 'accepted',
+    });
+    expect(test.acceptOffer).toHaveBeenCalledWith({
+      accountId: ACCOUNT_ID,
+      role: 'player',
+      matchId: MATCH_ID,
+      request: { offerId: OFFER_ID, requestKey: REQUEST_KEY },
+    });
+    expect(test.declineOffer).toHaveBeenCalledTimes(1);
+  });
+
+  it('maps expired offers and rejects malformed offer identifiers safely', async () => {
+    test.acceptOffer.mockResolvedValue({
+      outcome: 'rejected',
+      reason: 'offer_expired',
+    });
+    const expired = await test.app.inject({
+      method: 'POST',
+      url: `/matches/${MATCH_ID}/waitlist/offers/${OFFER_ID}/accept`,
+      headers: headers(),
+      payload: { requestKey: REQUEST_KEY },
+    });
+    const malformed = await test.app.inject({
+      method: 'POST',
+      url: `/matches/${MATCH_ID}/waitlist/offers/not-an-id/accept`,
+      headers: headers(),
+      payload: { requestKey: REQUEST_KEY },
+    });
+
+    expect(expired.statusCode).toBe(409);
+    expect(expired.json().code).toBe('match_waitlist_offer_expired');
+    expect(malformed.statusCode).toBe(400);
   });
 });

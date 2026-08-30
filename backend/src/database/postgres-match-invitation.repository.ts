@@ -14,6 +14,7 @@ import {
   isMatchParticipantId,
   isMatchRequestDigest,
 } from '../matches/match.types';
+import { isMatchWaitlistOfferId } from '../matches/match-waitlist-offer.types';
 import {
   AppliedMatchInvitationCommand,
   MatchInvitationCommandId,
@@ -173,6 +174,16 @@ const SELECT_PENDING_INVITATIONS_FOR_UPDATE_SQL = `
   FOR UPDATE
 `;
 
+const SELECT_ACTIVE_WAITLIST_OFFERS_FOR_UPDATE_SQL = `
+  SELECT id, account_id, slot_number
+  FROM backend_match.match_waitlist_offers
+  WHERE match_id = $1
+    AND status = 'active'
+    AND expires_at > $2
+  ORDER BY offered_at, id
+  FOR UPDATE
+`;
+
 const SELECT_CANDIDATE_SQL = `
   SELECT
     accounts.id,
@@ -324,6 +335,12 @@ interface ParticipantReservationRow extends QueryResultRow {
 interface PendingInvitationRow extends QueryResultRow {
   readonly id: unknown;
   readonly invited_account_id: unknown;
+  readonly slot_number: unknown;
+}
+
+interface ActiveWaitlistOfferRow extends QueryResultRow {
+  readonly id: unknown;
+  readonly account_id: unknown;
   readonly slot_number: unknown;
 }
 
@@ -789,7 +806,10 @@ async function loadInvitation(
 export class PostgresMatchInvitationRepository
   implements MatchInvitationRepository
 {
-  constructor(readonly matches: MatchRepository) {}
+  constructor(
+    readonly matches: MatchRepository,
+    readonly waitlistOffersEnabled = false,
+  ) {}
 
   async create(
     transaction: PostgresTransaction,
@@ -886,11 +906,22 @@ export class PostgresMatchInvitationRepository
         SELECT_PENDING_INVITATIONS_FOR_UPDATE_SQL,
         [input.matchId],
       );
+      const activeOffers = this.waitlistOffersEnabled
+        ? await transaction.query<ActiveWaitlistOfferRow>(
+            SELECT_ACTIVE_WAITLIST_OFFERS_FOR_UPDATE_SQL,
+            [input.matchId, input.now],
+          )
+        : Object.freeze({
+            rowCount: 0,
+            rows: [] as ActiveWaitlistOfferRow[],
+          });
       if (
         participants.rowCount !== participants.rows.length ||
         pending.rowCount !== pending.rows.length ||
+        activeOffers.rowCount !== activeOffers.rows.length ||
         participants.rows.length > 3 ||
-        pending.rows.length > 3
+        pending.rows.length > 3 ||
+        activeOffers.rows.length > 1
       ) {
         throw invalidState();
       }
@@ -907,6 +938,16 @@ export class PostgresMatchInvitationRepository
         if (
           !isMatchInvitationId(row.id) ||
           !isAccountId(row.invited_account_id) ||
+          ![2, 3, 4].includes(row.slot_number as number)
+        ) {
+          throw invalidState();
+        }
+        return row;
+      });
+      const offers = activeOffers.rows.map((row) => {
+        if (
+          !isMatchWaitlistOfferId(row.id) ||
+          !isAccountId(row.account_id) ||
           ![2, 3, 4].includes(row.slot_number as number)
         ) {
           throw invalidState();
@@ -937,6 +978,11 @@ export class PostgresMatchInvitationRepository
         active.some((row) => row.slot_number === input.slotNumber) ||
         reservations.some(
           (row) => row.slot_number === input.slotNumber,
+        ) ||
+        offers.some(
+          (row) =>
+            row.slot_number === input.slotNumber ||
+            row.account_id === input.invitedAccountId,
         )
       ) {
         return Object.freeze({
@@ -944,7 +990,7 @@ export class PostgresMatchInvitationRepository
           reason: 'slot_unavailable',
         });
       }
-      if (active.length + reservations.length >= 3) {
+      if (active.length + reservations.length + offers.length >= 3) {
         return Object.freeze({
           outcome: 'rejected',
           reason: 'match_full',

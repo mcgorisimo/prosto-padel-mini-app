@@ -174,6 +174,7 @@ function Assert-RuntimeBackendContract {
         TELEGRAM_INIT_DATA_MAX_AGE_SECONDS = '${TELEGRAM_INIT_DATA_MAX_AGE_SECONDS:?TELEGRAM_INIT_DATA_MAX_AGE_SECONDS is required}'
         TELEGRAM_LOGIN_UUID_NAMESPACE = '${TELEGRAM_LOGIN_UUID_NAMESPACE:?TELEGRAM_LOGIN_UUID_NAMESPACE is required}'
         TELEGRAM_OUTBOUND_NOTIFICATIONS_ENABLED = '${TELEGRAM_OUTBOUND_NOTIFICATIONS_ENABLED:-false}'
+        MATCH_WAITLIST_OFFERS_ENABLED = '${MATCH_WAITLIST_OFFERS_ENABLED:-false}'
         TELEGRAM_MINI_APP_URL = '${TELEGRAM_MINI_APP_URL:-https://app.prostopdl.ru/}'
         TELEGRAM_BOT_TOKEN_FILE = '/run/secrets/telegram-bot-token'
         TELEGRAM_IDENTITY_LOOKUP_PEPPER_BASE64_FILE = '/run/secrets/telegram-identity-lookup-pepper-base64'
@@ -410,6 +411,14 @@ $hardcodedYclientsApi = Replace-First `
     -NewValue '      YCLIENTS_API_ENABLED: true'
 Assert-RejectedMutation `
     -ServiceBlock $hardcodedYclientsApi `
+    -ExpectedError 'RUNTIME_BACKEND_COMPOSE_ENVIRONMENT_INVALID'
+
+$hardcodedWaitlistOffers = Replace-First `
+    -Text $runtimeBackendBlock `
+    -OldValue '      MATCH_WAITLIST_OFFERS_ENABLED: ${MATCH_WAITLIST_OFFERS_ENABLED:-false}' `
+    -NewValue '      MATCH_WAITLIST_OFFERS_ENABLED: true'
+Assert-RejectedMutation `
+    -ServiceBlock $hardcodedWaitlistOffers `
     -ExpectedError 'RUNTIME_BACKEND_COMPOSE_ENVIRONMENT_INVALID'
 
 $firstTarget = '        target: /run/secrets/backend-auth-app-password'

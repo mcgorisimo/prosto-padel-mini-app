@@ -9927,3 +9927,27 @@
 - Deployment is `deployment=applied_verified` for Selectel test. This append-only
   closeout changes documentation only and has `deployment=not_needed`; the
   deployed runtime remains exact `8112547b4187f4fd0b336b7bf7c382928cd33383`.
+
+### 2026-08-30 — waitlist 15-minute confirmation local checkpoint
+
+- Added a disabled-by-default FIFO waitlist offer: the first eligible player
+  receives one concrete free slot for 15 minutes and must accept or decline in
+  the Mini App. Acceptance atomically occupies only that reserved slot;
+  decline/expiry advances the next eligible player. Direct joins, invitations,
+  ordinary queue leave and duplicate requests cannot steal or strand an active
+  offer. Migration 044 contains only offer/command state and no contact data.
+- `MATCH_WAITLIST_OFFERS_ENABLED=false` is fail-closed and may not be enabled
+  unless Telegram outbound notifications are also enabled. Both remain `OFF`;
+  no Telegram/provider call, secret change, database write, migration apply,
+  Selectel action or production action occurred in this local checkpoint.
+- Gates passed: backend typecheck; unit `4077/4077`; E2E `4/4`; build; root E2E
+  `112/112` with one intentional feature-disabled skip; root build; runtime
+  Compose static check; and `git diff --check`. Independent review initially
+  found two P1 concurrency issues; both were fixed, then the repeat review
+  returned `P0=0`, `P1=0` and passed its own typecheck plus `90` focused tests.
+- Runtime, frontend, backend, Compose/config and unapplied migration 044 change,
+  so deployment remains `deployment_deferred_by_user` until the exact commit is
+  fast-forwarded to `main`, migration 044 is backed up/applied/verified on
+  Selectel test, backend/frontend are rolled out with both notification and
+  offer switches `OFF`, and health, write-free business smoke and bounded logs
+  pass. Production is not authorized.

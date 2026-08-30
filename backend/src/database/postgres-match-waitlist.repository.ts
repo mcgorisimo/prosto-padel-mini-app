@@ -124,6 +124,15 @@ const SELECT_WAITING_ENTRY_SQL = `
   FOR UPDATE
 `;
 
+const SELECT_ACTIVE_OFFER_FOR_ACCOUNT_SQL = `
+  SELECT id
+  FROM backend_match.match_waitlist_offers
+  WHERE match_id = $1
+    AND account_id = $2
+    AND status = 'active'
+  LIMIT 1
+`;
+
 const INSERT_ENTRY_SQL = `
   INSERT INTO backend_match.match_waitlist_entries (
     id,
@@ -683,6 +692,8 @@ async function insertCommand(
 }
 
 export class PostgresMatchWaitlistRepository implements MatchWaitlistRepository {
+  constructor(private readonly offersEnabled = false) {}
+
   async join(transaction: PostgresTransaction, input: JoinMatchWaitlistInput): Promise<MutateMatchWaitlistResult> {
     try {
       const validated = validateJoin(input);
@@ -800,6 +811,18 @@ export class PostgresMatchWaitlistRepository implements MatchWaitlistRepository 
           persistence: 'idempotent_retry',
           entry: mutationFromCommand(existingCommand),
         });
+      }
+      if (this.offersEnabled) {
+        const activeOffer = await transaction.query(SELECT_ACTIVE_OFFER_FOR_ACCOUNT_SQL, [
+          validated.matchId,
+          validated.actorAccountId,
+        ]);
+        if (activeOffer.rowCount !== activeOffer.rows.length || activeOffer.rows.length > 1) {
+          throw invalidState();
+        }
+        if (activeOffer.rows.length === 1) {
+          return Object.freeze({ outcome: 'rejected', reason: 'not_waiting' });
+        }
       }
       const waiting = await transaction.query<EntryRow>(SELECT_WAITING_ENTRY_SQL, [validated.matchId, validated.actorAccountId]);
       if (waiting.rowCount !== waiting.rows.length || waiting.rows.length > 1) throw invalidState();

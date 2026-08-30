@@ -13,6 +13,7 @@ import {
   MatchInvitationCommandId,
   MatchInvitationRequestDigest,
 } from '../matches/match-invitation.types';
+import { MatchWaitlistOfferId } from '../matches/match-waitlist-offer.types';
 import {
   CreateMatchInvitationInput,
   MatchInvitationPersistenceError,
@@ -40,6 +41,9 @@ const MATCH_COMMAND_ID = deterministicUuid(
 const PARTICIPANT_ID = deterministicUuid(
   'repository-invitation-participant',
 ) as MatchParticipantId;
+const WAITLIST_OFFER_ID = deterministicUuid(
+  'repository-invitation-waitlist-offer',
+) as MatchWaitlistOfferId;
 const INVITATION_DIGEST = 'a'.repeat(
   64,
 ) as MatchInvitationRequestDigest;
@@ -270,6 +274,38 @@ describe('PostgresMatchInvitationRepository', () => {
         })),
       ),
     ).not.toContain(PRIVATE_MARKER);
+  });
+
+  it('does not let an invitation reuse an active waitlist offer slot or player', async () => {
+    const offer = {
+      id: WAITLIST_OFFER_ID,
+      account_id: PLAYER_ID,
+      slot_number: 2,
+    };
+    const queue = () => [
+      queryResult([{ locked: '' }]),
+      queryResult([]),
+      queryResult([matchRow()]),
+      queryResult([]),
+      queryResult([]),
+      queryResult([offer]),
+    ];
+    const repository = new PostgresMatchInvitationRepository(matches(), true);
+
+    await expect(repository.create(
+      new FakeTransaction(queue()),
+      createInput(),
+    )).resolves.toEqual({
+      outcome: 'rejected',
+      reason: 'slot_unavailable',
+    });
+    await expect(repository.create(
+      new FakeTransaction(queue()),
+      createInput({ slotNumber: 3 }),
+    )).resolves.toEqual({
+      outcome: 'rejected',
+      reason: 'slot_unavailable',
+    });
   });
 
   it('returns the original create result for an exact retry without writes', async () => {

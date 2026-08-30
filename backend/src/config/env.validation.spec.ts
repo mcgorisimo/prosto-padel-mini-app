@@ -7,6 +7,7 @@ import {
   TELEGRAM_SESSION_TTL_SECONDS,
 } from './telegram-login.config';
 import { TELEGRAM_NOTIFICATION_CONFIG_KEYS } from './telegram-notification.config';
+import { MATCH_WAITLIST_OFFER_CONFIG_KEYS } from './match-waitlist-offer.config';
 import { YCLIENTS_WEBHOOK_CONFIG_KEYS } from './yclients-webhook.config';
 import {
   YCLIENTS_API_CONFIG_KEYS,
@@ -638,6 +639,30 @@ describe('envValidationSchema', () => {
         TELEGRAM_NOTIFICATION_CONFIG_KEYS.yclientsReadReconciliationEnabled
       ],
     ).toBe(false);
+    expect(value[MATCH_WAITLIST_OFFER_CONFIG_KEYS.enabled]).toBe(false);
+  });
+
+  it('keeps waitlist offers fail-closed until outbound Telegram is enabled', () => {
+    const disabledOutbound = validate({
+      [MATCH_WAITLIST_OFFER_CONFIG_KEYS.enabled]: 'true',
+    });
+    expect(disabledOutbound.error?.message).toContain(
+      'MATCH_WAITLIST_OFFERS_ENABLED requires TELEGRAM_OUTBOUND_NOTIFICATIONS_ENABLED',
+    );
+
+    const { error, value } = validate({
+      ...SAFE_TEST_DATABASE_CONFIG,
+      ...SAFE_TEST_TELEGRAM_CRYPTO_CONFIG,
+      TELEGRAM_AUTH_ENABLED: 'true',
+      TELEGRAM_BOT_TOKEN: SAFE_TEST_BOT_TOKEN,
+      TELEGRAM_INIT_DATA_MAX_AGE_SECONDS: '300',
+      [TELEGRAM_NOTIFICATION_CONFIG_KEYS.enabled]: 'true',
+      [TELEGRAM_NOTIFICATION_CONFIG_KEYS.miniAppUrl]:
+        'https://app.prostopdl.ru/',
+      [MATCH_WAITLIST_OFFER_CONFIG_KEYS.enabled]: 'true',
+    });
+    expect(error).toBeUndefined();
+    expect(value[MATCH_WAITLIST_OFFER_CONFIG_KEYS.enabled]).toBe(true);
   });
 
   it('requires Telegram auth and an HTTPS Mini App URL for outbound notifications', () => {

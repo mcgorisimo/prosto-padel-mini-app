@@ -1,6 +1,7 @@
 import { Module, Provider } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { readReservationSnapshotConfiguration } from '../config/reservation-snapshot.config';
+import { readMatchWaitlistOfferEnabled } from '../config/match-waitlist-offer.config';
 import { YCLIENTS_API_CONFIG_KEYS } from '../config/yclients-api.config';
 import { readPlayerOnboardingPolicyConfiguration } from '../config/player-onboarding-policy.config';
 import { ReservationSnapshotCrypto } from '../reservations/reservation-snapshot.crypto';
@@ -26,6 +27,7 @@ import { PostgresMatchResultRepository } from './postgres-match-result.repositor
 import { PostgresMatchRepository } from './postgres-match.repository';
 import { PostgresMatchInvitationRepository } from './postgres-match-invitation.repository';
 import { PostgresMatchWaitlistRepository } from './postgres-match-waitlist.repository';
+import { PostgresMatchWaitlistOfferRepository } from './postgres-match-waitlist-offer.repository';
 import { PostgresPlayerAccountProvisioningRepository } from './postgres-player-account-provisioning.repository';
 import { PostgresPlayerProfileDetailsRepository } from './postgres-player-profile-details.repository';
 import { PostgresPlayerProfilePhotoRepository } from './postgres-player-profile-photo.repository';
@@ -142,7 +144,15 @@ const DATABASE_WORKFLOW_PROVIDERS: Provider[] = [
   PostgresTelegramNotificationIntentRepository,
   PostgresYclientsWebhookSignalRepository,
   PostgresYclientsNotificationReconciliationRepository,
-  PostgresMatchWaitlistRepository,
+  PostgresMatchWaitlistOfferRepository,
+  {
+    provide: PostgresMatchWaitlistRepository,
+    inject: [ConfigService],
+    useFactory: (config: ConfigService): PostgresMatchWaitlistRepository =>
+      new PostgresMatchWaitlistRepository(
+        readMatchWaitlistOfferEnabled(config),
+      ),
+  },
   {
     provide: PlayerProfilePhotoUrlResolver,
     inject: [ConfigService],
@@ -185,19 +195,28 @@ const DATABASE_WORKFLOW_PROVIDERS: Provider[] = [
   },
   {
     provide: PostgresMatchRepository,
-    inject: [PostgresPlayerProfileReader, MATCH_COURT_CATALOG],
+    inject: [PostgresPlayerProfileReader, MATCH_COURT_CATALOG, ConfigService],
     useFactory: (
       profiles: PostgresPlayerProfileReader,
       courts: MatchCourtCatalog,
-    ): PostgresMatchRepository => new PostgresMatchRepository(profiles, courts),
+      config: ConfigService,
+    ): PostgresMatchRepository => new PostgresMatchRepository(
+      profiles,
+      courts,
+      readMatchWaitlistOfferEnabled(config),
+    ),
   },
   {
     provide: PostgresMatchInvitationRepository,
-    inject: [PostgresMatchRepository],
+    inject: [PostgresMatchRepository, ConfigService],
     useFactory: (
       matches: PostgresMatchRepository,
+      config: ConfigService,
     ): PostgresMatchInvitationRepository =>
-      new PostgresMatchInvitationRepository(matches),
+      new PostgresMatchInvitationRepository(
+        matches,
+        readMatchWaitlistOfferEnabled(config),
+      ),
   },
   {
     provide: PostgresTransactionExecutorAdapter,
@@ -291,6 +310,7 @@ const DATABASE_WORKFLOW_EXPORTS = [
   PostgresMatchNotificationRepository,
   PostgresMatchResultRepository,
   PostgresMatchWaitlistRepository,
+  PostgresMatchWaitlistOfferRepository,
   PostgresMatchRepository,
   PostgresMatchInvitationRepository,
   MATCH_COURT_CATALOG,

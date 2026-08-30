@@ -36,6 +36,10 @@ import {
   isMatchRequestDigest,
 } from '../matches/match.types';
 import {
+  MatchWaitlistOfferId,
+  isMatchWaitlistOfferId,
+} from '../matches/match-waitlist-offer.types';
+import {
   decodePostgresByteaDigest,
   decodePostgresNonNegativeBigint,
   encodePostgresByteaDigest,
@@ -176,6 +180,16 @@ const SELECT_PENDING_INVITATIONS_FOR_UPDATE_SQL = `
   WHERE match_id = $1
     AND status = 'pending'
   ORDER BY slot_number, id
+  FOR UPDATE
+`;
+
+const SELECT_ACTIVE_WAITLIST_OFFERS_FOR_UPDATE_SQL = `
+  SELECT id, account_id, slot_number
+  FROM backend_match.match_waitlist_offers
+  WHERE match_id = $1
+    AND status = 'active'
+    AND expires_at > $2
+  ORDER BY offered_at, id
   FOR UPDATE
 `;
 
@@ -515,6 +529,12 @@ interface ActorRatingRow extends QueryResultRow {
 interface PendingInvitationRow extends QueryResultRow {
   readonly id: unknown;
   readonly invited_account_id: unknown;
+  readonly slot_number: unknown;
+}
+
+interface ActiveWaitlistOfferRow extends QueryResultRow {
+  readonly id: unknown;
+  readonly account_id: unknown;
   readonly slot_number: unknown;
 }
 
@@ -1189,6 +1209,9 @@ function assertJoinInput(input: JoinMatchInput): void {
     (keys.length !== 7 && keys.length !== 8) ||
     (input.invitationId !== undefined &&
       !isMatchInvitationId(input.invitationId)) ||
+    (input.waitlistOfferId !== undefined &&
+      !isMatchWaitlistOfferId(input.waitlistOfferId)) ||
+    (input.invitationId !== undefined && input.waitlistOfferId !== undefined) ||
     !isValidMatchCommand({
       ...input,
       actorRatingLevel: 0,
@@ -1392,6 +1415,7 @@ export class PostgresMatchRepository implements MatchRepository {
   constructor(
     readonly profiles: PlayerProfileReader,
     readonly courts: MatchCourtCatalog,
+    readonly waitlistOffersEnabled = false,
   ) {}
 
   private async lockAndHydrate(
@@ -1885,12 +1909,42 @@ export class PostgresMatchRepository implements MatchRepository {
             slotNumber: row.slot_number as 2 | 3 | 4,
           });
         });
+        const activeOffers = this.waitlistOffersEnabled
+          ? await transaction.query<ActiveWaitlistOfferRow>(
+              SELECT_ACTIVE_WAITLIST_OFFERS_FOR_UPDATE_SQL,
+              [command.matchId, command.now],
+            )
+          : Object.freeze({ rowCount: 0, rows: [] as ActiveWaitlistOfferRow[] });
+        if (activeOffers.rowCount !== activeOffers.rows.length || activeOffers.rows.length > 1) {
+          throw invalidPersistedState();
+        }
+        const offers = activeOffers.rows.map((row) => {
+          if (
+            !isMatchWaitlistOfferId(row.id) ||
+            !isAccountId(row.account_id) ||
+            ![2, 3, 4].includes(row.slot_number as number)
+          ) {
+            throw invalidPersistedState();
+          }
+          return Object.freeze({
+            offerId: row.id as MatchWaitlistOfferId,
+            accountId: row.account_id as AccountId,
+            slotNumber: row.slot_number as 2 | 3 | 4,
+          });
+        });
         const requestedInvitation =
           command.invitationId === undefined
             ? undefined
             : reservations.find(
                 (candidate) =>
                   candidate.invitationId === command.invitationId,
+              );
+        const requestedOffer =
+          command.waitlistOfferId === undefined
+            ? undefined
+            : offers.find(
+                (candidate) =>
+                  candidate.offerId === command.waitlistOfferId,
               );
         if (
           command.invitationId === undefined &&
@@ -1905,10 +1959,32 @@ export class PostgresMatchRepository implements MatchRepository {
           });
         }
         if (
+          command.waitlistOfferId === undefined &&
+          offers.some(
+            (candidate) =>
+              candidate.accountId === command.actorAccountId,
+          )
+        ) {
+          return Object.freeze({
+            outcome: 'rejected',
+            reason: 'match_not_joinable',
+          });
+        }
+        if (
           command.invitationId !== undefined &&
           (requestedInvitation === undefined ||
             requestedInvitation.invitedAccountId !==
               command.actorAccountId)
+        ) {
+          return Object.freeze({
+            outcome: 'rejected',
+            reason: 'match_not_joinable',
+          });
+        }
+        if (
+          command.waitlistOfferId !== undefined &&
+          (requestedOffer === undefined ||
+            requestedOffer.accountId !== command.actorAccountId)
         ) {
           return Object.freeze({
             outcome: 'rejected',
@@ -1931,19 +2007,27 @@ export class PostgresMatchRepository implements MatchRepository {
               : (() => {
                   throw invalidPersistedState();
                 })(),
-          ...(requestedInvitation === undefined
+          ...(requestedInvitation === undefined && requestedOffer === undefined
             ? {}
             : {
                 requestedSlotNumber:
-                  requestedInvitation.slotNumber,
+                  requestedInvitation?.slotNumber ?? requestedOffer?.slotNumber,
               }),
           reservedSlotNumbers: Object.freeze(
-            reservations
-              .filter(
-                (candidate) =>
-                  candidate.invitationId !== command.invitationId,
-              )
-              .map((candidate) => candidate.slotNumber),
+            [
+              ...reservations
+                .filter(
+                  (candidate) =>
+                    candidate.invitationId !== command.invitationId,
+                )
+                .map((candidate) => candidate.slotNumber),
+              ...offers
+                .filter(
+                  (candidate) =>
+                    candidate.offerId !== command.waitlistOfferId,
+                )
+                .map((candidate) => candidate.slotNumber),
+            ],
           ),
         });
       } else {

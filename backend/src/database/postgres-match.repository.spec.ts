@@ -10,6 +10,7 @@ import {
   MatchRequestDigest,
   UpdateMatchDescriptionCommand,
 } from '../matches/match.types';
+import { MatchWaitlistOfferId } from '../matches/match-waitlist-offer.types';
 import {
   MatchCourtCatalog,
   MatchCourtSnapshot,
@@ -50,6 +51,9 @@ const PARTICIPANT_ID = deterministicUuid(
 const INVITATION_ID = deterministicUuid(
   'repository-invitation',
 ) as MatchInvitationId;
+const WAITLIST_OFFER_ID = deterministicUuid(
+  'repository-waitlist-offer',
+) as MatchWaitlistOfferId;
 const CREATE_DIGEST = '1'.repeat(64) as MatchRequestDigest;
 const JOIN_DIGEST = '2'.repeat(64) as MatchRequestDigest;
 const LEAVE_DIGEST = '3'.repeat(64) as MatchRequestDigest;
@@ -292,6 +296,7 @@ interface RepositoryHarness {
 function repositoryHarness(options: {
   readonly isVerified?: boolean;
   readonly court?: MatchCourtSnapshot | undefined;
+  readonly waitlistOffersEnabled?: boolean;
 } = {}): RepositoryHarness {
   const findProfile = jest.fn<
     ReturnType<PlayerProfileReader['findByAccountId']>,
@@ -323,6 +328,7 @@ function repositoryHarness(options: {
     repository: new PostgresMatchRepository(
       { findByAccountId: findProfile },
       { resolve: resolveCourt },
+      options.waitlistOffersEnabled ?? false,
     ),
     findProfile,
     resolveCourt,
@@ -1166,6 +1172,84 @@ describe('PostgresMatchRepository', () => {
       participant: { slotNumber: 3 },
     });
     expect(transaction.calls[5].values[3]).toBe(3);
+  });
+
+  it('reserves an active waitlist offer slot from ordinary joins', async () => {
+    const offersRepository = repositoryHarness({
+      waitlistOffersEnabled: true,
+    }).repository;
+    const transaction = new FakeTransaction([
+      queryResult([matchRow()]),
+      queryResult([]),
+      queryResult([commandRow()]),
+      queryResult([]),
+      queryResult([{
+        id: WAITLIST_OFFER_ID,
+        account_id: VIEWER_ID,
+        slot_number: 2,
+      }]),
+      actorRatingResult(),
+      queryResult([{ id: PARTICIPANT_ID }], 1, 'INSERT'),
+      queryResult([{ id: MATCH_ID, version: '2' }], 1, 'UPDATE'),
+      queryResult([{ command_id: JOIN_COMMAND_ID }], 1, 'INSERT'),
+    ]);
+
+    await expect(
+      offersRepository.join(transaction, joinCommand()),
+    ).resolves.toMatchObject({
+      outcome: 'participant_joined',
+      participant: { slotNumber: 3 },
+    });
+    expect(transaction.calls[4].text).toContain(
+      'backend_match.match_waitlist_offers',
+    );
+    expect(transaction.calls[6].values[3]).toBe(3);
+  });
+
+  it('requires an offered player to accept its concrete waitlist offer', async () => {
+    const offersRepository = repositoryHarness({
+      waitlistOffersEnabled: true,
+    }).repository;
+    const activeOffer = {
+      id: WAITLIST_OFFER_ID,
+      account_id: PLAYER_ID,
+      slot_number: 2,
+    };
+    const ordinary = new FakeTransaction([
+      queryResult([matchRow()]),
+      queryResult([]),
+      queryResult([commandRow()]),
+      queryResult([]),
+      queryResult([activeOffer]),
+    ]);
+    await expect(
+      offersRepository.join(ordinary, joinCommand()),
+    ).resolves.toEqual({
+      outcome: 'rejected',
+      reason: 'match_not_joinable',
+    });
+    expect(ordinary.calls).toHaveLength(5);
+
+    const accepted = new FakeTransaction([
+      queryResult([matchRow()]),
+      queryResult([]),
+      queryResult([commandRow()]),
+      queryResult([]),
+      queryResult([activeOffer]),
+      actorRatingResult(),
+      queryResult([{ id: PARTICIPANT_ID }], 1, 'INSERT'),
+      queryResult([{ id: MATCH_ID, version: '2' }], 1, 'UPDATE'),
+      queryResult([{ command_id: JOIN_COMMAND_ID }], 1, 'INSERT'),
+    ]);
+    await expect(
+      offersRepository.join(
+        accepted,
+        joinCommand({ waitlistOfferId: WAITLIST_OFFER_ID }),
+      ),
+    ).resolves.toMatchObject({
+      outcome: 'participant_joined',
+      participant: { slotNumber: 2 },
+    });
   });
 
   it('requires an invited player to accept its reserved invitation', async () => {

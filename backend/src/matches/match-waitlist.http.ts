@@ -3,6 +3,7 @@ import {
   ListMatchWaitlistRequest,
   MatchWaitlistActionRequest,
 } from './match-waitlist-api.types';
+import { isMatchWaitlistOfferId } from './match-waitlist-offer.types';
 import { isMatchId } from './match.types';
 
 const REQUEST_KEY_PATTERN =
@@ -21,6 +22,12 @@ function exactKeys(value: Record<string, unknown>, keys: readonly string[]) {
 
 export function readWaitlistMatchId(value: unknown) {
   return isInternalUuid(value) && isMatchId(value) ? value : undefined;
+}
+
+export function readWaitlistOfferId(value: unknown) {
+  return isInternalUuid(value) && isMatchWaitlistOfferId(value)
+    ? value
+    : undefined;
 }
 
 export function readListMatchWaitlistRequest(
