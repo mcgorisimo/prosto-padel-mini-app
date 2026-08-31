@@ -93,6 +93,7 @@ describe('BookingScreen match finalization', () => {
       />,
     );
 
+    fireEvent.click(await screen.findByRole('button', { name: /Завтра/u }));
     const firstSlot = await screen.findByRole('button', {
       name: '10:00–10:30 Свободно',
     });

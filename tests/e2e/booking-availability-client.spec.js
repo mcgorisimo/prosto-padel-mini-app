@@ -875,7 +875,9 @@ test('builds one bounded private range and keeps payment honest', async ({ page 
     ).length,
     settledDateRequests: window.__bookingReadOnlySummary.settledDateRequests,
   }))).toEqual({ dates: 1, times: 3, settledDateRequests: 0 });
-  await expect(root.getByRole('button', { name: '17:00–17:30 Загрузка' })).toBeDisabled();
+  await expect(root.locator('.booking-date-card')).toHaveCount(14);
+  expect(await root.locator('.booking-date-card:enabled').count()).toBe(14);
+  await expect(root.getByRole('button', { name: '17:00–17:30 Свободно' })).toBeEnabled();
   await page.evaluate(() => window.__bookingReadOnlySummary.releaseDates());
   await expect(root.getByTestId('booking-availability-status')).toHaveText(
     'Свободные слоты обновлены.',
@@ -1244,7 +1246,7 @@ test('fails closed instead of treating an incomplete duration batch as occupied'
   ))).toEqual([101, 102, 101, 102, 103]);
 });
 
-test('keeps partial times disabled until the resolved date catalog is complete', async ({ page }) => {
+test('keeps all 14 days interactive while the background date catalog is loading', async ({ page }) => {
   await page.clock.install({ time: new Date('2026-08-05T06:00:00.000Z') });
   await isolateComponentHarness(page);
 
@@ -1264,6 +1266,7 @@ test('keeps partial times disabled until the resolved date catalog is complete',
         releaseDates = resolve;
       });
       const timeDates = [];
+      let datesStarted = 0;
       const availabilityActions = Object.freeze({
         async listServices() {
           return {
@@ -1278,6 +1281,7 @@ test('keeps partial times disabled until the resolved date catalog is complete',
           };
         },
         async listDates() {
+          datesStarted += 1;
           await datesGate;
           return { outcome: 'dates_loaded', dates: resolvedDates };
         },
@@ -1302,6 +1306,7 @@ test('keeps partial times disabled until the resolved date catalog is complete',
       window.__bookingDateCatalogScenarios[id] = {
         releaseDates,
         timeDates,
+        get datesStarted() { return datesStarted; },
       };
     };
 
@@ -1312,13 +1317,37 @@ test('keeps partial times disabled until the resolved date catalog is complete',
 
   const emptyRoot = page.getByTestId('empty-date-catalog-root');
   const shiftedRoot = page.getByTestId('shifted-date-catalog-root');
+  await expect.poll(() => page.evaluate(() => ({
+    emptyDates: window.__bookingDateCatalogScenarios.empty.datesStarted,
+    emptyTimes: window.__bookingDateCatalogScenarios.empty.timeDates,
+    shiftedDates: window.__bookingDateCatalogScenarios.shifted.datesStarted,
+    shiftedTimes: window.__bookingDateCatalogScenarios.shifted.timeDates,
+  }))).toEqual({
+    emptyDates: 1,
+    emptyTimes: ['2026-08-05'],
+    shiftedDates: 1,
+    shiftedTimes: ['2026-08-05'],
+  });
   await expect(emptyRoot.getByRole('button', {
-    name: '17:00–17:30 Загрузка',
-  })).toBeDisabled();
+    name: '17:00–17:30 Свободно',
+  })).toBeEnabled();
+  await expect(shiftedRoot.getByRole('button', {
+    name: '17:00–17:30 Свободно',
+  })).toBeEnabled();
+  await expect(emptyRoot.locator('.booking-date-card')).toHaveCount(14);
+  await expect(shiftedRoot.locator('.booking-date-card')).toHaveCount(14);
+  expect(await emptyRoot.locator('.booking-date-card:enabled').count()).toBe(14);
+  expect(await shiftedRoot.locator('.booking-date-card:enabled').count()).toBe(14);
+  await expect(emptyRoot.getByTestId('booking-selection-summary')).toHaveCount(0);
+
+  await shiftedRoot.locator('.booking-date-card').nth(1).click();
+  await expect(shiftedRoot.locator('.booking-date-card.is-active')).toContainText('6 авг');
   await expect(shiftedRoot.getByRole('button', {
     name: '17:00–17:30 Загрузка',
   })).toBeDisabled();
-  await expect(emptyRoot.getByTestId('booking-selection-summary')).toHaveCount(0);
+  expect(await page.evaluate(() => (
+    window.__bookingDateCatalogScenarios.shifted.timeDates
+  ))).toEqual(['2026-08-05']);
 
   await page.evaluate(() => {
     window.__bookingDateCatalogScenarios.empty.releaseDates();
@@ -1333,9 +1362,6 @@ test('keeps partial times disabled until the resolved date catalog is complete',
   })).toBeDisabled();
   await expect(emptyRoot.getByTestId('booking-selection-summary')).toHaveCount(0);
 
-  await expect(shiftedRoot.locator('.booking-date-card.is-active')).toContainText(
-    '6 авг',
-  );
   await expect(shiftedRoot.getByRole('button', {
     name: '17:00–17:30 Свободно',
   })).toBeEnabled();
@@ -1346,6 +1372,190 @@ test('keeps partial times disabled until the resolved date catalog is complete',
     empty: ['2026-08-05'],
     shifted: ['2026-08-05', '2026-08-06'],
   });
+});
+
+test('prioritizes the latest day and court without starting an obsolete read backlog', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-08-05T06:00:00.000Z') });
+  await isolateComponentHarness(page);
+
+  await page.evaluate(async () => {
+    const reactModule = await import('/@id/react');
+    const React = reactModule.default ?? reactModule;
+    const reactDomClientModule = await import('/@id/react-dom/client');
+    const { createRoot } = reactDomClientModule.default ?? reactDomClientModule;
+    const { default: BookingScreen } = await import('/src/components/BookingScreen.jsx');
+    const started = [];
+    const pending = [];
+    let active = 0;
+    let maxActive = 0;
+
+    const defer = (kind, query) => new Promise((resolve) => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      const call = { kind, ...query };
+      started.push(call);
+      pending.push({ call, resolve, settled: false });
+    });
+
+    const availabilityActions = Object.freeze({
+      async listServices() {
+        return {
+          outcome: 'services_loaded',
+          services: [{ id: 101, title: 'Аренда корта 1ч.', categoryId: 1 }],
+        };
+      },
+      async listCourts() {
+        return {
+          outcome: 'courts_loaded',
+          courts: [
+            { id: 201, name: 'Корт №1' },
+            { id: 202, name: 'Корт №2' },
+          ],
+        };
+      },
+      listDates(query) {
+        return defer('dates', query);
+      },
+      listTimes(query) {
+        return defer('times', query);
+      },
+    });
+
+    const container = document.createElement('div');
+    container.dataset.testid = 'latest-availability-root';
+    document.body.append(container);
+    createRoot(container).render(React.createElement(BookingScreen, {
+      availabilityActions,
+    }));
+
+    window.__latestAvailabilityScenario = {
+      started,
+      get active() { return active; },
+      get maxActive() { return maxActive; },
+      releaseNext({ time = '19:00', dates = ['2026-08-05', '2026-08-06', '2026-08-07'] } = {}) {
+        const record = pending.find((item) => !item.settled);
+        if (!record) throw new Error('No pending availability read');
+        record.settled = true;
+        active -= 1;
+        record.resolve(record.call.kind === 'dates'
+          ? { outcome: 'dates_loaded', dates }
+          : {
+              outcome: 'times_loaded',
+              times: [{
+                time,
+                durationSeconds: 3_600,
+                datetime: `${record.call.date}T${time}:00+03:00`,
+              }],
+            });
+      },
+    };
+  });
+
+  const root = page.getByTestId('latest-availability-root');
+  const summary = () => page.evaluate(() => ({
+    active: window.__latestAvailabilityScenario.active,
+    maxActive: window.__latestAvailabilityScenario.maxActive,
+    started: window.__latestAvailabilityScenario.started,
+  }));
+  const releaseNext = (response) => page.evaluate((value) => {
+    window.__latestAvailabilityScenario.releaseNext(value);
+  }, response);
+
+  await expect.poll(summary).toMatchObject({
+    active: 1,
+    maxActive: 1,
+    started: [expect.objectContaining({
+      kind: 'times',
+      courtId: 201,
+      date: '2026-08-05',
+    })],
+  });
+  await expect(root.locator('.booking-date-card')).toHaveCount(14);
+  expect(await root.locator('.booking-date-card:enabled').count()).toBe(14);
+
+  await root.locator('.booking-date-card').nth(1).click();
+  await expect(root.locator('.booking-date-card.is-active')).toContainText('6 авг');
+  await root.locator('.booking-date-card').nth(2).click();
+  await expect(root.locator('.booking-date-card.is-active')).toContainText('7 авг');
+  expect((await summary()).started).toHaveLength(1);
+
+  await releaseNext({ time: '18:00' });
+  await expect.poll(summary).toMatchObject({
+    active: 1,
+    maxActive: 1,
+    started: [
+      expect.objectContaining({ date: '2026-08-05', courtId: 201 }),
+      expect.objectContaining({ kind: 'times', date: '2026-08-07', courtId: 201 }),
+    ],
+  });
+  expect((await summary()).started.some((call) => call.date === '2026-08-06')).toBe(false);
+
+  await releaseNext({ time: '20:00' });
+  await expect.poll(summary).toMatchObject({
+    active: 1,
+    maxActive: 1,
+    started: [
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ kind: 'dates', courtId: 201 }),
+    ],
+  });
+  await releaseNext({ dates: ['2026-08-05', '2026-08-06', '2026-08-07'] });
+  await expect(root.getByRole('button', { name: '20:00–20:30 Свободно' })).toBeEnabled();
+  await expect(root.getByRole('button', { name: '18:00–18:30 Недоступно' })).toBeDisabled();
+
+  const beforeAnyToCourt = (await summary()).started.length;
+  await root.getByRole('button', { name: 'Любой свободный' }).click();
+  await expect.poll(() => summary().then((value) => value.started.length))
+    .toBe(beforeAnyToCourt + 1);
+  expect((await summary()).started.at(-1)).toMatchObject({
+    kind: 'times',
+    courtId: 201,
+    date: '2026-08-07',
+  });
+  await root.getByRole('button', { name: 'Корт №2' }).click();
+  await expect(root.getByRole('button', { name: 'Корт №2' })).toHaveClass(/is-active/u);
+  await releaseNext({ time: '19:00' });
+  await expect.poll(summary).toMatchObject({
+    active: 1,
+    started: expect.arrayContaining([
+      expect.objectContaining({ kind: 'times', courtId: 202, date: '2026-08-07' }),
+    ]),
+  });
+  expect((await summary()).started.filter((call) => (
+    call.kind === 'times' && call.courtId === 202 && call.date === '2026-08-07'
+  ))).toHaveLength(1);
+  expect((await summary()).started.slice(beforeAnyToCourt).filter(
+    (call) => call.kind === 'times',
+  ).map((call) => call.courtId)).toEqual([201, 202]);
+  await releaseNext({ time: '21:00' });
+  await expect.poll(summary).toMatchObject({
+    active: 1,
+    started: expect.arrayContaining([
+      expect.objectContaining({ kind: 'dates', courtId: 202 }),
+    ]),
+  });
+  await releaseNext({ dates: ['2026-08-07'] });
+  await expect(root.getByRole('button', { name: '21:00–21:30 Свободно' })).toBeEnabled();
+  await expect(root.getByRole('button', { name: '19:00–19:30 Недоступно' })).toBeDisabled();
+
+  const beforeFinalAny = (await summary()).started.length;
+  await root.getByRole('button', { name: 'Любой свободный' }).click();
+  await expect(root.getByRole('button', { name: 'Любой свободный' })).toHaveClass(/is-active/u);
+  await expect.poll(summary).toMatchObject({ active: 1, maxActive: 1 });
+  await releaseNext({ time: '22:00' });
+  await expect.poll(() => summary().then((value) => value.started.length)).toBe(beforeFinalAny + 2);
+  await releaseNext({ time: '23:00' });
+  await expect.poll(() => summary().then((value) => value.started.length)).toBe(beforeFinalAny + 3);
+  await releaseNext({ dates: ['2026-08-07'] });
+  await expect.poll(() => summary().then((value) => value.started.length)).toBe(beforeFinalAny + 4);
+  await releaseNext({ dates: ['2026-08-07'] });
+  await expect(root.getByRole('button', { name: '22:00–22:30 Свободно' })).toBeEnabled();
+  await expect(root.getByRole('button', { name: '23:00–23:30 Свободно' })).toBeEnabled();
+  expect((await summary()).maxActive).toBe(1);
+  const stableCallCount = (await summary()).started.length;
+  await page.evaluate(() => Promise.resolve());
+  expect((await summary()).started).toHaveLength(stableCallCount);
 });
 
 test('restarts a cancelled date catalog after a fast court A to B to A switch', async ({ page }) => {
@@ -1446,7 +1656,7 @@ test('restarts a cancelled date catalog after a fast court A to B to A switch', 
   ))).toBe(0);
 });
 
-test('does not reuse stale times to start dates during a same-key refresh', async ({ page }) => {
+test('refreshes exact times and the background catalog in a fresh same-key epoch', async ({ page }) => {
   await page.clock.install({ time: new Date('2026-08-05T06:00:00.000Z') });
   await isolateComponentHarness(page);
 
@@ -1554,7 +1764,7 @@ test('does not reuse stale times to start dates during a same-key refresh', asyn
   await expect(root.getByTestId('booking-availability-status')).toHaveText(
     'Не удалось загрузить доступность. Обновите экран — ошибка останется до успешной загрузки.',
   );
-  expect(await page.evaluate(() => window.__sameKeyRefreshScenario.datesCalls)).toBe(1);
+  expect(await page.evaluate(() => window.__sameKeyRefreshScenario.datesCalls)).toBe(2);
 });
 
 test('uses only backend profile contacts and routes an incomplete profile out of the sheet', async ({ page }) => {

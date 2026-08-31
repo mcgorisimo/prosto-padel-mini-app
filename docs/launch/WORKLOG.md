@@ -10144,3 +10144,48 @@
   inline interval/duration/price and open the shared bottom sheet. The final
   payment CTA must remain disabled while `PAYMENT_PROVIDER_READY=false`. This
   append-only closeout is documentation-only and `deployment=not_needed`.
+
+### 2026-08-31 — D2.1 latest-selection availability P1 checkpoint
+
+- The owner reproduced a Selectel-test P1 after the first D2.1 serialization
+  fix: slots remained loading for a long time and another day could not be
+  selected. The exact cause was frontend head-of-line blocking through one FIFO:
+  services, every service court catalog, every selected service/court times
+  read, then every matching 14-day catalog read. Day buttons were disabled
+  until that final stage. With the observed six service variants and the
+  backend limiter's one-second provider cadence, a concrete court had an
+  approximately 12-second lower bound to slots and 18 seconds to usable days;
+  `ANY_COURT` was longer.
+- The FIFO is now a bounded one-in-flight priority scheduler. Exact selected
+  court/day times are foreground; the 14-day catalog is background. Queued
+  obsolete generations are discarded before action entry, an already-started
+  read is allowed to settle and ignored, exact pending keys coalesce only
+  within their request epoch, and pull-refresh creates fresh generations.
+  Network concurrency remains exactly one, so this change cannot overflow the
+  backend `maxPending=8` boundary or recreate the previous wide fan-out.
+- All 14 generated day chips are visible and selectable while the catalog is
+  loading. A click changes the active date and clears range/sheet state
+  immediately; the latest foreground selection runs after at most the one
+  already-started stale read. A complete exact times batch may truthfully show
+  its selected-day free slots while the range catalog remains in progress.
+  A later catalog error or proven absence still suppresses those slots and
+  clears selection; incomplete times remain `Нет данных`, never false
+  `Занято`.
+- Deterministic regressions cover 14 enabled days, rapid day latest-wins,
+  A→B→A including same-key refresh epochs, `ANY_COURT`→court, court→`ANY_COURT`,
+  one active read, no intermediate action entry/backlog, stale results ignored,
+  complete-empty/error fail-closed, persistent error and the six-second success
+  banner. The shared private/community/social `BookingScreen`, D3.1 inline
+  summary/CTA/safe-area behavior, payment fail-closed boundary and zero provider
+  writes remain unchanged.
+- Focused availability E2E passed `17/17`; root unit passed `149/149`; root E2E
+  passed `113` with one intentional feature-disabled skip; production build
+  passed with `1624` modules and only the existing large-chunk advisory;
+  changed-file ESLint and `git diff --check` passed. Backend files did not
+  change. Independent exact-diff review is `CLEAR`, `P0=0`, `P1=0`.
+- This checkpoint changes only the frontend bundle plus regressions/docs. No
+  database, migration, environment, secret, payment, YCLIENTS/provider write
+  or production action ran. The owner already authorized commit, fast-forward
+  integration and frontend-only Selectel test rollout, so
+  `deployment=pending_authorized_rollout` until the exact integrated SHA passes
+  health/HTTP, write-free business smoke and bounded logs.

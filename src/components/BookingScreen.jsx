@@ -149,17 +149,77 @@ function mergeDates(results) {
   return [...new Set(results.flatMap((result) => result.dates))].sort();
 }
 
-function nextAvailableDate(selectedDateISO, availableDates) {
-  if (
-    typeof selectedDateISO !== 'string' ||
-    !Array.isArray(availableDates) ||
-    availableDates.length === 0 ||
-    availableDates.includes(selectedDateISO)
-  ) {
-    return selectedDateISO;
+function createAvailabilityReadScheduler() {
+  const queues = {
+    foreground: [],
+    background: [],
+  };
+  const pendingByKey = new Map();
+  let running = false;
+  let scheduled = false;
+
+  const settleCancelled = (task) => {
+    pendingByKey.delete(task.key);
+    task.resolve(Object.freeze({ outcome: 'cancelled' }));
+  };
+
+  const takeCurrentTask = () => {
+    for (const priority of ['foreground', 'background']) {
+      while (queues[priority].length > 0) {
+        const task = queues[priority].shift();
+        if (task.isCurrent()) return task;
+        settleCancelled(task);
+      }
+    }
+    return null;
+  };
+
+  const pump = () => {
+    scheduled = false;
+    if (running) return;
+    const task = takeCurrentTask();
+    if (!task) return;
+    running = true;
+    Promise.resolve()
+      .then(() => (
+        task.isCurrent()
+          ? task.read()
+          : Object.freeze({ outcome: 'cancelled' })
+      ))
+      .then(task.resolve, task.reject)
+      .finally(() => {
+        running = false;
+        if (pendingByKey.get(task.key)?.task === task) {
+          pendingByKey.delete(task.key);
+        }
+        schedulePump();
+      });
+  };
+
+  function schedulePump() {
+    if (scheduled || running) return;
+    scheduled = true;
+    Promise.resolve().then(pump);
   }
-  return availableDates.find((date) => date > selectedDateISO)
-    ?? selectedDateISO;
+
+  return Object.freeze({
+    enqueue({ priority, key, isCurrent, read }) {
+      const pending = pendingByKey.get(key);
+      if (pending) return pending.promise;
+
+      let resolve;
+      let reject;
+      const promise = new Promise((resolvePromise, rejectPromise) => {
+        resolve = resolvePromise;
+        reject = rejectPromise;
+      });
+      const task = { key, isCurrent, read, resolve, reject };
+      pendingByKey.set(key, { promise, task });
+      queues[priority].push(task);
+      schedulePump();
+      return promise;
+    },
+  });
 }
 
 function createRequestKey() {
@@ -233,7 +293,13 @@ export default function BookingScreen({
   const reservationRefreshInFlightRef = useRef(false);
   const completionInFlightRef = useRef(false);
   const servicesRequestRef = useRef(0);
-  const availabilityReadQueueRef = useRef(Promise.resolve());
+  const courtsRequestRef = useRef(0);
+  const datesRequestRef = useRef(0);
+  const timesRequestRef = useRef(0);
+  const availabilityReadSchedulerRef = useRef(null);
+  if (availabilityReadSchedulerRef.current === null) {
+    availabilityReadSchedulerRef.current = createAvailabilityReadScheduler();
+  }
   const courtCatalogInitializedRef = useRef(false);
   const [availabilityBannerVisible, setAvailabilityBannerVisible] = useState(true);
   const [servicesState, setServicesState] = useState({
@@ -259,18 +325,8 @@ export default function BookingScreen({
     partial: false,
   });
 
-  const enqueueAvailabilityRead = useCallback((isCurrent, read) => {
-    const execute = async () => (
-      isCurrent()
-        ? read()
-        : Object.freeze({ outcome: 'cancelled' })
-    );
-    const request = availabilityReadQueueRef.current.then(execute, execute);
-    availabilityReadQueueRef.current = request.then(
-      () => undefined,
-      () => undefined,
-    );
-    return request;
+  const enqueueAvailabilityRead = useCallback((options) => {
+    return availabilityReadSchedulerRef.current.enqueue(options);
   }, []);
 
   const alignBookingScreenAfterCreate = useCallback(() => {
@@ -365,8 +421,12 @@ export default function BookingScreen({
 
     try {
       const result = await enqueueAvailabilityRead(
-        () => servicesRequestRef.current === requestId,
-        () => availabilityActions.listServices(),
+        {
+          priority: 'foreground',
+          key: `services|${requestId}`,
+          isCurrent: () => servicesRequestRef.current === requestId,
+          read: () => availabilityActions.listServices(),
+        },
       );
       if (servicesRequestRef.current !== requestId) return;
       if (result?.outcome !== 'services_loaded') {
@@ -426,6 +486,8 @@ export default function BookingScreen({
       return undefined;
     }
     let active = true;
+    const requestId = courtsRequestRef.current + 1;
+    courtsRequestRef.current = requestId;
     const serviceKey = selectedServiceKey;
     setCourtsState({ status: 'loading', serviceKey, courts: [], pairs: [] });
 
@@ -433,8 +495,12 @@ export default function BookingScreen({
       const results = [];
       for (const serviceId of selectedServiceIds) {
         const result = await enqueueAvailabilityRead(
-          () => active,
-          () => availabilityActions.listCourts(serviceId),
+          {
+            priority: 'foreground',
+            key: `courts|${requestId}|${serviceId}`,
+            isCurrent: () => active && courtsRequestRef.current === requestId,
+            read: () => availabilityActions.listCourts(serviceId),
+          },
         );
         if (!active) return;
         if (result?.outcome !== 'courts_loaded') {
@@ -524,8 +590,6 @@ export default function BookingScreen({
     serviceDurationById,
   ]);
   const datesQueryKey = `${selectedServiceKey}|${queryCourtKey}`;
-  const initialTimesQueryKey = `${datesQueryKey}|${selectedDateISO}`;
-
   useEffect(() => {
     if (
       !usesBackendAvailability ||
@@ -533,9 +597,7 @@ export default function BookingScreen({
       courtsState.status !== 'ready' ||
       queryServiceCourtPairs.length === 0 ||
       queryCourtIds.length === 0 ||
-      dates.length === 0 ||
-      timesState.status !== 'ready' ||
-      timesState.queryKey !== initialTimesQueryKey
+      dates.length === 0
     ) {
       return undefined;
     }
@@ -544,6 +606,8 @@ export default function BookingScreen({
     }
     let active = true;
     let settled = false;
+    const requestId = datesRequestRef.current + 1;
+    datesRequestRef.current = requestId;
     const queryKey = datesQueryKey;
     datesRequestKeyRef.current = queryKey;
     if (
@@ -558,13 +622,17 @@ export default function BookingScreen({
       const results = [];
       for (const { serviceId, courtId: selectedCourtId } of queryServiceCourtPairs) {
         const result = await enqueueAvailabilityRead(
-          () => active,
-          () => availabilityActions.listDates({
-            serviceId,
-            courtId: selectedCourtId,
-            dateFrom: dates[0].dateISO,
-            dateTo: dates[dates.length - 1].dateISO,
-          }),
+          {
+            priority: 'background',
+            key: `dates|${requestId}|${serviceId}|${selectedCourtId}`,
+            isCurrent: () => active && datesRequestRef.current === requestId,
+            read: () => availabilityActions.listDates({
+              serviceId,
+              courtId: selectedCourtId,
+              dateFrom: dates[0].dateISO,
+              dateTo: dates[dates.length - 1].dateISO,
+            }),
+          },
         );
         if (!active) return;
         if (result?.outcome !== 'dates_loaded') {
@@ -596,12 +664,9 @@ export default function BookingScreen({
     dates,
     datesQueryKey,
     enqueueAvailabilityRead,
-    initialTimesQueryKey,
     isReservationDetailsMode,
     queryCourtIds,
     queryServiceCourtPairs,
-    timesState.queryKey,
-    timesState.status,
     usesBackendAvailability,
   ]);
 
@@ -621,31 +686,6 @@ export default function BookingScreen({
       )
     );
 
-  useEffect(() => {
-    if (
-      !usesBackendAvailability ||
-      isReservationDetailsMode ||
-      datesState.status !== 'ready' ||
-      datesState.queryKey !== datesQueryKey
-    ) {
-      return;
-    }
-    const nextDate = nextAvailableDate(selectedDateISO, backendDates);
-    if (nextDate === selectedDateISO) return;
-    setSelectedDateISO(nextDate);
-    setSelectedRange(null);
-    setIsBookingSheetOpen(false);
-  }, [
-    backendDateSet,
-    backendDates,
-    datesQueryKey,
-    datesState.queryKey,
-    datesState.status,
-    isReservationDetailsMode,
-    selectedDateISO,
-    usesBackendAvailability,
-  ]);
-
   const timesQueryKey = `${datesQueryKey}|${selectedDateISO}`;
 
   useEffect(() => {
@@ -658,6 +698,8 @@ export default function BookingScreen({
       return undefined;
     }
     let active = true;
+    const requestId = timesRequestRef.current + 1;
+    timesRequestRef.current = requestId;
     const queryKey = timesQueryKey;
     if (
       queryCourtIds.length > MAX_BOOKING_QUERY_COURTS ||
@@ -673,12 +715,16 @@ export default function BookingScreen({
       const results = [];
       for (const { serviceId, courtId: selectedCourtId } of requests) {
         const result = await enqueueAvailabilityRead(
-          () => active,
-          () => availabilityActions.listTimes({
-            serviceId,
-            courtId: selectedCourtId,
-            date: selectedDateISO,
-          }),
+          {
+            priority: 'foreground',
+            key: `times|${requestId}|${serviceId}|${selectedCourtId}|${selectedDateISO}`,
+            isCurrent: () => active && timesRequestRef.current === requestId,
+            read: () => availabilityActions.listTimes({
+              serviceId,
+              courtId: selectedCourtId,
+              date: selectedDateISO,
+            }),
+          },
         );
         if (!active) return;
         if (result?.outcome !== 'times_loaded') {
@@ -852,9 +898,20 @@ export default function BookingScreen({
       return { state: 'past' };
     }
 
-    if (usesBackendAvailability && !availabilityIsReady) {
+    if (usesBackendAvailability && availabilityHasError) {
+      return { state: 'unknown' };
+    }
+
+    if (
+      usesBackendAvailability &&
+      (
+        servicesState.status !== 'ready' ||
+        !currentCourtsReady ||
+        !currentTimesReady
+      )
+    ) {
       return {
-        state: availabilityHasError ? 'unknown' : 'loading',
+        state: 'loading',
       };
     }
 
@@ -1389,11 +1446,10 @@ export default function BookingScreen({
         <div className="booking-horizontal-scroll booking-date-strip" style={{ scrollbarWidth: 'none' }}>
           {dates.map((item) => {
             const active = item.dateISO === selectedDateISO;
-            const disabled = usesBackendAvailability && (
-              datesState.status !== 'ready' ||
-              datesState.queryKey !== datesQueryKey ||
-              !backendDateSet.has(item.dateISO)
-            );
+            const disabled = usesBackendAvailability &&
+              datesState.status === 'ready' &&
+              datesState.queryKey === datesQueryKey &&
+              !backendDateSet.has(item.dateISO);
             return (
               <button
                 key={item.dateISO}
