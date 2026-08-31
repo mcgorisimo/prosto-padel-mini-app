@@ -10027,3 +10027,42 @@
   exact reviewed frontend commit rollout, so `deployment=pending_authorized_rollout`
   until fast-forward integration, frontend recreation, health/HTTP, write-free
   business smoke and bounded logs complete. Production is not authorized.
+
+### 2026-08-31 — D2.1 reliable availability Selectel test closeout
+
+- Reviewed commit `12f8b50fc7dbfc4ec3c9ef611856d40180ddbfed` was
+  fast-forwarded to remote `main`. The clean Selectel test checkout and its
+  `origin/main` were both verified at that exact SHA before the docs-only
+  closeout. Only the frontend was rebuilt and recreated; no backend, database,
+  migration, environment, secret, payment or YCLIENTS/provider write action
+  ran.
+- Frontend rollout ran from `2026-08-31T09:17:37Z` to the healthy state at
+  `2026-08-31T09:17:55Z`. The new frontend container is
+  `61d9f5bed21ce10578590ff9dc09c28df2049e54d638148c66d3a9b4b7c0f07c`
+  with image
+  `sha256:680c906911845f7bb2dc4781dc59db9a4dd59844b8143ee6a792912c7ea080a3`.
+  The backend was not recreated and remains container
+  `873c080738afa4e23e0a236b04c15df8283652d98e23bcc155e0ccb9d701f73f`
+  with image
+  `sha256:579ead267414e979039fd005d0a3b7893a54708f0924694d21ae1740d86f83cd`
+  and release `af3728ceb2fb57331bf2614523859db25dca3cd8`.
+- All ten services are running, nine healthchecks are healthy,
+  node-exporter is running, and every restart count is `0`. Internal frontend
+  and backend health passed. Public root, `/healthz` and `/api/v1/health`
+  returned `200` with TLS verification `0`; public metrics remained closed at
+  `404`. The unauthenticated availability-services read returned `401`, proving
+  the write-free smoke stopped at the auth boundary.
+- Public asset `/assets/index-EsuwXi8T.js` returned `200` and matched its
+  container file at SHA-256
+  `a512dd7375ff000a5581f66bb527ee847d90d220ab0e5991afaef3fe5ada4b5b`.
+  The deployed bundle contains the success, persistent-error, 1-2 hour booking
+  range and payment CTA contract markers. The owner then completed the manual
+  TMA check and reported the updated booking flow working.
+- The bounded post-health log window from `2026-08-31T09:17:55Z` contained
+  backend `1`, frontend `4` and nginx `90` records (`95` total): critical/fatal
+  `0`, HTTP 5xx `0`, sensitive-key hits `0`, provider-write signals `0`, and
+  release mismatches `0` against each unchanged/recreated component's expected
+  release. Deployment is `deployment=applied_verified` on Selectel test for
+  frontend commit `12f8b50fc7dbfc4ec3c9ef611856d40180ddbfed`.
+  Production was not touched. This append-only closeout is documentation-only
+  and has `deployment=not_needed`.
