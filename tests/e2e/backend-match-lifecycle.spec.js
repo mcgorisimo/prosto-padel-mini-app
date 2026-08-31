@@ -5103,9 +5103,10 @@ test.describe('backend match credential lifecycle', () => {
     expect(summary.sensitiveAbsent).toBe(true);
   });
 
-  test('routes both match scenarios to the canonical booking step', async ({
+  test('keeps the canonical booking controls reachable for both match scenarios', async ({
     page,
   }) => {
+    await page.clock.install({ time: new Date('2026-08-05T12:00:00+03:00') });
     await page.goto('/');
     await isolateComponentHarness(page);
 
@@ -5122,13 +5123,68 @@ test.describe('backend match credential lifecycle', () => {
       container.dataset.testid = 'paid-court-entry-test-root';
       document.body.append(container);
       const root = createRoot(container);
-      root.render(React.createElement(MatchCreationScreen, {
-        onBack() {},
-        onSuccess() {},
-        user: { isVerified: true },
-        allMatches: [],
-        showToast() {},
-      }));
+      let renderKey = 0;
+      let writes = 0;
+      const durationSecondsByService = {
+        30539679: 3_600,
+        30539694: 5_400,
+        30539748: 7_200,
+      };
+      const availabilityActions = Object.freeze({
+        async listServices() {
+          return {
+            outcome: 'services_loaded',
+            services: [
+              { id: 30539679, categoryId: 1, title: 'Аренда корта 1ч.' },
+              { id: 30539694, categoryId: 1, title: 'Аренда корта 1.5ч.' },
+              { id: 30539748, categoryId: 1, title: 'Аренда корта 2ч.' },
+            ],
+          };
+        },
+        async listCourts() {
+          return {
+            outcome: 'courts_loaded',
+            courts: [{ id: 5730531, name: 'Корт №1' }],
+          };
+        },
+        async listDates(query) {
+          return { outcome: 'dates_loaded', dates: [query.dateFrom] };
+        },
+        async listTimes(query) {
+          return {
+            outcome: 'times_loaded',
+            times: [{
+              time: '17:00',
+              durationSeconds: durationSecondsByService[query.serviceId],
+              datetime: `${query.date}T17:00:00+03:00`,
+            }],
+          };
+        },
+        async createBooking() {
+          writes += 1;
+          throw new Error('payment gate must prevent reservation create');
+        },
+      });
+      const renderMatchCreation = () => {
+        renderKey += 1;
+        root.render(React.createElement(MatchCreationScreen, {
+          key: renderKey,
+          onBack() {},
+          onSuccess() {},
+          user: { isVerified: true },
+          availabilityActions,
+          bookingClient: {
+            fullName: 'Test Player',
+            phone: '+7 900 000-00-00',
+          },
+          showToast() {},
+        }));
+      };
+      renderMatchCreation();
+      window.__renderMatchCreation = renderMatchCreation;
+      window.__matchCreationUiSummary = {
+        get writes() { return writes; },
+      };
       window.__paidCourtEntryUiUnmount = () => {
         root.unmount();
         container.remove();
@@ -5136,11 +5192,83 @@ test.describe('backend match credential lifecycle', () => {
     });
 
     const harness = page.getByTestId('paid-court-entry-test-root');
-    await expect(harness.getByTestId('match-scenario-community')).toBeEnabled();
-    await expect(harness.getByTestId('match-scenario-social')).toBeEnabled();
-    await expect(harness).toContainText(
-      'Матч создаётся только после подтверждения брони',
-    );
+    await page.setViewportSize({ width: 375, height: 667 });
+
+    for (const scenario of ['community', 'social']) {
+      await harness.getByTestId(`match-scenario-${scenario}`).click();
+
+      const entryButton = harness.getByTestId('match-continue-to-booking');
+      await expect(entryButton).toBeVisible();
+      await expect(entryButton).toBeInViewport();
+      const entryLayout = await entryButton.evaluate((button) => ({
+        barPosition: getComputedStyle(button.parentElement).position,
+        bottom: Math.round(button.getBoundingClientRect().bottom),
+        viewportHeight: window.innerHeight,
+      }));
+      expect(entryLayout.barPosition).toBe('fixed');
+      expect(entryLayout.bottom).toBeLessThanOrEqual(entryLayout.viewportHeight);
+      expect(entryLayout.viewportHeight - entryLayout.bottom).toBeLessThanOrEqual(40);
+
+      await entryButton.click();
+      await expect(harness.getByRole('heading', { name: 'Корт для матча' })).toBeVisible();
+      await expect(harness.getByTestId('booking-availability-status')).toHaveAttribute(
+        'data-phase',
+        'success',
+      );
+      await expect(harness.locator('.booking-date-card').first()).toBeVisible();
+      await expect(harness.getByRole('button', { name: 'Корт №1' })).toBeVisible();
+
+      const firstSlot = harness.getByRole('button', { name: '17:00–17:30 Свободно' });
+      await firstSlot.scrollIntoViewIfNeeded();
+      await firstSlot.click();
+      const secondSlot = harness.getByRole('button', { name: '17:30–18:00 Свободно' });
+      await secondSlot.click();
+
+      const selection = harness.getByTestId('booking-selection-summary');
+      await expect(selection).toContainText('17:00–18:00');
+      await expect(selection).toContainText('1 ч · 4 400 ₽');
+      await expect(selection).toBeInViewport();
+      const selectionLayout = await selection.evaluate((element) => ({
+        position: getComputedStyle(element).position,
+        precedesSelectedSlot: Boolean(
+          element.compareDocumentPosition(
+            document.querySelector('.booking-time-slot.is-selected'),
+          ) & Node.DOCUMENT_POSITION_FOLLOWING
+        ),
+      }));
+      expect(selectionLayout).toEqual({
+        position: 'relative',
+        precedesSelectedSlot: true,
+      });
+
+      await page.setViewportSize({ width: 667, height: 375 });
+      await selection.scrollIntoViewIfNeeded();
+      await expect(selection).toBeInViewport();
+      expect(await harness.evaluate((container) => ({
+        noHorizontalOverflow: container.scrollWidth <= container.clientWidth,
+        continueHeight: Math.round(
+          container.querySelector('.booking-selection-continue').getBoundingClientRect().height,
+        ),
+      }))).toEqual({
+        noHorizontalOverflow: true,
+        continueHeight: 44,
+      });
+      await page.setViewportSize({ width: 375, height: 667 });
+      await selection.scrollIntoViewIfNeeded();
+
+      await selection.getByRole('button', { name: 'Продолжить' }).click();
+      const dialog = page.getByRole('dialog', { name: 'Подтверждение брони' });
+      await expect(dialog.getByRole('button', {
+        name: 'Оплатить и создать матч 4 400 ₽',
+      })).toBeDisabled();
+      await dialog.getByRole('button', { name: 'Закрыть подтверждение' }).click();
+
+      if (scenario === 'community') {
+        await page.evaluate(() => window.__renderMatchCreation());
+      }
+    }
+
+    expect(await page.evaluate(() => window.__matchCreationUiSummary.writes)).toBe(0);
 
     await page.evaluate(() => window.__paidCourtEntryUiUnmount?.());
   });

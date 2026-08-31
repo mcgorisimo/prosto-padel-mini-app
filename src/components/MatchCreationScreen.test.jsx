@@ -31,7 +31,9 @@ describe('MatchCreationScreen canonical booking handoff', () => {
     );
 
     fireEvent.click(screen.getByTestId(`match-scenario-${scenario}`));
-    fireEvent.click(screen.getByTestId('match-continue-to-booking'));
+    const continueButton = screen.getByTestId('match-continue-to-booking');
+    expect(continueButton.closest('.match-creation-continue-bar')).toBeTruthy();
+    fireEvent.click(continueButton);
 
     expect(screen.getByTestId('canonical-booking-screen')).toBeTruthy();
     expect(bookingProps.current).toMatchObject({

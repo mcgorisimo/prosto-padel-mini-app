@@ -10066,3 +10066,42 @@
   frontend commit `12f8b50fc7dbfc4ec3c9ef611856d40180ddbfed`.
   Production was not touched. This append-only closeout is documentation-only
   and has `deployment=not_needed`.
+
+### 2026-08-31 — D3.1 mobile-reachable match booking controls checkpoint
+
+- Started from clean exact `origin/main`
+  `51f7305e95744b015884c09cecc991eacfb98356` after the completed D2.1
+  availability rollout. Both existing `community` and `social` match flows
+  still use the same `BookingScreen reservationPurpose="match"`; no new
+  no-court domain path, backend contract, `App.jsx` rewrite, payment field or
+  payment-provider behavior was introduced.
+- The metadata-step `Выбрать корт и время` action is now a safe-area-aware
+  fixed action bar, so it is reachable without scrolling through the optional
+  rating/comment/privacy controls. After slot selection, the compact interval,
+  duration, current price and `Продолжить` action render directly above the
+  selected range inside its time grid. This removes the previous below-fold
+  placement after the complete `07:00–00:00` grid without covering selected
+  slots or breaking deselection. The canonical D2.1 date/court/availability,
+  one-to-two-hour range, confirmation sheet and disabled
+  `Оплатить и создать матч` gate remain shared and unchanged.
+- Focused Playwright coverage passed `3/3` for both match types, private range
+  selection/repricing/deselection, fail-closed availability recovery,
+  `375x667` portrait, `667x375` landscape and zero reservation writes while
+  payment is unavailable. Final root E2E passed `112` with one intentional
+  feature-disabled skip; root unit passed `149/149`; production build passed
+  with `1624` modules and only the existing large-chunk advisory;
+  `git diff --check` passed. Backend files did not change, so backend gates were
+  not applicable.
+- Independent review first identified one P1 caused by a fixed CTA inside a
+  transformed pull-to-refresh containing block. The design was replaced with
+  the inline-above-selection layout; a full-gate overlap regression was also
+  removed. Final exact-diff review is `CLEAR`, `P0=0`, `P1=0`; the reviewer
+  changed no file or external state.
+- This checkpoint changes the frontend bundle only. No push, merge, Selectel,
+  database, migration, environment, secret, YCLIENTS/provider write or
+  production action ran. Selectel test currently serves frontend runtime
+  `12f8b50fc7dbfc4ec3c9ef611856d40180ddbfed`.
+  `deployment=pending_separate_owner_authorization`: next gate is push and
+  fast-forward integration of the exact local commit, followed by a separately
+  authorized frontend-only Selectel test rollout with health/HTTP, business
+  smoke and bounded logs.

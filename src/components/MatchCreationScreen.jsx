@@ -254,7 +254,7 @@ export default function MatchCreationScreen({
   }
 
   return (
-    <div style={{ background: T.bg, minHeight: '100dvh', overflowY: 'auto', paddingBottom: 'calc(116px + env(safe-area-inset-bottom, 0px))' }}>
+    <div className="match-creation-screen" style={{ background: T.bg, minHeight: '100dvh', overflowY: 'auto' }}>
       <header style={{ display: 'flex', alignItems: 'center', padding: '20px 16px 16px', gap: '12px' }}>
         <button type="button" aria-label="Назад" onClick={handleBack} style={{ minWidth: '44px', minHeight: '44px', background: 'none', border: 'none', color: T.muted, fontSize: '22px', cursor: 'pointer', lineHeight: 1, padding: '4px' }}>←</button>
         <h1 style={{ color: T.text, fontSize: '20px', fontWeight: 700, margin: 0 }}>
@@ -302,9 +302,11 @@ export default function MatchCreationScreen({
               Следующий шаг — единая сетка свободных слотов 30 минут. Матч появится только после подтверждения и привязки брони.
             </div>
 
-            <button type="button" data-testid="match-continue-to-booking" onClick={continueToBooking} style={{ width: '100%', minHeight: '52px', padding: '16px', background: 'rgba(216,243,74,0.12)', color: T.accent, border: '1px solid rgba(216,243,74,0.32)', borderRadius: '18px', fontSize: '16px', fontWeight: 800, cursor: 'pointer', boxShadow: '0 14px 36px rgba(216,243,74,0.16)' }}>
-              Выбрать корт и время
-            </button>
+            <div className="match-creation-continue-bar">
+              <button type="button" data-testid="match-continue-to-booking" onClick={continueToBooking} style={{ width: '100%', minHeight: '52px', padding: '16px', background: 'rgba(216,243,74,0.12)', color: T.accent, border: '1px solid rgba(216,243,74,0.32)', borderRadius: '18px', fontSize: '16px', fontWeight: 800, cursor: 'pointer', boxShadow: '0 14px 36px rgba(216,243,74,0.16)' }}>
+                Выбрать корт и время
+              </button>
+            </div>
           </div>
         </>
       )}

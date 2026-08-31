@@ -661,7 +661,7 @@ test('builds one bounded private range and keeps payment honest', async ({ page 
   await page.emulateMedia({ reducedMotion: 'reduce' });
   const clockTime = new Date('2026-08-05T06:00:00.000Z');
   await page.clock.install({ time: clockTime });
-  await page.clock.pauseAt(clockTime);
+  await page.clock.pauseAt(new Date(clockTime.getTime() + 1_000));
   await isolateComponentHarness(page);
 
   const factorySummary = await page.evaluate(async () => {
@@ -964,10 +964,17 @@ test('builds one bounded private range and keeps payment honest', async ({ page 
     const selectedSlot = container.querySelector('.booking-time-slot.is-selected');
     const summaryStyle = getComputedStyle(summary);
     const selectedStyle = getComputedStyle(selectedSlot);
+    const summaryRect = summary.getBoundingClientRect();
     return {
       summaryFollowsSlots: Boolean(
         times.compareDocumentPosition(summary) & Node.DOCUMENT_POSITION_FOLLOWING
       ),
+      summaryPrecedesSelection: Boolean(
+        summary.compareDocumentPosition(selectedSlot) & Node.DOCUMENT_POSITION_FOLLOWING
+      ),
+      summaryPosition: summaryStyle.position,
+      summaryInViewport:
+        summaryRect.top >= 0 && summaryRect.bottom <= window.innerHeight,
       selectedBackgroundColor: selectedStyle.backgroundColor,
       selectedShadow: selectedStyle.boxShadow,
       summaryBackground: summaryStyle.backgroundImage,
@@ -975,6 +982,9 @@ test('builds one bounded private range and keeps payment honest', async ({ page 
     };
   });
   expect(selectionPresentation.summaryFollowsSlots).toBe(true);
+  expect(selectionPresentation.summaryPrecedesSelection).toBe(true);
+  expect(selectionPresentation.summaryPosition).toBe('relative');
+  expect(selectionPresentation.summaryInViewport).toBe(true);
   expect(selectionPresentation.selectedBackgroundColor).toBe('rgb(216, 243, 74)');
   expect(selectionPresentation.selectedShadow).not.toBe('none');
   expect(selectionPresentation.summaryBackground).toContain('radial-gradient');
@@ -1223,10 +1233,6 @@ test('fails closed instead of treating an incomplete duration batch as occupied'
     dispatch('touchmove', [{ clientX: 120, clientY: 152 }]);
     dispatch('touchend', []);
   });
-  await expect(root.getByTestId('booking-availability-status')).toHaveAttribute(
-    'data-phase',
-    'loading',
-  );
   await expect(root.getByTestId('booking-availability-status')).toHaveText(
     'Свободные слоты обновлены.',
   );

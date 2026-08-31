@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   CalendarDays,
@@ -1265,6 +1265,34 @@ export default function BookingScreen({
     );
   }
 
+  const selectionSummary = selectedRange ? (
+    <section
+      data-testid="booking-selection-summary"
+      className="booking-selection-summary booking-selection-summary-inline"
+      aria-live="polite"
+    >
+      <div>
+        <div className="booking-selection-label text-[10px] font-extrabold uppercase tracking-[0.16em]">
+          Выбранный интервал
+        </div>
+        <div className="mt-1 text-lg font-black tabular-nums">
+          {selectedStartTime}–{selectedEndTime}
+        </div>
+        <div className="booking-selection-meta mt-1 text-xs">
+          {formatDuration(duration)} · {selectedOption ? fmtPrice(totalPrice) : 'добавьте соседний слот'}
+        </div>
+      </div>
+      <button
+        type="button"
+        className="booking-selection-continue"
+        disabled={!selectedOption}
+        onClick={() => setIsBookingSheetOpen(true)}
+      >
+        Продолжить
+      </button>
+    </section>
+  ) : null;
+
   return (
     <PullToRefresh
       onRefresh={handleBookingPullRefresh}
@@ -1460,8 +1488,9 @@ export default function BookingScreen({
                   minute + PRIVATE_BOOKING_SLOT_MINUTES,
                 );
                 return (
+                  <Fragment key={time}>
+                  {selectedRange?.startMinute === minute && selectionSummary}
                   <button
-                    key={time}
                     type="button"
                     disabled={disabled}
                     aria-label={`${time}–${intervalEnd} ${getSlotLabel(state)}`}
@@ -1485,40 +1514,13 @@ export default function BookingScreen({
                       до {intervalEnd} · {getSlotLabel(state)}
                     </div>
                   </button>
+                  </Fragment>
                 );
               })}
             </div>
           </div>
         ))}
       </section>
-
-      {selectedRange && (
-        <section
-          data-testid="booking-selection-summary"
-          className="booking-selection-summary mb-5"
-          aria-live="polite"
-        >
-          <div>
-            <div className="booking-selection-label text-[10px] font-extrabold uppercase tracking-[0.16em]">
-              Выбранный интервал
-            </div>
-            <div className="mt-1 text-lg font-black tabular-nums">
-              {selectedStartTime}–{selectedEndTime}
-            </div>
-            <div className="booking-selection-meta mt-1 text-xs">
-              {formatDuration(duration)} · {selectedOption ? fmtPrice(totalPrice) : 'добавьте соседний слот'}
-            </div>
-          </div>
-          <button
-            type="button"
-            className="booking-selection-continue"
-            disabled={!selectedOption}
-            onClick={() => setIsBookingSheetOpen(true)}
-          >
-            Продолжить
-          </button>
-        </section>
-      )}
 
       {selectedOption && isBookingSheetOpen && createPortal(
         <div className="booking-sheet-overlay" role="presentation" onClick={handleCloseConfirm}>
