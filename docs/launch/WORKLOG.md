@@ -10105,3 +10105,42 @@
   fast-forward integration of the exact local commit, followed by a separately
   authorized frontend-only Selectel test rollout with health/HTTP, business
   smoke and bounded logs.
+
+### 2026-08-31 — D3.1 mobile-reachable controls Selectel test closeout
+
+- Reviewed commit `f1e0be1ce452ce5939e7961831a7a5498db65ad5` was pushed to
+  the feature branch and fast-forwarded from `51f7305e95744b015884c09cecc991eacfb98356`
+  to remote `main`; no merge commit, conflict or history rewrite occurred. The
+  clean Selectel test checkout was then fast-forwarded to the exact reviewed
+  SHA and verified clean. Only the frontend was built and recreated.
+- The rollout ran from `2026-08-31T11:40:25Z` to `2026-08-31T11:40:42Z`.
+  Frontend container changed from
+  `61d9f5bed21ce10578590ff9dc09c28df2049e54d638148c66d3a9b4b7c0f07c`
+  to `02d8ae9c172ddd91563fe91279e35cc96cbaea0b1893b77415efb0ccbde26a06`
+  with image
+  `sha256:dd182f5b270fd4dacb5cb357a9ea1030b017f34d2ec9ab82d37fd4c28cebedc7`.
+  Backend, nginx, PostgreSQL and observability container identities were
+  unchanged. All ten services are running, nine healthchecks are healthy,
+  node-exporter is running, and every restart count is `0`.
+- Internal frontend and backend health passed. Public root, `/healthz` and
+  `/api/v1/health` returned `200` with TLS verification `0`; public metrics
+  remained closed at `404`. The unauthenticated write-free services smoke
+  returned `401` at the auth boundary and performed no provider action.
+- Public JS `/assets/index-BXedaHzB.js` and CSS
+  `/assets/index-E52Xh4yQ.css` returned `200` and matched their container files
+  at SHA-256 `f27921f0c4d5349aa771cf0aa758dcd349812f31dbef13c03b7af3cf2bb1de32`
+  and `3f1bd9f3ca9accdebe14c22f0cd8fac429db848d653886d0483ab671efd5b910`.
+  The deployed assets contain the fixed safe-area match CTA, inline selected
+  range summary/continue action and fail-closed payment CTA contract markers.
+- The bounded Loki window from `2026-08-31T11:40:25Z` through
+  `2026-08-31T11:46:23.657Z` covered `113` records: critical/fatal/error `0`,
+  HTTP 5xx `0`, PII-pattern hits `0`, provider-write signals `0`, release
+  mismatches `0`, and the query limit was not reached. No backend, database,
+  migration, environment, secret, payment, YCLIENTS/provider or production
+  action ran. Deployment is `deployment=applied_verified` on Selectel test for
+  frontend commit `f1e0be1ce452ce5939e7961831a7a5498db65ad5`.
+- Owner TMA smoke remains recommended for both `community` and `social`: verify
+  the metadata CTA on a phone viewport, select two adjacent slots, confirm the
+  inline interval/duration/price and open the shared bottom sheet. The final
+  payment CTA must remain disabled while `PAYMENT_PROVIDER_READY=false`. This
+  append-only closeout is documentation-only and `deployment=not_needed`.
