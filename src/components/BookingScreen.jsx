@@ -907,6 +907,7 @@ export default function BookingScreen({
       (
         servicesState.status !== 'ready' ||
         !currentCourtsReady ||
+        !currentDatesReady ||
         !currentTimesReady
       )
     ) {

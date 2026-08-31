@@ -52,6 +52,10 @@ describe('BookingScreen match finalization', () => {
           courtReservationId: RESERVATION_ID,
         },
       });
+    let releaseDates;
+    const datesGate = new Promise((resolve) => {
+      releaseDates = resolve;
+    });
     const availabilityActions = {
       listServices: vi.fn(async () => ({
         outcome: 'services_loaded',
@@ -65,10 +69,13 @@ describe('BookingScreen match finalization', () => {
         outcome: 'courts_loaded',
         courts: [{ id: 5_730_531, name: 'Корт №1' }],
       })),
-      listDates: vi.fn(async () => ({
-        outcome: 'dates_loaded',
-        dates: [dateISO],
-      })),
+      listDates: vi.fn(async () => {
+        await datesGate;
+        return {
+          outcome: 'dates_loaded',
+          dates: [dateISO],
+        };
+      }),
       listTimes: vi.fn(async ({ date }) => ({
         outcome: 'times_loaded',
         times: [{
@@ -94,6 +101,13 @@ describe('BookingScreen match finalization', () => {
     );
 
     fireEvent.click(await screen.findByRole('button', { name: /Завтра/u }));
+    expect((await screen.findByRole('button', {
+      name: '10:00–10:30 Загрузка',
+    })).disabled).toBe(true);
+    expect(screen.queryByRole('button', { name: 'Продолжить' })).toBeNull();
+    expect(createBooking).not.toHaveBeenCalled();
+
+    releaseDates();
     const firstSlot = await screen.findByRole('button', {
       name: '10:00–10:30 Свободно',
     });

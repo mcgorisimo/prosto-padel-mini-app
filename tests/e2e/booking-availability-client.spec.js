@@ -877,8 +877,13 @@ test('builds one bounded private range and keeps payment honest', async ({ page 
   }))).toEqual({ dates: 1, times: 3, settledDateRequests: 0 });
   await expect(root.locator('.booking-date-card')).toHaveCount(14);
   expect(await root.locator('.booking-date-card:enabled').count()).toBe(14);
-  await expect(root.getByRole('button', { name: '17:00–17:30 Свободно' })).toBeEnabled();
+  await expect(root.getByRole('button', {
+    name: '17:00–17:30 Загрузка',
+  })).toBeDisabled();
   await page.evaluate(() => window.__bookingReadOnlySummary.releaseDates());
+  await expect(root.getByRole('button', {
+    name: '17:00–17:30 Свободно',
+  })).toBeEnabled();
   await expect(root.getByTestId('booking-availability-status')).toHaveText(
     'Свободные слоты обновлены.',
   );
@@ -1329,11 +1334,11 @@ test('keeps all 14 days interactive while the background date catalog is loading
     shiftedTimes: ['2026-08-05'],
   });
   await expect(emptyRoot.getByRole('button', {
-    name: '17:00–17:30 Свободно',
-  })).toBeEnabled();
+    name: '17:00–17:30 Загрузка',
+  })).toBeDisabled();
   await expect(shiftedRoot.getByRole('button', {
-    name: '17:00–17:30 Свободно',
-  })).toBeEnabled();
+    name: '17:00–17:30 Загрузка',
+  })).toBeDisabled();
   await expect(emptyRoot.locator('.booking-date-card')).toHaveCount(14);
   await expect(shiftedRoot.locator('.booking-date-card')).toHaveCount(14);
   expect(await emptyRoot.locator('.booking-date-card:enabled').count()).toBe(14);
@@ -1371,6 +1376,119 @@ test('keeps all 14 days interactive while the background date catalog is loading
   }))).toEqual({
     empty: ['2026-08-05'],
     shifted: ['2026-08-05', '2026-08-06'],
+  });
+});
+
+test('clears a proven range before deferred day availability in private and match flows', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-08-05T06:00:00.000Z') });
+  await isolateComponentHarness(page);
+
+  await page.evaluate(async () => {
+    const reactModule = await import('/@id/react');
+    const React = reactModule.default ?? reactModule;
+    const reactDomClientModule = await import('/@id/react-dom/client');
+    const { createRoot } = reactDomClientModule.default ?? reactDomClientModule;
+    const { default: BookingScreen } = await import(
+      '/src/components/BookingScreen.jsx'
+    );
+
+    const mountScenario = (id, reservationPurpose) => {
+      let releaseNextDay;
+      let writes = 0;
+      const nextDayGate = new Promise((resolve) => {
+        releaseNextDay = resolve;
+      });
+      const availabilityActions = Object.freeze({
+        async listServices() {
+          return {
+            outcome: 'services_loaded',
+            services: [{ id: 101, title: 'Аренда корта 1ч.', categoryId: 1 }],
+          };
+        },
+        async listCourts() {
+          return {
+            outcome: 'courts_loaded',
+            courts: [{ id: 201, name: 'Корт №1' }],
+          };
+        },
+        async listDates() {
+          return {
+            outcome: 'dates_loaded',
+            dates: ['2026-08-05', '2026-08-06'],
+          };
+        },
+        async listTimes(query) {
+          if (query.date === '2026-08-06') await nextDayGate;
+          return {
+            outcome: 'times_loaded',
+            times: [{
+              time: '17:00',
+              durationSeconds: 3_600,
+              datetime: `${query.date}T17:00:00+03:00`,
+            }],
+          };
+        },
+        async createBooking() {
+          writes += 1;
+          return { outcome: 'temporary_unavailable' };
+        },
+      });
+      const container = document.createElement('div');
+      container.dataset.testid = `${id}-deferred-clear-root`;
+      document.body.append(container);
+      createRoot(container).render(React.createElement(BookingScreen, {
+        availabilityActions,
+        bookingClient: {
+          fullName: 'Test Player',
+          phone: '+7 900 000-00-00',
+        },
+        reservationPurpose,
+      }));
+      window.__bookingDeferredClearScenarios[id] = {
+        releaseNextDay,
+        get writes() { return writes; },
+      };
+    };
+
+    window.__bookingDeferredClearScenarios = {};
+    mountScenario('private', 'private');
+    mountScenario('match', 'match');
+  });
+
+  for (const id of ['private', 'match']) {
+    const root = page.getByTestId(`${id}-deferred-clear-root`);
+    await root.getByRole('button', { name: '17:00–17:30 Свободно' }).click();
+    await root.getByRole('button', { name: '17:30–18:00 Свободно' }).click();
+    const selection = root.getByTestId('booking-selection-summary');
+    await expect(selection).toContainText('17:00–18:00');
+    const continueButton = selection.getByRole('button', { name: 'Продолжить' });
+    await expect(continueButton).toBeEnabled();
+    await continueButton.click();
+    const dialog = page.getByRole('dialog', { name: 'Подтверждение брони' });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole('button', {
+      name: id === 'match'
+        ? /Оплатить и создать матч/u
+        : /^Оплатить/u,
+    })).toBeDisabled();
+    await dialog.getByRole('button', { name: 'Закрыть подтверждение' }).click();
+
+    await root.locator('.booking-date-card').nth(1).click();
+    await expect(root.getByTestId('booking-selection-summary')).toHaveCount(0);
+    await expect(page.getByRole('dialog', { name: 'Подтверждение брони' }))
+      .toHaveCount(0);
+    await expect(root.getByRole('button', { name: 'Продолжить' })).toHaveCount(0);
+    await expect(root.getByRole('button', {
+      name: '17:00–17:30 Загрузка',
+    })).toBeDisabled();
+    expect(await page.evaluate((scenarioId) => (
+      window.__bookingDeferredClearScenarios[scenarioId].writes
+    ), id)).toBe(0);
+  }
+
+  await page.evaluate(() => {
+    window.__bookingDeferredClearScenarios.private.releaseNextDay();
+    window.__bookingDeferredClearScenarios.match.releaseNextDay();
   });
 });
 

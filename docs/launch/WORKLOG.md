@@ -10189,3 +10189,34 @@
   integration and frontend-only Selectel test rollout, so
   `deployment=pending_authorized_rollout` until the exact integrated SHA passes
   health/HTTP, write-free business smoke and bounded logs.
+
+### 2026-08-31 — D2.1 availability date-proof forward-fix checkpoint
+
+- Commit `294f5949be4a73021c7015a190910a8ff2f014e9` reached Selectel test before a
+  post-commit review identified a fail-open boundary: exact times could render
+  a tile as free while the matching 14-day date catalog was still pending.
+  The owner successfully completed the requested day-switch TMA smoke on that
+  runtime, but deployment closeout was stopped for this safety fix.
+- The slot-state loading guard now requires both the current exact times and
+  current date catalog to be ready. All 14 generated date chips remain
+  interactive while the catalog is pending, so the latest foreground day read
+  still receives scheduler priority, but no range, sheet, CTA or create action
+  can be reached before date proof. Catalog error remains unknown/fail-closed;
+  proven absence remains unavailable.
+- Regressions now require loading/disabled slots until the date catalog settles.
+  A parameterized private/match scenario proves an already-valid range and
+  sheet are cleared immediately on day change, the deferred new day cannot
+  retain a stale CTA, and booking writes remain zero. Match finalization also
+  holds the date catalog and proves reservation creation is unreachable before
+  release.
+- Focused availability E2E passed `18/18`; focused match-finalization unit
+  passed `1/1`; root unit passed `149/149`; root E2E passed `114` with one
+  intentional feature-disabled skip; production build passed with `1624`
+  modules and only the existing large-chunk advisory; `git diff --check`
+  passed. Backend files did not change. Independent exact-diff review is
+  `CLEAR`, `P0=0`, `P1=0`.
+- This forward fix changes only the frontend bundle plus tests/docs. No backend,
+  database, migration, environment, secret, payment, YCLIENTS/provider write or
+  production action ran. `deployment=pending_authorized_forward_rollout` until
+  the exact forward-fix commit is pushed and replaces `294f594` on Selectel
+  test, followed by health/HTTP, write-free smoke and bounded logs.
