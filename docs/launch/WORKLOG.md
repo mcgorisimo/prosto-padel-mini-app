@@ -10220,3 +10220,49 @@
   production action ran. `deployment=pending_authorized_forward_rollout` until
   the exact forward-fix commit is pushed and replaces `294f594` on Selectel
   test, followed by health/HTTP, write-free smoke and bounded logs.
+
+### 2026-08-31 — D2.1 availability date-proof Selectel test closeout
+
+- Reviewed forward-fix commit
+  `622d3c8d963eac4a14abdf5124b56380c7ca91ca` was fast-forward pushed from
+  `294f5949be4a73021c7015a190910a8ff2f014e9` to remote `main`. The clean
+  Selectel test checkout was advanced to that exact SHA. Rollout ran from
+  `2026-08-31T12:55:02Z` to `2026-08-31T12:55:20Z`; only the frontend was built
+  and recreated.
+- Frontend changed from container
+  `c14b4a9357c6dfe24e5fa45bdd170f53f9407627c7eaa23caeefc10c9a8e6f56`
+  with image
+  `sha256:a53487deaba7ff7b6f2704c455d13d32a315c008c851fdd28a4062af3381079b`
+  to container
+  `87be1bf46799621375f9678dd2e2061ae5c1ec0b1681750281f3cc0d29ae1aef`
+  with image
+  `sha256:0d66eecbcdc1d684d33b8c44047c029d160b993f970dfb7a4ce152305323b027`.
+  Backend remained container
+  `873c080738afa4e23e0a236b04c15df8283652d98e23bcc155e0ccb9d701f73f`
+  with image
+  `sha256:579ead267414e979039fd005d0a3b7893a54708f0924694d21ae1740d86f83cd`;
+  no other service was recreated.
+- All ten services are running, all nine configured healthchecks are healthy,
+  node-exporter is running without a healthcheck, and aggregate restart count is
+  `0`. Internal frontend `/healthz` and backend `/api/v1/health` returned `200`.
+  Public root, `/healthz` and `/api/v1/health` returned `200` with TLS result
+  `0`; metrics remained closed at `404`. The unauthenticated write-free booking
+  services GET stopped at the expected `401` boundary.
+- Public JS `/assets/index-DC2T_lmJ.js` returned `200` and matched the container
+  file at SHA-256
+  `70612d6142b6d8a5a570878440b7dfddea3bd038dbaa1717ef3395938279b835`.
+  The bundle contains the selected availability success/loading and private
+  booking duration-contract markers.
+- The bounded frontend/backend/nginx log window from
+  `2026-08-31T12:55:02Z` through `2026-08-31T13:25:20Z` contained `404` lines:
+  severity hits `0`, HTTP 5xx `0`, write-method hits `0`, sensitive-pattern
+  hits `0`, provider-write hits `0`, and old-release hits `0`. No backend,
+  database, migration, environment, secret, payment, YCLIENTS/provider or
+  production action ran.
+- The owner confirmed the day-switch TMA behavior on the preceding `294f594`
+  runtime. Because the date-proof guard was added afterward, one exact-`622d3c8`
+  TMA repeat remains: reload the booking screen, switch the day and verify that
+  slots appear after loading. Automated deployment is
+  `deployment=applied_health_verified`; manual exact-SHA smoke remains pending.
+  This append-only closeout is documentation-only and
+  `deployment=not_needed`.
