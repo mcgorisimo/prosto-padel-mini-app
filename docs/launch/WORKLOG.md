@@ -9999,3 +9999,31 @@
   Deployment is `deployment=applied_verified` for Selectel test at exact runtime
   commit `af3728ceb2fb57331bf2614523859db25dca3cd8`. Production was not touched;
   this append-only closeout is docs-only and `deployment=not_needed`.
+
+### 2026-08-31 — D2.1 reliable availability and status-banner checkpoint
+
+- Root cause was the frontend `Promise.all` fan-out across every service/court
+  pair against the singleton YCLIENTS limiter (`maxPending=8`, serial provider
+  reads). An `ANY_COURT` batch could overflow the backend queue; stale reads
+  continued after court changes, so a following concrete-court request also
+  failed intermittently. Availability now uses one shared in-flight queue,
+  stops the current batch on its first failed read and skips obsolete work.
+  Current dates/times are published only after the complete current generation;
+  refresh also clears the previous selection and sheet.
+- The initial concrete-court fallback remains fast, while an explicitly chosen
+  `ANY_COURT` survives pull-refresh. The nonblocking availability banner now
+  occupies a stable `84px` hero slot: loading and persistent error are distinct,
+  full success is shown for exactly six seconds and is then replaced by the
+  existing instruction without overlap or layout movement. Payment remains
+  fail-closed and no payment field/provider path changed.
+- Final gates: root E2E `112 passed` with one intentional feature-disabled skip;
+  root unit `149/149`; production build `1624` modules with the existing chunk
+  advisory only; `git diff --check`. Independent review found three P1 issues
+  (orphan fan-out, `ANY_COURT` refresh fallback and fixed-banner overlap); all
+  were fixed and repeat review is clean: `P0=0`, `P1=0`.
+- No backend, database, migration, environment, secret, provider or YCLIENTS
+  write changed or ran. Runtime impact is frontend-only. Selectel test currently
+  remains at `af3728ceb2fb57331bf2614523859db25dca3cd8`; the owner authorized the
+  exact reviewed frontend commit rollout, so `deployment=pending_authorized_rollout`
+  until fast-forward integration, frontend recreation, health/HTTP, write-free
+  business smoke and bounded logs complete. Production is not authorized.

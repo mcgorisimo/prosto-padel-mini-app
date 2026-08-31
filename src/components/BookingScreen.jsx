@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { CalendarDays, Clock3, LockKeyhole, X } from 'lucide-react';
+import {
+  CalendarDays,
+  CircleCheck,
+  Clock3,
+  LoaderCircle,
+  LockKeyhole,
+  TriangleAlert,
+  X,
+} from 'lucide-react';
 import PullToRefresh from './PullToRefresh';
 import { WORKING_HOURS, fromMin } from '../lib/booking';
 import { getBackendBookingStatusPresentation } from '../lib/backendBookingHomeAdapter';
@@ -27,6 +35,7 @@ const PAYMENT_PROVIDER_READY = YOOKASSA_COURT_CHECKOUT_ENABLED;
 const MAX_BOOKING_SERVICE_VARIANTS = 16;
 const MAX_BOOKING_QUERY_COURTS = 8;
 const MAX_BOOKING_AVAILABILITY_REQUESTS = 64;
+const AVAILABILITY_SUCCESS_VISIBLE_MS = 6_000;
 const TIME_SECTIONS = [
   { id: 'morning', title: 'Утро', from: 7 * 60, to: 12 * 60 },
   { id: 'day', title: 'День', from: 12 * 60, to: 17 * 60 },
@@ -224,6 +233,9 @@ export default function BookingScreen({
   const reservationRefreshInFlightRef = useRef(false);
   const completionInFlightRef = useRef(false);
   const servicesRequestRef = useRef(0);
+  const availabilityReadQueueRef = useRef(Promise.resolve());
+  const courtCatalogInitializedRef = useRef(false);
+  const [availabilityBannerVisible, setAvailabilityBannerVisible] = useState(true);
   const [servicesState, setServicesState] = useState({
     status: 'idle',
     groups: [],
@@ -246,6 +258,20 @@ export default function BookingScreen({
     slots: [],
     partial: false,
   });
+
+  const enqueueAvailabilityRead = useCallback((isCurrent, read) => {
+    const execute = async () => (
+      isCurrent()
+        ? read()
+        : Object.freeze({ outcome: 'cancelled' })
+    );
+    const request = availabilityReadQueueRef.current.then(execute, execute);
+    availabilityReadQueueRef.current = request.then(
+      () => undefined,
+      () => undefined,
+    );
+    return request;
+  }, []);
 
   const alignBookingScreenAfterCreate = useCallback(() => {
     bookingSheetCloseScrollRef.current = 0;
@@ -332,10 +358,16 @@ export default function BookingScreen({
     setCourtsState({ status: 'idle', serviceKey: '', courts: [], pairs: [] });
     setDatesState({ status: 'idle', queryKey: '', dates: [] });
     setTimesState({ status: 'idle', queryKey: '', slots: [], partial: false });
+    setSelectedRange(null);
+    setSelectionHint('');
+    setIsBookingSheetOpen(false);
     setServicesState({ status: 'loading', groups: [] });
 
     try {
-      const result = await availabilityActions.listServices();
+      const result = await enqueueAvailabilityRead(
+        () => servicesRequestRef.current === requestId,
+        () => availabilityActions.listServices(),
+      );
       if (servicesRequestRef.current !== requestId) return;
       if (result?.outcome !== 'services_loaded') {
         setServicesState({ status: 'error', groups: [] });
@@ -358,7 +390,12 @@ export default function BookingScreen({
         setServicesState({ status: 'error', groups: [] });
       }
     }
-  }, [availabilityActions, isReservationDetailsMode, usesBackendAvailability]);
+  }, [
+    availabilityActions,
+    enqueueAvailabilityRead,
+    isReservationDetailsMode,
+    usesBackendAvailability,
+  ]);
 
   useEffect(() => {
     void loadServices();
@@ -392,15 +429,21 @@ export default function BookingScreen({
     const serviceKey = selectedServiceKey;
     setCourtsState({ status: 'loading', serviceKey, courts: [], pairs: [] });
 
-    void Promise.all(
-      selectedServiceIds.map((serviceId) =>
-        availabilityActions.listCourts(serviceId)),
-    ).then((results) => {
-      if (!active) return;
-      if (results.some((result) => result?.outcome !== 'courts_loaded')) {
-        setCourtsState({ status: 'error', serviceKey, courts: [], pairs: [] });
-        return;
+    void (async () => {
+      const results = [];
+      for (const serviceId of selectedServiceIds) {
+        const result = await enqueueAvailabilityRead(
+          () => active,
+          () => availabilityActions.listCourts(serviceId),
+        );
+        if (!active) return;
+        if (result?.outcome !== 'courts_loaded') {
+          setCourtsState({ status: 'error', serviceKey, courts: [], pairs: [] });
+          return;
+        }
+        results.push(result);
       }
+
       const courts = mergeBookingCourts(results);
       const pairs = results.flatMap((result, index) =>
         result.courts.map((court) => ({
@@ -415,13 +458,18 @@ export default function BookingScreen({
         courts,
         pairs,
       });
+      const isInitialCourtCatalog = !courtCatalogInitializedRef.current;
+      courtCatalogInitializedRef.current = true;
       setCourtId((current) => {
         const fallbackCourtId = courts[0]?.id ?? ANY_COURT;
-        return current !== ANY_COURT && courts.some((court) => court.id === current)
+        if (current === ANY_COURT) {
+          return isInitialCourtCatalog ? fallbackCourtId : ANY_COURT;
+        }
+        return courts.some((court) => court.id === current)
           ? current
           : fallbackCourtId;
       });
-    }).catch(() => {
+    })().catch(() => {
       if (active) {
         setCourtsState({ status: 'error', serviceKey, courts: [], pairs: [] });
       }
@@ -432,6 +480,7 @@ export default function BookingScreen({
     };
   }, [
     availabilityActions,
+    enqueueAvailabilityRead,
     isReservationDetailsMode,
     selectedServiceIds,
     selectedServiceKey,
@@ -505,23 +554,30 @@ export default function BookingScreen({
       return undefined;
     }
     setDatesState({ status: 'loading', queryKey, dates: [] });
-    const requests = queryServiceCourtPairs.map(({ serviceId, courtId: selectedCourtId }) =>
-      availabilityActions.listDates({
-        serviceId,
-        courtId: selectedCourtId,
-        dateFrom: dates[0].dateISO,
-        dateTo: dates[dates.length - 1].dateISO,
-      }));
-
-    void Promise.all(requests).then((results) => {
-      if (!active) return;
-      settled = true;
-      if (results.some((result) => result?.outcome !== 'dates_loaded')) {
-        setDatesState({ status: 'error', queryKey, dates: [] });
-        return;
+    void (async () => {
+      const results = [];
+      for (const { serviceId, courtId: selectedCourtId } of queryServiceCourtPairs) {
+        const result = await enqueueAvailabilityRead(
+          () => active,
+          () => availabilityActions.listDates({
+            serviceId,
+            courtId: selectedCourtId,
+            dateFrom: dates[0].dateISO,
+            dateTo: dates[dates.length - 1].dateISO,
+          }),
+        );
+        if (!active) return;
+        if (result?.outcome !== 'dates_loaded') {
+          settled = true;
+          setDatesState({ status: 'error', queryKey, dates: [] });
+          return;
+        }
+        results.push(result);
       }
+
+      settled = true;
       setDatesState({ status: 'ready', queryKey, dates: mergeDates(results) });
-    }).catch(() => {
+    })().catch(() => {
       if (active) {
         settled = true;
         setDatesState({ status: 'error', queryKey, dates: [] });
@@ -539,6 +595,7 @@ export default function BookingScreen({
     courtsState.status,
     dates,
     datesQueryKey,
+    enqueueAvailabilityRead,
     initialTimesQueryKey,
     isReservationDetailsMode,
     queryCourtIds,
@@ -612,13 +669,25 @@ export default function BookingScreen({
     setTimesState({ status: 'loading', queryKey, slots: [], partial: false });
     const requests = queryServiceCourtPairs;
 
-    void Promise.all(requests.map(({ serviceId, courtId: selectedCourtId }) =>
-      availabilityActions.listTimes({
-        serviceId,
-        courtId: selectedCourtId,
-        date: selectedDateISO,
-      }))).then((results) => {
-      if (!active) return;
+    void (async () => {
+      const results = [];
+      for (const { serviceId, courtId: selectedCourtId } of requests) {
+        const result = await enqueueAvailabilityRead(
+          () => active,
+          () => availabilityActions.listTimes({
+            serviceId,
+            courtId: selectedCourtId,
+            date: selectedDateISO,
+          }),
+        );
+        if (!active) return;
+        if (result?.outcome !== 'times_loaded') {
+          setTimesState({ status: 'error', queryKey, slots: [], partial: false });
+          return;
+        }
+        results.push(result);
+      }
+
       const loadedResults = results.flatMap((result, index) => (
         result?.outcome === 'times_loaded'
           ? [{ request: requests[index], result }]
@@ -665,7 +734,7 @@ export default function BookingScreen({
         slots: validSlots,
         partial: false,
       });
-    }).catch(() => {
+    })().catch(() => {
       if (active) {
         setTimesState({ status: 'error', queryKey, slots: [], partial: false });
       }
@@ -677,6 +746,7 @@ export default function BookingScreen({
   }, [
     availabilityActions,
     backendCourts,
+    enqueueAvailabilityRead,
     isReservationDetailsMode,
     queryCourtIds,
     queryServiceCourtPairs,
@@ -694,6 +764,65 @@ export default function BookingScreen({
     timesQueryKey,
     timesState.queryKey,
     timesState.slots,
+  ]);
+
+  const currentCourtsReady = courtsState.status === 'ready' &&
+    courtsState.serviceKey === selectedServiceKey;
+  const currentDatesReady = datesState.status === 'ready' &&
+    datesState.queryKey === datesQueryKey;
+  const currentTimesReady = timesState.status === 'ready' &&
+    timesState.queryKey === timesQueryKey;
+  const availabilityHasError = servicesState.status === 'error' ||
+    (
+      courtsState.status === 'error' &&
+      courtsState.serviceKey === selectedServiceKey
+    ) ||
+    (
+      datesState.status === 'error' &&
+      datesState.queryKey === datesQueryKey
+    ) ||
+    (
+      timesState.status === 'error' &&
+      timesState.queryKey === timesQueryKey
+    );
+  const availabilityIsReady = servicesState.status === 'ready' &&
+    currentCourtsReady &&
+    currentDatesReady &&
+    currentTimesReady;
+  const availabilityPhase = availabilityHasError
+    ? 'error'
+    : availabilityIsReady && backendDates.length === 0
+      ? 'empty'
+      : availabilityIsReady
+        ? 'success'
+        : 'loading';
+  const availabilityStatusText = availabilityPhase === 'error'
+    ? 'Не удалось загрузить доступность. Обновите экран — ошибка останется до успешной загрузки.'
+    : availabilityPhase === 'empty'
+      ? 'Для выбранного корта нет доступных дат.'
+      : availabilityPhase === 'success'
+        ? 'Свободные слоты обновлены.'
+        : 'Загружаем актуальные свободные слоты…';
+
+  useEffect(() => {
+    if (!usesBackendAvailability || isReservationDetailsMode) {
+      setAvailabilityBannerVisible(false);
+      return undefined;
+    }
+
+    setAvailabilityBannerVisible(true);
+    if (availabilityPhase !== 'success') return undefined;
+
+    const timerId = window.setTimeout(() => {
+      setAvailabilityBannerVisible(false);
+    }, AVAILABILITY_SUCCESS_VISIBLE_MS);
+    return () => window.clearTimeout(timerId);
+  }, [
+    availabilityPhase,
+    datesQueryKey,
+    isReservationDetailsMode,
+    timesQueryKey,
+    usesBackendAvailability,
   ]);
 
   const selectedDate = dates.find((item) => item.dateISO === selectedDateISO) ?? dates[0];
@@ -723,20 +852,14 @@ export default function BookingScreen({
       return { state: 'past' };
     }
 
-    if (backendDateBlocksTimes) {
+    if (usesBackendAvailability && !availabilityIsReady) {
       return {
-        state: datesState.status === 'error' ? 'unknown' : 'unavailable',
+        state: availabilityHasError ? 'unknown' : 'loading',
       };
     }
 
-    if (usesBackendAvailability && timesState.queryKey !== timesQueryKey) {
-      return { state: 'loading' };
-    }
-    if (usesBackendAvailability && timesState.status === 'loading') {
-      return { state: 'loading' };
-    }
-    if (usesBackendAvailability && timesState.status !== 'ready') {
-      return { state: 'unknown' };
+    if (backendDateBlocksTimes) {
+      return { state: 'unavailable' };
     }
 
     if (isSelected) return { state: 'selected' };
@@ -761,22 +884,6 @@ export default function BookingScreen({
     ...section,
     slots: times.filter(({ minute }) => minute >= section.from && minute < section.to),
   }));
-  const availabilityHasError = [
-    servicesState.status,
-    courtsState.status,
-    datesState.status,
-    timesState.status,
-  ].includes('error');
-  const availabilityStatusText = availabilityHasError
-    ? 'Не удалось загрузить доступность. Попробуйте открыть экран ещё раз.'
-    : datesState.status === 'ready' &&
-        datesState.queryKey === datesQueryKey &&
-        backendDates.length === 0
-      ? 'Для выбранного корта нет доступных дат.'
-    : timesState.status === 'ready' && timesState.queryKey === timesQueryKey
-      ? 'Показаны актуальные свободные слоты клуба.'
-      : 'Загружаем актуальные свободные слоты…';
-
   useEffect(() => {
     if (!selectedRange || (usesBackendAvailability && timesState.status !== 'ready')) return;
     const option = findPrivateBookingRangeOption(availabilityOptions, selectedRange, {
@@ -1181,19 +1288,40 @@ export default function BookingScreen({
         <h1 className="booking-title text-[30px] font-black leading-tight">
           {isMatchCreation ? 'Корт для матча' : 'Бронирование корта'}
         </h1>
-        <p className="booking-subtitle text-sm leading-relaxed text-warm-white/58">
-          Выберите соседние свободные интервалы от 1 до 2 часов.
-        </p>
+        {usesBackendAvailability ? (
+          <div
+            data-testid="booking-availability-status-slot"
+            className="booking-availability-status-slot"
+          >
+            {availabilityBannerVisible ? (
+              <div
+                data-testid="booking-availability-status"
+                data-phase={availabilityPhase}
+                role={availabilityPhase === 'error' ? 'alert' : 'status'}
+                aria-live={availabilityPhase === 'error' ? 'assertive' : 'polite'}
+                className={`booking-availability-banner is-${availabilityPhase}`}
+              >
+                <span className="booking-availability-banner-icon" aria-hidden="true">
+                  {availabilityPhase === 'loading' && <LoaderCircle size={18} />}
+                  {availabilityPhase === 'success' && <CircleCheck size={18} />}
+                  {(availabilityPhase === 'error' || availabilityPhase === 'empty') && (
+                    <TriangleAlert size={18} />
+                  )}
+                </span>
+                <span>{availabilityStatusText}</span>
+              </div>
+            ) : (
+              <p className="booking-subtitle text-sm leading-relaxed text-warm-white/58">
+                Выберите соседние свободные интервалы от 1 до 2 часов.
+              </p>
+            )}
+          </div>
+        ) : (
+          <p className="booking-subtitle text-sm leading-relaxed text-warm-white/58">
+            Выберите соседние свободные интервалы от 1 до 2 часов.
+          </p>
+        )}
       </header>
-
-      {usesBackendAvailability && (
-        <div
-          data-testid="booking-availability-status"
-          className="mb-4 rounded-2xl bg-warm-white/6 px-4 py-3 text-xs leading-relaxed text-warm-white/58"
-        >
-          {availabilityStatusText}
-        </div>
-      )}
 
       {successText && (
         <div
