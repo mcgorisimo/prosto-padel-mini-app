@@ -10266,3 +10266,65 @@
   `deployment=applied_health_verified`; manual exact-SHA smoke remains pending.
   This append-only closeout is documentation-only and
   `deployment=not_needed`.
+
+### 2026-09-06 — Owner reservation actions / organize match integration; TEST blocked
+
+- Started from clean exact `origin/main` `156248114b213c7c7e72e3076b4ea8ba3d2ca06b`.
+  Reviewed implementation `36c53e38310a2394963950ca4aa3862ee125b6ef` is pushed on
+  `codex/booking-organize-match` and fast-forward integrated into remote `main`.
+  No merge commit/history rewrite; TASK.md was not changed.
+- BookingScreen owner details now expose ReservationActions: open an existing
+  linked match, or explicitly organize one from a confirmed, non-stale future
+  reservation. MatchCreationScreen reuses community/social and existing private
+  metadata support with locked court/date/time, pending/error/retry feedback and
+  an explicit publication button. App stores the returned match and suppresses
+  the corresponding Home reservation duplicate. Standalone private reservations
+  are never added to the public feed. No training action/domain was introduced.
+- Backend POST /matches still accepts reservationId plus existing metadata only.
+  It performs bounded owner-scoped canonical read, rejects stale/unavailable proof,
+  then rechecks owner/status/current target/start time under the existing reservation
+  lock. A linked match (including a previously unbooked match linked separately)
+  is returned with persistence=idempotent_retry even when retry metadata differs;
+  a second match/create/link is not performed. Owner booking GET adds optional
+  linkedMatchId, including on stale views, for safe navigation after reload.
+  BookingReservationCoreModule shares the service without an AuthModule cycle.
+- Shared next-stage contract: ReservationActions props reservation, linkedMatch,
+  onOpenMatch(entityOrId, isCurrent), onOrganizeMatch(reservation); the UI predicate
+  canOrganizeReservation is not backend authority. Backend extension points are
+  MatchApiService.create, MatchReservationApiService/linkConfirmed and
+  PostgresMatchReservationRepository. Creation/link order remains advisory scope
+  `backend_match:reservation-link:` + reservation row FOR UPDATE, then match/link;
+  canonical refresh serializes on the reservation row (no new advisory lock).
+  Future training attachment must use this scope and mutual occupancy checks in
+  BOTH match write paths; no training schema or migration was added here.
+- Gates: root unit 154/154; root E2E 118 passed, one intentional disabled-feature
+  skip (`npm.cmd run test:e2e -- --workers=4`); root build 1625 modules passed,
+  existing chunk advisory only. First default 9-worker E2E had one timeout in the
+  unchanged profile-photo test; its isolated retry and full 4-worker rerun passed.
+  Backend typecheck/build passed, unit 4084/4084 (188 suites), E2E 4/4.
+  Changed-file ESLint and git diff --check passed. Two independent final reviews
+  are CLEAR, P0=0/P1=0; a module-wiring P1 found earlier was corrected before gates.
+  Concurrency coverage is a serializing service harness, not a live PostgreSQL
+  integration test. Synthetic tests assert canonical inputs and zero second rental;
+  no real provider/payment/notification writes were used for smoke.
+- Baseline boundary confirmed with coordinator: standalone no-court creation is
+  already absent at the starting main revision; this stage neither restores it
+  nor claims that flow was tested. Existing new-court/unbooked checkout remains
+  fail-closed before D4. No payment fields/states, dependencies, schema, migrations,
+  outbound flags, availability scheduler/grid or production state were changed.
+- Runtime impact: frontend AND backend; deployment=blocked (SSH pre-KEX).
+  Two bounded read-only SSH checks to root@135.106.155.112:22 established TCP but
+  remote closed before SSH banner/key exchange: kex_exchange_identification.
+  No authentication/key probing, firewall/service/reboot changes or rollout ran.
+  Coordinator separately could not establish today's HTTP/TLS health access;
+  this is an inability to verify, not evidence all services are down.
+  Changed containers: none. Today's health/HTTP, deployed commit, business/manual
+  smoke and logs: not verified. Historical recorded frontend remains 622d3c8d963eac4a14abdf5124b56380c7ca91ca,
+  backend af3728ceb2fb57331bf2614523859db25dca3cd8; these were NOT rechecked live.
+- Next gate: restore confirmed operator access, then one coordinated frontend+
+  backend Selectel TEST rollout of the exact integrated SHA with health/HTTP,
+  write-free smoke and bounded logs; real booking/payment writes still require
+  specific authorization. Runtime stage is NOT done. After integration handoff
+  the shared code is released to the training task; its implementation/rollout
+  handoff remains with coordinator while access and its publication-source gate
+  are blocked. No competing rollout is authorized by this checkpoint.
