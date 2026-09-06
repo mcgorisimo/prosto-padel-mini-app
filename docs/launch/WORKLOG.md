@@ -10590,3 +10590,28 @@
   CTA, then Back; labels, five tabs and active coloring should be unchanged.
   This closeout changes WORKLOG only: deployment=not_needed for its docs commit;
   verified implementation tests/review above still cover the deployed runtime.
+
+### 2026-09-07 — Owner-approved final sport icons, implementation/review gate
+
+- Started from clean exact origin/main f7fdb75503f3b80f25fb9ccc9896f59078082476.
+  Owner rejected the custom match candidate; its uncommitted SVG and preview
+  changes were removed before this final diff. Matches now use standard Lucide
+  Swords in BottomNav and Home category/filter/event badges; custom match icon
+  implementation is removed. Only the approved RacketFace/PadelTrainingIcon
+  and Home 32px visual wrappers were copied from the explicitly named b55d
+  source. Training has one racket and a separate tennis ball with two seams,
+  no concentric target. Labels, navigation, five tabs, touch/layout preserved.
+- Independent exact-diff code/UI review: CLEAR P0=0/P1=0; approved source
+  functions and wrappers compared, real Home 375x667/667x375 screenshots checked.
+  Updated focused assertions cover Swords mapping and one ball/two curved seams.
+- Final root unit 168/168 PASS; E2E --workers=4 --retries=1: 122 PASS,
+  1 existing intentional skip, no retries needed in final run. Earlier full
+  runs each had one unrelated intermittent failure (403 request count, then
+  expiring Home event timer); no auth/timer code or test expectation changed.
+  Build PASS (1628 modules), changed-file ESLint PASS, git diff --check PASS.
+- Frontend-only runtime impact. Owner explicitly approved commit, fast-forward
+  main push and controlled TEST frontend rollout; integration/rollout is next,
+  not yet claimed complete. TEST preflight: clean cd55d4e7c1def0c55801f476036c53f651f8a9c7,
+  backend d1dd066f0149360efad2ac02a5455d90ddcb0196, all 10 running,
+  nine healthchecks healthy, zero restarts. No backend/DB/env/payment/provider,
+  Telegram, production or SSH authorized_keys/key change is in scope.

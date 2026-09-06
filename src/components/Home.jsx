@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { CalendarDays, LayoutGrid } from 'lucide-react';
-import { CrossedPadelRacketsIcon, PadelTrainingIcon } from './icons/PadelIcons';
+import { CalendarDays, LayoutGrid, Swords } from 'lucide-react';
+import { PadelTrainingIcon } from './icons/PadelIcons';
 import PadelButton from './ui/PadelButton';
 import PadelCard from './ui/PadelCard';
 import { CLUB } from '../lib/clubConfig';
@@ -28,7 +28,7 @@ const getDisplayDate = (dateISO) => {
 const EVENT_CATEGORY_VISUALS = {
   all: { accentRgb: '245, 241, 232', Icon: LayoutGrid },
   bookings: { accentRgb: '251, 220, 138', Icon: CalendarDays },
-  matches: { accentRgb: '216, 243, 74', Icon: CrossedPadelRacketsIcon },
+  matches: { accentRgb: '216, 243, 74', Icon: Swords },
   trainings: { accentRgb: '245, 241, 232', Icon: PadelTrainingIcon },
 };
 
@@ -191,7 +191,9 @@ export default function Home({
               Брони, матчи и тренировки в одном месте
             </p>
           </div>
-          <PadelTrainingIcon size={20} strokeWidth={1.8} className="mb-1 text-accent-light/70" aria-hidden="true" />
+          <span className="relative mb-1 h-5 w-5 shrink-0" aria-hidden="true">
+            <PadelTrainingIcon size={32} strokeWidth={1.4} className="absolute bottom-0 right-0 text-accent-light/70" />
+          </span>
         </div>
 
         <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
@@ -239,7 +241,9 @@ export default function Home({
 
       {onOpenTrainings && (
         <PadelButton variant="ghost" size="md" className="my-6 min-h-[48px] w-full motion-reduce:transform-none motion-reduce:transition-none" onClick={onOpenTrainings}>
-          <PadelTrainingIcon size={18} aria-hidden="true" />
+          <span className="relative h-[18px] w-[18px] shrink-0" aria-hidden="true">
+            <PadelTrainingIcon size={32} strokeWidth={1.4} className="absolute right-0 top-1/2 -translate-y-1/2" />
+          </span>
           Групповые тренировки
         </PadelButton>
       )}

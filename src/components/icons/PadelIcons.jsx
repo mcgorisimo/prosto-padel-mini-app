@@ -20,37 +20,30 @@ function PadelIcon({ size = 24, strokeWidth = 2, className, children, ...props }
   );
 }
 
-// A solid perforated face and short grip distinguish a padel racket from strings.
-function RacketFace() {
+// Broad perforated head, open throat and short flared grip: original padel geometry.
+function RacketFace({ strokeWidth }) {
   return (
-    <>
-      <path d="M-3.4-7c0-4.5 6.8-4.5 6.8 0 0 2.2-.8 4.3-2.4 5.6h-2C-2.6-2.7-3.4-4.8-3.4-7Z" />
-      <path d="m-1-1.4.2 2.2h1.6L1-1.4M-.8.8v6H.8v-6" />
+    <g data-padel-part="racket" strokeWidth={strokeWidth}>
+      <path d="M0-10C-3.3-10-5.2-7.8-5.2-4.6c0 3.1 1.5 5.1 3.8 7.2l.1 1.5L-1.7 8h3.4l-.4-3.9.1-1.5C3.7.5 5.2-1.5 5.2-4.6 5.2-7.8 3.3-10 0-10Z" />
+      <path d="m-1.7 1.2 1.7 2 1.7-2ZM-1.3 4.4h2.6" strokeWidth={strokeWidth * 0.65} />
       <g fill="currentColor" stroke="none">
-        <circle cx="-1.2" cy="-7" r=".5" />
-        <circle cx="1.2" cy="-7" r=".5" />
-        <circle cx="-1.2" cy="-5" r=".5" />
-        <circle cx="1.2" cy="-5" r=".5" />
+        <circle cx="-2" cy="-6.6" r=".55" /><circle cy="-6.6" r=".55" /><circle cx="2" cy="-6.6" r=".55" />
+        <circle cx="-2" cy="-4.2" r=".55" /><circle cy="-4.2" r=".55" /><circle cx="2" cy="-4.2" r=".55" />
+        <circle cx="-2" cy="-1.8" r=".55" /><circle cy="-1.8" r=".55" /><circle cx="2" cy="-1.8" r=".55" />
       </g>
-    </>
+    </g>
   );
 }
 
-export function CrossedPadelRacketsIcon(props) {
+export function PadelTrainingIcon({ size = 24, strokeWidth = 2, ...props }) {
   return (
-    <PadelIcon {...props} data-padel-icon="matches">
-      <g transform="translate(12 13) rotate(-40)"><RacketFace /></g>
-      <g transform="translate(12 13) rotate(40)"><RacketFace /></g>
-    </PadelIcon>
-  );
-}
-
-export function PadelTrainingIcon(props) {
-  return (
-    <PadelIcon {...props} data-padel-icon="trainings">
-      <g transform="translate(7.5 11.5) rotate(25)"><RacketFace /></g>
-      <circle cx="17" cy="17" r="4" />
-      <circle cx="17" cy="17" r="1.3" />
+    <PadelIcon {...props} size={size} strokeWidth={strokeWidth} data-padel-icon="trainings">
+      <g transform="translate(8.8 12.5) rotate(-18) scale(1.1)"><RacketFace strokeWidth={strokeWidth} /></g>
+      <g data-padel-part="ball" transform="translate(18.5 17.5)">
+        <circle r="4.2" />
+        <path d="M-2.6-3.3c2.3 1.8 2.3 4.8 0 6.6" strokeWidth={strokeWidth * 0.7} />
+        <path d="M2.6-3.3c-2.3 1.8-2.3 4.8 0 6.6" strokeWidth={strokeWidth * 0.7} />
+      </g>
     </PadelIcon>
   );
 }
