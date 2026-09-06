@@ -10471,3 +10471,58 @@
   containers changed=none, candidate server health/smoke/logs=pending. Owner TMA
   smoke and the actual publication/access proof remain separate outstanding
   gates. Coordinator owns the next temporary-access/TEST rollout step.
+
+### 2026-09-06 — Group training foundation Selectel TEST rollout
+
+- Separate rollout was explicitly authorized after temporary SSH access was
+  restored. Clean detached TEST checkout advanced by fast-forward from
+  c8d3354a065d25bd0febe64da642c2385682b103 to exact integrated main
+  d1dd066f0149360efad2ac02a5455d90ddcb0196. Merged Compose validation passed;
+  configuration differed only in APP_RELEASE. Environment bytes/permissions,
+  schema, dependencies, compose and all flags were preserved. No migration,
+  provider request/write, payment, Telegram notification or production action ran.
+- Both images built from the clean exact source. Only frontend/backend were
+  recreated, from 20:03:52.028434Z to healthy at 20:03:59.121521Z.
+  Frontend container is 1670b2407f861991500ae16915ee1573479b9462ed366a7f36390f244b85679f,
+  image sha256:a4d5680bbc5cf61b96797237c1cbe78bc91dd08b2be58c209801c478277d880f.
+  Backend container is 38875ebde6d2d051f78c234e2e262c5a71ae9ff79bec4a4464bc194f0cbf9e36,
+  image sha256:00fc7e88217edd6a7a893cac9250d38058f58b921c1266d4bda61175aeaaa2a6.
+  The other eight container IDs did not change. All ten services run, all nine
+  configured healthchecks are healthy, every restart count is zero.
+- Backend APP_RELEASE is exact d1dd066f0149360efad2ac02a5455d90ddcb0196;
+  the compiled controller/module contain the guarded closed-schedule contract.
+  Public JS /assets/index-BINL96QH.js has SHA-256
+  d8f87e352bdf08f35aa6c19e2dba49701c239cd17f5d641ee437a0dcc240353a;
+  CSS /assets/index-2ESYx6bi.css has SHA-256
+  14546d1ddca2ffcbd0a801aea29504bb0be0b978673d0cb44fd9b992ffc8bf52.
+  Both exactly match container bytes. The bundle contains the group-training
+  route/coming-soon/Home markers and lacks the removed Home-level/nearest block.
+- Internal frontend/backend health and public /, /healthz, /api/v1/health returned
+  200; public TLS verification was 0 at 135.106.155.112. Metrics remains 404.
+  Actual HTTP GET schedule with missing and canonical nonexistent bearer returned
+  401 session_invalid/no-store. A synthetic query marker was not reflected.
+  No session was created or impersonated: authenticated owner 200/coming-soon
+  navigation still requires the manual TMA check below. Business counts before
+  and after were identical: matches=19, reservations=14, links=0, offers=0.
+- Bounded logs 20:03:52Z–20:08:38.027730Z: backend 160, frontend 23, nginx 124
+  lines; Loki HTTP 200/success with 476 records, below the 1000-record bound.
+  PII/sensitive markers, provider writes, old-release and HTTP 5xx counts were 0.
+  One nginx upstream connection refusal at 20:03:54.124466Z occurred during
+  replacement before healthy. After healthy, error/fatal/HTTP 5xx were all 0.
+  One broad provider-write regex hit was verified as RouterExplorer startup
+  registration of the inbound YCLIENTS webhook route, not an outbound request.
+  Final service identity/health/restart checks passed again.
+- temporary_root_ssh_access=retained_by_owner_request_until_section_signoff.
+  Owner explicitly superseded key cleanup after rollout: authorized_keys was
+  never edited. At 20:09:41.435996Z, both exact matching temporary-key rows remain;
+  the other two rows are byte-identical and owner/group/mode are preserved.
+  The local temporary private key was not removed. Cleanup requires a separate
+  owner/coordinator command after section signoff.
+- deployment=applied_health_verified for Selectel TEST frontend AND backend
+  exact d1dd066f0149360efad2ac02a5455d90ddcb0196; no-write HTTP/bundle smoke passed.
+  Owner manual TMA smoke pending: Home -> 'Групповые тренировки' -> coming-soon
+  state -> Back to Home with five tabs. Publication/access remains closed by
+  design. Prior exact-runtime gates remain frontend unit163/E2E122+1skip/build,
+  backend unit4100/E2E4/typecheck/build, two final CLEAR P0=0/P1=0 reviews.
+  This checkpoint is docs-only: deployment=not_needed for its documentation
+  commit; it does not change the verified runtime release above.
