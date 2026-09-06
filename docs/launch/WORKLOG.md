@@ -10328,3 +10328,62 @@
   the shared code is released to the training task; its implementation/rollout
   handoff remains with coordinator while access and its publication-source gate
   are blocked. No competing rollout is authorized by this checkpoint.
+
+### 2026-09-06 — Owner reservation actions Selectel TEST rollout closeout
+
+- Access blocker was resolved through owner-installed temporary SSH access.
+  Clean server checkout was fast-forwarded from 622d3c8d963eac4a14abdf5124b56380c7ca91ca
+  to exact integrated candidate c8d3354a065d25bd0febe64da642c2385682b103.
+  Compose config passed with that exact APP_RELEASE; actual SQL/config/dependency
+  delta was empty (only migration 044 README had a historical applied-status edit).
+  No migration, environment/secret change or production action ran.
+- Both images built successfully from that clean source. Only frontend/backend
+  were recreated, from 2026-09-06T18:53:13.783179Z to healthy at 18:53:20.836321Z.
+  Frontend changed from 87be1bf46799621375f9678dd2e2061ae5c1ec0b1681750281f3cc0d29ae1aef
+  to 06fde691f18c26edc0de61ab21c666422ef79d830f22be876f850fe3f70fa365,
+  image sha256:bdd6b5d10a3abe4d90554ad1d4cc20ec21c025b7eb67a8501e71606d309aa312.
+  Backend changed from 873c080738afa4e23e0a236b04c15df8283652d98e23bcc155e0ccb9d701f73f
+  to bf8b211a834cac9946015bb9c45bd3dd56a398a211d87586c9b81f66c48c6cbb,
+  image sha256:42909adbbc32f0351c05e2edcd8b4643ea03398702cc45770987de1b094bc6e7.
+  The other eight container identities were unchanged. All ten services run,
+  all nine configured healthchecks are healthy, node-exporter runs without one,
+  and every restart count is zero.
+- Backend APP_RELEASE is c8d3354a065d25bd0febe64da642c2385682b103. Compiled match
+  and booking services contain the canonical-read/linkedMatchId contract markers.
+  Public /assets/index-DdLW-p9t.js and /assets/index-CElX8BDH.css exactly match
+  their container bytes at SHA-256 fb91c3ac612aa8b21cf5d6ba9d6b6c87339357cde794ac393cad3374d33e6bd9
+  and 9103940fe7eeb88bbee91164abe0dc76b11d7e0cc3236b83b767b1f2a57e4e81.
+  The published JS contains organize/publish/existing-rental/linked-match and
+  fail-closed payment CTA markers. Internal frontend/backend health passed;
+  public root, /healthz and /api/v1/health returned 200, TLS verify 0.
+  Public metrics remains 404. Unauthenticated GET booking list, synthetic exact
+  booking detail and matches returned 401 at the private boundary. No write
+  smoke ran. Counts before/after remain matches=19, reservations=14, links=0,
+  offers=0. Outbound notifications, waitlist offers, notification reconciliation
+  and webhook flags stay false; existing YCLIENTS flags were not changed.
+- Bounded docker logs for 18:53:13Z–18:55:11.098408Z contained backend 103,
+  frontend 21 and nginx 34 lines. PII/sensitive-pattern, provider-write and
+  old-release hits were zero. One nginx upstream connection refusal/502 occurred
+  at 18:53:15 during container replacement, before the healthy boundary.
+  Post-health audit through 18:55:39.059042Z covered 44 lines (3/4/37) with
+  errors/fatal/HTTP 5xx zero. Loki query returned HTTP 200/success, 169 records,
+  below its 1000-record bound. Final services/restarts check passed again.
+- Remote temporary authorization was removed at 18:57:55.795389Z. The owner had
+  installed the key without its comment, so the first strict-comment assertion
+  stopped without mutation. Cleanup uniquely matched the exact temporary public
+  key bytes, removed only that one line, and verified the other two lines byte
+  identical with owner/group/mode preserved. Neither the temporary key nor its
+  expected comment remains in authorized_keys. Local temporary files were left
+  to the coordinator as instructed; no further SSH action is needed here.
+- deployment=applied_health_verified on Selectel TEST for frontend AND backend
+  exact c8d3354a065d25bd0febe64da642c2385682b103; write-free automated smoke passed.
+  Manual exact-SHA TMA smoke remains pending: owner opens a confirmed future
+  private reservation, chooses Organize match and checks the locked court/date/
+  time and publication CTA. Real publication/provider/payment writes were not
+  authorized for this rollout. Prior implementation gates remain 118 E2E passed
+  plus one intentional skip, frontend unit154/backend unit4084/backend E2E4,
+  both builds/typecheck and independent P0=0/P1=0 review.
+  Shared code and rollout ownership are released to the coordinator/training
+  task; its separate publication-source/access gate remains in force. This
+  append-only closeout is docs-only: deployment=not_needed for this commit,
+  because it does not alter the verified runtime artifacts.
