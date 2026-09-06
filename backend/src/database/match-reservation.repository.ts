@@ -52,6 +52,7 @@ export class MatchReservationPersistenceError extends Error {
 }
 
 export interface MatchReservationRepository {
+  findLinkedMatchId(transaction: PostgresTransaction, ownerAccountId: AccountId, reservationId: CourtReservationId): Promise<MatchId | null>;
   lockReservationForMatchCreate(
     transaction: PostgresTransaction,
     ownerAccountId: AccountId,

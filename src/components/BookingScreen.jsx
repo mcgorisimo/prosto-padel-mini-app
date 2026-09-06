@@ -10,6 +10,7 @@ import {
   X,
 } from 'lucide-react';
 import PullToRefresh from './PullToRefresh';
+import ReservationActions from './ReservationActions';
 import { WORKING_HOURS, fromMin } from '../lib/booking';
 import { getBackendBookingStatusPresentation } from '../lib/backendBookingHomeAdapter';
 import {
@@ -261,6 +262,9 @@ export default function BookingScreen({
   initialReservationId = null,
   reservationPurpose = 'private',
   onConfirmedReservation = null,
+  onOrganizeMatch = null,
+  linkedMatch = null,
+  onOpenMatch = null,
   onBack = null,
   onCloseReservation = null,
   courtNamesById = {},
@@ -1316,6 +1320,7 @@ export default function BookingScreen({
             <div className="mt-3 rounded-xl bg-warm-white/10 px-3 py-3 text-sm">
               Для отмены или переноса обратитесь к администратору клуба. Прямая ссылка появится после подключения официального контакта клуба.
             </div>
+            <ReservationActions reservation={latestReservation} linkedMatch={linkedMatch} onOpenMatch={onOpenMatch} onOrganizeMatch={onOrganizeMatch} />
           </section>
         )}
       </div>

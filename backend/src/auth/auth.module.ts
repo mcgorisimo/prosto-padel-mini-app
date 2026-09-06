@@ -1,3 +1,5 @@
+import { BookingReservationCoreModule } from '../bookings/booking-reservation-core.module';
+import { BookingReservationService } from '../bookings/booking-reservation.service';
 import { Logger, Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
@@ -366,11 +368,13 @@ function createMatchApiService(
   lineups: MatchLineupService,
   notificationIntents: PostgresTelegramNotificationIntentRepository,
   clock: SessionAuthenticationClock,
+  bookingReservations: BookingReservationService,
 ): MatchApiService {
   return new MatchApiService({
     transactions,
     matches,
     matchReservations,
+    bookingReservations,
     publicProfiles,
     waitlist,
     lineups,
@@ -513,7 +517,7 @@ function createPlayerProfilePhotoService(
 }
 
 @Module({
-  imports: [DatabaseModule],
+  imports: [DatabaseModule, BookingReservationCoreModule],
   controllers: [
     AdminPlayerRatingController,
     TelegramLoginController,
@@ -661,6 +665,7 @@ function createPlayerProfilePhotoService(
         MatchLineupService,
         PostgresTelegramNotificationIntentRepository,
         SESSION_AUTHENTICATION_CLOCK,
+        BookingReservationService,
       ],
       useFactory: createMatchApiService,
     },

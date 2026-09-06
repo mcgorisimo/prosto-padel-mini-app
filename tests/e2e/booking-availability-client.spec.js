@@ -1967,3 +1967,96 @@ test('uses only backend profile contacts and routes an incomplete profile out of
     lists: 0,
   });
 });
+
+
+for (const scenario of ['community', 'social']) {
+  test(`organizes ${scenario} from owner booking without a second rental`, async ({ page }) => {
+    await isolateComponentHarness(page);
+    await page.setViewportSize({ width: 375, height: 667 });
+    await page.evaluate(async () => {
+      const { default: React } = await import('/node_modules/.vite/deps/react.js');
+      const { default: ReactDOM } = await import('/node_modules/.vite/deps/react-dom_client.js');
+      const { createRoot } = ReactDOM;
+      const { default: BookingScreen } = await import('/src/components/BookingScreen.jsx');
+      const { default: MatchCreationScreen } = await import('/src/components/MatchCreationScreen.jsx');
+      const reservation = { reservationId:'22222222-2222-4222-8222-222222222222', status:'confirmed', stale:false, serviceId:11, courtId:22, startsAt:'2099-09-06T12:00:00+03:00', endsAt:'2099-09-06T13:30:00+03:00' };
+      window.organizeCalls = [];
+      const actions = {
+        readBooking: async () => ({outcome:'booking_loaded',reservation}),
+        createBooking: async () => { window.organizeCalls.push('forbidden-booking-write'); throw Error('forbidden'); },
+        loadServices: async () => { window.organizeCalls.push('unexpected-availability'); throw Error('unexpected'); },
+      };
+      function Harness() {
+        const [existing, setExisting] = React.useState(null);
+        return existing ? React.createElement(MatchCreationScreen, {existingReservation:existing,availabilityActions:actions,courtNamesById:{22:'Корт №2'},user:{isVerified:true},onBack:()=>setExisting(null),onSuccess:async(data)=>{window.organizeCalls.push(data);return {outcome:'match_created'};}}) : React.createElement(BookingScreen, {initialReservationId:reservation.reservationId,availabilityActions:actions,courtNamesById:{22:'Корт №2'},onOrganizeMatch:setExisting});
+      }
+      const root = document.createElement('div'); root.id='organize-harness';document.body.appendChild(root);
+      createRoot(root).render(React.createElement(Harness));
+    });
+    const root = page.locator('#organize-harness');
+    await root.getByRole('button', {name:'Организовать матч'}).click();
+    await root.getByTestId(`match-scenario-${scenario}`).click();
+    await expect(root.getByTestId('match-existing-reservation')).toContainText('Корт №2');
+    await expect(root.getByTestId('match-existing-reservation')).toContainText('12:00');
+    expect(await page.evaluate(() => window.organizeCalls)).toEqual([]);
+    const publish = root.getByRole('button', {name:'Опубликовать матч'});
+    await expect(publish).toBeInViewport();
+    await publish.click();
+    expect(await page.evaluate(() => window.organizeCalls)).toEqual([expect.objectContaining({reservationId:'22222222-2222-4222-8222-222222222222',scenario})]);
+    await page.setViewportSize({width:667,height:375});
+    await expect(publish).toBeInViewport();
+  });
+}
+
+test('booking action eligibility fails closed for stale, terminal and past reservations', async ({page}) => {
+  const result = await page.evaluate(async () => {
+    const {canOrganizeReservation} = await import('/src/components/ReservationActions.jsx');
+    const valid={status:'confirmed',stale:false,reservationId:'22222222-2222-4222-8222-222222222222',startsAt:'2099-09-06T12:00:00+03:00'};
+    return [valid,{...valid,stale:true},...['unknown','rejected','cancelled','pending_confirmation'].map(status=>({...valid,status})),{...valid,startsAt:'2020-01-01T00:00:00Z'}].map(r=>canOrganizeReservation(r));
+  });
+  expect(result).toEqual([true,false,false,false,false,false,false]);
+});
+
+
+test('App Home booking publication replaces the reservation card', async ({page}) => {
+  await isolateComponentHarness(page);
+  await page.evaluate(async () => {
+    const rm = await import('/@id/react'); const React=rm.default ?? rm;
+    const dm = await import('/@id/react-dom/client'); const {createRoot}=dm.default ?? dm;
+    const {default:App}=await import('/src/App.jsx');
+    const id='11111111-1111-4111-8111-111111111111', rid='22222222-2222-4222-8222-222222222222', mid='33333333-3333-4333-8333-333333333333';
+    const startsAt=Math.floor(Date.now()/1000)+86400;
+    const reservation={reservationId:rid,status:'confirmed',stale:false,serviceId:11,courtId:22,startsAt:new Date(startsAt*1000).toISOString(),endsAt:new Date((startsAt+5400)*1000).toISOString()};
+    const owner={playerId:id,firstName:'Игрок',rating:3,isVerified:true};
+    let created=false;
+    const match={matchId:mid,ownerAccountId:id,createdAt:startsAt-86400,updatedAt:startsAt-86400,startsAt,durationMinutes:90,courtId:'yclients:22',courtName:'Корт №2',courtType:'indoor',kind:'match',visibility:'public',scenario:'social',status:'confirmed',description:'Матч из брони',ratingMin:2,ratingMax:5,isRatingMatch:false,version:1,courtBookingStatus:'confirmed',courtBookingStale:false,courtReservationId:rid,courtBookingTarget:{serviceId:11,courtId:22,startsAt:reservation.startsAt,endsAt:reservation.endsAt},owner,participants:[{...owner,slotNumber:1}]};
+    window.appBookingCalls={create:0,bookingWrite:0};
+    const backendMatchActions={
+      listMatches:async()=>({outcome:'matches_loaded',matches:created?[match]:[]}),
+      listAccountMatches:async()=>({outcome:'matches_loaded',matches:created?[match]:[]}),
+      listIncomingMatchInvitations:async()=>({outcome:'invitations_loaded',invitations:[]}),
+      listOutgoingMatchInvitations:async()=>({outcome:'invitations_loaded',invitations:[]}),
+      listMatchNotifications:async()=>({outcome:'notifications_loaded',notifications:[],unreadCount:0}),
+      loadMatch:async()=>({outcome:'match_loaded',match}),
+      createMatch:async(draft)=>{window.appBookingCalls.create++;window.appBookingCalls.draft=draft;created=true;return {outcome:'match_created',match};},
+    };
+    const backendBookingAvailabilityActions={
+      listBookings:async()=>({outcome:'bookings_loaded',reservations:[reservation]}),
+      readBooking:async()=>({outcome:'booking_loaded',reservation:created?{...reservation,linkedMatchId:mid,stale:true}:reservation}),
+      listCourts:async()=>({outcome:'courts_loaded',courts:[{id:22,name:'Корт №2'}]}),
+      createBooking:async()=>{window.appBookingCalls.bookingWrite++;throw Error('forbidden');},
+    };
+    const container=document.createElement('div');container.id='app-booking-harness';document.body.appendChild(container);
+    createRoot(container).render(React.createElement(App,{backendProfile:{accountId:id,role:'player',firstName:'Игрок',rating:3,isVerified:true,capabilities:[]},backendMatchLifecycleStatus:'authenticated',backendProfileStatus:'ready',backendMatchActions,backendBookingAvailabilityActions,showToast() {},onLogout() {}}));
+  });
+  const root=page.locator('#app-booking-harness');
+  await root.locator('.home-event-card').first().click();
+  await root.getByRole('button',{name:'Организовать матч'}).click();
+  await root.getByTestId('match-scenario-social').click();
+  await root.getByRole('button',{name:'Опубликовать матч'}).click();
+  await expect(root.locator('.bottom-nav button')).toHaveCount(5);
+  await root.locator('.bottom-nav button').first().click();
+  await expect(root.locator('.home-event-kind-badge').filter({hasText:'Бронь'})).toHaveCount(0);
+  await expect(root.getByRole('button', {name:'Брони 0',exact:true})).toBeVisible();
+  expect(await page.evaluate(()=>window.appBookingCalls)).toMatchObject({create:1,bookingWrite:0,draft:{reservationId:'22222222-2222-4222-8222-222222222222'}});
+});

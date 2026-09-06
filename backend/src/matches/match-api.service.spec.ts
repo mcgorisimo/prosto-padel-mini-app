@@ -233,7 +233,9 @@ function createHarness(): Harness {
     publicProfiles: { findByPlayerIds },
     waitlist: { promoteAvailable, closeForParticipant },
     lineups: { releaseForParticipantLeave: releaseLineupForParticipant },
+    bookingReservations: { read: jest.fn(async () => ({ outcome: "found" as const, reservation: { reservationId: RESERVATION_ID, status: "confirmed" as const, ...reservation().target, stale: false } })) },
     matchReservations: {
+      findLinkedMatchId: jest.fn(async () => null),
       lockReservationForMatchCreate: findReservationById,
       linkConfirmed,
       readCourtBookings,
@@ -1337,5 +1339,64 @@ describe('MatchApiService', () => {
       reason: 'internal_failure',
     });
     expect(harness.create).toHaveBeenCalledTimes(1);
+  });
+});
+
+
+describe('reservation action authority', () => {
+  const input = () => ({accountId: ACCOUNT_ID, role: 'player' as const, request: request()});
+  it.each(['cancelled', 'rejected', 'unknown', 'pending_confirmation'] as const)('rejects canonical %s without create/link', async (status) => {
+    const h = createHarness();
+    h.findReservationById.mockResolvedValue(reservation({status}));
+    expect((await h.service.create(input())).outcome).toBe('rejected');
+    expect(h.create).not.toHaveBeenCalled(); expect(h.linkConfirmed).not.toHaveBeenCalled();
+  });
+  it('rejects stale provider proof and missing/foreign ownership', async () => {
+    const h = createHarness();
+    const read = jest.spyOn(h.service.dependencies.bookingReservations, 'read');
+    read.mockResolvedValueOnce({outcome:'found', reservation:{reservationId:RESERVATION_ID,status:'confirmed',...reservation().target,stale:true}});
+    expect(await h.service.create(input())).toEqual({outcome:'rejected',reason:'temporary_unavailable'});
+    expect(h.run).not.toHaveBeenCalled();
+    h.findReservationById.mockResolvedValueOnce(null).mockResolvedValueOnce(reservation({ownerAccountId: OTHER_ACCOUNT_ID}));
+    expect(await h.service.create(input())).toEqual({outcome:'rejected',reason:'reservation_not_found'});
+    expect(await h.service.create(input())).toEqual({outcome:'rejected',reason:'reservation_not_found'});
+    expect(h.create).not.toHaveBeenCalled();
+  });
+  it('rejects a target changed after provider proof and a start crossed during read', async () => {
+    const h = createHarness();
+    h.findReservationById.mockResolvedValueOnce(reservation({target:{...reservation().target,courtId:99}}));
+    expect(await h.service.create(input())).toEqual({outcome:'rejected',reason:'reservation_not_confirmed'});
+    jest.spyOn(h.service.dependencies.bookingReservations, 'read').mockImplementation(async () => {
+      h.clockNow.mockReturnValue(unixEpochSeconds(NOW + 4000));
+      return {outcome:'found',reservation:{reservationId:RESERVATION_ID,status:'confirmed',...reservation().target,stale:false}};
+    });
+    expect(await h.service.create(input())).toEqual({outcome:'rejected',reason:'match_started'});
+    expect(h.create).not.toHaveBeenCalled();
+  });
+  it('serializes two windows with changed metadata and returns the existing match with no second create/link', async () => {
+    const h = createHarness();
+    let tail = Promise.resolve();
+    h.run.mockImplementation((operation) => {
+      const result = tail.then(() => operation(TRANSACTION));
+      tail = result.then(() => undefined, () => undefined);
+      return result;
+    });
+    let linked: MatchId | null = null;
+    jest.spyOn(h.service.dependencies.matchReservations, 'findLinkedMatchId').mockImplementation(async () => linked);
+    h.create.mockImplementation(async (_tx, command) => ({outcome:'match_created',persistence:'applied',match:detail(command.matchId)}));
+    h.linkConfirmed.mockImplementation(async (_tx, command) => {
+      linked = command.matchId;
+      return {outcome:'linked',persistence:'applied',projection:{status:'confirmed',stale:false,reservationId:RESERVATION_ID,target:reservation().target}};
+    });
+    h.findVisibleById.mockImplementation(async (_tx, query) => detail(query.matchId));
+    h.readCourtBookings.mockImplementation(async () => new Map([[linked,{status:'confirmed',stale:false,reservationId:RESERVATION_ID,target:reservation().target}]]));
+    const results = await Promise.all([h.service.create(input()),h.service.create({...input(),request:request({description:'second window', requestKey:deterministicUuid('window-b')})})]);
+    expect(results).toMatchObject([{outcome:'created',persistence:'applied'},{outcome:'created',persistence:'idempotent_retry'}]);
+    expect(results[0].outcome === 'created' && results[0].match.matchId).toBe(results[1].outcome === 'created' && results[1].match.matchId);
+    expect(h.create).toHaveBeenCalledTimes(1); expect(h.linkConfirmed).toHaveBeenCalledTimes(1);
+    // A pre-existing unbooked match linked by the other command has a different ID.
+    linked = MATCH_ID;
+    expect(await h.service.create(input())).toMatchObject({outcome:'created',persistence:'idempotent_retry',match:{matchId:MATCH_ID}});
+    expect(h.create).toHaveBeenCalledTimes(1);
   });
 });

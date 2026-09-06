@@ -41,6 +41,7 @@ export const BOOKING_RESERVATION_CLOCK = Symbol('BOOKING_RESERVATION_CLOCK');
 export interface BookingReservationClock { nowEpochSeconds(): number }
 
 export type BookingReservationView = Readonly<{
+  linkedMatchId?: import('../matches/match.types').MatchId;
   reservationId: CourtReservationId;
   status: CourtReservation['status'];
   serviceId: number;
@@ -458,6 +459,15 @@ export class BookingReservationService {
   }
 
   async read(ownerAccountId: AccountId, rawReservationId: string): Promise<ReadBookingReservationResult> {
+    const result = await this.readCanonical(ownerAccountId, rawReservationId);
+    if (result.outcome !== 'found') return result;
+    try {
+      const linkedMatchId = await this.transactions.runInTransaction((tx) => this.matchReservations.findLinkedMatchId(tx, ownerAccountId, result.reservation.reservationId));
+      return linkedMatchId === null ? result : Object.freeze({ outcome: 'found', reservation: Object.freeze({ ...result.reservation, linkedMatchId }) });
+    } catch { return Object.freeze({ outcome: 'unavailable' }); }
+  }
+
+  private async readCanonical(ownerAccountId: AccountId, rawReservationId: string): Promise<ReadBookingReservationResult> {
     let reservationId: CourtReservationId;
     try { reservationId = courtReservationId(rawReservationId); } catch { return Object.freeze({outcome:'not_found'}); }
     let reservation: CourtReservation | null;

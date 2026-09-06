@@ -478,6 +478,19 @@ export class PostgresMatchReservationRepository
     }
   }
 
+  async findLinkedMatchId(transaction: PostgresTransaction, ownerAccountId: AccountId, reservationId: CourtReservationId): Promise<MatchId | null> {
+    if (!isAccountId(ownerAccountId) || !isCourtReservationId(reservationId)) throw failure('invalid_input');
+    const result = await transaction.query<{ match_id: unknown }>(
+      `SELECT match_id FROM backend_match.match_reservation_links
+       WHERE owner_account_id = $1 AND reservation_id = $2 AND state = 'active'`,
+      [ownerAccountId, reservationId],
+    );
+    if (result.rows.length === 0) return null;
+    const id = result.rows[0]?.match_id;
+    if (result.rows.length !== 1 || !isMatchId(id)) throw failure('invalid_persisted_state');
+    return id;
+  }
+
   async linkConfirmed(
     transaction: PostgresTransaction,
     input: Readonly<{

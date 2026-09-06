@@ -141,6 +141,7 @@ function harness() {
   const diagnostics = { record: jest.fn() };
   const notificationIntents = { enqueueDirect: jest.fn() };
   const matchReservations = {
+    findLinkedMatchId: jest.fn(async () => null),
     synchronizeCanonicalRefresh: jest.fn(async () => ({ outcome: 'not_linked' })),
   };
   const service = new BookingReservationService(

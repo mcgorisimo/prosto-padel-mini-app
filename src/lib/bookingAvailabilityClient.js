@@ -162,7 +162,8 @@ function readTimes(body, expectedDate) {
 
 function readCreatedBooking(body) {
   if (
-    !hasExactKeys(body, ['reservationId', 'status', 'serviceId', 'courtId', 'startsAt', 'endsAt', 'stale']) ||
+    !(hasExactKeys(body, ['reservationId', 'status', 'serviceId', 'courtId', 'startsAt', 'endsAt', 'stale']) ||
+      (hasExactKeys(body, ['reservationId', 'status', 'serviceId', 'courtId', 'startsAt', 'endsAt', 'stale', 'linkedMatchId']) && typeof body.linkedMatchId === 'string' && UUID_PATTERN.test(body.linkedMatchId))) ||
     typeof body.reservationId !== 'string' || !UUID_PATTERN.test(body.reservationId) ||
     !['pending_confirmation', 'confirmed', 'unknown', 'rejected', 'cancelled'].includes(body.status) ||
     !isPositiveSafeInteger(body.serviceId) || !isPositiveSafeInteger(body.courtId) ||

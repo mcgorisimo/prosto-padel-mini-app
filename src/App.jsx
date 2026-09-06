@@ -185,6 +185,7 @@ export default function App({
   const [activeTab, setActiveTab]    = useState('home');
   const [selectedMatch, setSelected] = useState(null);
   const [selectedBookingReservationId, setSelectedBookingReservationId] = useState(null);
+  const [matchCreationReservation, setMatchCreationReservation] = useState(null);
   const [screen, setScreen] = useState(null);
   const backendDetailRequestRef = useRef(0);
   const backendFeedRequestRef = useRef(0);
@@ -1146,6 +1147,7 @@ export default function App({
   // --- 4. TOAST (now handled by AuthGate, but keeping this for other app-specific toasts) ---
   // ── Navigation helpers ──
   const openCreateMatch = () => {
+    setMatchCreationReservation(null);
     if (!backendMatchesReady) {
       showToast?.(
         'Профиль ещё загружается. Попробуйте открыть создание матча позже.',
@@ -1636,8 +1638,10 @@ export default function App({
       showToast?.('Матч создан, но ответ сервера не распознан. Обновите ленту.', 'error');
       throw malformedMatch;
     }
+    storeBackendMatch(createdMatch);
+    setMatchCreationReservation(null);
+    void loadBackendReservations();
     if (!createdMatch.isPrivate) {
-      storeBackendMatch(createdMatch);
       setScreen(null);
       setActiveTab('matches');
       return result;
@@ -1662,7 +1666,7 @@ export default function App({
     [backendCourtNamesById, backendReservations],
   );
   const homeUpcomingEvents = useMemo(
-    () => [...upcomingMatches, ...backendBookingEvents],
+    () => [...upcomingMatches, ...backendBookingEvents.filter((booking) => !upcomingMatches.some((match) => match.courtReservationId === booking.reservationId))],
     [backendBookingEvents, upcomingMatches],
   );
   const completedMatches = getUserMatchHistory(backendAccountMatches, ME_ID);
@@ -1704,6 +1708,7 @@ export default function App({
   if (screen === 'create-match') {
     return (
       <MatchCreationScreen
+        existingReservation={matchCreationReservation}
         availabilityActions={backendBookingAvailabilityActions}
         bookingClient={privateBookingClient}
         courtNamesById={backendCourtNamesById}
@@ -1712,7 +1717,7 @@ export default function App({
           setScreen(null);
           setActiveTab('profile');
         }}
-        onBack={() => setScreen(null)}
+        onBack={() => { setScreen(null); setMatchCreationReservation(null); }}
         onSuccess={handleMatchSuccess}
         user={backendMatchCurrentUser}
         allowPrivateMatches={BACKEND_PRIVATE_MATCH_CREATION_ENABLED}
@@ -1968,6 +1973,20 @@ export default function App({
           <BookingScreen
             availabilityActions={backendBookingAvailabilityActions}
             initialReservationId={selectedBookingReservationId}
+            linkedMatch={backendAccountMatches.find((match) => match.courtReservationId === selectedBookingReservationId)}
+            onOpenMatch={async (match, isCurrent) => {
+              if (typeof match !== 'string') { openMatchDetails(match); return; }
+              const result = await backendMatchActions.loadMatch(match);
+              if (!isCurrent()) return;
+              const loaded = result.outcome === 'match_loaded' ? mapBackendMatchToApp(result.match, backendProfile, backendCourtNamesById) : null;
+              if (loaded) { storeBackendMatch(loaded); openMatchDetails(loaded); }
+              else showToast?.('Не удалось открыть матч. Обновите бронь.', 'error');
+            }}
+            onOrganizeMatch={(reservation) => {
+              if (!backendMatchesReady) return;
+              setMatchCreationReservation(reservation);
+              setScreen('create-match');
+            }}
             onCloseReservation={() => {
               setSelectedBookingReservationId(null);
               setActiveTab('home');

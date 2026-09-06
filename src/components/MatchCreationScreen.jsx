@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import BookingScreen from './BookingScreen';
+import { canOrganizeReservation } from './ReservationActions';
 
 const RATINGS = ['D', 'D+', 'C', 'C+', 'B', 'B+', 'A'];
 const MATCH_COMMENT_MAX_LENGTH = 240;
@@ -64,7 +65,7 @@ export const SOCIAL_MATCH_CONFIRMATION_COPY = Object.freeze({
   confirmLabel: 'Выбрать корт и время',
 });
 
-function ScenarioSelector({ onSelect }) {
+function ScenarioSelector({ onSelect, existingReservation }) {
   return (
     <div style={{ padding: '0 16px' }}>
       <p style={{ color: T.muted, fontSize: '13px', margin: '0 0 20px', lineHeight: 1.5 }}>
@@ -86,10 +87,10 @@ function ScenarioSelector({ onSelect }) {
                 <div style={{ color: definition.color, fontSize: '11px', fontWeight: 700, letterSpacing: '0.06em', marginTop: '2px' }}>{definition.badge}</div>
               </div>
             </div>
-            <div style={{ color: T.muted, fontSize: '12px', lineHeight: 1.6, marginBottom: '12px' }}>{definition.desc}</div>
+            <div style={{ color: T.muted, fontSize: '12px', lineHeight: 1.6, marginBottom: '12px' }}>{existingReservation ? 'Матч на вашем уже забронированном корте.' : definition.desc}</div>
             <div style={{ color: T.muted, fontSize: '12px', lineHeight: 1.55 }}>
-              <div><span style={{ color: T.accent }}>✓</span> {definition.pros[0]}</div>
-              <div style={{ marginTop: '4px', color: definition.color }}>! {definition.warn}</div>
+              <div><span style={{ color: T.accent }}>✓</span> {existingReservation ? 'Корт, дата и время сохраняются' : definition.pros[0]}</div>
+              <div style={{ marginTop: '4px', color: definition.color }}>! {existingReservation ? 'Публикация только после вашего подтверждения' : definition.warn}</div>
             </div>
             <div style={{ marginTop: '14px', textAlign: 'right', color: definition.color, fontSize: '13px', fontWeight: 700 }}>Выбрать</div>
           </button>
@@ -195,7 +196,11 @@ export default function MatchCreationScreen({
   onOpenProfile = null,
   showToast,
   allowPrivateMatches = true,
+  existingReservation = null,
 }) {
+  const savingRef = useRef(false);
+  const [saving, setSaving] = useState(false);
+  const [creationError, setCreationError] = useState('');
   const [step, setStep] = useState('scenario');
   const [scenario, setScenario] = useState(null);
   const [ratingMin, setRatingMin] = useState(2);
@@ -221,12 +226,30 @@ export default function MatchCreationScreen({
     }
   };
 
-  const continueToBooking = () => {
+  const continueToBooking = async () => {
+    if (savingRef.current) return;
     if (isRatingMatch && !isPrivate && user?.isVerified !== true) {
       showToast?.('Для рейтинговой игры нужен подтверждённый рейтинг.', 'error');
       return;
     }
-    if (metadata !== null) setStep('booking');
+    if (metadata === null) return;
+    if (!existingReservation) { setStep('booking'); return; }
+    if (!canOrganizeReservation(existingReservation)) {
+      setCreationError('Бронь больше не доступна для создания матча. Вернитесь к её деталям и обновите данные.');
+      return;
+    }
+    savingRef.current = true;
+    setSaving(true);
+    setCreationError('');
+    try {
+      const result = await completeConfirmedReservation(existingReservation);
+      if (result?.outcome !== 'match_created') throw new Error('match_create_failed');
+    } catch {
+      setCreationError('Матч не удалось открыть. Проверьте актуальность брони или повторите — новая аренда не создаётся.');
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
   };
 
   const completeConfirmedReservation = async (reservation) => {
@@ -263,7 +286,7 @@ export default function MatchCreationScreen({
       </header>
 
       {step === 'scenario' ? (
-        <ScenarioSelector onSelect={(nextScenario) => { setScenario(nextScenario); setStep('details'); }} />
+        <ScenarioSelector existingReservation={existingReservation} onSelect={(nextScenario) => { setScenario(nextScenario); setStep('details'); }} />
       ) : (
         <>
           <div style={{ padding: '0 16px 16px' }}>
@@ -275,6 +298,7 @@ export default function MatchCreationScreen({
           </div>
 
           <div style={{ padding: '0 16px' }}>
+            {existingReservation && <Section title="Ваш забронированный корт"><div data-testid="match-existing-reservation" style={{ color: T.text, lineHeight: 1.6 }}>{courtNamesById[existingReservation.courtId] || `Корт ${existingReservation.courtId}`}<br />{new Intl.DateTimeFormat('ru-RU', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Europe/Moscow' }).format(new Date(existingReservation.startsAt))} — {new Intl.DateTimeFormat('ru-RU', { timeStyle: 'short', timeZone: 'Europe/Moscow' }).format(new Date(existingReservation.endsAt))}<div style={{ color: T.muted, fontSize: '12px' }}>Повторно бронировать и оплачивать корт не нужно.</div></div></Section>}
             {!isPrivate && <RatingRangeSlider minIdx={ratingMin} maxIdx={ratingMax} onChange={(minimum, maximum) => { setRatingMin(minimum); setRatingMax(maximum); }} />}
 
             <Section title="Комментарий (необязательно)">
@@ -299,12 +323,13 @@ export default function MatchCreationScreen({
             )}
 
             <div style={{ marginBottom: '16px', borderRadius: '14px', border: '1px solid rgba(216,243,74,0.18)', background: 'rgba(216,243,74,0.06)', padding: '12px 14px', color: T.muted, fontSize: '12px', lineHeight: 1.55 }}>
-              Следующий шаг — единая сетка свободных слотов 30 минут. Матч появится только после подтверждения и привязки брони.
+              {existingReservation ? 'Параметры корта определяются вашей бронью. Матч появится после нажатия кнопки и проверки актуальности брони.' : 'Следующий шаг — единая сетка свободных слотов 30 минут. Матч появится только после подтверждения и привязки брони.'}
             </div>
+            {creationError && <p role="alert" style={{ color: T.gold }}>{creationError}</p>}
 
             <div className="match-creation-continue-bar">
-              <button type="button" data-testid="match-continue-to-booking" onClick={continueToBooking} style={{ width: '100%', minHeight: '52px', padding: '16px', background: 'rgba(216,243,74,0.12)', color: T.accent, border: '1px solid rgba(216,243,74,0.32)', borderRadius: '18px', fontSize: '16px', fontWeight: 800, cursor: 'pointer', boxShadow: '0 14px 36px rgba(216,243,74,0.16)' }}>
-                Выбрать корт и время
+              <button type="button" disabled={saving} data-testid="match-continue-to-booking" onClick={continueToBooking} style={{ width: '100%', minHeight: '52px', padding: '16px', background: 'rgba(216,243,74,0.12)', color: T.accent, border: '1px solid rgba(216,243,74,0.32)', borderRadius: '18px', fontSize: '16px', fontWeight: 800, cursor: 'pointer', boxShadow: '0 14px 36px rgba(216,243,74,0.16)' }}>
+                {saving ? 'Проверяем бронь и создаём матч…' : existingReservation ? (isPrivate ? 'Создать приватный матч' : 'Опубликовать матч') : 'Выбрать корт и время'}
               </button>
             </div>
           </div>

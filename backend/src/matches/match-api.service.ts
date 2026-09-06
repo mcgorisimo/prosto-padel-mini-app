@@ -4,6 +4,7 @@ import {
   USER_ROLES,
   isAccountId,
 } from '../accounts/account.types';
+import { BookingReservationService } from '../bookings/booking-reservation.service';
 import {
   encodeLengthPrefixedUtf8,
   uuidV5FromParts,
@@ -101,6 +102,7 @@ export interface MatchApiTransactionExecutor {
   ): Promise<T>;
 }
 export interface MatchApiServiceDependencies {
+  readonly bookingReservations: Pick<BookingReservationService, 'read'>;
   readonly transactions: MatchApiTransactionExecutor;
   readonly matches: MatchRepository;
   readonly publicProfiles: Pick<
@@ -114,7 +116,7 @@ export interface MatchApiServiceDependencies {
   readonly lineups: Pick<MatchLineupService, 'releaseForParticipantLeave'>;
   readonly matchReservations: Pick<
     MatchReservationRepository,
-    'linkConfirmed' | 'lockReservationForMatchCreate' | 'readCourtBookings'
+    'linkConfirmed' | 'lockReservationForMatchCreate' | 'readCourtBookings' | 'findLinkedMatchId'
   >;
   readonly notificationIntents: Pick<
     TelegramNotificationIntentRepository,
@@ -808,10 +810,9 @@ export class MatchApiService {
       return rejected('content_not_allowed');
     }
     try {
-      const now = this.dependencies.clock.nowEpochSeconds();
-      if (!isUnixEpochSeconds(now)) {
-        return rejected('invalid_request');
-      }
+      const fresh = await this.dependencies.bookingReservations.read(input.accountId, request.reservationId);
+      if (fresh.outcome === 'not_found') return rejected('reservation_not_found');
+      if (fresh.outcome !== 'found' || fresh.reservation.stale) return rejected('temporary_unavailable');
       const idParts = [input.accountId, request.reservationId];
       const matchId = bindingUuid(
         BINDING_DOMAINS.create.match,
@@ -831,9 +832,30 @@ export class MatchApiService {
           if (reservation === null) {
             throw new CreateMatchReservationRejection('reservation_not_found');
           }
+          const now = this.dependencies.clock.nowEpochSeconds();
+          if (!isUnixEpochSeconds(now)) throw new CreateMatchReservationRejection('invalid_request');
+          if (reservation.ownerAccountId !== input.accountId) throw new CreateMatchReservationRejection('reservation_not_found');
           const target = confirmedMatchTarget(reservation, now);
           if (typeof target === 'string') {
             throw new CreateMatchReservationRejection(target);
+          }
+          if (fresh.reservation.status !== 'confirmed' ||
+              fresh.reservation.courtId !== reservation.target.courtId ||
+              fresh.reservation.serviceId !== reservation.target.serviceId ||
+              Date.parse(fresh.reservation.startsAt) !== Date.parse(reservation.target.startsAt) ||
+              Date.parse(fresh.reservation.endsAt) !== Date.parse(reservation.target.endsAt)) {
+            throw new CreateMatchReservationRejection('reservation_not_confirmed');
+          }
+          // Same advisory/row lock as linkConfirmed; refresh serializes on the row.
+          const linkedMatchId = await this.dependencies.matchReservations.findLinkedMatchId(transaction, input.accountId, request.reservationId);
+          if (linkedMatchId !== null) {
+            const existing = safeMatchDetail(await this.dependencies.matches.findVisibleById(transaction, { viewerAccountId: input.accountId, matchId: linkedMatchId }));
+            if (!existing || existing.ownerAccountId !== input.accountId) throw invalidReadModel();
+            const projections = await this.dependencies.matchReservations.readCourtBookings(transaction, [linkedMatchId]);
+            const projection = projections.get(linkedMatchId);
+            if (!projection || projection.status !== 'confirmed' || projection.reservationId !== request.reservationId) throw invalidReadModel();
+            const players = await readPublicPlayers(this.dependencies.publicProfiles, transaction, [existing]);
+            return Object.freeze({ result: { outcome: 'created' as const, persistence: 'idempotent_retry' as const }, match: enrichDetail(existing, players, projection) });
           }
           const digest = requestDigest([
             BINDING_DOMAINS.create.request,
