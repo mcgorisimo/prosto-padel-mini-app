@@ -10554,3 +10554,39 @@
   Docker configuration, payments, Telegram, YCLIENTS and production are outside
   scope. temporary_root_ssh_access=retained_by_owner_request_until_section_signoff;
   neither authorized_keys nor the local temporary private key may be changed.
+
+### 2026-09-06 — Padel icons frontend-only TEST rollout closeout
+
+- Implementation cd55d4e7c1def0c55801f476036c53f651f8a9c7 was committed after
+  review/final gates and atomically fast-forward pushed to main and
+  codex/padel-sport-icons, without merge/force. Clean TEST checkout advanced
+  from d1dd066 to that exact commit. Compose validation passed; normalized
+  configuration, environment bytes and permissions were preserved.
+- Only frontend was built/recreated, 20:31:46.243814Z–20:31:52.634856Z.
+  New container: 0dd31452a8a74eec8b9d602ba346a17d1b05895a39a7cf43c87d11ef346160fd;
+  image: sha256:65edfa39f297255bad1da808910b51442c053b34c215c783ecf697a7ecbd89f4.
+  Other nine container IDs remain unchanged. Backend environment/release stays
+  exact d1dd066f0149360efad2ac02a5455d90ddcb0196. All ten services run, all nine
+  healthchecks pass, all restart counts are zero. No DB/provider/payment writes,
+  migrations, config/dependency changes, Telegram or production action ran.
+- Public /assets/index-BeSs65Hl.js SHA-256 is
+  5d7b09ac0ff933bdd541b9cb0c6c83c3301b80ba178ce3a3a921dd76f71ad375 and exactly
+  matches the container. Both new padel-icon markers are present, old structural
+  sport icons are absent. CSS /assets/index-2ESYx6bi.css is byte-identical to the
+  prior release and container (14546d1ddca2ffcbd0a801aea29504bb0be0b978673d0cb44fd9b992ffc8bf52).
+  Internal frontend/backend health and public /, /healthz, /api/v1/health return
+  200; public TLS verifies with result 0. Metrics remains 404. Schedule GET with
+  absent/canonical nonexistent bearer remains 401 session_invalid/no-store.
+- Bounded log window 20:31:46Z–20:33:43.206433Z: frontend 20, backend 2, nginx 32
+  lines; Loki returned 77 records below its 1000-record bound. Error/fatal,
+  HTTP 5xx, PII/sensitive markers and provider-write matches were all zero.
+  Final services/identity/health/restarts and clean checkout checks passed.
+- temporary_root_ssh_access=retained_by_owner_request_until_section_signoff.
+  Entire authorized_keys file bytes/owner/group/mode match the preflight;
+  no key row or local temporary private key was changed or removed.
+- deployment=applied_health_verified on Selectel TEST frontend exact cd55d4e;
+  backend remains d1dd066. Owner manual TMA smoke pending: check the crossed
+  padel rackets on Home/Matches tab, open Group training through racket/target
+  CTA, then Back; labels, five tabs and active coloring should be unchanged.
+  This closeout changes WORKLOG only: deployment=not_needed for its docs commit;
+  verified implementation tests/review above still cover the deployed runtime.
