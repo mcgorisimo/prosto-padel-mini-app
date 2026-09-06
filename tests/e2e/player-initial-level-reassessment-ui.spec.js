@@ -216,9 +216,9 @@ test.describe('legacy initial-level reassessment UI', () => {
     });
     await page.getByRole('button', { name: 'Перейти в приложение' }).click();
     await expect(page.locator('.bottom-nav')).toBeVisible();
-    await expect(page.getByTestId('home-player-level-value')).toHaveText(
-      '3.50 · C+',
-    );
+    await expect(page.getByTestId('home-player-level-value')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Профиль', exact: true }).click();
+    await expect(page.getByTestId('profile-player-level-summary')).toContainText('3.50 · C+');
     const persistenceLeak = await page.evaluate(
       (privateValues) => {
         const persistedValues = [];
@@ -261,9 +261,9 @@ test.describe('legacy initial-level reassessment UI', () => {
 
     await page.goto('/');
     await expect(page.locator('.bottom-nav')).toBeVisible();
-    await expect(page.getByTestId('home-player-level-value')).toHaveText(
-      '2.00 · D+',
-    );
+    await expect(page.getByTestId('home-player-level-value')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Профиль', exact: true }).click();
+    await expect(page.getByTestId('profile-player-level-summary')).toContainText('2.00 · D+');
     await expect(
       page.getByTestId('initial-level-reassessment-gate'),
     ).toHaveCount(0);

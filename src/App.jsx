@@ -5,6 +5,7 @@ import MatchCreationScreen from './components/MatchCreationScreen';
 import MatchDetailsScreen from './components/MatchDetailsScreen';
 import MatchFeed from './components/MatchFeed';
 import Home from './components/Home';
+import TrainingScreen from './components/TrainingScreen';
 import EditProfileScreen from './components/EditProfileScreen';
 import BookingScreen from './components/BookingScreen';
 import PullToRefresh from './components/PullToRefresh';
@@ -149,6 +150,7 @@ export default function App({
   backendProfileStatus = backendProfile ? 'ready' : 'inactive',
   backendMatchActions = null,
   backendBookingAvailabilityActions = null,
+  readTrainingSchedule = null,
   onBackendProfileRefresh = null,
   onBackendProfileSave = null,
   onBackendProfilePhotoUpload = null,
@@ -1705,6 +1707,10 @@ export default function App({
   }
 
   // ── Full-screen routes (hide BottomNav) ──
+  if (screen === 'trainings') {
+    return <TrainingScreen readSchedule={readTrainingSchedule} onBack={() => setScreen(null)} />;
+  }
+
   if (screen === 'create-match') {
     return (
       <MatchCreationScreen
@@ -1896,6 +1902,7 @@ export default function App({
         {activeTab === 'home' && (
           <Home
             upcomingMatches={homeUpcomingEvents}
+            onOpenTrainings={() => setScreen('trainings')}
             completedMatches={completedMatches}
             onViewDetails={openMatchDetails}
             onBookCourt={() => {

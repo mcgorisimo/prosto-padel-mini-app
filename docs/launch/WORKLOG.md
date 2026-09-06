@@ -10387,3 +10387,69 @@
   task; its separate publication-source/access gate remains in force. This
   append-only closeout is docs-only: deployment=not_needed for this commit,
   because it does not alter the verified runtime artifacts.
+
+### 2026-09-06 — Group training schedule foundation: reviewed candidate
+
+- Base: be6f64f9bbd444ef903e60c2c1180bafede84836; branch:
+  codex/training-schedule-foundation. The coordinator's final scope releases the
+  Home hold: compact greeting, My events immediately below it, then one Group
+  training CTA. Home address, large player-level card and duplicate nearest-event
+  section are removed. The nearest event appears once in the existing sorted list.
+  Personal-event filters, reservation/match actions, empty choose-time action,
+  Profile/onboarding rating and all five BottomNav tabs remain available.
+- Added authenticated GET /api/v1/trainings/schedule in the Selectel backend.
+  The compile-time response is strictly { outcome: 'not_configured', sessions: [] };
+  any query override is rejected. SessionBearerGuard supplies no-store/no-cache.
+  There is no provider/config/database schedule dependency or enabling flag.
+  Ordinary session authentication still uses the existing auth boundary.
+- Added a pure, unwired YCLIENTS activity normalizer with explicit company and
+  opaque application-ID inputs. It validates company/service/coach consistency,
+  Unix seconds, duration and bounded labels/resources; constructs an allowlisted
+  candidate without contacts, attendees, provider IDs, price, balance or capacity.
+  Normalization never grants permission to publish a title or coach name.
+  The official developers.yclients.com/ru OpenAPI activity/search shape supplies
+  date and length in seconds. records_count is not proof of occupied places;
+  search results/service allowlists are not proof of public publication status.
+  No live YCLIENTS data was requested. Publication/access evidence remains absent,
+  and the owner confirmed there is no public group booking form/link yet.
+- Home opens the fullscreen 'Групповые тренировки' screen. On-screen/Telegram
+  Back returns to Home; BottomNav is hidden inside the screen. Loading, honest
+  not-configured and error/retry states are distinct. The existing session
+  lifecycle owns bearer/generation/401 handling. The same-origin GET client
+  requires no-store JSON and bounds actual response bytes to 1024; unexpected
+  rows/payloads never render. StrictMode does not issue a duplicate screen read.
+- Gates: frontend unit 163/163, build PASS, focused new E2E 4/4. Default full
+  E2E (9 workers) had one existing booking harness timeout at page.evaluate,
+  121 passed/1 skipped. Full repeat with --workers=4 passed 122/122 plus the
+  existing intentional skip, including that unchanged booking test. Backend
+  typecheck/build PASS, unit 4100/4100 (190 suites), E2E 4/4 (2 suites).
+  Changed-file ESLint and git diff --check passed. Local screenshots checked
+  at 375x667 and 667x375 after the login toast disappeared: readable screen,
+  safe-area spacing, 48px CTA/Back, no horizontal page overflow, working return.
+  Tests use synthetic fixtures and no real booking/payment/provider writes.
+  Existing dependency directories were reused via local ignored junctions after
+  both lockfile hashes matched; no dependency or lockfile change was required.
+- Backend and frontend independent exact-final-diff reviews after the
+  coordinator's scope release are CLEAR: P0=0/P1=0, including final Home order
+  and four mobile screenshots. No commit/push/merge has run at this checkpoint.
+- Deferred membership requirement (separate slice): paired Home CTA opens
+  'Абонементы'; fullscreen Back, hidden BottomNav, accessible text tabs with
+  touch >=44px: 'Мои абонементы' selected by default, 'Купить абонемент' second.
+  Required dependencies: trusted account-to-YCLIENTS-client binding, canonical
+  own-membership read/status/remaining-visits/expiry and refresh, confirmed public
+  product catalog, separate unavailable/not-configured/empty states. Editable
+  phone/email is never an ownership proof. Purchase requires D4 authority and
+  idempotent reconciliation; only canonical YCLIENTS appearance after purchase
+  makes a membership visible, never redirect/optimistic state. None of its
+  buttons/routes/screens/balance/binding/catalog/payment logic is added here.
+  Club leaderboard and Rating-to-Tournaments navigation are separate stages.
+- Runtime impact: frontend AND backend images; no schema/migration, env/config,
+  dependencies, payment fields, outbound Telegram or production changes.
+  deployment=deployment_deferred_by_user: coordinator requires a separate TEST
+  rollout after commit/integration and new temporary access. No SSH was attempted.
+  Changed containers this stage: none. Last verified Selectel TEST frontend and
+  backend remain c8d3354a065d25bd0febe64da642c2385682b103, as recorded above;
+  today's candidate health/HTTP, business/manual smoke and logs are not verified
+  on the server. Runtime stage is NOT done. Next: controlled fast-forward main
+  integration, exact-SHA coordinator handoff, then
+  separately authorized TEST rollout with health, smoke and bounded logs.

@@ -5,6 +5,7 @@ import {
   isBackendOwnProfilePatch,
 } from '../lib/backendSessionClient';
 import { bookingAvailabilityClient } from '../lib/bookingAvailabilityClient';
+import { trainingScheduleClient, isUnconfiguredTrainingSchedule } from '../lib/trainingScheduleClient';
 import {
   playerInitialLevelReassessmentClient,
   readPlayerInitialLevelReassessment,
@@ -75,6 +76,7 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
   const profiles = dependencies.profiles ?? sessions;
   const matches = dependencies.matches ?? sessions;
   const bookings = dependencies.bookings ?? bookingAvailabilityClient;
+  const trainings = dependencies.trainings ?? trainingScheduleClient;
   const onboarding =
     dependencies.onboarding ?? playerOnboardingClient;
   const initialLevelReassessments =
@@ -1256,6 +1258,13 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
     );
   }
 
+  function readTrainingSchedule() {
+    return runMatchOperation(
+      (credential, signal) => trainings.read(credential, { signal }),
+      isUnconfiguredTrainingSchedule,
+    );
+  }
+
   function listBookingCourts(serviceId) {
     return runMatchOperation(
       (credential, signal) =>
@@ -1896,6 +1905,7 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
     loadOwnInitialLevelReassessment,
     completeOwnInitialLevelReassessment,
     listBookingServices,
+    readTrainingSchedule,
     listBookingCourts,
     listBookingDates,
     listBookingTimes,
@@ -2090,6 +2100,11 @@ export function useTelegramBackendLogin() {
       }));
     }
     return telegramBackendLoginLifecycle.listBookingServices();
+  }, []);
+
+  const readTrainingSchedule = useCallback(() => {
+    if (!FEATURE_ENABLED) return Promise.resolve(Object.freeze({ outcome: 'rejected', reason: 'not_authenticated' }));
+    return telegramBackendLoginLifecycle.readTrainingSchedule();
   }, []);
 
   const listBookingCourts = useCallback((serviceId) => {
@@ -2583,6 +2598,7 @@ export function useTelegramBackendLogin() {
     loadOwnInitialLevelReassessment,
     completeOwnInitialLevelReassessment,
     listBookingServices,
+    readTrainingSchedule,
     listBookingCourts,
     listBookingDates,
     listBookingTimes,

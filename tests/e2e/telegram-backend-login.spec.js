@@ -453,12 +453,8 @@ test.describe('Telegram backend login feature enabled', () => {
     await expect(
       page.getByTestId('onboarding-initial-level-result-gate'),
     ).toHaveCount(0);
-    await expect(page.getByTestId('home-player-level-label')).toHaveText(
-      'Начальный уровень',
-    );
-    await expect(page.getByTestId('home-player-level-value')).toHaveText(
-      '2.00 · D+',
-    );
+    await expect(page.getByTestId('home-player-level-label')).toHaveCount(0);
+    await expect(page.getByTestId('home-player-level-value')).toHaveCount(0);
     await page.getByRole('button', { name: 'Профиль' }).click();
     await expect(page.getByTestId('profile-avatar-rating')).toHaveText('2.0');
     await expect(page.getByTestId('profile-player-level-summary')).toHaveText(

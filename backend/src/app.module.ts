@@ -8,6 +8,7 @@ import { DatabaseModule } from './database/database.module';
 import { EventsModule } from './events/events.module';
 import { HealthModule } from './health/health.module';
 import { IntegrationsModule } from './integrations/integrations.module';
+import { TrainingsModule } from './trainings/trainings.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { IntegrationsModule } from './integrations/integrations.module';
     AuthModule,
     AccountsModule,
     BookingsModule,
+    TrainingsModule,
     EventsModule,
     IntegrationsModule,
     HealthModule,

@@ -4,7 +4,6 @@ import PadelButton from './ui/PadelButton';
 import PadelCard from './ui/PadelCard';
 import { CLUB } from '../lib/clubConfig';
 import { getBackendBookingStatusPresentation } from '../lib/backendBookingHomeAdapter';
-import { resolvePlayerLevelPresentation } from '../lib/playerLevelPresentation';
 
 const getDisplayDate = (dateISO) => {
   if (!dateISO || typeof dateISO !== 'string') return 'Дата не указана';
@@ -125,6 +124,7 @@ export default function Home({
   upcomingMatches = [],
   onBookCourt,
   onOpenBooking,
+  onOpenTrainings,
   onViewDetails,
   showToast,
   user,
@@ -134,13 +134,6 @@ export default function Home({
   const gamesWithPartners = upcomingMatches.filter(m => m.type === 'match');
   const myTrainings = upcomingMatches.filter(m => m.type === 'private' && m.isTraining);
   const personalBookings = upcomingMatches.filter(m => m.type === 'private' && !m.isTraining);
-  const featuredEvent = [...gamesWithPartners, ...myTrainings, ...personalBookings]
-    .sort((a, b) => new Date(`${a.dateISO}T${a.time || '00:00'}:00`) - new Date(`${b.dateISO}T${b.time || '00:00'}:00`))[0];
-  const levelPresentation = resolvePlayerLevelPresentation({
-    numericRating: user?.numericRating,
-    isVerified: user?.isVerified,
-    initialLevelLabel: user?.initialLevelLabel,
-  });
   const playerName = user?.firstName || 'Игрок';
   const myEvents = [...personalBookings, ...gamesWithPartners, ...myTrainings]
     .sort((a, b) => new Date(`${a.dateISO}T${a.time || '00:00'}:00`) - new Date(`${b.dateISO}T${b.time || '00:00'}:00`));
@@ -177,7 +170,7 @@ export default function Home({
   };
 
   return (
-    <div className="min-h-screen bg-app-bg px-4 pb-24 pt-5" style={{ paddingTop: 'calc(1.25rem + env(safe-area-inset-top, 0px))' }}>
+    <div className="min-h-screen bg-app-bg px-4 pb-24 pt-5" style={{ paddingTop: 'calc(1.25rem + env(safe-area-inset-top, 0px))', paddingBottom: 'calc(6rem + env(safe-area-inset-bottom, 0px))' }}>
       <header className="mb-5">
         <div className="mb-2 text-[11px] font-extrabold uppercase tracking-[0.18em] text-warm-white/48">
           {CLUB.name}
@@ -185,71 +178,14 @@ export default function Home({
         <h1 className="text-[32px] font-black leading-tight text-warm-white">
           Привет, {playerName}
         </h1>
-        <p className="mt-2 text-sm leading-relaxed text-warm-white/58">
-          {CLUB.location}, {CLUB.address}
-        </p>
       </header>
-
-      <PadelCard padding="lg" className="mb-5">
-        <div className="flex items-end justify-between gap-4">
-          <div>
-            <div className="mb-2 text-[10px] font-extrabold uppercase tracking-[0.16em] text-warm-white/48">
-              <span data-testid="home-player-level-label">
-                {levelPresentation.homeLabel}
-              </span>
-            </div>
-            <div
-              className="text-4xl font-black tabular-nums text-accent-light"
-              data-testid="home-player-level-value"
-            >
-              {levelPresentation.homeValue}
-            </div>
-          </div>
-          <div className="text-right">
-            <div className="text-sm font-semibold text-warm-white">{upcomingMatches.length}</div>
-            <div className="text-xs text-warm-white/50">событий</div>
-          </div>
-        </div>
-      </PadelCard>
-
-      <section className="mb-7 space-y-4">
-        <div className="text-[10px] font-extrabold uppercase tracking-[0.20em] text-warm-white/42">
-          Ближайшее событие
-        </div>
-
-        {featuredEvent ? (
-          <>
-            <UpcomingRow match={featuredEvent} onClick={() => handleUpcomingClick(featuredEvent)} />
-            {upcomingMatches.length > 1 && (
-              <button
-                type="button"
-                onClick={() => setEventsFilter('all')}
-                className="w-full rounded-2xl border border-warm-white/10 px-4 py-3 text-sm font-bold text-warm-white/70"
-              >
-                Смотреть все события
-              </button>
-            )}
-          </>
-        ) : (
-          <PadelCard className="border-dashed py-8 text-center">
-            <p className="text-sm text-warm-white/58">У вас пока нет активных броней.</p>
-            {onBookCourt ? (
-              <PadelButton variant="ghost" size="md" onClick={onBookCourt} className="mt-4">
-                Выбрать время
-              </PadelButton>
-            ) : (
-              <p className="mt-4 text-xs leading-relaxed text-warm-white/46">{bookingUnavailableText}</p>
-            )}
-          </PadelCard>
-        )}
-      </section>
 
       <section className="space-y-4">
         <div className="flex items-end justify-between gap-3">
           <div>
-            <div className="text-[10px] font-extrabold uppercase tracking-[0.20em] text-warm-white/42">
+            <h2 className="text-[10px] font-extrabold uppercase tracking-[0.20em] text-warm-white/70">
               Мои события
-            </div>
+            </h2>
             <p className="mt-1 text-sm text-warm-white/52">
               Брони, матчи и тренировки в одном месте
             </p>
@@ -290,15 +226,23 @@ export default function Home({
           </div>
         ) : (
           <PadelCard className="border-dashed py-8 text-center">
-            <p className="text-sm text-warm-white/58">В этой категории пока пусто.</p>
-            {eventsFilter === 'bookings' && onBookCourt && (
-              <PadelButton variant="ghost" size="md" onClick={handleBookCourt} className="mt-4">
+            <p className="text-sm text-warm-white/58">{eventsFilter === 'all' ? 'У вас пока нет событий.' : 'В этой категории пока пусто.'}</p>
+            {['all', 'bookings'].includes(eventsFilter) && onBookCourt && (
+              <PadelButton variant="ghost" size="md" onClick={handleBookCourt} className="mt-4 min-h-[48px]">
                 Выбрать время
               </PadelButton>
             )}
           </PadelCard>
         )}
       </section>
+
+      {onOpenTrainings && (
+        <PadelButton variant="ghost" size="md" className="my-6 min-h-[48px] w-full motion-reduce:transform-none motion-reduce:transition-none" onClick={onOpenTrainings}>
+          <Dumbbell size={18} aria-hidden="true" />
+          Групповые тренировки
+        </PadelButton>
+      )}
+
 
     </div>
   );
