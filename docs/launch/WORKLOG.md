@@ -10453,3 +10453,21 @@
   on the server. Runtime stage is NOT done. Next: controlled fast-forward main
   integration, exact-SHA coordinator handoff, then
   separately authorized TEST rollout with health, smoke and bounded logs.
+
+### 2026-09-06 — Group training foundation integration handoff
+
+- Implementation cfa7cf868b460895f7407cdd7d55a36e96d95004 was committed after
+  both final reviews and atomically pushed to origin/main and
+  origin/codex/training-schedule-foundation. Remote refs were verified at that
+  exact SHA. Integration was fast-forward from be6f64f; no merge commit/force.
+  All gates above cover its runtime; no source changes followed those gates.
+- This follow-up changes WORKLOG only; deployment=not_needed for this docs-only
+  delta. It does not close the implementation deployment gate, which remains
+  deployment_deferred_by_user. A separate coordinated rollout must build both
+  frontend/backend from the exact selected integrated commit, verify APP_RELEASE
+  and published bundle, health/HTTP, authenticated no-write schedule/Home smoke
+  and bounded logs. There are no migrations or enabling flags for this slice.
+- No server action ran. Last verified TEST frontend/backend remains c8d3354;
+  containers changed=none, candidate server health/smoke/logs=pending. Owner TMA
+  smoke and the actual publication/access proof remain separate outstanding
+  gates. Coordinator owns the next temporary-access/TEST rollout step.
