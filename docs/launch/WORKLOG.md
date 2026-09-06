@@ -10526,3 +10526,31 @@
   backend unit4100/E2E4/typecheck/build, two final CLEAR P0=0/P1=0 reviews.
   This checkpoint is docs-only: deployment=not_needed for its documentation
   commit; it does not change the verified runtime release above.
+
+### 2026-09-06 — Padel sport icons implementation/review checkpoint
+
+- Owner-authorized UI step based on clean origin/main
+  95c3988b9d8eed37ca2c53b7d813500bf94d0555, branch codex/padel-sport-icons.
+  No competing active editor was visible; coordinator confirmed exclusive scope.
+- Added reusable CrossedPadelRacketsIcon and PadelTrainingIcon in
+  src/components/icons/PadelIcons.jsx. Both use outline SVG, perforated padel
+  racket faces, viewBox 0 0 24 24, currentColor, round caps/joins and existing
+  size/strokeWidth/className props. Decorative icons are aria-hidden/nonfocusable.
+  Home match/training filters, event badges, header and group CTA now use them;
+  BottomNav Matches uses the crossed rackets. No Swords/Dumbbell import remains
+  in these components. Labels, layout, touch sizes, active/pressed colors and
+  all five navigation tabs are preserved. CalendarDays in TrainingScreen and
+  App.jsx were not changed; no dependency, API, backend or payment change.
+- Focused icon/Home unit 7/7 and mobile E2E 4/4 passed. Independent exact-diff
+  review including both mobile screenshots is CLEAR, P0=0/P1=0. Final gates
+  after that review: frontend unit 168/168; E2E --workers=4 passed 122 with one
+  existing intentional skip; build PASS (1628 modules), changed-file lint and
+  diff-check PASS. Portrait 375x667 and landscape 667x375 checks confirm icon
+  rendering, currentColor/active stroke, labels/Back/five tabs, reduced motion
+  and no horizontal page overflow. Existing color tokens/contrast are preserved.
+- Deployment impact is frontend-only. Commit/FF main and controlled exact-SHA
+  TEST frontend rollout are next; this checkpoint is not a deployment claim.
+  Backend stays at d1dd066f0149360efad2ac02a5455d90ddcb0196. Schema, environment,
+  Docker configuration, payments, Telegram, YCLIENTS and production are outside
+  scope. temporary_root_ssh_access=retained_by_owner_request_until_section_signoff;
+  neither authorized_keys nor the local temporary private key may be changed.

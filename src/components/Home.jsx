@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { CalendarDays, Dumbbell, LayoutGrid, Swords } from 'lucide-react';
+import { CalendarDays, LayoutGrid } from 'lucide-react';
+import { CrossedPadelRacketsIcon, PadelTrainingIcon } from './icons/PadelIcons';
 import PadelButton from './ui/PadelButton';
 import PadelCard from './ui/PadelCard';
 import { CLUB } from '../lib/clubConfig';
@@ -27,8 +28,8 @@ const getDisplayDate = (dateISO) => {
 const EVENT_CATEGORY_VISUALS = {
   all: { accentRgb: '245, 241, 232', Icon: LayoutGrid },
   bookings: { accentRgb: '251, 220, 138', Icon: CalendarDays },
-  matches: { accentRgb: '216, 243, 74', Icon: Swords },
-  trainings: { accentRgb: '245, 241, 232', Icon: Dumbbell },
+  matches: { accentRgb: '216, 243, 74', Icon: CrossedPadelRacketsIcon },
+  trainings: { accentRgb: '245, 241, 232', Icon: PadelTrainingIcon },
 };
 
 function CountdownBadge({ matchDateISO, matchTime }) {
@@ -190,7 +191,7 @@ export default function Home({
               Брони, матчи и тренировки в одном месте
             </p>
           </div>
-          <Dumbbell size={20} strokeWidth={1.8} className="mb-1 text-accent-light/70" />
+          <PadelTrainingIcon size={20} strokeWidth={1.8} className="mb-1 text-accent-light/70" aria-hidden="true" />
         </div>
 
         <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
@@ -238,7 +239,7 @@ export default function Home({
 
       {onOpenTrainings && (
         <PadelButton variant="ghost" size="md" className="my-6 min-h-[48px] w-full motion-reduce:transform-none motion-reduce:transition-none" onClick={onOpenTrainings}>
-          <Dumbbell size={18} aria-hidden="true" />
+          <PadelTrainingIcon size={18} aria-hidden="true" />
           Групповые тренировки
         </PadelButton>
       )}
