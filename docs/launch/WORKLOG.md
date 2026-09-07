@@ -10657,3 +10657,31 @@
   d1dd066f0149360efad2ac02a5455d90ddcb0196. Containers changed here: none;
   no server health/smoke/log run. Backend, DB, env, dependencies, payment fields,
   providers, production and SSH/authorized_keys were not touched.
+
+### 2026-09-07 — Booking and Matches icons integrated and deployed to TEST
+
+- Exact 3320a22a60ce046b925938d34ad0385d282017d3 was fast-forward pushed to
+  remote main from 59f28eafed3593804217632c7f3d7717aaa4803c. Selectel TEST checkout is
+  clean at the same commit. Frontend-only build/recreate ran from
+  2026-09-07T19:44:31.475748299Z to 2026-09-07T19:44:48.089623098Z.
+- Deployed frontend container:
+  f53699859d184b4e8b1e24fb72379ac183421c00535a52dfc31c96bf7c5a6629;
+  image sha256:61ddb927e841285f369a41fa2ecd958402f26aec995cc72af694b982bc0958b9.
+  The other nine container IDs are unchanged. All ten containers are running,
+  nine healthchecks are healthy and restart sum is zero. Backend remains exact
+  d1dd066f0149360efad2ac02a5455d90ddcb0196.
+- Public `/`, `/healthz` and `/api/v1/health` returned HTTP 200;
+  `/api/v1/metrics` returned HTTP 404. Published JS
+  `/assets/index-BKERxSW5.js` has SHA256
+  8ee549e20cc6442ba491eb105aaaead3af1d1cd129efcd61ec4d587ffa40c67a,
+  all six required icon/content markers and zero Supabase markers. Logs since
+  frontend start: frontend 20, nginx 24, backend 7; errors/fatal/exception/panic
+  zero and HTTP 5xx zero.
+- Served TEST bundle WebKit icon smoke passed 2/2 at portrait 375px and landscape
+  667px with intercepted synthetic API responses and no server writes. It verified
+  the published 21/14/11px icons and found no clipping or overflow. Two earlier
+  local harness invocations stopped before assertions because Playwright resolved
+  twice; the harness was corrected and this had no runtime effect.
+- Environment, backend, DB, nginx, providers, payment fields and production were
+  unchanged. Temporary SSH key was retained; matching `authorized_keys` entries:
+  two. This closeout is docs-only and requires no additional deployment.
