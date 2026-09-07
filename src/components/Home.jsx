@@ -191,9 +191,6 @@ export default function Home({
               Брони, матчи и тренировки в одном месте
             </p>
           </div>
-          <span className="relative mb-1 h-5 w-5 shrink-0" aria-hidden="true">
-            <PadelTrainingIcon size={32} strokeWidth={1.4} className="absolute bottom-0 right-0 text-accent-light/70" />
-          </span>
         </div>
 
         <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>

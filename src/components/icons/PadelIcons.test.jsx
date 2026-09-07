@@ -38,7 +38,7 @@ describe('padel sport icons', () => {
     expect(container.querySelector('image')).toBeNull();
   });
 
-  it('uses the matching icon in Home filters, event badges, header and group CTA', () => {
+  it('keeps filter, badge and CTA icons without a decorative events heading icon', () => {
     const onOpenTrainings = vi.fn();
     const { container } = render(<Home onOpenTrainings={onOpenTrainings} upcomingMatches={[
       { id: 'match', type: 'match', dateISO: '2035-10-05', time: '09:00' },
@@ -49,9 +49,12 @@ describe('padel sport icons', () => {
     expect(container.querySelectorAll('.home-event-kind-badge [data-padel-icon="trainings"]')).toHaveLength(1);
     expect(container.querySelectorAll('.home-event-kind-badge .lucide-swords')).toHaveLength(1);
     expect(container.querySelectorAll('.lucide-swords')).toHaveLength(2);
-    expect(container.querySelectorAll('[data-padel-icon="trainings"]')).toHaveLength(4);
+    expect(container.querySelectorAll('[data-padel-icon="trainings"]')).toHaveLength(3);
+    const eventsHeading = screen.getByRole('heading', { name: 'Мои события' });
+    expect(eventsHeading.parentElement.parentElement.querySelector('svg')).toBeNull();
     const group = screen.getByRole('button', { name: 'Групповые тренировки' });
     expect(group.querySelector('[data-padel-icon="trainings"]')).not.toBeNull();
+    expect(group.querySelector('svg').getAttribute('width')).toBe('32');
     fireEvent.click(group);
     expect(onOpenTrainings).toHaveBeenCalledOnce();
   });
