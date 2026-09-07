@@ -54,7 +54,7 @@ for (const viewport of [{ width: 375, height: 667 }, { width: 667, height: 375 }
     await expect(tabs).toHaveCount(5);
     const matchTab = page.getByRole('button', { name: 'Матчи', exact: true });
     const matchIcon = matchTab.locator('svg');
-    await expect(matchIcon).toHaveClass(/lucide-swords/u);
+    await expect(matchIcon).toHaveAttribute('data-padel-icon', 'matches');
     await expect(matchIcon).toHaveAttribute('stroke', 'currentColor');
     await expect(matchIcon).toHaveAttribute('stroke-width', '1.9');
     const inactiveColor = await matchIcon.evaluate((svg) => getComputedStyle(svg).color);
@@ -75,7 +75,8 @@ for (const viewport of [{ width: 375, height: 667 }, { width: 667, height: 375 }
     await page.getByRole('button', { name: 'Все 0', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Групповые тренировки', exact: true }).locator('svg')).toHaveAttribute('data-padel-icon', 'trainings');
     await expect(page.locator('.lucide-dumbbell')).toHaveCount(0);
-    await expect(page.locator('[data-padel-icon="matches"]')).toHaveCount(0);
+    await expect(page.locator('.lucide-swords')).toHaveCount(0);
+    await expect(page.locator('[data-padel-icon="matches"]')).toHaveCount(2);
     await expect(page.getByText('ТРЦ «Отрада»')).toHaveCount(0);
     await expect(page.getByText('Пятницкое ш.', { exact: false })).toHaveCount(0);
     await expect(page.getByTestId('home-player-level-value')).toHaveCount(0);

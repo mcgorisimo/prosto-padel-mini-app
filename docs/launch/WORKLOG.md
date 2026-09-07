@@ -10632,3 +10632,28 @@
   Home E2E. Deployment impact frontend-only; integration and TEST rollout
   remain next until exact-SHA health/asset/route/log gates are complete.
 - Independent exact-diff code/UI review CLEAR: P0=0/P1=0; both fresh screenshots confirm only the heading decoration is removed.
+
+### 2026-09-07 — Owner-approved Booking and Matches icons, pre-integration checkpoint
+
+- Started from clean exact origin/main 59f28eafed3593804217632c7f3d7717aaa4803c.
+  Owner approved both final icons. Booking uses a white calendar, darker green
+  filled ball #78B83F and white seams. Matches uses two exactly mirrored padel
+  rackets: each head outline, symmetric 10-hole grid, neck and hollow grip share
+  one longitudinal axis; the handles cross low and a seamed ball is centered above.
+  BottomNav and Home filter/event badge use the shared icons at 21/14/11px.
+  The removed decorative SVG beside `Мои события` remains absent; training icon,
+  labels, actions, five-tab navigation and layout are unchanged.
+- Focused unit 9/9 and focused Home/icon E2E 6/6 PASS. Final full root E2E with
+  four workers: 124 PASS and one existing intentional skip. The first full run
+  exposed only two obsolete Lucide Swords assertions; their fixture expectations
+  were updated to the approved custom Matches marker, then focused/full runs passed.
+  Build PASS (1628 modules); changed-file ESLint and git diff --check PASS.
+  Independent final exact-diff and portrait/landscape 21/14/11px review:
+  CLEAR P0=0/P1=0; axis, mirror symmetry, clipping and overflow checks passed.
+- Frontend-only runtime impact. This feature branch checkpoint does not push,
+  integrate or deploy; coordinator owns the authorized main integration and
+  controlled TEST rollout. Last coordinator-verified TEST frontend remains exact
+  59f28eafed3593804217632c7f3d7717aaa4803c and backend remains exact
+  d1dd066f0149360efad2ac02a5455d90ddcb0196. Containers changed here: none;
+  no server health/smoke/log run. Backend, DB, env, dependencies, payment fields,
+  providers, production and SSH/authorized_keys were not touched.

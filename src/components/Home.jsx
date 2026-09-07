@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { CalendarDays, LayoutGrid, Swords } from 'lucide-react';
-import { PadelTrainingIcon } from './icons/PadelIcons';
+import { LayoutGrid } from 'lucide-react';
+import { CrossedPadelRacketsIcon, PadelBookingIcon, PadelTrainingIcon } from './icons/PadelIcons';
 import PadelButton from './ui/PadelButton';
 import PadelCard from './ui/PadelCard';
 import { CLUB } from '../lib/clubConfig';
@@ -27,8 +27,8 @@ const getDisplayDate = (dateISO) => {
 
 const EVENT_CATEGORY_VISUALS = {
   all: { accentRgb: '245, 241, 232', Icon: LayoutGrid },
-  bookings: { accentRgb: '251, 220, 138', Icon: CalendarDays },
-  matches: { accentRgb: '216, 243, 74', Icon: Swords },
+  bookings: { accentRgb: '251, 220, 138', Icon: PadelBookingIcon },
+  matches: { accentRgb: '216, 243, 74', Icon: CrossedPadelRacketsIcon },
   trainings: { accentRgb: '245, 241, 232', Icon: PadelTrainingIcon },
 };
 

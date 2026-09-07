@@ -1,32 +1,11 @@
-import { Home, Swords, Trophy, UserRound } from 'lucide-react';
-
-function CourtIcon({ size = 21, strokeWidth = 2 }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={strokeWidth}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <rect x="4" y="3" width="16" height="18" rx="2.5" />
-      <path d="M4 12h16" />
-      <path d="M12 3v18" />
-      <path d="M8 7h8" />
-      <path d="M8 17h8" />
-    </svg>
-  );
-}
+import { Home, Trophy, UserRound } from 'lucide-react';
+import { CrossedPadelRacketsIcon, PadelBookingIcon } from './icons/PadelIcons';
 
 export default function BottomNav({ active, setActive, profileBadgeCount = 0 }) {
   const tabs = [
     { id: 'home', label: 'Главная', Icon: Home },
-    { id: 'matches', label: 'Матчи', Icon: Swords },
-    { id: 'booking', label: 'Бронь', Icon: CourtIcon, primary: true },
+    { id: 'matches', label: 'Матчи', Icon: CrossedPadelRacketsIcon },
+    { id: 'booking', label: 'Бронь', Icon: PadelBookingIcon, primary: true },
     { id: 'leaderboard', label: 'Рейтинг', Icon: Trophy },
     { id: 'profile', label: 'Профиль', Icon: UserRound },
   ];

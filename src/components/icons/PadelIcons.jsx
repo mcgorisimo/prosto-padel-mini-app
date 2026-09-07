@@ -47,3 +47,67 @@ export function PadelTrainingIcon({ size = 24, strokeWidth = 2, ...props }) {
     </PadelIcon>
   );
 }
+
+export function CrossedPadelRacketsIcon({ strokeWidth = 2, ...props }) {
+  const racket = (
+    <g data-padel-part="racket">
+      <g data-padel-part="head">
+        <path
+          data-padel-part="head-outline"
+          d="M0-5C-3.2-5-5-2.9-4.8.1c.15 2.8 1.7 4.8 3.9 5.8l.9.4.9-.4c2.2-1 3.75-3 3.9-5.8C5-2.9 3.2-5 0-5Z"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={strokeWidth * 0.65}
+        />
+        <g fill="currentColor" stroke="none">
+          <circle cx="-1.4" cy="-3" r=".52" />
+          <circle cx="1.4" cy="-3" r=".52" />
+          <circle cx="-2.4" cy="-1" r=".52" />
+          <circle cy="-1" r=".52" />
+          <circle cx="2.4" cy="-1" r=".52" />
+          <circle cx="-2.4" cy="1.2" r=".52" />
+          <circle cy="1.2" r=".52" />
+          <circle cx="2.4" cy="1.2" r=".52" />
+          <circle cx="-1.2" cy="3.25" r=".52" />
+          <circle cx="1.2" cy="3.25" r=".52" />
+        </g>
+      </g>
+      <g data-padel-part="grip" stroke="none">
+        <path d="M-1.45 5.2h2.9v8.2q0 .8-.8.8h-1.3q-.8 0-.8-.8Z" fill="currentColor" />
+        <path d="M-.5 6.6h1v6.55q0 .25-.25.25h-.5q-.25 0-.25-.25Z" fill="#071F16" />
+      </g>
+    </g>
+  );
+
+  return (
+    <PadelIcon {...props} strokeWidth={strokeWidth} data-padel-icon="matches">
+      <g data-padel-part="ball">
+        <circle cx="12" cy="3.25" r="2.55" fill="currentColor" stroke="none" />
+        <g fill="none" stroke="#071F16" strokeWidth={strokeWidth * 0.34}>
+          <path d="M10.5 1.2c1.25 1 1.25 3.1 0 4.1" />
+          <path d="M13.5 1.2c-1.25 1-1.25 3.1 0 4.1" />
+        </g>
+      </g>
+      <g transform="translate(5.95 11.8) rotate(-36)">{racket}</g>
+      <g transform="translate(18.05 11.8) rotate(36)">{racket}</g>
+    </PadelIcon>
+  );
+}
+
+export function PadelBookingIcon({ strokeWidth = 2, ...props }) {
+  return (
+    <PadelIcon {...props} strokeWidth={strokeWidth} data-padel-icon="bookings">
+      <g data-padel-part="calendar" stroke="#F5F1E8">
+        <path d="M5.2 4.5h13.6A2.2 2.2 0 0 1 21 6.7v12.1a2.2 2.2 0 0 1-2.2 2.2H5.2A2.2 2.2 0 0 1 3 18.8V6.7a2.2 2.2 0 0 1 2.2-2.2Z" />
+        <path d="M3 9h18M7 2.5v4M17 2.5v4" />
+      </g>
+      <g data-padel-part="ball">
+        <circle cx="12" cy="15.3" r="4.35" fill="#78B83F" stroke="#78B83F" />
+        <g fill="none" stroke="#F5F1E8" strokeWidth={strokeWidth * 0.78}>
+          <path d="M9.4 11.8c2.1 1.8 2.1 5.2 0 7" />
+          <path d="M14.6 11.8c-2.1 1.8-2.1 5.2 0 7" />
+        </g>
+      </g>
+    </PadelIcon>
+  );
+}
