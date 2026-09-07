@@ -10637,3 +10637,35 @@
   new-change authorization came through a coordinator transcript. Direct
   in-task owner approval is required; push/main/TEST rollout not executed.
   TEST stays healthy at04efbb8; no key/backend/DB/env/provider changes.
+
+### 2026-09-07 — Home heading decoration removal: TEST deployment closeout
+
+- Coordinator reports completing the owner-authorized integration and rollout:
+  remote main and clean Selectel TEST checkout exact
+  59f28eafed3593804217632c7f3d7717aaa4803c (fast-forward from 04efbb8).
+  Remote main SHA independently confirmed by this task using git ls-remote.
+  The server results below are the coordinator's deployment handoff.
+- Only frontend rebuilt/recreated: container
+  bf423fe3f954151ff6b4e4edcc79816159b30fb47cd4dcbcad3df9d034701b04.
+  Public JS /assets/index-CCJtBCaC.js SHA256
+  b80684aaefc63c49bde839f2edb9ecedae4711d4df480938a4a1da2ccb2939e3.
+  Required bundle markers present; Supabase markers absent. All ten services
+  running, nine healthy, restart sum zero; all nine non-frontend container IDs
+  unchanged. Backend remains d1dd066f0149360efad2ac02a5455d90ddcb0196.
+- Public /, /healthz, /api/v1/health HTTP200; /api/v1/metrics HTTP404.
+  Bounded logs since frontend start: frontend22/nginx110/backend51 lines;
+  errors/fatal/exception/panic and HTTP5xx matches zero. Served TEST WebKit
+  smoke portrait375x667 and landscape667x375:2/2 PASS with synthetic API
+  interception and no server writes. Owner-device manual TMA smoke is not
+  claimed: reopen Home and check the heading decoration is absent while
+  training filter/CTA and Matches Swords remain.
+- Coordinator reports an initial preflight stopped before container changes
+  because APP_RELEASE was set late. Verification-script stdin and asset-regex/
+  CRLF issues were corrected; subsequent checks passed. Environment, backend,
+  DB, nginx and production unchanged. Temporary SSH key retained; root
+  authorized_keys retains exactly its two matching entries.
+- deployment=applied_health_verified for TEST frontend exact59f28ea.
+  This closeout is docs-only: deployment=not_needed; it is saved on the
+  feature branch without changing main/runtime. Prior approval-block entries
+  describe this task's earlier attempts and are superseded by the completed
+  coordinator rollout above.
