@@ -5,6 +5,7 @@ import MatchCreationScreen from './components/MatchCreationScreen';
 import MatchDetailsScreen from './components/MatchDetailsScreen';
 import MatchFeed from './components/MatchFeed';
 import Home from './components/Home';
+import MembershipScreen from './components/MembershipScreen';
 import TrainingScreen from './components/TrainingScreen';
 import EditProfileScreen from './components/EditProfileScreen';
 import BookingScreen from './components/BookingScreen';
@@ -150,6 +151,8 @@ export default function App({
   backendProfileStatus = backendProfile ? 'ready' : 'inactive',
   backendMatchActions = null,
   backendBookingAvailabilityActions = null,
+  readMembershipCatalog = null,
+  readOwnMemberships = null,
   readTrainingSchedule = null,
   onBackendProfileRefresh = null,
   onBackendProfileSave = null,
@@ -1711,6 +1714,16 @@ export default function App({
     return <TrainingScreen readSchedule={readTrainingSchedule} onBack={() => setScreen(null)} />;
   }
 
+  if (screen === 'memberships') {
+    return (
+      <MembershipScreen
+        readMemberships={readOwnMemberships}
+        readCatalog={readMembershipCatalog}
+        onBack={() => setScreen(null)}
+      />
+    );
+  }
+
   if (screen === 'create-match') {
     return (
       <MatchCreationScreen
@@ -1902,6 +1915,7 @@ export default function App({
         {activeTab === 'home' && (
           <Home
             upcomingMatches={homeUpcomingEvents}
+            onOpenMemberships={() => setScreen('memberships')}
             onOpenTrainings={() => setScreen('trainings')}
             completedMatches={completedMatches}
             onViewDetails={openMatchDetails}

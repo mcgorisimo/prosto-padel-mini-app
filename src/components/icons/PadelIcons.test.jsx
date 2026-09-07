@@ -61,9 +61,10 @@ describe('padel sport icons', () => {
     expect(container.querySelector('image')).toBeNull();
   });
 
-  it('keeps filter, badge and CTA icons without a decorative events heading icon', () => {
+  it('keeps filter and badge icons while Home feature CTAs stay text-only', () => {
     const onOpenTrainings = vi.fn();
-    const { container } = render(<Home onOpenTrainings={onOpenTrainings} upcomingMatches={[
+    const onOpenMemberships = vi.fn();
+    const { container } = render(<Home onOpenTrainings={onOpenTrainings} onOpenMemberships={onOpenMemberships} upcomingMatches={[
       { id: 'match', type: 'match', dateISO: '2035-10-05', time: '09:00' },
       { id: 'booking', type: 'private', dateISO: '2035-10-05', time: '09:30' },
       { id: 'training', type: 'private', isTraining: true, dateISO: '2035-10-05', time: '10:00' },
@@ -74,14 +75,17 @@ describe('padel sport icons', () => {
     expect(container.querySelectorAll('.home-event-kind-badge [data-padel-icon="bookings"]')).toHaveLength(1);
     expect(container.querySelectorAll('.home-event-kind-badge [data-padel-icon="matches"]')).toHaveLength(1);
     expect(container.querySelectorAll('.home-event-kind-badge [data-padel-icon="trainings"]')).toHaveLength(1);
-    expect(container.querySelectorAll('[data-padel-icon="trainings"]')).toHaveLength(3);
+    expect(container.querySelectorAll('[data-padel-icon="trainings"]')).toHaveLength(2);
     const eventsHeading = screen.getByRole('heading', { name: 'Мои события' });
     expect(eventsHeading.parentElement.parentElement.querySelector('svg')).toBeNull();
     const group = screen.getByRole('button', { name: 'Групповые тренировки' });
-    expect(group.querySelector('[data-padel-icon="trainings"]')).not.toBeNull();
-    expect(group.querySelector('svg').getAttribute('width')).toBe('32');
+    const memberships = screen.getByRole('button', { name: 'Абонементы' });
+    expect(group.querySelector('svg')).toBeNull();
+    expect(memberships.querySelector('svg')).toBeNull();
     fireEvent.click(group);
+    fireEvent.click(memberships);
     expect(onOpenTrainings).toHaveBeenCalledOnce();
+    expect(onOpenMemberships).toHaveBeenCalledOnce();
   });
 
   it('keeps all five BottomNav labels, actions and active stroke widths', () => {

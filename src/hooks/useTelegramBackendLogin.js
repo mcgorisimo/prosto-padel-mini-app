@@ -5,6 +5,11 @@ import {
   isBackendOwnProfilePatch,
 } from '../lib/backendSessionClient';
 import { bookingAvailabilityClient } from '../lib/bookingAvailabilityClient';
+import {
+  membershipReadClient,
+  readMembershipCatalogResponse,
+  readOwnMembershipsResponse,
+} from '../lib/membershipReadClient';
 import { trainingScheduleClient, isUnconfiguredTrainingSchedule } from '../lib/trainingScheduleClient';
 import {
   playerInitialLevelReassessmentClient,
@@ -76,6 +81,7 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
   const profiles = dependencies.profiles ?? sessions;
   const matches = dependencies.matches ?? sessions;
   const bookings = dependencies.bookings ?? bookingAvailabilityClient;
+  const memberships = dependencies.memberships ?? membershipReadClient;
   const trainings = dependencies.trainings ?? trainingScheduleClient;
   const onboarding =
     dependencies.onboarding ?? playerOnboardingClient;
@@ -1265,6 +1271,20 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
     );
   }
 
+  function readOwnMemberships() {
+    return runMatchOperation(
+      (credential, signal) => memberships.readMine(credential, { signal }),
+      (result) => readOwnMembershipsResponse(result) !== null,
+    );
+  }
+
+  function readMembershipCatalog() {
+    return runMatchOperation(
+      (credential, signal) => memberships.readCatalog(credential, { signal }),
+      (result) => readMembershipCatalogResponse(result) !== null,
+    );
+  }
+
   function listBookingCourts(serviceId) {
     return runMatchOperation(
       (credential, signal) =>
@@ -1905,6 +1925,8 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
     loadOwnInitialLevelReassessment,
     completeOwnInitialLevelReassessment,
     listBookingServices,
+    readMembershipCatalog,
+    readOwnMemberships,
     readTrainingSchedule,
     listBookingCourts,
     listBookingDates,
@@ -2105,6 +2127,16 @@ export function useTelegramBackendLogin() {
   const readTrainingSchedule = useCallback(() => {
     if (!FEATURE_ENABLED) return Promise.resolve(Object.freeze({ outcome: 'rejected', reason: 'not_authenticated' }));
     return telegramBackendLoginLifecycle.readTrainingSchedule();
+  }, []);
+
+  const readOwnMemberships = useCallback(() => {
+    if (!FEATURE_ENABLED) return Promise.resolve(Object.freeze({ outcome: 'rejected', reason: 'not_authenticated' }));
+    return telegramBackendLoginLifecycle.readOwnMemberships();
+  }, []);
+
+  const readMembershipCatalog = useCallback(() => {
+    if (!FEATURE_ENABLED) return Promise.resolve(Object.freeze({ outcome: 'rejected', reason: 'not_authenticated' }));
+    return telegramBackendLoginLifecycle.readMembershipCatalog();
   }, []);
 
   const listBookingCourts = useCallback((serviceId) => {
@@ -2598,6 +2630,8 @@ export function useTelegramBackendLogin() {
     loadOwnInitialLevelReassessment,
     completeOwnInitialLevelReassessment,
     listBookingServices,
+    readMembershipCatalog,
+    readOwnMemberships,
     readTrainingSchedule,
     listBookingCourts,
     listBookingDates,

@@ -755,6 +755,8 @@ export default function AuthGate() {
         backendProfileStatus={effectiveBackendProfileStatus}
         backendMatchActions={backendMatchActions}
         backendBookingAvailabilityActions={backendBookingAvailabilityActions}
+        readMembershipCatalog={telegramBackendLogin.readMembershipCatalog}
+        readOwnMemberships={telegramBackendLogin.readOwnMemberships}
         readTrainingSchedule={telegramBackendLogin.readTrainingSchedule}
         onBackendProfileRefresh={handleBackendProfileRefresh}
         onBackendProfileSave={handleBackendProfileSave}

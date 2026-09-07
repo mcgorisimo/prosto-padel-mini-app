@@ -28,6 +28,8 @@
   --deep:           #050F0B;
   --accent:         #FF6F61;
   --accent-light:   #D8F34A;
+  --signal-blue:    #005387;
+  --membership-teal:#2E5656;
   --text-primary:   #071F16;
   --text-secondary: rgba(7, 31, 22, 0.62);
   --border:         rgba(7, 31, 22, 0.10);
@@ -408,6 +410,36 @@ textarea {
 
 .match-card.result-win::before  { background: var(--win); }
 .match-card.result-loss::before { background: var(--loss); }
+
+/* Compact primary actions on Home. */
+.home-action-cta {
+  min-height: 64px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  line-height: 1.25;
+}
+
+.home-training-cta {
+  border-color: var(--signal-blue);
+  background: var(--signal-blue);
+  color: #fff;
+}
+
+.home-training-cta:hover {
+  background: var(--signal-blue);
+  filter: brightness(1.08);
+}
+
+.home-training-cta:active {
+  background: var(--signal-blue);
+  filter: brightness(0.94);
+}
+
+.home-membership-cta {
+  border-color: rgba(245, 241, 232, 0.18);
+  background: var(--membership-teal);
+  color: #fff;
+}
 
 /* Home event categories: muted semantic accents from the existing club palette. */
 .home-event-card {

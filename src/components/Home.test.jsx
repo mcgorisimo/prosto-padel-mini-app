@@ -11,9 +11,10 @@ const match = { id: 'match:second', type: 'match', time: '10:00', dateISO: '2035
 describe('Home event priority', () => {
   it('shows the nearest event once, keeps filters and navigation, without the removed hero sections', () => {
     const onOpenBooking = vi.fn();
+    const onOpenMemberships = vi.fn();
     const onViewDetails = vi.fn();
     const onOpenTrainings = vi.fn();
-    const { container } = render(<Home upcomingMatches={[match, booking]} onOpenBooking={onOpenBooking} onViewDetails={onViewDetails} onOpenTrainings={onOpenTrainings} user={{ firstName: 'Игрок', numericRating: 5 }} />);
+    const { container } = render(<Home upcomingMatches={[match, booking]} onOpenBooking={onOpenBooking} onOpenMemberships={onOpenMemberships} onViewDetails={onViewDetails} onOpenTrainings={onOpenTrainings} user={{ firstName: 'Игрок', numericRating: 5 }} />);
     expect(screen.getAllByText('Первый корт')).toHaveLength(1);
     expect([...container.querySelectorAll('.home-event-card')].map((card) => card.textContent)).toEqual([
       expect.stringContaining('Первый корт'), expect.stringContaining('Второй корт'),
@@ -36,6 +37,11 @@ describe('Home event priority', () => {
     expect(onOpenTrainings).not.toHaveBeenCalled();
     fireEvent.click(group);
     expect(onOpenTrainings).toHaveBeenCalledTimes(1);
+    const memberships = screen.getByRole('button', { name: 'Абонементы', exact: true });
+    expect(group.querySelector('svg')).toBeNull();
+    expect(memberships.querySelector('svg')).toBeNull();
+    fireEvent.click(memberships);
+    expect(onOpenMemberships).toHaveBeenCalledTimes(1);
   });
 
   it('keeps a working choose-time action for empty all/bookings, but does not pretend to offer training signup', () => {

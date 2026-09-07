@@ -125,6 +125,7 @@ export default function Home({
   upcomingMatches = [],
   onBookCourt,
   onOpenBooking,
+  onOpenMemberships,
   onOpenTrainings,
   onViewDetails,
   showToast,
@@ -236,13 +237,15 @@ export default function Home({
         )}
       </section>
 
-      {onOpenTrainings && (
-        <PadelButton variant="ghost" size="md" className="my-6 min-h-[48px] w-full motion-reduce:transform-none motion-reduce:transition-none" onClick={onOpenTrainings}>
-          <span className="relative h-[18px] w-[18px] shrink-0" aria-hidden="true">
-            <PadelTrainingIcon size={32} strokeWidth={1.4} className="absolute right-0 top-1/2 -translate-y-1/2" />
-          </span>
-          Групповые тренировки
-        </PadelButton>
+      {onOpenTrainings && onOpenMemberships && (
+        <div className="my-4 grid grid-cols-2 gap-2">
+          <PadelButton variant="ghost" size="md" className="home-action-cta home-training-cta w-full flex-col text-center motion-reduce:transform-none motion-reduce:transition-none" onClick={onOpenTrainings}>
+            <span>Групповые тренировки</span>
+          </PadelButton>
+          <PadelButton variant="dark" size="md" className="home-action-cta home-membership-cta w-full flex-col text-center motion-reduce:transform-none motion-reduce:transition-none" onClick={onOpenMemberships}>
+            <span>Абонементы</span>
+          </PadelButton>
+        </div>
       )}
 
 

@@ -73,7 +73,7 @@ for (const viewport of [{ width: 375, height: 667 }, { width: 667, height: 375 }
     await expect(trainingFilter).toHaveAttribute('aria-pressed', 'true');
     expect(await trainingFilter.locator('svg').evaluate((svg) => getComputedStyle(svg).stroke === getComputedStyle(svg).color)).toBe(true);
     await page.getByRole('button', { name: 'Все 0', exact: true }).click();
-    await expect(page.getByRole('button', { name: 'Групповые тренировки', exact: true }).locator('svg')).toHaveAttribute('data-padel-icon', 'trainings');
+    await expect(page.getByRole('button', { name: 'Групповые тренировки', exact: true }).locator('svg')).toHaveCount(0);
     await expect(page.locator('.lucide-dumbbell')).toHaveCount(0);
     await expect(page.locator('.lucide-swords')).toHaveCount(0);
     await expect(page.locator('[data-padel-icon="matches"]')).toHaveCount(2);
