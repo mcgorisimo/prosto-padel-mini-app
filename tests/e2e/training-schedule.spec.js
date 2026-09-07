@@ -3,8 +3,13 @@ const { test, expect } = require('@playwright/test');
 const CREDENTIAL = 'A'.repeat(43);
 const ACCOUNT = '11111111-1111-4111-8111-111111111111';
 const CLOSED = { outcome: 'not_configured', sessions: [] };
+const LOADED = { outcome: 'loaded', lastUpdatedAt: '2026-09-07T21:15:00.000Z', sessions: [{
+  id: '11111111-1111-5111-8111-111111111111', title: 'Групповая тренировка Новички D/D+',
+  startsAt: '2026-09-08T07:00:00.000Z', durationSeconds: 3600, courtName: 'Корт №4',
+  capacity: 4, occupied: 0, remaining: 4,
+}] };
 
-async function prepare(page, schedule = () => ({ status: 200, body: CLOSED })) {
+async function prepare(page, schedule = () => ({ status: 200, body: LOADED })) {
   const requests = [];
   const providerRequests = [];
   page.on('request', (request) => {
@@ -46,7 +51,7 @@ async function prepare(page, schedule = () => ({ status: 200, body: CLOSED })) {
 }
 
 for (const viewport of [{ width: 375, height: 667 }, { width: 667, height: 375 }]) {
-  test(`real Home opens closed group schedule and returns with five tabs ${viewport.width}x${viewport.height}`, async ({ page }, testInfo) => {
+  test(`real Home opens fresh read-only group schedule and returns with five tabs ${viewport.width}x${viewport.height}`, async ({ page }, testInfo) => {
     await page.setViewportSize(viewport);
     await page.emulateMedia({ reducedMotion: 'reduce' });
     const { requests, providerRequests } = await prepare(page);
@@ -91,7 +96,13 @@ for (const viewport of [{ width: 375, height: 667 }, { width: 667, height: 375 }
     expect(requests.filter((r) => r.path === '/api/v1/trainings/schedule')).toHaveLength(0);
     await page.getByRole('button', { name: 'Групповые тренировки', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Групповые тренировки', exact: true })).toBeVisible();
-    await expect(page.getByText('Расписание групповых занятий скоро появится')).toBeVisible();
+    await expect(page.getByText('Новички D/D+', { exact: true })).toBeVisible();
+    await expect(page.getByText('Групповая тренировка Новички D/D+', { exact: true })).toHaveCount(0);
+    await expect(page.getByText('10:00–11:00', { exact: true })).toBeVisible();
+    await expect(page.getByText('Корт №4', { exact: true })).toBeVisible();
+    await expect(page.getByText('Тренер уточняется', { exact: true })).toBeVisible();
+    await expect(page.getByText('Осталось 4 из 4', { exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: /запис/iu })).toHaveCount(0);
     await page.screenshot({ path: testInfo.outputPath('training.png'), fullPage: true });
     await expect(tabs).toHaveCount(0);
     await expect(page.getByRole('button', { name: /записаться|оплатить|абонемент/iu })).toHaveCount(0);
@@ -113,6 +124,22 @@ for (const viewport of [{ width: 375, height: 667 }, { width: 667, height: 375 }
   });
 }
 
+test('stale schedule is removed until a foreground refresh confirms fresh rows', async ({ page }) => {
+  let attempts = 0;
+  await prepare(page, () => {
+    attempts += 1;
+    return { status: 200, body: attempts === 1
+      ? { outcome: 'stale', sessions: [], lastUpdatedAt: '2026-09-07T21:10:00.000Z' }
+      : LOADED };
+  });
+  await page.getByRole('button', { name: 'Групповые тренировки', exact: true }).click();
+  await expect(page.getByText('Расписание нужно обновить', { exact: true })).toBeVisible();
+  await expect(page.getByText('Новички D/D+', { exact: true })).toHaveCount(0);
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await expect(page.getByText('Новички D/D+', { exact: true })).toBeVisible();
+  expect(attempts).toBe(2);
+});
+
 test('schedule errors and unapproved rows stay separate from not_configured, with a working retry', async ({ page }) => {
   let attempts = 0;
   await prepare(page, () => {
@@ -122,7 +149,7 @@ test('schedule errors and unapproved rows stay separate from not_configured, wit
         : { status: 200, body: CLOSED };
   });
   await page.getByRole('button', { name: 'Групповые тренировки', exact: true }).click();
-  await expect(page.getByRole('alert')).toContainText('Не удалось загрузить расписание');
+  await expect(page.getByRole('alert')).toContainText('Не удалось прочитать расписание');
   await expect(page.getByText('Расписание групповых занятий скоро появится')).toHaveCount(0);
   await page.getByRole('button', { name: 'Повторить', exact: true }).click();
   await expect.poll(() => attempts).toBe(2);

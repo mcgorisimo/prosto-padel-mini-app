@@ -225,6 +225,7 @@ import { YclientsNotificationReconciliationScheduler } from './yclients/yclients
     YclientsAvailabilityService,
     YclientsBookingService,
     YclientsAdminReadClient,
+    YclientsConservativeRequestLimiter,
   ],
 })
 export class IntegrationsModule {}

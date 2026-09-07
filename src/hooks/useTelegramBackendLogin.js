@@ -10,7 +10,7 @@ import {
   readMembershipCatalogResponse,
   readOwnMembershipsResponse,
 } from '../lib/membershipReadClient';
-import { trainingScheduleClient, isUnconfiguredTrainingSchedule } from '../lib/trainingScheduleClient';
+import { trainingScheduleClient, isTrainingScheduleResponse } from '../lib/trainingScheduleClient';
 import {
   playerInitialLevelReassessmentClient,
   readPlayerInitialLevelReassessment,
@@ -1267,7 +1267,7 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
   function readTrainingSchedule() {
     return runMatchOperation(
       (credential, signal) => trainings.read(credential, { signal }),
-      isUnconfiguredTrainingSchedule,
+      isTrainingScheduleResponse,
     );
   }
 
