@@ -8,6 +8,10 @@ import {
   TELEGRAM_SESSION_TTL_SECONDS,
 } from './telegram-login.config';
 import { TELEGRAM_NOTIFICATION_CONFIG_KEYS } from './telegram-notification.config';
+import {
+  TELEGRAM_BOT_WEBHOOK_CONFIG_KEYS,
+  TELEGRAM_BOT_WEBHOOK_SECRET_PATTERN,
+} from './telegram-bot-webhook.config';
 import { MATCH_WAITLIST_OFFER_CONFIG_KEYS } from './match-waitlist-offer.config';
 import {
   PLAYER_PROFILE_PHOTO_CONFIG_KEYS,
@@ -304,6 +308,39 @@ export const envValidationSchema = Joi.object({
     then: telegramBotToken.required(),
     otherwise: Joi.string().allow('').default(''),
   }),
+  [TELEGRAM_BOT_WEBHOOK_CONFIG_KEYS.enabled]: Joi.boolean()
+    .truthy('true')
+    .falsy('false')
+    .default(false)
+    .when('TELEGRAM_AUTH_ENABLED', {
+      is: false,
+      then: Joi.valid(false).messages({
+        'any.only':
+          'TELEGRAM_BOT_WEBHOOK_ENABLED requires TELEGRAM_AUTH_ENABLED to be enabled',
+      }),
+    }),
+  [TELEGRAM_BOT_WEBHOOK_CONFIG_KEYS.secret]: Joi.when(
+    TELEGRAM_BOT_WEBHOOK_CONFIG_KEYS.enabled,
+    {
+      is: true,
+      then: Joi.string()
+        .pattern(TELEGRAM_BOT_WEBHOOK_SECRET_PATTERN)
+        .required(),
+      otherwise: Joi.string().allow('').default(''),
+    },
+  ),
+  [TELEGRAM_BOT_WEBHOOK_CONFIG_KEYS.allowedAccountId]: Joi.when(
+    TELEGRAM_BOT_WEBHOOK_CONFIG_KEYS.enabled,
+    {
+      is: true,
+      then: Joi.string()
+        .pattern(
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
+        )
+        .required(),
+      otherwise: Joi.string().allow('').default(''),
+    },
+  ),
   TELEGRAM_INIT_DATA_MAX_AGE_SECONDS: Joi.when('TELEGRAM_AUTH_ENABLED', {
     is: true,
     then: Joi.number().integer().positive().max(86400).required(),
@@ -325,14 +362,17 @@ export const envValidationSchema = Joi.object({
           'TELEGRAM_OUTBOUND_NOTIFICATIONS_ENABLED requires TELEGRAM_AUTH_ENABLED to be enabled',
       }),
     }),
-  [TELEGRAM_NOTIFICATION_CONFIG_KEYS.miniAppUrl]: Joi.when(
-    TELEGRAM_NOTIFICATION_CONFIG_KEYS.enabled,
-    {
+  [TELEGRAM_NOTIFICATION_CONFIG_KEYS.miniAppUrl]: Joi.string()
+    .allow('')
+    .default('')
+    .when(TELEGRAM_NOTIFICATION_CONFIG_KEYS.enabled, {
       is: true,
       then: canonicalHttpsBaseUrl.required(),
-      otherwise: Joi.string().allow('').default(''),
-    },
-  ),
+    })
+    .when(TELEGRAM_BOT_WEBHOOK_CONFIG_KEYS.enabled, {
+      is: true,
+      then: canonicalHttpsBaseUrl.required(),
+    }),
   [MATCH_WAITLIST_OFFER_CONFIG_KEYS.enabled]: Joi.boolean()
     .truthy('true')
     .falsy('false')

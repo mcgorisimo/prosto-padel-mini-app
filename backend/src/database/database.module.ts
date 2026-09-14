@@ -49,6 +49,7 @@ import { PostgresTelegramAuthenticationOperationRepository } from './postgres-te
 import { PostgresTelegramNotificationDestinationRepository } from './postgres-telegram-notification-destination.repository';
 import { PostgresTelegramNotificationOutboxRepository } from './postgres-telegram-notification-outbox.repository';
 import { PostgresTelegramNotificationIntentRepository } from './postgres-telegram-notification-intent.repository';
+import { PostgresTelegramBotUpdateRepository } from './postgres-telegram-bot-update.repository';
 import { PostgresYclientsWebhookSignalRepository } from './postgres-yclients-webhook-signal.repository';
 import { PostgresYclientsNotificationReconciliationRepository } from './postgres-yclients-notification-reconciliation.repository';
 import { PostgresTransactionRunner } from './postgres-transaction';
@@ -142,6 +143,7 @@ const DATABASE_WORKFLOW_PROVIDERS: Provider[] = [
   PostgresTelegramNotificationDestinationRepository,
   PostgresTelegramNotificationOutboxRepository,
   PostgresTelegramNotificationIntentRepository,
+  PostgresTelegramBotUpdateRepository,
   PostgresYclientsWebhookSignalRepository,
   PostgresYclientsNotificationReconciliationRepository,
   PostgresMatchWaitlistOfferRepository,
@@ -287,6 +289,7 @@ const DATABASE_WORKFLOW_EXPORTS = [
   PostgresTelegramNotificationDestinationRepository,
   PostgresTelegramNotificationOutboxRepository,
   PostgresTelegramNotificationIntentRepository,
+  PostgresTelegramBotUpdateRepository,
   PostgresYclientsWebhookSignalRepository,
   PostgresYclientsNotificationReconciliationRepository,
   PostgresExternalIdentityResolutionRepository,

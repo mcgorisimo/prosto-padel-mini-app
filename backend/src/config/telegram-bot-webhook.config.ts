@@ -1,0 +1,80 @@
+import { ConfigService } from '@nestjs/config';
+import { AccountId, isAccountId } from '../accounts/account.types';
+import { InternalUuid, isInternalUuid } from '../common/internal-uuid';
+import { TELEGRAM_NOTIFICATION_CONFIG_KEYS } from './telegram-notification.config';
+import { TELEGRAM_LOGIN_CONFIG_KEYS } from './telegram-login.config';
+
+export const TELEGRAM_BOT_WEBHOOK_CONFIG_KEYS = Object.freeze({
+  enabled: 'TELEGRAM_BOT_WEBHOOK_ENABLED',
+  secret: 'TELEGRAM_BOT_WEBHOOK_SECRET',
+  allowedAccountId: 'TELEGRAM_BOT_WEBHOOK_ALLOWED_ACCOUNT_ID',
+} as const);
+
+export const TELEGRAM_BOT_WEBHOOK_SECRET_PATTERN = /^[A-Za-z0-9_-]{32,256}$/u;
+
+export type TelegramBotWebhookConfiguration =
+  | Readonly<{
+      enabled: false;
+      secret: '';
+      miniAppUrl: '';
+    }>
+  | Readonly<{
+      enabled: true;
+      secret: string;
+      miniAppUrl: string;
+      allowedAccountId: AccountId;
+      botNamespace: InternalUuid;
+    }>;
+
+function isCanonicalMiniAppUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === 'https:' &&
+      url.username === '' &&
+      url.password === '' &&
+      url.search === '' &&
+      url.hash === '' &&
+      url.toString() === value
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function readTelegramBotWebhookConfiguration(
+  config: ConfigService,
+): TelegramBotWebhookConfiguration {
+  const enabled =
+    config.get<boolean>(TELEGRAM_BOT_WEBHOOK_CONFIG_KEYS.enabled) === true;
+  if (!enabled) {
+    return Object.freeze({ enabled: false, secret: '', miniAppUrl: '' });
+  }
+
+  const secret =
+    config.get<string>(TELEGRAM_BOT_WEBHOOK_CONFIG_KEYS.secret) ?? '';
+  const miniAppUrl =
+    config.get<string>(TELEGRAM_NOTIFICATION_CONFIG_KEYS.miniAppUrl) ?? '';
+  const allowedAccountId = config.get<string>(
+    TELEGRAM_BOT_WEBHOOK_CONFIG_KEYS.allowedAccountId,
+  );
+  const botNamespace = config.get<string>(
+    TELEGRAM_LOGIN_CONFIG_KEYS.uuidNamespace,
+  );
+  if (
+    !TELEGRAM_BOT_WEBHOOK_SECRET_PATTERN.test(secret) ||
+    !isCanonicalMiniAppUrl(miniAppUrl) ||
+    !isAccountId(allowedAccountId) ||
+    !isInternalUuid(botNamespace)
+  ) {
+    throw new Error('Telegram bot webhook configuration is invalid');
+  }
+
+  return Object.freeze({
+    enabled: true,
+    secret,
+    miniAppUrl,
+    allowedAccountId,
+    botNamespace,
+  });
+}

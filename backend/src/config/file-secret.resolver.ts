@@ -11,6 +11,7 @@ export const FILE_SECRET_KEYS = Object.freeze({
   profilePhotoSecretAccessKey:
     'PROFILE_PHOTO_STORAGE_SECRET_ACCESS_KEY_FILE',
   telegramBotToken: 'TELEGRAM_BOT_TOKEN_FILE',
+  telegramBotWebhookSecret: 'TELEGRAM_BOT_WEBHOOK_SECRET_FILE',
   telegramLookupPepper:
     'TELEGRAM_IDENTITY_LOOKUP_PEPPER_BASE64_FILE',
   telegramWorkflowHmac:
@@ -27,6 +28,8 @@ const DIRECT_SECRET_KEYS = Object.freeze({
   [FILE_SECRET_KEYS.profilePhotoSecretAccessKey]:
     'PROFILE_PHOTO_STORAGE_SECRET_ACCESS_KEY',
   [FILE_SECRET_KEYS.telegramBotToken]: 'TELEGRAM_BOT_TOKEN',
+  [FILE_SECRET_KEYS.telegramBotWebhookSecret]:
+    'TELEGRAM_BOT_WEBHOOK_SECRET',
   [FILE_SECRET_KEYS.telegramLookupPepper]:
     'TELEGRAM_IDENTITY_LOOKUP_PEPPER_BASE64',
   [FILE_SECRET_KEYS.telegramWorkflowHmac]:

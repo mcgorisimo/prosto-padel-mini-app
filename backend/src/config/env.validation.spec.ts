@@ -7,6 +7,7 @@ import {
   TELEGRAM_SESSION_TTL_SECONDS,
 } from './telegram-login.config';
 import { TELEGRAM_NOTIFICATION_CONFIG_KEYS } from './telegram-notification.config';
+import { TELEGRAM_BOT_WEBHOOK_CONFIG_KEYS } from './telegram-bot-webhook.config';
 import { MATCH_WAITLIST_OFFER_CONFIG_KEYS } from './match-waitlist-offer.config';
 import { YCLIENTS_WEBHOOK_CONFIG_KEYS } from './yclients-webhook.config';
 import {
@@ -834,4 +835,78 @@ describe('envValidationSchema', () => {
       expect(value.TELEGRAM_AUTH_ENABLED).toBe(false);
     },
   );
+
+  it('keeps the Telegram bot webhook independently disabled by default', () => {
+    const { error, value } = validate();
+
+    expect(error).toBeUndefined();
+    expect(value).toMatchObject({
+      [TELEGRAM_BOT_WEBHOOK_CONFIG_KEYS.enabled]: false,
+      [TELEGRAM_BOT_WEBHOOK_CONFIG_KEYS.secret]: '',
+      [TELEGRAM_BOT_WEBHOOK_CONFIG_KEYS.allowedAccountId]: '',
+    });
+  });
+
+  it('requires Telegram auth, a secret, an allowlisted account and canonical Mini App URL for the webhook', () => {
+    const enabled = {
+      ...SAFE_TEST_DATABASE_CONFIG,
+      ...SAFE_TEST_TELEGRAM_CRYPTO_CONFIG,
+      TELEGRAM_AUTH_ENABLED: 'true',
+      TELEGRAM_BOT_TOKEN: SAFE_TEST_BOT_TOKEN,
+      TELEGRAM_INIT_DATA_MAX_AGE_SECONDS: '300',
+      [TELEGRAM_BOT_WEBHOOK_CONFIG_KEYS.enabled]: 'true',
+      [TELEGRAM_BOT_WEBHOOK_CONFIG_KEYS.secret]:
+        'BOT1_TEST_WEBHOOK_SECRET_1234567890',
+      [TELEGRAM_BOT_WEBHOOK_CONFIG_KEYS.allowedAccountId]:
+        '11111111-1111-4111-8111-111111111111',
+      [TELEGRAM_NOTIFICATION_CONFIG_KEYS.miniAppUrl]:
+        'https://test-app.prostopdl.ru/',
+      [TELEGRAM_NOTIFICATION_CONFIG_KEYS.enabled]: 'false',
+    };
+
+    expect(validate(enabled).error).toBeUndefined();
+    expect(
+      validate({
+        ...enabled,
+        TELEGRAM_AUTH_ENABLED: 'false',
+      }).error,
+    ).toBeDefined();
+    expect(
+      validate({
+        ...enabled,
+        [TELEGRAM_BOT_WEBHOOK_CONFIG_KEYS.secret]: '',
+      }).error,
+    ).toBeDefined();
+    expect(
+      validate({
+        ...enabled,
+        [TELEGRAM_BOT_WEBHOOK_CONFIG_KEYS.allowedAccountId]: '',
+      }).error,
+    ).toBeDefined();
+  });
+
+  it.each([
+    ['short secret', { [TELEGRAM_BOT_WEBHOOK_CONFIG_KEYS.secret]: 'short' }],
+    ['unsafe secret', { [TELEGRAM_BOT_WEBHOOK_CONFIG_KEYS.secret]: `${'A'.repeat(31)}:` }],
+    ['HTTP URL', { [TELEGRAM_NOTIFICATION_CONFIG_KEYS.miniAppUrl]: 'http://test-app.prostopdl.ru/' }],
+    ['URL credentials', { [TELEGRAM_NOTIFICATION_CONFIG_KEYS.miniAppUrl]: 'https://user:password@test-app.prostopdl.ru/' }],
+  ])('rejects webhook %s', (_label, override) => {
+    const { error } = validate({
+      ...SAFE_TEST_DATABASE_CONFIG,
+      ...SAFE_TEST_TELEGRAM_CRYPTO_CONFIG,
+      TELEGRAM_AUTH_ENABLED: 'true',
+      TELEGRAM_BOT_TOKEN: SAFE_TEST_BOT_TOKEN,
+      TELEGRAM_INIT_DATA_MAX_AGE_SECONDS: '300',
+      [TELEGRAM_BOT_WEBHOOK_CONFIG_KEYS.enabled]: 'true',
+      [TELEGRAM_BOT_WEBHOOK_CONFIG_KEYS.secret]:
+        'BOT1_TEST_WEBHOOK_SECRET_1234567890',
+      [TELEGRAM_BOT_WEBHOOK_CONFIG_KEYS.allowedAccountId]:
+        '11111111-1111-4111-8111-111111111111',
+      [TELEGRAM_NOTIFICATION_CONFIG_KEYS.miniAppUrl]:
+        'https://test-app.prostopdl.ru/',
+      ...override,
+    });
+
+    expect(error).toBeDefined();
+  });
 });

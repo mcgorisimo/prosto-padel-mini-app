@@ -304,4 +304,22 @@ describe('file secret resolver', () => {
 
     expect(resolved.environment.BACKEND_IGNORE_ENV_FILE).toBe('true');
   });
+
+  it('loads the Telegram webhook secret through the approved file boundary', () => {
+    const path = '/synthetic/telegram-webhook-secret';
+    const secret = 'BOT1_TEST_WEBHOOK_SECRET_1234567890';
+    const reader = readerFrom({ [path]: `${secret}\n` });
+
+    const resolved = resolveFileSecrets(
+      { [FILE_SECRET_KEYS.telegramBotWebhookSecret]: path },
+      reader,
+    );
+
+    expect(resolved.environment).toEqual({
+      TELEGRAM_BOT_WEBHOOK_SECRET: secret,
+    });
+    expect(resolved.environment).not.toHaveProperty(
+      FILE_SECRET_KEYS.telegramBotWebhookSecret,
+    );
+  });
 });

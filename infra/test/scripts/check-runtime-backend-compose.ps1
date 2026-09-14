@@ -174,8 +174,12 @@ function Assert-RuntimeBackendContract {
         TELEGRAM_INIT_DATA_MAX_AGE_SECONDS = '${TELEGRAM_INIT_DATA_MAX_AGE_SECONDS:?TELEGRAM_INIT_DATA_MAX_AGE_SECONDS is required}'
         TELEGRAM_LOGIN_UUID_NAMESPACE = '${TELEGRAM_LOGIN_UUID_NAMESPACE:?TELEGRAM_LOGIN_UUID_NAMESPACE is required}'
         TELEGRAM_OUTBOUND_NOTIFICATIONS_ENABLED = '${TELEGRAM_OUTBOUND_NOTIFICATIONS_ENABLED:-false}'
+        TELEGRAM_BOT_WEBHOOK_ENABLED = '${TELEGRAM_BOT_WEBHOOK_ENABLED:-false}'
+        TELEGRAM_BOT_WEBHOOK_ALLOWED_ACCOUNT_ID = '${TELEGRAM_BOT_WEBHOOK_ALLOWED_ACCOUNT_ID:-}'
+        TELEGRAM_BOT_WEBHOOK_SECRET = '!reset null'
+        TELEGRAM_BOT_WEBHOOK_SECRET_FILE = '/run/secrets/telegram-bot-webhook-secret'
         MATCH_WAITLIST_OFFERS_ENABLED = '${MATCH_WAITLIST_OFFERS_ENABLED:-false}'
-        TELEGRAM_MINI_APP_URL = '${TELEGRAM_MINI_APP_URL:-https://app.prostopdl.ru/}'
+        TELEGRAM_MINI_APP_URL = '${TELEGRAM_MINI_APP_URL:-https://test-app.prostopdl.ru/}'
         TELEGRAM_BOT_TOKEN_FILE = '/run/secrets/telegram-bot-token'
         TELEGRAM_IDENTITY_LOOKUP_PEPPER_BASE64_FILE = '/run/secrets/telegram-identity-lookup-pepper-base64'
         TELEGRAM_LOGIN_WORKFLOW_HMAC_SECRET_BASE64_FILE = '/run/secrets/telegram-login-workflow-hmac-secret-base64'
@@ -201,13 +205,14 @@ function Assert-RuntimeBackendContract {
         -ServiceBlock $ServiceBlock `
         -ChildName 'volumes'
     $mountBlocks = @(Get-MountBlocks -VolumesBlock $volumes)
-    if ($mountBlocks.Count -ne 9) {
+    if ($mountBlocks.Count -ne 10) {
         throw "RUNTIME_BACKEND_COMPOSE_MOUNT_INVALID"
     }
 
     $expectedMounts = [ordered]@{
         '${BACKEND_AUTH_APP_PASSWORD_FILE_HOST:?BACKEND_AUTH_APP_PASSWORD_FILE_HOST is required}' = '/run/secrets/backend-auth-app-password'
         '${TELEGRAM_BOT_TOKEN_FILE_HOST:?TELEGRAM_BOT_TOKEN_FILE_HOST is required}' = '/run/secrets/telegram-bot-token'
+        '${TELEGRAM_BOT_WEBHOOK_SECRET_FILE_HOST:?TELEGRAM_BOT_WEBHOOK_SECRET_FILE_HOST is required}' = '/run/secrets/telegram-bot-webhook-secret'
         '${TELEGRAM_IDENTITY_LOOKUP_PEPPER_BASE64_FILE_HOST:?TELEGRAM_IDENTITY_LOOKUP_PEPPER_BASE64_FILE_HOST is required}' = '/run/secrets/telegram-identity-lookup-pepper-base64'
         '${TELEGRAM_LOGIN_WORKFLOW_HMAC_SECRET_BASE64_FILE_HOST:?TELEGRAM_LOGIN_WORKFLOW_HMAC_SECRET_BASE64_FILE_HOST is required}' = '/run/secrets/telegram-login-workflow-hmac-secret-base64'
         '${PROFILE_PHOTO_STORAGE_ACCESS_KEY_ID_FILE_HOST:?PROFILE_PHOTO_STORAGE_ACCESS_KEY_ID_FILE_HOST is required}' = '/run/secrets/profile-photo-access-key-id'
@@ -372,6 +377,7 @@ if (
     ($runtimeBackend -join "`n") -match 'TEST_POSTGRES_(USER|PASSWORD)' -or
     ($runtimeBackend -join "`n") -match '(^|\n)(ports|expose|user|privileged):' -or
     ($runtimeBackend -join "`n") -match 'TELEGRAM_BOT_TOKEN:\s+[^!]' -or
+    ($runtimeBackend -join "`n") -match 'TELEGRAM_BOT_WEBHOOK_SECRET:\s+[^!]' -or
     ($runtimeBackend -join "`n") -match 'TELEGRAM_IDENTITY_LOOKUP_PEPPER_BASE64:\s+[^!]' -or
     ($runtimeBackend -join "`n") -match 'TELEGRAM_LOGIN_WORKFLOW_HMAC_SECRET_BASE64:\s+[^!]' -or
     ($runtimeBackend -join "`n") -match 'YCLIENTS_PARTNER_TOKEN:\s+[^!]' -or

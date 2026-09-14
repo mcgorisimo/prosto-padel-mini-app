@@ -31,15 +31,111 @@ import { YclientsBookingService } from './yclients/yclients-booking.service';
 import { YclientsAdminReadClient } from './yclients/yclients-admin-read.client';
 import { YclientsConservativeRequestLimiter } from './yclients/yclients-request-limiter';
 import { YclientsNotificationReconciliationScheduler } from './yclients/yclients-notification-reconciliation.scheduler';
+import { TelegramBotWebhookController } from './telegram/telegram-bot-webhook.controller';
+import { TelegramBotWebhookService } from './telegram/telegram-bot-webhook.service';
+import { readTelegramBotWebhookConfiguration } from '../config/telegram-bot-webhook.config';
+import { PostgresTelegramBotUpdateRepository } from '../database/postgres-telegram-bot-update.repository';
+import { PostgresTelegramNotificationDestinationRepository } from '../database/postgres-telegram-notification-destination.repository';
+import {
+  DisabledTelegramBotOwnerIdentityResolver,
+  TelegramBotOwnerIdentityResolver,
+  VerifiedTelegramBotOwnerIdentityResolver,
+} from './telegram/telegram-bot-owner-identity.resolver';
+import { PostgresExternalIdentityResolutionRepository } from '../database/postgres-external-identity.repository';
+import { PostgresAccountStatusReader } from '../database/postgres-account-status.reader';
+import { TelegramLookupDigestCandidatesAdapter } from '../auth/telegram-lookup-digest.adapter';
+import { externalIdentityNamespace } from '../accounts/external-identity.types';
+import {
+  externalIdentityLookupDigestPepperVersion,
+  externalIdentityLookupDigestVersion,
+} from '../accounts/external-identity-lookup-digest.port';
+import {
+  decodeTelegramCryptoSecret,
+  TELEGRAM_LOGIN_CONFIG_KEYS,
+} from '../config/telegram-login.config';
 
 @Module({
   imports: [DatabaseModule],
-  controllers: [YclientsWebhookController],
+  controllers: [YclientsWebhookController, TelegramBotWebhookController],
   providers: [
     DisabledCrmAdapter,
     YclientsAvailabilityService,
     YclientsBookingService,
     YclientsWebhookService,
+    {
+      provide: TelegramBotOwnerIdentityResolver,
+      inject: [
+        ConfigService,
+        PostgresExternalIdentityResolutionRepository,
+        PostgresAccountStatusReader,
+      ],
+      useFactory: (
+        config: ConfigService,
+        identities: PostgresExternalIdentityResolutionRepository,
+        accounts: PostgresAccountStatusReader,
+      ): TelegramBotOwnerIdentityResolver => {
+        const webhook = readTelegramBotWebhookConfiguration(config);
+        if (!webhook.enabled) {
+          return new DisabledTelegramBotOwnerIdentityResolver();
+        }
+        const token = config.getOrThrow<string>('TELEGRAM_BOT_TOKEN');
+        const botId = /^([1-9][0-9]{0,19}):/u.exec(token)?.[1];
+        if (botId === undefined) {
+          throw new Error('Telegram bot identity configuration is invalid');
+        }
+        const pepper = decodeTelegramCryptoSecret(
+          config.getOrThrow<string>(
+            TELEGRAM_LOGIN_CONFIG_KEYS.lookupPepperBase64,
+          ),
+        );
+        try {
+          return new VerifiedTelegramBotOwnerIdentityResolver(
+            externalIdentityNamespace(`telegram:bot:${botId}`),
+            new TelegramLookupDigestCandidatesAdapter({
+              digestVersion: externalIdentityLookupDigestVersion(
+                config.getOrThrow<number>(
+                  TELEGRAM_LOGIN_CONFIG_KEYS.digestVersion,
+                ),
+              ),
+              pepperVersion: externalIdentityLookupDigestPepperVersion(
+                config.getOrThrow<number>(
+                  TELEGRAM_LOGIN_CONFIG_KEYS.pepperVersion,
+                ),
+              ),
+              pepper,
+            }),
+            identities,
+            accounts,
+          );
+        } finally {
+          pepper.fill(0);
+        }
+      },
+    },
+    {
+      provide: TelegramBotWebhookService,
+      inject: [
+        ConfigService,
+        PostgresTransactionRunner,
+        PostgresTelegramBotUpdateRepository,
+        TelegramBotOwnerIdentityResolver,
+        PostgresTelegramNotificationDestinationRepository,
+      ],
+      useFactory: (
+        config: ConfigService,
+        transactions: PostgresTransactionRunner,
+        updates: PostgresTelegramBotUpdateRepository,
+        owners: TelegramBotOwnerIdentityResolver,
+        destinations: PostgresTelegramNotificationDestinationRepository,
+      ): TelegramBotWebhookService =>
+        new TelegramBotWebhookService(
+          readTelegramBotWebhookConfiguration(config),
+          transactions,
+          updates,
+          owners,
+          destinations,
+        ),
+    },
     YclientsConservativeRequestLimiter,
     {
       provide: YclientsApiClient,
