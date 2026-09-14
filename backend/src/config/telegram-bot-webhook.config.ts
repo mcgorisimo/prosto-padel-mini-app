@@ -26,19 +26,27 @@ export type TelegramBotWebhookConfiguration =
       botNamespace: InternalUuid;
     }>;
 
-function isCanonicalMiniAppUrl(value: string): boolean {
+function normalizeCanonicalMiniAppUrl(value: string): string | undefined {
   try {
     const url = new URL(value);
-    return (
-      url.protocol === 'https:' &&
-      url.username === '' &&
-      url.password === '' &&
-      url.search === '' &&
-      url.hash === '' &&
-      url.toString() === value
-    );
+    if (
+      url.protocol !== 'https:' ||
+      url.username !== '' ||
+      url.password !== '' ||
+      url.search !== '' ||
+      url.hash !== ''
+    ) {
+      return undefined;
+    }
+
+    const canonical = url.toString();
+    const normalizedRootWithoutSlash =
+      url.pathname === '/' && value === url.origin;
+    return canonical === value || normalizedRootWithoutSlash
+      ? canonical
+      : undefined;
   } catch {
-    return false;
+    return undefined;
   }
 }
 
@@ -55,6 +63,7 @@ export function readTelegramBotWebhookConfiguration(
     config.get<string>(TELEGRAM_BOT_WEBHOOK_CONFIG_KEYS.secret) ?? '';
   const miniAppUrl =
     config.get<string>(TELEGRAM_NOTIFICATION_CONFIG_KEYS.miniAppUrl) ?? '';
+  const canonicalMiniAppUrl = normalizeCanonicalMiniAppUrl(miniAppUrl);
   const allowedAccountId = config.get<string>(
     TELEGRAM_BOT_WEBHOOK_CONFIG_KEYS.allowedAccountId,
   );
@@ -63,7 +72,7 @@ export function readTelegramBotWebhookConfiguration(
   );
   if (
     !TELEGRAM_BOT_WEBHOOK_SECRET_PATTERN.test(secret) ||
-    !isCanonicalMiniAppUrl(miniAppUrl) ||
+    canonicalMiniAppUrl === undefined ||
     !isAccountId(allowedAccountId) ||
     !isInternalUuid(botNamespace)
   ) {
@@ -73,7 +82,7 @@ export function readTelegramBotWebhookConfiguration(
   return Object.freeze({
     enabled: true,
     secret,
-    miniAppUrl,
+    miniAppUrl: canonicalMiniAppUrl,
     allowedAccountId,
     botNamespace,
   });
