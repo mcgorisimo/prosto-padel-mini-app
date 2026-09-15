@@ -141,6 +141,17 @@ Next step: approve controlled TEST validation and rollout of the manual workflow
 SMS verification is no longer a prerequisite for manual linking.
 ## Manual workflow local validation
 
+Owner authorized main integration, TEST backup, migrations 046/047, frontend/
+backend rollout and enabling manual binding on 2026-09-15. Fresh read-only
+preflight confirmed TEST backend and clean server checkout at `3530fd8`,
+PostgreSQL 14.23 and exact 042 POSTCHECK PASS with all six tables empty.
+042 must not be reapplied. 046/047 targets and profile fence columns are absent;
+owner/app privileges match the prerequisites. Runtime Compose now passes
+`CRM_MANUAL_BINDING_ENABLED`, defaulting to false in the checked-in example.
+No real binding is authorized without the owner's chosen account/card pair.
+The historical deferred status above is superseded by this rollout approval;
+the actual rollout result must be recorded separately after verification.
+
 - Backend: typecheck/build PASS, all 207 unit suites / 4305 tests PASS,
   both e2e suites / 4 tests PASS. Final binding-only check: 8 suites / 138 tests.
 - Frontend: 34 unit files / 205 tests PASS; build PASS (existing chunk-size
