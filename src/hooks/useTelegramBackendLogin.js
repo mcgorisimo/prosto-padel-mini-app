@@ -11,6 +11,7 @@ import {
   readOwnMembershipsResponse,
 } from '../lib/membershipReadClient';
 import { trainingScheduleClient, isTrainingScheduleResponse } from '../lib/trainingScheduleClient';
+import { manualCrmBindingClient, readManualCrmResponse } from '../lib/manualCrmBindingClient';
 import {
   playerInitialLevelReassessmentClient,
   readPlayerInitialLevelReassessment,
@@ -83,6 +84,7 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
   const bookings = dependencies.bookings ?? bookingAvailabilityClient;
   const memberships = dependencies.memberships ?? membershipReadClient;
   const trainings = dependencies.trainings ?? trainingScheduleClient;
+  const manualCrm = dependencies.manualCrm ?? manualCrmBindingClient;
   const onboarding =
     dependencies.onboarding ?? playerOnboardingClient;
   const initialLevelReassessments =
@@ -1852,6 +1854,15 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
     );
   }
 
+  function previewManualCrmBinding(playerId, clientId) {
+    return runMatchOperation((credential, signal) => manualCrm.preview(credential, playerId, clientId, { signal }),
+      result => readManualCrmResponse(result) !== null);
+  }
+  function confirmManualCrmBinding(playerId, draftId) {
+    return runMatchOperation((credential, signal) => manualCrm.confirm(credential, playerId, draftId, { signal }),
+      result => readManualCrmResponse(result) !== null);
+  }
+
   function attach(rawInitData, listener) {
     if (teardownTimer !== null) {
       clearTimer(teardownTimer);
@@ -1969,6 +1980,8 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
     disputeMatchResult,
     listAdminPlayers,
     setAdminPlayerRatingState,
+    previewManualCrmBinding,
+    confirmManualCrmBinding,
     logout,
   });
 }
@@ -2597,6 +2610,13 @@ export function useTelegramBackendLogin() {
     );
   }, []);
 
+  const previewManualCrmBinding = useCallback((playerId, clientId) => FEATURE_ENABLED
+    ? telegramBackendLoginLifecycle.previewManualCrmBinding(playerId, clientId)
+    : Promise.resolve({ outcome: 'rejected', reason: 'not_authenticated' }), []);
+  const confirmManualCrmBinding = useCallback((playerId, draftId) => FEATURE_ENABLED
+    ? telegramBackendLoginLifecycle.confirmManualCrmBinding(playerId, draftId)
+    : Promise.resolve({ outcome: 'rejected', reason: 'not_authenticated' }), []);
+
   useEffect(() => {
     if (!FEATURE_ENABLED) return undefined;
 
@@ -2674,6 +2694,8 @@ export function useTelegramBackendLogin() {
     disputeMatchResult,
     listAdminPlayers,
     setAdminPlayerRatingState,
+    previewManualCrmBinding,
+    confirmManualCrmBinding,
     logout,
   });
 }

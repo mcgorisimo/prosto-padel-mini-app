@@ -1662,8 +1662,9 @@ test.describe('backend session credential lifecycle', () => {
     ).toBe(3);
     await page.locator('#admin-root button').last().click();
     await page.locator('#admin-root input[type="number"]').fill('4.25');
-    await page.locator('#admin-root input[type="checkbox"]').check();
-    await page.locator('#admin-root button').last().click();
+    await page.getByRole('checkbox', { name: 'Подтверждённый рейтинг', exact: true }).check();
+    await page.getByRole('button', { name: 'Сохранить рейтинг', exact: true }).click();
+    await expect(page.getByText('Рейтинг игрока сохранен.', { exact: true })).toBeVisible();
     await expect(page.locator('#admin-root input[type="number"]'))
       .toHaveValue('4.25');
 

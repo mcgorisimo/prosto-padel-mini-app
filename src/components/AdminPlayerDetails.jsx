@@ -1,5 +1,6 @@
-import React, { useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { getLevelForRating } from '../lib/ratingEngine';
+import AdminCrmBinding from './AdminCrmBinding';
 
 const C = {
   bg: '#050F0B',
@@ -128,6 +129,7 @@ export default function AdminPlayerDetails({
 
         <div style={{ marginTop: '14px' }}>
           <InfoRow label="Телефон" value={player?.phone} />
+          <InfoRow label="Telegram" value={player?.username ? `@${player.username}` : null} />
           <InfoRow label="Роль" value={player?.role || 'user'} />
           <InfoRow label="Сторона" value={player?.side_preference} />
           <InfoRow label="Статус рейтинга" value={isVerified ? 'Подтверждён' : 'Не подтверждён'} />
@@ -210,6 +212,7 @@ export default function AdminPlayerDetails({
           {saving ? 'Сохраняем...' : 'Сохранить рейтинг'}
         </button>
       </div>
+      <AdminCrmBinding key={player?.id} player={player} actions={adminActions} />
     </div>
   );
 }

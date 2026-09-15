@@ -228,6 +228,9 @@ export const envValidationSchema = Joi.object({
     },
   ),
   DATABASE_ENABLED: Joi.boolean().truthy('true').falsy('false').default(false),
+  CRM_MANUAL_BINDING_ENABLED: Joi.boolean().truthy('true').falsy('false').default(false)
+    .when('DATABASE_ENABLED', { is: false, then: Joi.valid(false) })
+    .when('YCLIENTS_API_ENABLED', { is: false, then: Joi.valid(false) }),
   DATABASE_URL: Joi.when('DATABASE_ENABLED', {
     is: true,
     then: Joi.string()

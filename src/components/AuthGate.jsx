@@ -93,6 +93,8 @@ export function createBackendMatchActions(telegramBackendLogin) {
       telegramBackendLogin.listAdminPlayers,
     setAdminPlayerRatingState:
       telegramBackendLogin.setAdminPlayerRatingState,
+    previewManualCrmBinding: telegramBackendLogin.previewManualCrmBinding,
+    confirmManualCrmBinding: telegramBackendLogin.confirmManualCrmBinding,
   });
 }
 
@@ -550,6 +552,8 @@ export default function AuthGate() {
       telegramBackendLogin.disputeMatchResult,
       telegramBackendLogin.listAdminPlayers,
       telegramBackendLogin.setAdminPlayerRatingState,
+      telegramBackendLogin.previewManualCrmBinding,
+      telegramBackendLogin.confirmManualCrmBinding,
       telegramBackendLogin.searchPlayers,
       telegramBackendLogin.sendMatchMessage,
       telegramBackendLogin.sessionReady,
