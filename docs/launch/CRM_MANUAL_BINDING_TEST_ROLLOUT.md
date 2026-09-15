@@ -4,6 +4,10 @@ Date: 2026-09-15. Owner explicitly approved configuration, main integration,
 TEST backup, migrations 046/047, frontend/backend rollout and enabling manual
 binding. WORKLOG is deliberately unchanged by the owner's separate instruction.
 
+Current TEST runtime: `85d21aea0851087449f9d160888c01a587eceeaf` (email follow-up).
+The original `4da0f1b` rollout below is retained as migration/backup history;
+current rollout and smoke evidence are in the final section.
+
 ## Applied release
 
 - Environment: Selectel TEST, Compose project `prosto-padel-test`, database
@@ -120,3 +124,33 @@ missing/malformed email on any exact candidate returns unknown (six regressions)
 Real TEST PostgreSQL smoke under app role verified write/read/clear and isolation
 from a second synthetic account. The entire transaction was rolled back; zero
 synthetic rows remain. No real contact or provider query was used for this smoke.
+
+### Email rollout completed
+
+- Commit `85d21aea0851087449f9d160888c01a587eceeaf` was committed and pushed
+  atomically to the feature branch and `main` by fast-forward. TEST checkout and
+  backend APP_RELEASE equal that exact SHA; manual binding remains enabled.
+- Only frontend/backend were recreated, both healthy with zero restarts.
+  All other containers retained their IDs; no migration or database rebuild.
+- Backend image: `sha256:c3afe8fe137cdcddbf9315f89389ec0e18f7ec728aa1ef4324ba9a02cfbfd5d8`.
+- Frontend image: `sha256:14a61ce737ca861ea8ab9173979112c8dcf36ac2c32e6aeb7933cd96a7dbc3f2`.
+- Public TEST `/healthz` and `/api/v1/health`: HTTP 200. Own profile and email
+  preview without a session: HTTP 401. Public `/assets/index-BGYW94r1.js` contains
+  both email controls and exactly matches the frontend container bytes;
+  SHA-256 `6c14ee94831573b87a80de6211da1e075c783f939abb45da054f6f121674ad8f`.
+- Post-rollout smoke extracted the actual deployed profile writer's parameterized
+  SQL and executed its write/read/clear flow against TEST PostgreSQL under the
+  app role. A second synthetic account stayed unchanged, the transaction was
+  rolled back, and zero synthetic accounts remained. No provider calls.
+- Post-rollout bounded logs: backend 119 lines, frontend 20 lines, zero errors.
+- Root-only audit: `/root/prosto-padel-migration-audit/email-20260915T200346Z`.
+  Previous env is saved as mode 0600; build/rollout/post-smoke evidence is there.
+  Previous images retained with tag `crm-email-before-85d21ae` for both services.
+- User flow: reopen Mini App; Settings > Personal information > Email; save.
+  Administrator opens a player and uses Email or client ID in the YCLIENTS
+  section, reviews the returned card, then personally confirms the identity.
+  End-to-end acceptance against the owner's real CRM card remains pending that
+  explicit lookup and confirmation; synthetic tests are not real CRM acceptance.
+
+This post-rollout evidence update is docs-only (`deployment=not_needed`);
+runtime remains the exact SHA above. No production rollout was performed.
