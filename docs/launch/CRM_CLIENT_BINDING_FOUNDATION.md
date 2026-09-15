@@ -1,8 +1,10 @@
 # Telegram account → YCLIENTS client: local foundation
 
-Date: 2026-09-15. Base: `3530fd8aebc22eca49342b878381cf272ef4e4c9` (live
-origin/main read). Local implementation only; `deployment_deferred_by_user`.
-WORKLOG is intentionally unchanged by direct owner instruction.
+Date: 2026-09-15. Initial base: `3530fd8aebc22eca49342b878381cf272ef4e4c9`.
+The foundation/deferred notes below describe the original local checkpoint.
+The owner subsequently approved TEST rollout: see
+[current deployment evidence](CRM_MANUAL_BINDING_TEST_ROLLOUT.md).
+WORKLOG remains unchanged by direct owner instruction.
 
 ## Approved manual workflow (supersedes the SMS-first next step)
 
