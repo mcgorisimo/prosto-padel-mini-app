@@ -4,7 +4,7 @@ Date: 2026-09-15. Owner explicitly approved configuration, main integration,
 TEST backup, migrations 046/047, frontend/backend rollout and enabling manual
 binding. WORKLOG is deliberately unchanged by the owner's separate instruction.
 
-Current TEST runtime: `85d21aea0851087449f9d160888c01a587eceeaf` (email follow-up).
+Current TEST runtime: `52c423ce247e827568f72610b581b89d73707d5a` (provider denial fix).
 The original `4da0f1b` rollout below is retained as migration/backup history;
 current rollout and smoke evidence are in the final section.
 
@@ -186,3 +186,32 @@ system user's client-base rights; see the official API access instructions:
 https://support.yclients.ru/67-68-199--dostup-k-api/ . This is an external access
 dependency, not a completed business scenario. WORKLOG remains unchanged under
 the owner's earlier explicit instruction.
+
+### Provider-denial fix rollout verified
+
+- Runtime commit `52c423ce247e827568f72610b581b89d73707d5a` pushed atomically
+  to main and the feature branch, then fast-forwarded onto the clean TEST
+  checkout. Backend APP_RELEASE matches this exact SHA.
+- Recreated only backend/frontend; both healthy, zero restarts. All other
+  container IDs are unchanged. No database/schema/provider mutation.
+- Backend image: `sha256:f7cf9002ec8ed789609caab3370be843b9f3e30a296056396cc7f56280b8daa9`.
+- Frontend image: `sha256:d866b4be01066a178dfc7c8be10cedf8c29f7de83a8bc1f138b83c063fca9dab`.
+- Public TEST `/healthz` and `/api/v1/health`: 200; unauthenticated profile and
+  email-preview requests: 401. Public `/assets/index-BvxXfajh.js` exactly matches
+  the frontend container and includes the provider-access guidance; SHA-256
+  `e6335892efc57ed6df0882b1b1bbd0e8db23d6c5146735ac72d8cdff0367b6c2`.
+- Post-rollout read-only smoke of the deployed email lookup returned
+  `provider_forbidden` for actual YCLIENTS HTTP 403, as expected. The selected
+  app account's administrator context is ready; binding count remains zero.
+  That database inspection transaction was rolled back. No session fabricated
+  and no identity confirmation submitted. Successful real-card linking remains
+  pending the external access change and the owner's personal confirmation.
+- Logs since rollout: backend 138 lines and frontend 20 lines, zero errors.
+- Protected audit: `/root/prosto-padel-migration-audit/crm-errors-20260915T202235Z`.
+  It contains mode-0600 previous env, pre/post container metadata, build/rollout
+  logs, HTTP/bundle/log checks, and sanitized provider-access smoke evidence.
+  Prior images retained as `prosto-padel-test-backend:crm-errors-before-52c423c`
+  and `prosto-padel-test-frontend:crm-errors-before-52c423c`.
+
+This final evidence update is docs-only (`deployment=not_needed`); the runtime
+SHA above remains deployed. Production was not updated.
