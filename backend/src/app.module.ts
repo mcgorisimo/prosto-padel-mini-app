@@ -10,6 +10,7 @@ import { HealthModule } from './health/health.module';
 import { IntegrationsModule } from './integrations/integrations.module';
 import { MembershipsModule } from './memberships/memberships.module';
 import { TrainingsModule } from './trainings/trainings.module';
+import { CrmBindingModule } from './crm-binding/crm-binding.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { TrainingsModule } from './trainings/trainings.module';
     BookingsModule,
     MembershipsModule,
     TrainingsModule,
+    CrmBindingModule,
     EventsModule,
     IntegrationsModule,
     HealthModule,
