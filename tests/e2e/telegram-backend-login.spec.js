@@ -893,6 +893,7 @@ test.describe('Telegram backend login feature enabled', () => {
     let profilePatches = 0;
     let legacyProfileUpdates = 0;
     let patchContract = null;
+    let savedEmail = 'initial@example.test';
 
     await prepareBrowser(page);
     await page.route(LOGIN_ROUTE, async (route) => {
@@ -914,7 +915,7 @@ test.describe('Telegram backend login feature enabled', () => {
         patchContract = {
           exactKeys:
             Object.keys(body).sort().join(',') ===
-            'firstName,lastName,phone,sidePreference',
+            'email,firstName,lastName,phone,sidePreference',
           hasAccountId:
             Object.prototype.hasOwnProperty.call(body, 'accountId'),
           bearerIsCanonical:
@@ -932,10 +933,12 @@ test.describe('Telegram backend login feature enabled', () => {
           });
           return;
         }
+        savedEmail = body.email;
         await fulfillJson(route, 200, {
           accountId: SYNTHETIC_ACCOUNT_ID,
           role: 'player',
           firstName: body.firstName,
+          email: savedEmail,
           lastName: body.lastName,
           username: 'synthetic_player',
           photoUrl: null,
@@ -952,6 +955,7 @@ test.describe('Telegram backend login feature enabled', () => {
         firstName: 'Backend',
         lastName: 'Player',
         username: 'synthetic_player',
+        email: savedEmail,
         photoUrl: null,
         languageCode: 'ru',
         phone: null,
@@ -1004,6 +1008,12 @@ test.describe('Telegram backend login feature enabled', () => {
     await page.getByRole('button', { name: 'Закрыть управление фото' }).click();
 
     const inputs = page.locator('input:not([type="file"])');
+    await expect(page.getByLabel('Email', { exact: true })).toHaveValue('initial@example.test');
+    await page.getByLabel('Email', { exact: true }).fill('invalid');
+    await page.getByRole('button', { name: 'Сохранить' }).click();
+    await expect(page.getByText('Введите корректный email, например name@example.ru.')).toBeVisible();
+    expect(profilePatches).toBe(0);
+    await page.getByLabel('Email', { exact: true }).fill(' Owner@Example.Test ');
     await expect(inputs.nth(0)).toHaveValue('Backend');
     await expect(inputs.nth(2)).toHaveValue('');
     await inputs.nth(0).fill('fuck');
@@ -1030,9 +1040,16 @@ test.describe('Telegram backend login feature enabled', () => {
       noCookie: true,
     });
     expect(legacyProfileUpdates).toBe(0);
+    expect(savedEmail).toBe('owner@example.test');
     await expect(
       page.getByText('Профиль сохранен', { exact: true }),
     ).toBeVisible();
+    await page.getByRole('button', { name: /Личная информация/ }).click();
+    await expect(page.getByLabel('Email', { exact: true })).toHaveValue('owner@example.test');
+    await page.getByLabel('Email', { exact: true }).fill('');
+    await page.getByRole('button', { name: 'Сохранить' }).click();
+    await expect.poll(() => profilePatches).toBe(3);
+    expect(savedEmail).toBeNull();
   });
 
   test('keeps a Telegram login error visible beyond the success timeout', async ({

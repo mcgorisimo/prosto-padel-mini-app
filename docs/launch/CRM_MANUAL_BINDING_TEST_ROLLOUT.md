@@ -86,3 +86,37 @@ closed. Previous images are retained as
 `prosto-padel-test-frontend:crm-before-20260915` (source release `3530fd8`).
 No destructive schema rollback is supplied; investigate and use a reviewed
 forward migration if needed. Do not drop the applied binding/audit tables.
+
+## Email follow-up — 2026-09-15
+
+Owner requested adding email after discussing email-based manual CRM lookup.
+The existing onboarding `normalized_email` column already stores declared
+contact data. Own-profile GET/PATCH now exposes, edits and clears it; the
+personal-information screen carries the value through the credential lifecycle.
+Public player projections remain unchanged. Email is not verified identity.
+
+Manual preview accepts exactly one selector: numeric `clientId` or `email` in
+the authenticated POST body. Current administrator capability is checked before
+provider access. Email search is company-scoped and bounded, verifies exact
+normalized email on each candidate, rejects ambiguous matches, and rechecks
+search pagination. The exact card version must remain unchanged between lookup,
+preview and confirmation. Existing durable drafts and administrator attestation
+remain the binding authority; searching alone never creates a binding.
+
+No new migration, dependency, configuration flag or provider mutation is needed.
+TEST preflight: clean runtime `4da0f1b`, healthy services, existing email column
+constraint and app-role SELECT/UPDATE privileges verified (all true).
+
+Validation: backend typecheck, 4326 unit tests, 4 e2e tests and build PASS;
+frontend 207 unit tests, 132 Playwright tests with 1 existing skip, build PASS.
+Changed frontend modules pass ESLint. Browser coverage includes invalid email,
+normalization, save/reopen/clear and manual email/ID preview with safe retry.
+Portrait manual-email preview visually checked. Existing bundle-size warning
+remains. Final integration, deployed SHA and post-rollout evidence follow below.
+WORKLOG remains unchanged under the owner's earlier explicit instruction.
+
+Independent review CLEAR after closing one incomplete-candidate ambiguity:
+missing/malformed email on any exact candidate returns unknown (six regressions).
+Real TEST PostgreSQL smoke under app role verified write/read/clear and isolation
+from a second synthetic account. The entire transaction was rolled back; zero
+synthetic rows remain. No real contact or provider query was used for this smoke.

@@ -13,6 +13,19 @@ const draft = {
 };
 afterEach(cleanup);
 describe('administrator manual linking', () => {
+  it('normalizes email for lookup and discards attestation when it changes', async () => {
+    const user = userEvent.setup();
+    const actions = { previewManualCrmBinding: vi.fn().mockResolvedValue(draft) };
+    render(<AdminCrmBinding player={player} actions={actions} />);
+    const input = screen.getByLabelText('Email или ID клиента YCLIENTS');
+    await user.type(input, ' Owner@Example.Test ');
+    await user.click(screen.getByRole('button', { name: 'Проверить карточку' }));
+    await screen.findByRole('checkbox');
+    expect(actions.previewManualCrmBinding).toHaveBeenCalledWith(player.id, 'owner@example.test');
+    expect(screen.getByRole('button', { name: 'Подтвердить связь' }).disabled).toBe(true);
+    await user.clear(input);
+    expect(screen.queryByRole('checkbox')).toBeNull();
+  });
   it('requires explicit identity check, retries the same draft after unknown, then locks successful form', async () => {
     const user = userEvent.setup();
     const actions = {
@@ -24,7 +37,7 @@ describe('administrator manual linking', () => {
     };
     render(<AdminCrmBinding player={player} actions={actions} />);
     await user.type(
-      screen.getByLabelText('ID карточки клиента в YCLIENTS'),
+      screen.getByLabelText('Email или ID клиента YCLIENTS'),
       '5',
     );
     await user.click(
@@ -44,7 +57,7 @@ describe('administrator manual linking', () => {
       [player.id, draft.draftId],
     ]);
     expect(
-      screen.queryByLabelText('ID карточки клиента в YCLIENTS'),
+      screen.queryByLabelText('Email или ID клиента YCLIENTS'),
     ).toBeNull();
   });
   it('changing the chosen CRM ID discards preview and attestation', async () => {
@@ -53,7 +66,7 @@ describe('administrator manual linking', () => {
       previewManualCrmBinding: vi.fn().mockResolvedValue(draft),
     };
     render(<AdminCrmBinding player={player} actions={actions} />);
-    const input = screen.getByLabelText('ID карточки клиента в YCLIENTS');
+    const input = screen.getByLabelText('Email или ID клиента YCLIENTS');
     await user.type(input, '5');
     await user.click(
       screen.getByRole('button', { name: 'Проверить карточку' }),
@@ -74,7 +87,7 @@ describe('administrator manual linking', () => {
       />,
     );
     await user.type(
-      screen.getByLabelText('ID карточки клиента в YCLIENTS'),
+      screen.getByLabelText('Email или ID клиента YCLIENTS'),
       '5',
     );
     await user.click(

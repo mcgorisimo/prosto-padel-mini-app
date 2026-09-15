@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
+import { normalizeContactEmail } from '../lib/contactEmail';
 
 const messages = {
   not_configured: 'Ручная привязка пока не включена на сервере.',
   forbidden: 'Нет права подтверждать связь с YCLIENTS.',
-  not_found: 'Карточка в клубе не найдена. Проверьте ID.',
+  not_found: 'Карточка в клубе не найдена. Проверьте email или ID.',
   review_required:
-    'Данные изменились или карточка уже связана. Нужна проверка администратора.',
+    'Есть неоднозначные совпадения, данные изменились или карточка уже связана. Нужна проверка администратора.',
   unknown:
     'Результат пока неизвестен. Повторите подтверждение: вторая связь не создастся.',
   linked: 'Аккаунт игрока связан с карточкой YCLIENTS.',
@@ -38,22 +39,28 @@ export default function AdminCrmBinding({ player, actions }) {
   const run = async (confirm) => {
     if (pending.current || linked || (confirm && (!checked || !preview)))
       return;
+    const email = normalizeContactEmail(clientId);
     if (
       !confirm &&
+      !email &&
       (!/^[1-9][0-9]{0,15}$/u.test(clientId) ||
         !Number.isSafeInteger(Number(clientId)))
     ) {
-      setMessage('Укажите числовой ID карточки клиента YCLIENTS.');
+      setMessage('Укажите email или числовой ID карточки клиента YCLIENTS.');
       return;
     }
     pending.current = true;
     setBusy(true);
     setMessage('');
+    if (!confirm) {
+      setPreview(null);
+      setChecked(false);
+    }
     const current = generation.current;
     try {
       const result = confirm
         ? await actions?.confirmManualCrmBinding?.(player.id, preview.draftId)
-        : await actions?.previewManualCrmBinding?.(player.id, Number(clientId));
+        : await actions?.previewManualCrmBinding?.(player.id, email ?? Number(clientId));
       if (current !== generation.current) return;
       if (result?.outcome === 'preview') {
         setPreview(result);
@@ -105,9 +112,13 @@ export default function AdminCrmBinding({ player, actions }) {
       {!linked && (
         <>
           <label style={{ display: 'block', fontSize: 13 }}>
-            ID карточки клиента в YCLIENTS
+            Email или ID клиента YCLIENTS
             <input
-              inputMode="numeric"
+              inputMode="text"
+              autoComplete="off"
+              autoCapitalize="none"
+              maxLength={320}
+              placeholder="name@example.ru или ID"
               value={clientId}
               disabled={busy}
               onChange={(event) => {

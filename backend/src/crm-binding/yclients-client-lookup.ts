@@ -1,7 +1,8 @@
 import { YclientsApiConfiguration } from '../config/yclients-api.config';
+import { normalizeContactEmail } from '../common/contact-email';
 import { YclientsConservativeRequestLimiter } from '../integrations/yclients/yclients-request-limiter';
 
-export type ClientLookupResult = Readonly<{ outcome: 'unique'; companyId: number; clientId: number }>
+export type ClientLookupResult = Readonly<{ outcome: 'unique'; companyId: number; clientId: number; clientVersion?: string }>
   | Readonly<{ outcome: 'no_match' | 'review_required' | 'unknown' }>;
 export interface ClientLookup {
   find(phone: string, companyId: number): Promise<ClientLookupResult>;
@@ -33,9 +34,20 @@ export class YclientsClientLookup implements ClientLookup {
   }) {}
 
   async find(phone: string, companyId: number): Promise<ClientLookupResult> {
+    if (!/^\+[1-9][0-9]{6,14}$/u.test(phone)) return { outcome: 'unknown' };
+    return this.findContact(phone, companyId, 'phone');
+  }
+
+  async findEmail(email: string, companyId: number): Promise<ClientLookupResult> {
+    const normalized = normalizeContactEmail(email);
+    if (!normalized) return { outcome: 'unknown' };
+    return this.findContact(normalized, companyId, 'email');
+  }
+
+  private async findContact(contact: string, companyId: number, kind: 'phone' | 'email'): Promise<ClientLookupResult> {
     const runtime = this.config.runtime;
     if (!runtime.enabled || !positiveId(companyId) || companyId !== runtime.companyId ||
-        !/^\+[1-9][0-9]{6,14}$/u.test(phone) || runtime.baseUrl !== 'https://api.yclients.com' ||
+        runtime.baseUrl !== 'https://api.yclients.com' ||
         !runtime.partnerToken || !runtime.userToken) return { outcome: 'unknown' };
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -43,7 +55,7 @@ export class YclientsClientLookup implements ClientLookup {
       timer = setTimeout(() => { controller.abort(); reject(new Error('Lookup unavailable')); }, CLIENT_LOOKUP_BUDGET.totalMilliseconds);
     });
     try {
-      return await Promise.race([this.search(phone, companyId, controller.signal), expired]);
+      return await Promise.race([this.search(contact, companyId, controller.signal, kind), expired]);
     } catch {
       // No raw URL, body, contact, credential, provider error or cause escapes.
       return { outcome: 'unknown' };
@@ -53,7 +65,7 @@ export class YclientsClientLookup implements ClientLookup {
     }
   }
 
-  private async search(phone: string, companyId: number, signal: AbortSignal): Promise<ClientLookupResult> {
+  private async search(contact: string, companyId: number, signal: AbortSignal, kind: 'phone' | 'email'): Promise<ClientLookupResult> {
     let requests = 0;
     const read = async (path: string, body?: object): Promise<Record<string, unknown>> => {
       if (signal.aborted || ++requests > CLIENT_LOOKUP_BUDGET.requests) throw new Error('Lookup unavailable');
@@ -95,7 +107,7 @@ export class YclientsClientLookup implements ClientLookup {
       for (let page = 1; page <= CLIENT_LOOKUP_BUDGET.pages; page++) {
         const result = await read(`/api/v1/company/${companyId}/clients/search`, {
           page, page_size: CLIENT_LOOKUP_BUDGET.pageSize, fields: ['id'], order_by: 'id', order_by_direction: 'ASC',
-          operation: 'AND', filters: [{ type: 'quick_search', state: { value: phone.slice(1) } }],
+          operation: 'AND', filters: [{ type: 'quick_search', state: { value: kind === 'phone' ? contact.slice(1) : contact } }],
         });
         if (!object(result.meta) || !Number.isSafeInteger(result.meta.total_count) ||
             Number(result.meta.total_count) < 0 || Number(result.meta.total_count) > CLIENT_LOOKUP_BUDGET.candidates ||
@@ -114,17 +126,25 @@ export class YclientsClientLookup implements ClientLookup {
     };
     const ids = await collect();
     const exact: number[] = [];
+    let clientVersion: string | undefined;
     for (const id of ids) {
       const result = await read(`/api/v1/client/${companyId}/${id}`);
       if (!object(result.data) || result.data.id !== id ||
           (result.data.company_id !== undefined && result.data.company_id !== companyId)) throw new Error('Lookup unavailable');
-      const candidatePhone = normalizeCrmPhone(result.data.phone);
-      if (!candidatePhone) throw new Error('Lookup unavailable');
-      if (candidatePhone === phone) exact.push(id);
+      const candidate = kind === 'phone' ? normalizeCrmPhone(result.data.phone) : normalizeContactEmail(result.data.email);
+      if (!candidate) throw new Error('Lookup unavailable');
+      if (candidate === contact) {
+        exact.push(id);
+        if (kind === 'email') {
+          const version = result.data.last_change_date;
+          if (typeof version !== 'string' || !Number.isFinite(Date.parse(version))) throw new Error('Lookup unavailable');
+          clientVersion = version;
+        }
+      }
     }
     // Detect ordinary pagination drift. YCLIENTS offers no consistent-snapshot token.
     if (JSON.stringify(await collect()) !== JSON.stringify(ids)) return { outcome: 'unknown' };
-    if (exact.length === 1) return { outcome: 'unique', companyId, clientId: exact[0] };
+    if (exact.length === 1) return { outcome: 'unique', companyId, clientId: exact[0], ...(kind === 'email' ? { clientVersion } : {}) };
     return { outcome: ids.length === 0 ? 'no_match' : 'review_required' };
   }
 }

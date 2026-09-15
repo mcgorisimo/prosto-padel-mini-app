@@ -93,6 +93,12 @@ function expectSafeError(
 }
 
 describe('PostgresPlayerProfileWriter', () => {
+  it.each(['owner@example.test', null])('writes or clears the owner email using bound parameters: %s', async (email) => {
+    const transaction = new FakeTransaction([queryResult([{ account_id: ACCOUNT_ID }])]);
+    await new PostgresPlayerProfileWriter().updateByAccountId(transaction, { accountId: ACCOUNT_ID, changes: { email }, updatedAt: NOW });
+    expect(transaction.calls[0].values.slice(-2)).toEqual([true, email]);
+    expect(transaction.calls[0].text).not.toContain('owner@example.test');
+  });
   it('updates only allowlisted columns using one static parameterized statement', async () => {
     const transaction = new FakeTransaction([
       queryResult([{ account_id: ACCOUNT_ID }]),
@@ -114,7 +120,7 @@ describe('PostgresPlayerProfileWriter', () => {
     expect(transaction.calls).toHaveLength(1);
     const call = transaction.calls[0];
     expect(normalizeSql(call.text)).toBe(
-      'UPDATE backend_auth.player_profile_details SET first_name = CASE WHEN $2::boolean THEN $3::text ELSE first_name END, last_name = CASE WHEN $4::boolean THEN $5::text ELSE last_name END, phone = CASE WHEN $6::boolean THEN $7::text ELSE phone END, side_preference = CASE WHEN $8::boolean THEN $9::text ELSE side_preference END, updated_at = $10::bigint WHERE account_id = $1::uuid RETURNING account_id',
+      'UPDATE backend_auth.player_profile_details SET first_name = CASE WHEN $2::boolean THEN $3::text ELSE first_name END, last_name = CASE WHEN $4::boolean THEN $5::text ELSE last_name END, phone = CASE WHEN $6::boolean THEN $7::text ELSE phone END, side_preference = CASE WHEN $8::boolean THEN $9::text ELSE side_preference END, updated_at = $10::bigint, normalized_email = CASE WHEN $11::boolean THEN $12::text ELSE normalized_email END WHERE account_id = $1::uuid RETURNING account_id',
     );
     expect(call.values).toEqual([
       ACCOUNT_ID,
@@ -127,6 +133,8 @@ describe('PostgresPlayerProfileWriter', () => {
       true,
       'Left',
       NOW,
+      false,
+      null,
     ]);
     expect(call.text).not.toContain('public.');
   });
@@ -156,6 +164,8 @@ describe('PostgresPlayerProfileWriter', () => {
       false,
       null,
       NOW,
+      false,
+      null,
     ]);
   });
 

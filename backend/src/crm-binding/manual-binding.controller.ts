@@ -18,6 +18,7 @@ import {
 } from '../auth/session-authentication.guard';
 import { ManualBindingService } from './manual-binding.service';
 import { positiveId } from './yclients-client-lookup';
+import { normalizeContactEmail } from '../common/contact-email';
 
 function inputs(
   request: FastifyRequest,
@@ -71,6 +72,12 @@ export class ManualBindingController {
     @Query() query: Record<string, unknown>,
     @Body() body: unknown,
   ) {
+    if (typeof body === 'object' && body !== null && Object.hasOwn(body, 'email')) {
+      const input = inputs(request, target, query, body, ['email']);
+      const email = normalizeContactEmail(input.body.email);
+      if (!email) invalid();
+      return this.service.preview(input.actor, input.target, email);
+    }
     const input = inputs(request, target, query, body, ['clientId']);
     if (!positiveId(input.body.clientId)) invalid();
     return this.service.preview(input.actor, input.target, input.body.clientId);

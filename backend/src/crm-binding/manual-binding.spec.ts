@@ -34,18 +34,40 @@ function setup(enabled = true) {
     ownStatus: jest.fn().mockResolvedValue({ outcome: 'linked' }),
   };
   const readExact = jest.fn().mockResolvedValue(client());
+  const findEmail = jest.fn().mockResolvedValue({ outcome: 'unique', companyId: 17, clientId: 5, clientVersion: draft().clientVersion });
   return {
     repository,
     readExact,
+    findEmail,
     service: new ManualBindingService({
       enabled,
       companyId: 17,
       repository,
       clients: { readExact },
+      emailLookup: { findEmail },
     }),
   };
 }
 describe('manual CRM identity is an administrator attestation, never an SMS boolean', () => {
+  it('authorizes email search and prepares only a unique unchanged card without automatically binding', async () => {
+    const h = setup();
+    expect((await h.service.preview(A, B, ' Owner@Example.Test ')).outcome).toBe('preview');
+    expect(h.findEmail).toHaveBeenCalledWith('owner@example.test', 17);
+    expect(h.repository.commit).not.toHaveBeenCalled();
+    h.repository.context.mockResolvedValue({ outcome: 'forbidden' });
+    h.findEmail.mockClear();
+    expect(await h.service.preview(A, B, 'owner@example.test')).toEqual({ outcome: 'forbidden' });
+    expect(h.findEmail).not.toHaveBeenCalled();
+  });
+  it('rejects duplicate emails and card changes between search and preview', async () => {
+    const h = setup();
+    h.findEmail.mockResolvedValueOnce({ outcome: 'review_required' });
+    expect(await h.service.preview(A, B, 'owner@example.test')).toEqual({ outcome: 'review_required' });
+    expect(h.readExact).not.toHaveBeenCalled();
+    h.readExact.mockResolvedValue({ ...client(), version: '2026-09-15T12:01:00+03:00' });
+    expect(await h.service.preview(A, B, 'owner@example.test')).toEqual({ outcome: 'review_required' });
+    expect(h.repository.prepare).not.toHaveBeenCalled();
+  });
   it('is disabled with no DB or CRM calls', async () => {
     const h = setup(false);
     expect(await h.service.preview(A, B, 5)).toEqual({

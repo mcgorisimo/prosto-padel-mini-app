@@ -14,6 +14,28 @@ function setup(bodies: unknown[] = []) {
 }
 
 describe('company-scoped YCLIENTS client reads', () => {
+  const EMAIL = 'owner@example.test';
+  const VERSION = '2026-09-15T12:00:00+03:00';
+  const emailCard = (id: number, email: unknown) => ({ success: true, data: { id, email, last_change_date: VERSION } });
+  it('normalizes email, verifies the exact card and returns its version without disclosing contact data', async () => {
+    const { lookup, fetch } = setup([page([5, 6]), emailCard(5, 'OWNER@example.test'), emailCard(6, 'other@example.test'), page([5, 6])]);
+    expect(await lookup.findEmail(' Owner@Example.Test ', 17)).toEqual({ outcome: 'unique', companyId: 17, clientId: 5, clientVersion: VERSION });
+    expect(JSON.parse(fetch.mock.calls[0][1].body).filters).toEqual([{ type: 'quick_search', state: { value: EMAIL } }]);
+    expect(fetch.mock.calls.every(([url]) => !url.includes('@') && !url.includes('?'))).toBe(true);
+  });
+  it('does not choose between duplicate emails, partial matches or changing search pages', async () => {
+    expect(await setup([page([5, 6]), emailCard(5, EMAIL), emailCard(6, EMAIL), page([5, 6])]).lookup.findEmail(EMAIL, 17)).toEqual({ outcome: 'review_required' });
+    expect(await setup([page([5]), emailCard(5, 'other@example.test'), page([5])]).lookup.findEmail(EMAIL, 17)).toEqual({ outcome: 'review_required' });
+    expect(await setup([page([5]), emailCard(5, EMAIL), page([])]).lookup.findEmail(EMAIL, 17)).toEqual({ outcome: 'unknown' });
+  });
+  it.each([undefined, null, '', {}, ['owner@example.test'], 'malformed'])('does not claim uniqueness when another candidate has missing or malformed email %#', async (email) => {
+    expect(await setup([page([5, 6]), emailCard(5, EMAIL), emailCard(6, email), page([5, 6])]).lookup.findEmail(EMAIL, 17)).toEqual({ outcome: 'unknown' });
+  });
+  it.each(['invalid', 'a@example.test\nb@example.test', '', 'a'.repeat(321) + '@example.test'])('rejects invalid email before provider access %#', async (email) => {
+    const { lookup, fetch } = setup();
+    expect(await lookup.findEmail(email, 17)).toEqual({ outcome: 'unknown' });
+    expect(fetch).not.toHaveBeenCalled();
+  });
   it.each([PHONE, '79991112233', 79991112233, '8 (999) 111-22-33', '+7 (999) 111-22-33'])('normalizes primary phone %s', phone => {
     expect(normalizeCrmPhone(phone)).toBe(PHONE);
   });

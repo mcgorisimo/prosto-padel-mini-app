@@ -778,6 +778,7 @@ export function createTelegramBackendLoginLifecycle(dependencies = {}) {
                 : {}),
               languageCode: result.profile.languageCode,
               phone: result.profile.phone,
+              ...(Object.hasOwn(result.profile, 'email') ? { email: result.profile.email } : {}),
               sidePreference: result.profile.sidePreference,
               capabilities: Object.freeze([
                 ...(Array.isArray(result.profile.capabilities)

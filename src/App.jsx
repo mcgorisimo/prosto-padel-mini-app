@@ -130,6 +130,7 @@ export function mapBackendProfileToCurrentUser(backendProfile) {
     full_photo_url: backendProfile?.fullPhotoUrl ?? '',
     language_code: backendProfile?.languageCode ?? '',
     phone: backendProfile?.phone ?? '',
+    email: backendProfile?.email ?? '',
     side_preference: backendProfile?.sidePreference ?? 'Both',
     rating: Number.isFinite(backendProfile?.rating)
       ? backendProfile.rating
@@ -777,6 +778,7 @@ export default function App({
       firstName: p.first_name,
       lastName: p.last_name,
       phone: p.phone || '',
+      email: p.email || '',
       side_preference: p.side_preference || 'Both',
       username: p.username,
       photo_url: p.photo_url || '',

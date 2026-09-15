@@ -22,6 +22,15 @@ const response = (body, status = 200) =>
     },
   });
 describe('manual binding browser contract', () => {
+  it('sends email only in an explicit authenticated POST body and rejects invalid addresses', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(response(preview));
+    const client = createManualCrmBindingClient({ fetchImpl });
+    expect(await client.preview(CREDENTIAL, OWNER, ' Owner@Example.Test ')).toEqual(preview);
+    expect(fetchImpl.mock.calls[0][0]).not.toContain('@');
+    expect(JSON.parse(fetchImpl.mock.calls[0][1].body)).toEqual({ email: 'owner@example.test' });
+    expect(await client.preview(CREDENTIAL, OWNER, 'invalid')).toMatchObject({ outcome: 'rejected' });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
   it('uses one same-origin bearer POST per explicit action, IDs only in body', async () => {
     const fetchImpl = vi
       .fn()

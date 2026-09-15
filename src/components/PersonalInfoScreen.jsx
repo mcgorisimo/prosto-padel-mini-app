@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useTelegram } from '../hooks/useTelegram';
 import { ProfilePhotoManager } from './PlayerProfile';
+import { normalizeContactEmail } from '../lib/contactEmail';
 
 const C = {
   bg:      '#020617',
@@ -125,6 +126,7 @@ export default function PersonalInfoScreen({
   const [firstName, setFirstName] = useState(user?.firstName || '');
   const [lastName, setLastName]   = useState(user?.lastName || '');
   const [phone, setPhone]         = useState(user?.phone || '');
+  const [email, setEmail] = useState(user?.email || '');
   const [preferredSide, setPreferredSide] = useState(user?.side_preference || user?.sidePreference || 'Both');
   const [saveError, setSaveError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
@@ -142,6 +144,12 @@ export default function PersonalInfoScreen({
   }, [tg, onBack]);
 
   const handleSave = async () => {
+    if (isSaving) return;
+    const normalizedEmail = email.trim() === '' ? null : normalizeContactEmail(email);
+    if (email.trim() !== '' && !normalizedEmail) {
+      setSaveError('Введите корректный email, например name@example.ru.');
+      return;
+    }
     if (typeof onBackendProfileSave !== 'function') {
       const message = 'Не удалось определить профиль. Войдите заново и попробуйте еще раз.';
       setSaveError(message);
@@ -157,6 +165,7 @@ export default function PersonalInfoScreen({
         firstName: firstName.trim(),
         lastName: lastName.trim() || null,
         phone: normalizePhone(phone),
+        email: normalizedEmail,
         sidePreference: preferredSide,
       });
       if (result?.outcome !== 'profile_updated') {
@@ -267,6 +276,20 @@ export default function PersonalInfoScreen({
             placeholder="+7 (___) ___-__-__"
             inputMode="tel"
             autoComplete="tel"
+          />
+        </Field>
+
+        <Field label="Email">
+          <TextInput
+            type="email"
+            inputMode="email"
+            autoComplete="email"
+            autoCapitalize="none"
+            maxLength={320}
+            value={email}
+            disabled={isSaving}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="name@example.ru"
           />
         </Field>
 

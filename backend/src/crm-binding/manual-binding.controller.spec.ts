@@ -60,6 +60,12 @@ describe('manual binding HTTP owner/admin boundary', () => {
     await app.close();
   });
   const url = `/api/v1/admin/players/${B}/crm-binding`;
+  it('accepts email only in the authenticated POST body and normalizes it', async () => {
+    const r = await app.inject({ method: 'POST', url: `${url}/preview`, headers, payload: { email: ' Owner@Example.Test ' } });
+    expect(r.statusCode).toBe(200);
+    expect(r.headers['cache-control']).toBe('no-store');
+    expect(preview).toHaveBeenCalledWith(A, B, 'owner@example.test');
+  });
   it('takes actor only from session and lets capability service authorize player-role admins', async () => {
     const r = await app.inject({
       method: 'POST',
@@ -73,6 +79,9 @@ describe('manual binding HTTP owner/admin boundary', () => {
     expect(preview).toHaveBeenCalledWith(A, B, 5);
   });
   it.each([
+    { email: 'bad' },
+    { email: 'owner@example.test', clientId: 5 },
+    { email: 'owner@example.test', actorId: B },
     { clientId: 5, actorId: B },
     { clientId: 5, companyId: 18 },
     { phone: '+79991112233' },

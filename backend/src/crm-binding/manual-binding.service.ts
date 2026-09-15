@@ -7,6 +7,8 @@ import {
   ManualResult,
 } from './manual-binding.types';
 import { positiveId } from './yclients-client-lookup';
+import { YclientsClientLookup } from './yclients-client-lookup';
+import { normalizeContactEmail } from '../common/contact-email';
 
 export class ManualBindingService {
   private readonly active = new Set<AccountId>();
@@ -16,6 +18,7 @@ export class ManualBindingService {
       companyId?: number;
       repository: ManualBindingRepository;
       clients: ManualClientReader;
+      emailLookup?: Pick<YclientsClientLookup, 'findEmail'>;
     },
   ) {}
 
@@ -35,16 +38,28 @@ export class ManualBindingService {
   async preview(
     actor: AccountId,
     target: AccountId,
-    clientId: number,
+    selector: number | string,
   ): Promise<ManualResult> {
     return this.run(actor, target, async (companyId) => {
-      if (!positiveId(clientId)) return { outcome: 'unknown' };
+      const email = typeof selector === 'string' ? normalizeContactEmail(selector) : undefined;
+      if (!positiveId(selector) && !email) return { outcome: 'unknown' };
       const context = await this.config.repository.context(actor, target);
       if (context.outcome !== 'ready') return context;
+      let clientId = typeof selector === 'number' ? selector : 0;
+      let expectedVersion: string | undefined;
+      if (email) {
+        if (!this.config.emailLookup) return { outcome: 'not_configured' };
+        const match = await this.config.emailLookup.findEmail(email, companyId);
+        if (match.outcome !== 'unique') return { outcome: match.outcome === 'no_match' ? 'not_found' : match.outcome };
+        if (match.companyId !== companyId || !positiveId(match.clientId) || !match.clientVersion) return { outcome: 'unknown' };
+        clientId = match.clientId;
+        expectedVersion = match.clientVersion;
+      }
       const client = await this.config.clients.readExact(companyId, clientId);
       if (client.outcome !== 'loaded') return client;
       if (client.companyId !== companyId || client.clientId !== clientId)
         return { outcome: 'unknown' };
+      if (expectedVersion && client.version !== expectedVersion) return { outcome: 'review_required' };
       const draft = await this.config.repository.prepare(
         actor,
         target,

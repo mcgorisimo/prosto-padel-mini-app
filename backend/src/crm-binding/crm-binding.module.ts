@@ -56,6 +56,7 @@ import { YclientsManualClientReader } from './yclients-manual-client.reader';
           enabled: config.get('CRM_MANUAL_BINDING_ENABLED') === true,
           companyId: runtime.companyId,
           repository: new PostgresManualBindingRepository(transactions),
+          emailLookup: new YclientsClientLookup({ runtime, fetch: globalThis.fetch, limiter }),
           clients: new YclientsManualClientReader({
             runtime,
             fetch: globalThis.fetch,

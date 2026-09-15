@@ -74,7 +74,7 @@ for (const viewport of [
       },
       { owner: OWNER },
     );
-    await page.getByLabel('ID карточки клиента в YCLIENTS').fill('5');
+    await page.getByLabel('Email или ID клиента YCLIENTS').fill(viewport.width === 375 ? ' Owner@Example.Test ' : '5');
     await page.getByRole('button', { name: 'Проверить карточку' }).click();
     const confirm = page.getByRole('button', { name: 'Подтвердить связь' });
     await expect(confirm).toBeDisabled();
@@ -98,6 +98,7 @@ for (const viewport of [
       'Аккаунт игрока связан',
     );
     expect(calls).toHaveLength(3);
+    expect(calls[0].body).toEqual(viewport.width === 375 ? { email: 'owner@example.test' } : { clientId: 5 });
     expect(calls[1].body).toEqual({ draftId: DRAFT, identityChecked: true });
     expect(calls[2].body).toEqual(calls[1].body);
     expect(

@@ -1,4 +1,5 @@
 import { isCanonicalSessionCredential } from './sessionCredential';
+import { normalizeContactEmail } from './contactEmail';
 
 const REFRESH_PATH = '/api/v1/auth/session/refresh';
 const LOGOUT_PATH = '/api/v1/auth/session/logout';
@@ -43,6 +44,7 @@ const INTERNAL_UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const PHONE_PATTERN = /^\+[1-9][0-9]{6,14}$/u;
 const PROFILE_PATCH_KEYS = Object.freeze([
+  'email',
   'firstName',
   'lastName',
   'phone',
@@ -983,7 +985,9 @@ function authenticationSuccess(body) {
 
 export function isBackendOwnProfile(value) {
   if (!isPlainObject(value)) return false;
-  const keys = Object.keys(value).sort();
+  if (Object.hasOwn(value, 'email') && value.email !== null &&
+      (!normalizeContactEmail(value.email) || normalizeContactEmail(value.email) !== value.email)) return false;
+  const keys = Object.keys(value).filter((key) => key !== 'email').sort();
   const hasPhotoRendition = hasExactKeys(
     keys,
     PHOTO_RENDITION_PROFILE_KEYS,
@@ -1043,6 +1047,7 @@ export function isBackendOwnProfilePatch(value) {
   return (
     keys.length > 0 &&
     keys.every((key) => PROFILE_PATCH_KEYS.includes(key)) &&
+    (!Object.hasOwn(value, 'email') || value.email === null || Boolean(normalizeContactEmail(value.email))) &&
     (!Object.prototype.hasOwnProperty.call(value, 'firstName') ||
       (isBoundedString(value.firstName, 256) &&
         value.firstName.trim() === value.firstName)) &&
@@ -1074,6 +1079,7 @@ function profileSuccess(body, outcome = 'profile_loaded') {
         : {}),
       languageCode: body.languageCode,
       phone: body.phone,
+      ...(Object.hasOwn(body, 'email') ? { email: body.email } : {}),
       sidePreference: body.sidePreference,
       ...(Object.prototype.hasOwnProperty.call(body, 'rating')
         ? {

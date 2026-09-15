@@ -190,6 +190,7 @@ function publicProfile(
     fullPhotoUrl: profile.fullPhotoUrl ?? null,
     languageCode: profile.languageCode ?? null,
     phone: profile.phone ?? null,
+    email: profile.normalizedEmail ?? null,
     sidePreference: profile.sidePreference ?? null,
     rating: profile.rating,
     isVerified: profile.isVerified,
@@ -308,7 +309,7 @@ export class PlayerProfileService {
             transaction,
             {
               accountId: input.accountId,
-              changes: input.changes,
+              changes: readOwnPlayerProfilePatch(input.changes)!,
               updatedAt: this.dependencies.clock.nowEpochSeconds(),
             },
           );

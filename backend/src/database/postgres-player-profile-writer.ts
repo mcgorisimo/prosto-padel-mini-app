@@ -1,4 +1,5 @@
 import { QueryResultRow } from 'pg';
+import { normalizeContactEmail } from '../common/contact-email';
 import { isAccountId } from '../accounts/account.types';
 import { isUnixEpochSeconds } from '../auth/auth.types';
 import { classifyPostgresError } from './postgres-error-classifier';
@@ -23,6 +24,7 @@ const CHANGE_KEYS = Object.freeze([
   'firstName',
   'lastName',
   'phone',
+  'email',
   'sidePreference',
 ] as const);
 
@@ -34,7 +36,8 @@ const UPDATE_PLAYER_PROFILE_SQL = `
     phone = CASE WHEN $6::boolean THEN $7::text ELSE phone END,
     side_preference =
       CASE WHEN $8::boolean THEN $9::text ELSE side_preference END,
-    updated_at = $10::bigint
+    updated_at = $10::bigint,
+    normalized_email = CASE WHEN $11::boolean THEN $12::text ELSE normalized_email END
   WHERE account_id = $1::uuid
   RETURNING account_id
 `;
@@ -104,6 +107,8 @@ function validateChanges(value: unknown): PlayerProfileChanges {
     (hasOwn(value, 'firstName') && !validName(value.firstName)) ||
     (hasOwn(value, 'lastName') && !validNullableName(value.lastName)) ||
     (hasOwn(value, 'phone') && !validPhone(value.phone)) ||
+    (hasOwn(value, 'email') && value.email !== null &&
+      (normalizeContactEmail(value.email) === undefined || normalizeContactEmail(value.email) !== value.email)) ||
     (hasOwn(value, 'sidePreference') &&
       !validSidePreference(value.sidePreference))
   ) {
@@ -120,6 +125,7 @@ function validateChanges(value: unknown): PlayerProfileChanges {
     ...(hasOwn(value, 'phone')
       ? { phone: value.phone as string | null }
       : {}),
+    ...(hasOwn(value, 'email') ? { email: value.email as string | null } : {}),
     ...(hasOwn(value, 'sidePreference')
       ? {
           sidePreference:
@@ -208,6 +214,8 @@ export class PostgresPlayerProfileWriter implements PlayerProfileWriter {
           hasSidePreference,
           changes.sidePreference ?? null,
           validated.updatedAt,
+          hasOwn(changes, 'email'),
+          changes.email ?? null,
         ],
       );
 

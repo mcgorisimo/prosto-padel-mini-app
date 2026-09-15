@@ -105,6 +105,16 @@ function input(
 }
 
 describe('PlayerProfileService', () => {
+  it('normalizes declared email before persistence and permits clearing it without verification', async () => {
+    const h = createHarness();
+    await h.service.updateOwnProfile({ ...input(), changes: { email: ' Owner@Example.Test ' } });
+    expect(h.updateByAccountId).toHaveBeenLastCalledWith(TRANSACTION, { accountId: ACCOUNT_ID, changes: { email: 'owner@example.test' }, updatedAt: NOW });
+    await h.service.updateOwnProfile({ ...input(), changes: { email: null } });
+    expect(h.updateByAccountId).toHaveBeenLastCalledWith(TRANSACTION, { accountId: ACCOUNT_ID, changes: { email: null }, updatedAt: NOW });
+    h.updateByAccountId.mockClear();
+    expect(await h.service.updateOwnProfile({ ...input(), changes: { email: 'bad' } })).toEqual({ outcome: 'rejected', reason: 'invalid_request' });
+    expect(h.updateByAccountId).not.toHaveBeenCalled();
+  });
   it('reads the authenticated player profile in one transaction', async () => {
     const harness = createHarness();
 
@@ -122,6 +132,7 @@ describe('PlayerProfileService', () => {
         fullPhotoUrl: null,
         languageCode: 'ru',
         phone: '+79990000000',
+        email: 'private.owner@example.test',
         sidePreference: 'Right',
         rating: 3,
         isVerified: false,
@@ -133,7 +144,7 @@ describe('PlayerProfileService', () => {
     expect(harness.findByAccountId).toHaveBeenCalledWith(TRANSACTION, {
       accountId: ACCOUNT_ID,
     });
-    expect(JSON.stringify(result)).not.toContain('private.owner@example.test');
+    expect(JSON.stringify(result)).not.toContain('normalizedEmail');
     expect(Object.isFrozen(result)).toBe(true);
     if (result.outcome === 'found') {
       expect(Object.isFrozen(result.profile)).toBe(true);
@@ -166,6 +177,7 @@ describe('PlayerProfileService', () => {
         fullPhotoUrl: null,
         languageCode: null,
         phone: null,
+        email: null,
         sidePreference: null,
         rating: 3,
         isVerified: false,
@@ -199,6 +211,7 @@ describe('PlayerProfileService', () => {
         fullPhotoUrl: null,
         languageCode: null,
         phone: null,
+        email: null,
         sidePreference: null,
         rating: 0.29,
         isVerified: true,
@@ -350,6 +363,7 @@ describe('PlayerProfileService', () => {
         fullPhotoUrl: null,
         languageCode: 'ru',
         phone: '+79990000000',
+        email: 'private.owner@example.test',
         sidePreference: 'Right',
         rating: 3,
         isVerified: false,

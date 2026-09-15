@@ -1,4 +1,5 @@
 import { isCanonicalSessionCredential } from './sessionCredential';
+import { normalizeContactEmail } from './contactEmail';
 
 const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -49,7 +50,8 @@ export function createManualCrmBindingClient({
     if (
       !UUID.test(playerId) ||
       (action === 'preview' &&
-        (!Number.isSafeInteger(body.clientId) || body.clientId <= 0)) ||
+        (Object.hasOwn(body, 'email') ? !normalizeContactEmail(body.email) :
+          (!Number.isSafeInteger(body.clientId) || body.clientId <= 0))) ||
       (action === 'confirm' && !UUID.test(body.draftId))
     )
       return reject('invalid_request');
@@ -57,7 +59,7 @@ export function createManualCrmBindingClient({
     const controller = new AbortController();
     const abort = () => controller.abort();
     signal?.addEventListener('abort', abort, { once: true });
-    const timer = setTimeout(abort, 12_000);
+    const timer = setTimeout(abort, Object.hasOwn(body, 'email') ? 30_000 : 12_000);
     let reader;
     try {
       const response = await fetchImpl(
@@ -116,8 +118,9 @@ export function createManualCrmBindingClient({
     }
   }
   return Object.freeze({
-    preview: (credential, playerId, clientId, options) =>
-      call('preview', credential, playerId, { clientId }, options),
+    preview: (credential, playerId, selector, options) =>
+      call('preview', credential, playerId, typeof selector === 'string'
+        ? { email: normalizeContactEmail(selector) } : { clientId: selector }, options),
     confirm: (credential, playerId, draftId, options) =>
       call(
         'confirm',

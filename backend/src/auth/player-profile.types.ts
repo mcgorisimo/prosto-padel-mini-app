@@ -3,6 +3,7 @@ import {
   UserRole,
   isAccountId,
 } from '../accounts/account.types';
+import { normalizeContactEmail } from '../common/contact-email';
 
 export interface ReadOwnPlayerProfileInput {
   readonly accountId: AccountId;
@@ -19,6 +20,7 @@ export interface OwnPlayerProfile {
   readonly fullPhotoUrl: string | null;
   readonly languageCode: string | null;
   readonly phone: string | null;
+  readonly email?: string | null;
   readonly sidePreference: 'Left' | 'Both' | 'Right' | null;
   readonly rating: number;
   readonly isVerified: boolean;
@@ -29,6 +31,7 @@ export interface OwnPlayerProfilePatch {
   readonly firstName?: string;
   readonly lastName?: string | null;
   readonly phone?: string | null;
+  readonly email?: string | null;
   readonly sidePreference?: 'Left' | 'Both' | 'Right';
 }
 
@@ -103,6 +106,7 @@ const PATCH_KEYS = Object.freeze([
   'firstName',
   'lastName',
   'phone',
+  'email',
   'sidePreference',
 ] as const);
 const SIDE_PREFERENCES = Object.freeze([
@@ -146,6 +150,8 @@ export function readOwnPlayerProfilePatch(
       value.phone !== null &&
       (typeof value.phone !== 'string' ||
         !PHONE_PATTERN.test(value.phone))) ||
+    (hasOwn(value, 'email') && value.email !== null &&
+      normalizeContactEmail(value.email) === undefined) ||
     (hasOwn(value, 'sidePreference') &&
       (typeof value.sidePreference !== 'string' ||
         !SIDE_PREFERENCES.includes(
@@ -164,6 +170,9 @@ export function readOwnPlayerProfilePatch(
       : {}),
     ...(hasOwn(value, 'phone')
       ? { phone: value.phone as string | null }
+      : {}),
+    ...(hasOwn(value, 'email')
+      ? { email: value.email === null ? null : normalizeContactEmail(value.email)! }
       : {}),
     ...(hasOwn(value, 'sidePreference')
       ? {
@@ -196,7 +205,9 @@ export function isOwnPlayerProfile(
   ] as const;
   if (
     !isRecord(value) ||
-    Object.keys(value).length !== expectedKeys.length ||
+    Object.keys(value).filter((key) => key !== 'email').length !== expectedKeys.length ||
+    (hasOwn(value, 'email') && value.email !== null &&
+      (normalizeContactEmail(value.email) === undefined || normalizeContactEmail(value.email) !== value.email)) ||
     !expectedKeys.every((key) =>
       Object.prototype.hasOwnProperty.call(value, key),
     ) ||

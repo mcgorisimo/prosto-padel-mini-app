@@ -8,6 +8,7 @@ export interface PlayerProfileChanges {
   readonly firstName?: string;
   readonly lastName?: string | null;
   readonly phone?: string | null;
+  readonly email?: string | null;
   readonly sidePreference?: PlayerSidePreference;
 }
 
