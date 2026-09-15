@@ -22,6 +22,10 @@ const response = (body, status = 200) =>
     },
   });
 describe('manual binding browser contract', () => {
+  it('preserves provider denial separately from an invalid app session', async () => {
+    const client = createManualCrmBindingClient({ fetchImpl: vi.fn().mockResolvedValue(response({ outcome: 'provider_forbidden' })) });
+    expect(await client.preview(CREDENTIAL, OWNER, 'owner@example.test')).toEqual({ outcome: 'provider_forbidden' });
+  });
   it('sends email only in an explicit authenticated POST body and rejects invalid addresses', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(response(preview));
     const client = createManualCrmBindingClient({ fetchImpl });

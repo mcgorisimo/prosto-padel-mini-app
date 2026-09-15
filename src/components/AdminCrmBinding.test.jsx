@@ -13,6 +13,24 @@ const draft = {
 };
 afterEach(cleanup);
 describe('administrator manual linking', () => {
+  it.each(['unknown', 'exception'])('offers search retry after preview %s without suggesting confirmation', async (failure) => {
+    const user = userEvent.setup();
+    const previewManualCrmBinding = vi.fn();
+    if (failure === 'unknown') previewManualCrmBinding.mockResolvedValueOnce({ outcome: 'unknown' });
+    else previewManualCrmBinding.mockRejectedValueOnce(new Error('Network unavailable'));
+    previewManualCrmBinding.mockResolvedValueOnce(draft);
+    render(<AdminCrmBinding player={player} actions={{ previewManualCrmBinding }} />);
+    await user.type(screen.getByLabelText('Email или ID клиента YCLIENTS'), 'owner@example.test');
+    await user.click(screen.getByRole('button', { name: 'Проверить карточку' }));
+    expect((await screen.findByRole('status')).textContent).toBe(
+      'Не удалось проверить карточку YCLIENTS. Повторите поиск.',
+    );
+    expect(screen.queryByRole('checkbox')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Подтвердить связь' })).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Проверить карточку' }));
+    await screen.findByRole('checkbox');
+    expect(previewManualCrmBinding).toHaveBeenCalledTimes(2);
+  });
   it('normalizes email for lookup and discards attestation when it changes', async () => {
     const user = userEvent.setup();
     const actions = { previewManualCrmBinding: vi.fn().mockResolvedValue(draft) };

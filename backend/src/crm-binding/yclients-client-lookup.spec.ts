@@ -17,6 +17,18 @@ describe('company-scoped YCLIENTS client reads', () => {
   const EMAIL = 'owner@example.test';
   const VERSION = '2026-09-15T12:00:00+03:00';
   const emailCard = (id: number, email: unknown) => ({ success: true, data: { id, email, last_change_date: VERSION } });
+  it.each([401, 403])('reports provider access denial on email search HTTP %s without exposing its body or retrying', async (status) => {
+    const { lookup, fetch } = setup();
+    fetch.mockResolvedValueOnce(new Response(JSON.stringify({ meta: { message: EMAIL } }), { status }));
+    expect(await lookup.findEmail(EMAIL, 17)).toEqual({ outcome: 'provider_forbidden' });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+  it('reports provider access denial during exact email candidate read', async () => {
+    const { lookup, fetch } = setup([page([5])]);
+    fetch.mockResolvedValueOnce(new Response('private', { status: 403 }));
+    expect(await lookup.findEmail(EMAIL, 17)).toEqual({ outcome: 'provider_forbidden' });
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
   it('normalizes email, verifies the exact card and returns its version without disclosing contact data', async () => {
     const { lookup, fetch } = setup([page([5, 6]), emailCard(5, 'OWNER@example.test'), emailCard(6, 'other@example.test'), page([5, 6])]);
     expect(await lookup.findEmail(' Owner@Example.Test ', 17)).toEqual({ outcome: 'unique', companyId: 17, clientId: 5, clientVersion: VERSION });

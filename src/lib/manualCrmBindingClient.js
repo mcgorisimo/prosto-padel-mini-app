@@ -6,6 +6,7 @@ const UUID =
 const outcomes = [
   'not_configured',
   'forbidden',
+  'provider_forbidden',
   'not_found',
   'review_required',
   'unknown',

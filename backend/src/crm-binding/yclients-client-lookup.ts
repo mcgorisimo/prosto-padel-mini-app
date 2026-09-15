@@ -4,6 +4,8 @@ import { YclientsConservativeRequestLimiter } from '../integrations/yclients/ycl
 
 export type ClientLookupResult = Readonly<{ outcome: 'unique'; companyId: number; clientId: number; clientVersion?: string }>
   | Readonly<{ outcome: 'no_match' | 'review_required' | 'unknown' }>;
+export type EmailClientLookupResult = ClientLookupResult | Readonly<{ outcome: 'provider_forbidden' }>;
+class ProviderAccessDenied extends Error {}
 export interface ClientLookup {
   find(phone: string, companyId: number): Promise<ClientLookupResult>;
 }
@@ -35,16 +37,17 @@ export class YclientsClientLookup implements ClientLookup {
 
   async find(phone: string, companyId: number): Promise<ClientLookupResult> {
     if (!/^\+[1-9][0-9]{6,14}$/u.test(phone)) return { outcome: 'unknown' };
-    return this.findContact(phone, companyId, 'phone');
+    const result = await this.findContact(phone, companyId, 'phone');
+    return result.outcome === 'provider_forbidden' ? { outcome: 'unknown' } : result;
   }
 
-  async findEmail(email: string, companyId: number): Promise<ClientLookupResult> {
+  async findEmail(email: string, companyId: number): Promise<EmailClientLookupResult> {
     const normalized = normalizeContactEmail(email);
     if (!normalized) return { outcome: 'unknown' };
     return this.findContact(normalized, companyId, 'email');
   }
 
-  private async findContact(contact: string, companyId: number, kind: 'phone' | 'email'): Promise<ClientLookupResult> {
+  private async findContact(contact: string, companyId: number, kind: 'phone' | 'email'): Promise<EmailClientLookupResult> {
     const runtime = this.config.runtime;
     if (!runtime.enabled || !positiveId(companyId) || companyId !== runtime.companyId ||
         runtime.baseUrl !== 'https://api.yclients.com' ||
@@ -56,9 +59,9 @@ export class YclientsClientLookup implements ClientLookup {
     });
     try {
       return await Promise.race([this.search(contact, companyId, controller.signal, kind), expired]);
-    } catch {
+    } catch (error) {
       // No raw URL, body, contact, credential, provider error or cause escapes.
-      return { outcome: 'unknown' };
+      return { outcome: error instanceof ProviderAccessDenied ? 'provider_forbidden' : 'unknown' };
     } finally {
       if (timer) clearTimeout(timer);
       controller.abort();
@@ -82,6 +85,7 @@ export class YclientsClientLookup implements ClientLookup {
         });
         if (response.status !== 200 || !response.body) {
           await response.body?.cancel();
+          if (response.status === 401 || response.status === 403) throw new ProviderAccessDenied();
           throw new Error('Lookup unavailable');
         }
         const reader = response.body.getReader();

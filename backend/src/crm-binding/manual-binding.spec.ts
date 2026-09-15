@@ -49,6 +49,17 @@ function setup(enabled = true) {
   };
 }
 describe('manual CRM identity is an administrator attestation, never an SMS boolean', () => {
+  it('propagates provider denial without preparing a draft or committing a binding', async () => {
+    const h = setup();
+    h.findEmail.mockResolvedValueOnce({ outcome: 'provider_forbidden' });
+    expect(await h.service.preview(A, B, 'owner@example.test')).toEqual({ outcome: 'provider_forbidden' });
+    expect(h.readExact).not.toHaveBeenCalled();
+    h.readExact.mockResolvedValue({ outcome: 'provider_forbidden' });
+    expect(await h.service.preview(A, B, 5)).toEqual({ outcome: 'provider_forbidden' });
+    expect(await h.service.confirm(A, B, D, true)).toEqual({ outcome: 'provider_forbidden' });
+    expect(h.repository.prepare).not.toHaveBeenCalled();
+    expect(h.repository.commit).not.toHaveBeenCalled();
+  });
   it('authorizes email search and prepares only a unique unchanged card without automatically binding', async () => {
     const h = setup();
     expect((await h.service.preview(A, B, ' Owner@Example.Test ')).outcome).toBe('preview');
@@ -246,7 +257,12 @@ describe('manual exact read privacy/bounds', () => {
       JSON.stringify(await reader().reader.readExact(17, 5)),
     ).not.toContain('79991112233');
   });
-  it.each([401, 403, 429, 500, 302])(
+  it.each([401, 403])('reports exact-card access denial HTTP %s without exposing provider details', async (status) => {
+    const h = reader({ private: 'not for the browser' }, status);
+    expect(await h.reader.readExact(17, 5)).toEqual({ outcome: 'provider_forbidden' });
+    expect(h.fetch).toHaveBeenCalledTimes(1);
+  });
+  it.each([429, 500, 302])(
     'fails closed on HTTP %s without retry',
     async (status) => {
       const h = reader({}, status);

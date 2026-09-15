@@ -4,6 +4,8 @@ import { normalizeContactEmail } from '../lib/contactEmail';
 const messages = {
   not_configured: 'Ручная привязка пока не включена на сервере.',
   forbidden: 'Нет права подтверждать связь с YCLIENTS.',
+  provider_forbidden:
+    'Нет доступа к клиентам YCLIENTS. Проверьте подключение интеграции к клубу и её права в YCLIENTS.',
   not_found: 'Карточка в клубе не найдена. Проверьте email или ID.',
   review_required:
     'Есть неоднозначные совпадения, данные изменились или карточка уже связана. Нужна проверка администратора.',
@@ -11,6 +13,8 @@ const messages = {
     'Результат пока неизвестен. Повторите подтверждение: вторая связь не создастся.',
   linked: 'Аккаунт игрока связан с карточкой YCLIENTS.',
 };
+const previewUnknownMessage =
+  'Не удалось проверить карточку YCLIENTS. Повторите поиск.';
 const button = {
   width: '100%',
   padding: '12px',
@@ -57,6 +61,7 @@ export default function AdminCrmBinding({ player, actions }) {
       setChecked(false);
     }
     const current = generation.current;
+    const unknownMessage = confirm ? messages.unknown : previewUnknownMessage;
     try {
       const result = confirm
         ? await actions?.confirmManualCrmBinding?.(player.id, preview.draftId)
@@ -67,7 +72,7 @@ export default function AdminCrmBinding({ player, actions }) {
         setChecked(false);
       } else {
         setMessage(
-          messages[result?.outcome] ??
+          (result?.outcome === 'unknown' ? unknownMessage : messages[result?.outcome]) ??
             'Не удалось выполнить запрос. Проверьте доступ и попробуйте снова.',
         );
         if (result?.outcome === 'linked') {
@@ -84,7 +89,7 @@ export default function AdminCrmBinding({ player, actions }) {
         }
       }
     } catch {
-      if (current === generation.current) setMessage(messages.unknown);
+      if (current === generation.current) setMessage(unknownMessage);
     } finally {
       if (current === generation.current) {
         pending.current = false;

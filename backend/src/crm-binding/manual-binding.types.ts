@@ -3,6 +3,7 @@ import { AccountId } from '../accounts/account.types';
 export type ManualOutcome =
   | 'not_configured'
   | 'forbidden'
+  | 'provider_forbidden'
   | 'not_found'
   | 'review_required'
   | 'unknown'
@@ -36,7 +37,7 @@ export type ExactClient =
       phoneHint: string;
       version: string;
     }>
-  | Readonly<{ outcome: 'unknown' | 'not_found' }>;
+  | Readonly<{ outcome: 'unknown' | 'not_found' | 'provider_forbidden' }>;
 export interface ManualClientReader {
   readExact(companyId: number, clientId: number): Promise<ExactClient>;
 }

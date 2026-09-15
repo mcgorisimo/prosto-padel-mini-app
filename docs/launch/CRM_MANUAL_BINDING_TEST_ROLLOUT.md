@@ -154,3 +154,35 @@ synthetic rows remain. No real contact or provider query was used for this smoke
 
 This post-rollout evidence update is docs-only (`deployment=not_needed`);
 runtime remains the exact SHA above. No production rollout was performed.
+
+## Live email lookup failure — 2026-09-15
+
+The owner reported a failed email preview. After explicit permission for that
+email to be sent to api.yclients.com, a bounded read-only reproduction using
+the deployed integration returned HTTP 403 on the first client-search request,
+with the provider reason "Нет прав на управление компанией". No card, draft,
+binding or provider data was changed by the diagnostic. Personal contact values
+and tokens are deliberately omitted from this report.
+
+The application previously collapsed this denial into `unknown` and displayed
+confirmation-retry guidance even when only a preview had been requested.
+Manual email lookup and exact-card reads now classify provider HTTP 401/403 as
+`provider_forbidden`, with fixed UI guidance to check the integration's club
+connection and client permissions. Raw provider messages are not returned.
+Other preview failures invite a search retry; unknown confirmation keeps its
+existing same-draft retry behavior. The closed phone-verification flow retains
+its existing contract. No migration, dependency or configuration change.
+
+Validation: backend typecheck, 4330 unit tests, 4 e2e tests and build PASS;
+frontend 210 unit tests, 132 Playwright tests with 1 existing skip and build PASS.
+Changed frontend modules pass ESLint; diff check PASS. Browser coverage tests
+provider denial followed by successful retry for email and numeric ID, personal
+attestation and an unknown confirmation retry. Existing bundle-size warning
+remains. Runtime impact: frontend/backend; controlled TEST rollout follows.
+
+Real successful lookup/link acceptance remains blocked on YCLIENTS integration
+access to company 2079564. The owner must verify the connected application and
+system user's client-base rights; see the official API access instructions:
+https://support.yclients.ru/67-68-199--dostup-k-api/ . This is an external access
+dependency, not a completed business scenario. WORKLOG remains unchanged under
+the owner's earlier explicit instruction.

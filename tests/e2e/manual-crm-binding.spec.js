@@ -17,6 +17,7 @@ for (const viewport of [
       }),
     );
     const calls = [];
+    let previews = 0;
     let confirms = 0;
     await page.route('**/api/v1/admin/players/*/crm-binding/*', (route) => {
       calls.push({
@@ -25,6 +26,14 @@ for (const viewport of [
         method: route.request().method(),
       });
       const isPreview = route.request().url().endsWith('/preview');
+      if (isPreview && ++previews === 1) {
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          headers: { 'cache-control': 'no-store' },
+          body: JSON.stringify({ outcome: 'provider_forbidden' }),
+        });
+      }
       return route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -76,6 +85,9 @@ for (const viewport of [
     );
     await page.getByLabel('Email или ID клиента YCLIENTS').fill(viewport.width === 375 ? ' Owner@Example.Test ' : '5');
     await page.getByRole('button', { name: 'Проверить карточку' }).click();
+    await expect(page.getByRole('status')).toContainText('Нет доступа к клиентам YCLIENTS');
+    await expect(page.getByRole('button', { name: 'Подтвердить связь' })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Проверить карточку' }).click();
     const confirm = page.getByRole('button', { name: 'Подтвердить связь' });
     await expect(confirm).toBeDisabled();
     await page.getByLabel('Я лично проверил:', { exact: false }).check();
@@ -97,10 +109,11 @@ for (const viewport of [
     await expect(page.getByRole('status')).toContainText(
       'Аккаунт игрока связан',
     );
-    expect(calls).toHaveLength(3);
+    expect(calls).toHaveLength(4);
     expect(calls[0].body).toEqual(viewport.width === 375 ? { email: 'owner@example.test' } : { clientId: 5 });
-    expect(calls[1].body).toEqual({ draftId: DRAFT, identityChecked: true });
-    expect(calls[2].body).toEqual(calls[1].body);
+    expect(calls[1].body).toEqual(calls[0].body);
+    expect(calls[2].body).toEqual({ draftId: DRAFT, identityChecked: true });
+    expect(calls[3].body).toEqual(calls[2].body);
     expect(
       calls.every((call) => call.method === 'POST' && !call.url.includes('?')),
     ).toBe(true);

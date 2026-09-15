@@ -51,7 +51,8 @@ export class YclientsManualClientReader implements ManualClientReader {
           if (response.status !== 200 || !response.body) {
             await response.body?.cancel();
             return {
-              outcome: response.status === 404 ? 'not_found' : 'unknown',
+              outcome: response.status === 404 ? 'not_found' :
+                response.status === 401 || response.status === 403 ? 'provider_forbidden' : 'unknown',
             };
           }
           const reader = response.body.getReader();
